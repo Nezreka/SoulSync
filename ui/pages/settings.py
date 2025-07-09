@@ -1,8 +1,9 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                            QFrame, QPushButton, QLineEdit, QComboBox,
-                           QCheckBox, QSpinBox, QTextEdit, QGroupBox, QFormLayout)
+                           QCheckBox, QSpinBox, QTextEdit, QGroupBox, QFormLayout, QMessageBox)
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
+from config.settings import config_manager
 
 class SettingsGroup(QGroupBox):
     def __init__(self, title: str, parent=None):
@@ -28,7 +29,10 @@ class SettingsGroup(QGroupBox):
 class SettingsPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.config_manager = None
+        self.form_inputs = {}
         self.setup_ui()
+        self.load_config_values()
     
     def setup_ui(self):
         self.setStyleSheet("""
@@ -61,9 +65,10 @@ class SettingsPage(QWidget):
         main_layout.addStretch()
         
         # Save button
-        save_btn = QPushButton("💾 Save Settings")
-        save_btn.setFixedHeight(45)
-        save_btn.setStyleSheet("""
+        self.save_btn = QPushButton("💾 Save Settings")
+        self.save_btn.setFixedHeight(45)
+        self.save_btn.clicked.connect(self.save_settings)
+        self.save_btn.setStyleSheet("""
             QPushButton {
                 background: #1db954;
                 border: none;
@@ -77,7 +82,173 @@ class SettingsPage(QWidget):
             }
         """)
         
-        main_layout.addWidget(save_btn)
+        main_layout.addWidget(self.save_btn)
+    
+    def load_config_values(self):
+        """Load current configuration values into form inputs"""
+        try:
+            # Load Spotify config
+            spotify_config = config_manager.get_spotify_config()
+            self.client_id_input.setText(spotify_config.get('client_id', ''))
+            self.client_secret_input.setText(spotify_config.get('client_secret', ''))
+            
+            # Load Plex config
+            plex_config = config_manager.get_plex_config()
+            self.plex_url_input.setText(plex_config.get('base_url', ''))
+            self.plex_token_input.setText(plex_config.get('token', ''))
+            
+            # Load Soulseek config
+            soulseek_config = config_manager.get_soulseek_config()
+            self.slskd_url_input.setText(soulseek_config.get('slskd_url', ''))
+            self.api_key_input.setText(soulseek_config.get('api_key', ''))
+            
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to load configuration: {e}")
+    
+    def save_settings(self):
+        """Save current form values to configuration"""
+        try:
+            # Save Spotify settings
+            config_manager.set('spotify.client_id', self.client_id_input.text())
+            config_manager.set('spotify.client_secret', self.client_secret_input.text())
+            
+            # Save Plex settings
+            config_manager.set('plex.base_url', self.plex_url_input.text())
+            config_manager.set('plex.token', self.plex_token_input.text())
+            
+            # Save Soulseek settings
+            config_manager.set('soulseek.slskd_url', self.slskd_url_input.text())
+            config_manager.set('soulseek.api_key', self.api_key_input.text())
+            
+            # Show success message
+            QMessageBox.information(self, "Success", "Settings saved successfully!")
+            
+            # Update button text temporarily
+            original_text = self.save_btn.text()
+            self.save_btn.setText("✓ Saved!")
+            self.save_btn.setStyleSheet("""
+                QPushButton {
+                    background: #1aa34a;
+                    border: none;
+                    border-radius: 22px;
+                    color: #ffffff;
+                    font-size: 14px;
+                    font-weight: bold;
+                }
+            """)
+            
+            # Reset button after 2 seconds
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(2000, lambda: self.reset_save_button(original_text))
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to save settings: {e}")
+    
+    def reset_save_button(self, original_text):
+        """Reset save button to original state"""
+        self.save_btn.setText(original_text)
+        self.save_btn.setStyleSheet("""
+            QPushButton {
+                background: #1db954;
+                border: none;
+                border-radius: 22px;
+                color: #000000;
+                font-size: 14px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #1ed760;
+            }
+        """)
+    
+    def test_spotify_connection(self):
+        """Test Spotify API connection"""
+        try:
+            from core.spotify_client import SpotifyClient
+            
+            # Create temporary client with current form values
+            temp_config = config_manager.get_spotify_config().copy()
+            temp_config['client_id'] = self.client_id_input.text()
+            temp_config['client_secret'] = self.client_secret_input.text()
+            
+            # Save temporarily to test
+            original_client_id = config_manager.get('spotify.client_id')
+            original_client_secret = config_manager.get('spotify.client_secret')
+            
+            config_manager.set('spotify.client_id', temp_config['client_id'])
+            config_manager.set('spotify.client_secret', temp_config['client_secret'])
+            
+            # Test connection
+            client = SpotifyClient()
+            if client.is_authenticated():
+                user_info = client.get_user_info()
+                username = user_info.get('display_name', 'Unknown') if user_info else 'Unknown'
+                QMessageBox.information(self, "Success", f"✓ Spotify connection successful!\nConnected as: {username}")
+            else:
+                QMessageBox.warning(self, "Failed", "✗ Spotify connection failed.\nCheck your credentials and try again.")
+            
+            # Restore original values
+            config_manager.set('spotify.client_id', original_client_id)
+            config_manager.set('spotify.client_secret', original_client_secret)
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"✗ Spotify test failed:\n{str(e)}")
+    
+    def test_plex_connection(self):
+        """Test Plex server connection"""
+        try:
+            from core.plex_client import PlexClient
+            
+            # Save temporarily to test
+            original_base_url = config_manager.get('plex.base_url')
+            original_token = config_manager.get('plex.token')
+            
+            config_manager.set('plex.base_url', self.plex_url_input.text())
+            config_manager.set('plex.token', self.plex_token_input.text())
+            
+            # Test connection
+            client = PlexClient()
+            if client.is_connected():
+                server_name = client.server.friendlyName if client.server else 'Unknown'
+                QMessageBox.information(self, "Success", f"✓ Plex connection successful!\nServer: {server_name}")
+            else:
+                QMessageBox.warning(self, "Failed", "✗ Plex connection failed.\nCheck your server URL and token.")
+            
+            # Restore original values
+            config_manager.set('plex.base_url', original_base_url)
+            config_manager.set('plex.token', original_token)
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"✗ Plex test failed:\n{str(e)}")
+    
+    def test_soulseek_connection(self):
+        """Test Soulseek slskd connection"""
+        try:
+            import requests
+            
+            slskd_url = self.slskd_url_input.text()
+            api_key = self.api_key_input.text()
+            
+            if not slskd_url:
+                QMessageBox.warning(self, "Error", "Please enter slskd URL")
+                return
+            
+            # Test API endpoint
+            headers = {}
+            if api_key:
+                headers['X-API-Key'] = api_key
+            
+            response = requests.get(f"{slskd_url}/api/v0/session", headers=headers, timeout=5)
+            
+            if response.status_code == 200:
+                QMessageBox.information(self, "Success", "✓ Soulseek connection successful!\nslskd is responding.")
+            else:
+                QMessageBox.warning(self, "Failed", f"✗ Soulseek connection failed.\nHTTP {response.status_code}")
+                
+        except requests.exceptions.RequestException as e:
+            QMessageBox.critical(self, "Error", f"✗ Soulseek test failed:\n{str(e)}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"✗ Soulseek test failed:\n{str(e)}")
     
     def create_header(self):
         header = QWidget()
@@ -120,16 +291,18 @@ class SettingsPage(QWidget):
         spotify_title.setFont(QFont("Arial", 12, QFont.Weight.Bold))
         spotify_title.setStyleSheet("color: #1db954;")
         
-        client_id_input = QLineEdit("512b25bd9e0d4ecd82140f6d1ce0c8e6")
-        client_id_input.setStyleSheet(self.get_input_style())
+        self.client_id_input = QLineEdit()
+        self.client_id_input.setStyleSheet(self.get_input_style())
+        self.form_inputs['spotify.client_id'] = self.client_id_input
         
-        client_secret_input = QLineEdit("c3844dcbedbc4e09a6242a14b2e89e89")
-        client_secret_input.setEchoMode(QLineEdit.EchoMode.Password)
-        client_secret_input.setStyleSheet(self.get_input_style())
+        self.client_secret_input = QLineEdit()
+        self.client_secret_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.client_secret_input.setStyleSheet(self.get_input_style())
+        self.form_inputs['spotify.client_secret'] = self.client_secret_input
         
         spotify_layout.addRow(spotify_title)
-        spotify_layout.addRow("Client ID:", client_id_input)
-        spotify_layout.addRow("Client Secret:", client_secret_input)
+        spotify_layout.addRow("Client ID:", self.client_id_input)
+        spotify_layout.addRow("Client Secret:", self.client_secret_input)
         
         # Plex settings
         plex_frame = QFrame()
@@ -140,16 +313,18 @@ class SettingsPage(QWidget):
         plex_title.setFont(QFont("Arial", 12, QFont.Weight.Bold))
         plex_title.setStyleSheet("color: #e5a00d;")
         
-        plex_url_input = QLineEdit("http://192.168.86.36:32400")
-        plex_url_input.setStyleSheet(self.get_input_style())
+        self.plex_url_input = QLineEdit()
+        self.plex_url_input.setStyleSheet(self.get_input_style())
+        self.form_inputs['plex.base_url'] = self.plex_url_input
         
-        plex_token_input = QLineEdit("a9hTgvasV1aJMLSdoBkr")
-        plex_token_input.setEchoMode(QLineEdit.EchoMode.Password)
-        plex_token_input.setStyleSheet(self.get_input_style())
+        self.plex_token_input = QLineEdit()
+        self.plex_token_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.plex_token_input.setStyleSheet(self.get_input_style())
+        self.form_inputs['plex.token'] = self.plex_token_input
         
         plex_layout.addRow(plex_title)
-        plex_layout.addRow("Server URL:", plex_url_input)
-        plex_layout.addRow("Token:", plex_token_input)
+        plex_layout.addRow("Server URL:", self.plex_url_input)
+        plex_layout.addRow("Token:", self.plex_token_input)
         
         # Soulseek settings
         soulseek_frame = QFrame()
@@ -160,17 +335,19 @@ class SettingsPage(QWidget):
         soulseek_title.setFont(QFont("Arial", 12, QFont.Weight.Bold))
         soulseek_title.setStyleSheet("color: #ff6b35;")
         
-        slskd_url_input = QLineEdit("http://localhost:5030")
-        slskd_url_input.setStyleSheet(self.get_input_style())
+        self.slskd_url_input = QLineEdit()
+        self.slskd_url_input.setStyleSheet(self.get_input_style())
+        self.form_inputs['soulseek.slskd_url'] = self.slskd_url_input
         
-        api_key_input = QLineEdit()
-        api_key_input.setPlaceholderText("Enter your slskd API key")
-        api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
-        api_key_input.setStyleSheet(self.get_input_style())
+        self.api_key_input = QLineEdit()
+        self.api_key_input.setPlaceholderText("Enter your slskd API key")
+        self.api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.api_key_input.setStyleSheet(self.get_input_style())
+        self.form_inputs['soulseek.api_key'] = self.api_key_input
         
         soulseek_layout.addRow(soulseek_title)
-        soulseek_layout.addRow("slskd URL:", slskd_url_input)
-        soulseek_layout.addRow("API Key:", api_key_input)
+        soulseek_layout.addRow("slskd URL:", self.slskd_url_input)
+        soulseek_layout.addRow("API Key:", self.api_key_input)
         
         api_layout.addWidget(spotify_frame)
         api_layout.addWidget(plex_frame)
@@ -182,14 +359,17 @@ class SettingsPage(QWidget):
         
         test_spotify = QPushButton("Test Spotify")
         test_spotify.setFixedHeight(30)
+        test_spotify.clicked.connect(self.test_spotify_connection)
         test_spotify.setStyleSheet(self.get_test_button_style())
         
         test_plex = QPushButton("Test Plex")
         test_plex.setFixedHeight(30)
+        test_plex.clicked.connect(self.test_plex_connection)
         test_plex.setStyleSheet(self.get_test_button_style())
         
         test_soulseek = QPushButton("Test Soulseek")
         test_soulseek.setFixedHeight(30)
+        test_soulseek.clicked.connect(self.test_soulseek_connection)
         test_soulseek.setStyleSheet(self.get_test_button_style())
         
         test_layout.addWidget(test_spotify)
@@ -288,19 +468,22 @@ class SettingsPage(QWidget):
         auto_sync.setChecked(True)
         auto_sync.setStyleSheet(self.get_checkbox_style())
         
-        # Update metadata checkbox
-        update_metadata = QCheckBox("Update metadata from Spotify")
-        update_metadata.setChecked(True)
-        update_metadata.setStyleSheet(self.get_checkbox_style())
+        # Sync interval
+        interval_layout = QHBoxLayout()
+        interval_label = QLabel("Sync Interval (minutes):")
+        interval_label.setStyleSheet("color: #ffffff; font-size: 12px;")
         
-        # Download missing tracks checkbox
-        download_missing = QCheckBox("Automatically download missing tracks")
-        download_missing.setChecked(False)
-        download_missing.setStyleSheet(self.get_checkbox_style())
+        interval_spin = QSpinBox()
+        interval_spin.setRange(5, 1440)  # 5 minutes to 24 hours
+        interval_spin.setValue(60)
+        interval_spin.setStyleSheet(self.get_spin_style())
+        
+        interval_layout.addWidget(interval_label)
+        interval_layout.addWidget(interval_spin)
+        interval_layout.addStretch()
         
         sync_layout.addWidget(auto_sync)
-        sync_layout.addWidget(update_metadata)
-        sync_layout.addWidget(download_missing)
+        sync_layout.addLayout(interval_layout)
         
         # Logging Settings
         logging_group = SettingsGroup("Logging Settings")

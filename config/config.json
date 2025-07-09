@@ -9,7 +9,7 @@
   },
   "soulseek": {
     "slskd_url": "http://localhost:5030",
-    "api_key": "",
+    "api_key": "123456789123456789",
     "download_path": "./downloads"
   },
   "database": {

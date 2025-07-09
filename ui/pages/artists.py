@@ -81,6 +81,7 @@ class ArtistCard(QFrame):
         
         update_btn = QPushButton("Update")
         update_btn.setFixedSize(60, 25)
+        update_btn.setToolTip("Update metadata for this artist only")
         update_btn.setStyleSheet("""
             QPushButton {
                 background: #1db954;
@@ -97,6 +98,7 @@ class ArtistCard(QFrame):
         
         download_btn = QPushButton("Download")
         download_btn.setFixedSize(60, 25)
+        download_btn.setToolTip("Download complete discography for this artist")
         download_btn.setStyleSheet("""
             QPushButton {
                 background: transparent;
@@ -177,8 +179,13 @@ class ArtistsPage(QWidget):
     
     def create_controls(self):
         controls = QWidget()
-        layout = QHBoxLayout(controls)
+        layout = QVBoxLayout(controls)
         layout.setSpacing(15)
+        
+        # First row - search and filters
+        first_row = QWidget()
+        first_row_layout = QHBoxLayout(first_row)
+        first_row_layout.setSpacing(15)
         
         # Search bar
         search_bar = QLineEdit()
@@ -241,6 +248,7 @@ class ArtistsPage(QWidget):
         # Update all button
         update_btn = QPushButton("📝 Update All Metadata")
         update_btn.setFixedHeight(40)
+        update_btn.setToolTip("Batch update metadata for all artists (skips already completed)")
         update_btn.setStyleSheet("""
             QPushButton {
                 background: transparent;
@@ -256,13 +264,72 @@ class ArtistsPage(QWidget):
             }
         """)
         
-        layout.addWidget(search_bar)
-        layout.addWidget(filter_combo)
-        layout.addStretch()
-        layout.addWidget(scan_btn)
-        layout.addWidget(update_btn)
+        first_row_layout.addWidget(search_bar)
+        first_row_layout.addWidget(filter_combo)
+        first_row_layout.addStretch()
+        first_row_layout.addWidget(scan_btn)
+        first_row_layout.addWidget(update_btn)
+        
+        # Second row - alphabet navigation
+        alphabet_row = self.create_alphabet_navigation()
+        
+        layout.addWidget(first_row)
+        layout.addWidget(alphabet_row)
         
         return controls
+    
+    def create_alphabet_navigation(self):
+        alphabet_widget = QWidget()
+        alphabet_layout = QHBoxLayout(alphabet_widget)
+        alphabet_layout.setContentsMargins(0, 0, 0, 0)
+        alphabet_layout.setSpacing(3)
+        
+        # Create alphabet buttons
+        letters = ['All', '#'] + [chr(i) for i in range(ord('A'), ord('Z')+1)]
+        
+        for letter in letters:
+            btn = QPushButton(letter)
+            btn.setFixedSize(30, 30)
+            btn.setStyleSheet("""
+                QPushButton {
+                    background: #282828;
+                    border: 1px solid #404040;
+                    border-radius: 15px;
+                    color: #b3b3b3;
+                    font-size: 10px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background: #1db954;
+                    border: 1px solid #1db954;
+                    color: #000000;
+                }
+                QPushButton:pressed {
+                    background: #1aa34a;
+                }
+            """)
+            
+            # Set "All" as active by default
+            if letter == 'All':
+                btn.setStyleSheet("""
+                    QPushButton {
+                        background: #1db954;
+                        border: 1px solid #1db954;
+                        border-radius: 15px;
+                        color: #000000;
+                        font-size: 10px;
+                        font-weight: bold;
+                    }
+                    QPushButton:hover {
+                        background: #1ed760;
+                    }
+                """)
+            
+            alphabet_layout.addWidget(btn)
+        
+        alphabet_layout.addStretch()
+        
+        return alphabet_widget
     
     def create_artists_section(self):
         section = QWidget()

@@ -63,7 +63,7 @@ class SidebarButton(QPushButton):
                     transform: scale(1.02);
                 }
             """)
-            self.text_label.setStyleSheet("color: #1db954; font-weight: bold;")
+            self.text_label.setStyleSheet("color: #1db954; font-weight: bold; background: transparent;")
             self.icon_label.setStyleSheet("""
                 QLabel {
                     color: #1db954;
@@ -87,7 +87,7 @@ class SidebarButton(QPushButton):
                     border-left: 2px solid rgba(255, 255, 255, 0.3);
                 }
             """)
-            self.text_label.setStyleSheet("color: #b3b3b3;")
+            self.text_label.setStyleSheet("color: #b3b3b3; background: transparent;")
             self.icon_label.setStyleSheet("""
                 QLabel {
                     color: #b3b3b3;
