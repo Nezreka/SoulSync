@@ -230,7 +230,10 @@ class SettingsPage(QWidget):
             api_key = self.api_key_input.text()
             
             if not slskd_url:
-                QMessageBox.warning(self, "Error", "Please enter slskd URL")
+                QMessageBox.warning(self, "Configuration Required", 
+                                  "Please enter slskd URL\n\n"
+                                  "slskd is a headless Soulseek client that provides an HTTP API.\n"
+                                  "Download from: https://github.com/slskd/slskd")
                 return
             
             # Test API endpoint
@@ -242,13 +245,34 @@ class SettingsPage(QWidget):
             
             if response.status_code == 200:
                 QMessageBox.information(self, "Success", "✓ Soulseek connection successful!\nslskd is responding.")
+            elif response.status_code == 401:
+                QMessageBox.warning(self, "Authentication Required", 
+                                  "✗ Invalid API key\n\n"
+                                  "Please check your slskd API key in the configuration.")
             else:
-                QMessageBox.warning(self, "Failed", f"✗ Soulseek connection failed.\nHTTP {response.status_code}")
+                QMessageBox.warning(self, "Connection Failed", 
+                                  f"✗ Soulseek connection failed\nHTTP {response.status_code}\n\n"
+                                  "slskd is running but returned an error.")
                 
+        except requests.exceptions.ConnectionError as e:
+            if "refused" in str(e).lower():
+                QMessageBox.critical(self, "slskd Not Running", 
+                                   "✗ Cannot connect to slskd\n\n"
+                                   "slskd appears to not be running on the specified URL.\n\n"
+                                   "To fix this:\n"
+                                   "1. Install slskd from: https://github.com/slskd/slskd\n"
+                                   "2. Start slskd service\n"
+                                   "3. Ensure it's running on the correct port (default: 5030)")
+            else:
+                QMessageBox.critical(self, "Connection Error", f"✗ Network error:\n{str(e)}")
+        except requests.exceptions.Timeout:
+            QMessageBox.critical(self, "Connection Timeout", 
+                               "✗ Connection timed out\n\n"
+                               "slskd is not responding. Check if it's running and accessible.")
         except requests.exceptions.RequestException as e:
-            QMessageBox.critical(self, "Error", f"✗ Soulseek test failed:\n{str(e)}")
+            QMessageBox.critical(self, "Request Error", f"✗ Request failed:\n{str(e)}")
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"✗ Soulseek test failed:\n{str(e)}")
+            QMessageBox.critical(self, "Error", f"✗ Unexpected error:\n{str(e)}")
     
     def create_header(self):
         header = QWidget()
