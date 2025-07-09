@@ -1,0 +1,10 @@
+2025-07-08 23:06:53 - newmusic - [92mINFO[0m - setup_logging:57 - Logging initialized with level: INFO
+2025-07-08 23:06:53 - newmusic.main - [92mINFO[0m - main:259 - Starting NewMusic application
+2025-07-08 23:06:53 - newmusic.spotify_client - [93mWARNING[0m - _setup_client:69 - Spotify credentials not configured
+2025-07-08 23:06:53 - newmusic.plex_client - [93mWARNING[0m - _setup_client:73 - Plex server URL not configured
+2025-07-08 23:06:53 - newmusic.soulseek_client - [92mINFO[0m - _setup_client:88 - Soulseek client configured with slskd at http://localhost:5030
+2025-07-09 11:26:03 - newmusic - [92mINFO[0m - setup_logging:57 - Logging initialized with level: INFO
+2025-07-09 11:26:03 - newmusic.main - [92mINFO[0m - main:259 - Starting NewMusic application
+2025-07-09 11:26:03 - newmusic.spotify_client - [93mWARNING[0m - _setup_client:69 - Spotify credentials not configured
+2025-07-09 11:26:03 - newmusic.plex_client - [93mWARNING[0m - _setup_client:73 - Plex server URL not configured
+2025-07-09 11:26:03 - newmusic.soulseek_client - [92mINFO[0m - _setup_client:88 - Soulseek client configured with slskd at http://localhost:5030

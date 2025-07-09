@@ -1,0 +1,27 @@
+{
+  "spotify": {
+    "client_id": "512b25bd9e0d4ecd82140f6d1ce0c8e6",
+    "client_secret": "c3844dcbedbc4e09a6242a14b2e89e89"
+  },
+  "plex": {
+    "base_url": "http://192.168.86.36:32400",
+    "token": "a9hTgvasV1aJMLSdoBkr"
+  },
+  "soulseek": {
+    "slskd_url": "http://localhost:5030",
+    "api_key": "",
+    "download_path": "./downloads"
+  },
+  "database": {
+    "path": "database/artists.db"
+  },
+  "logging": {
+    "path": "logs/app.log",
+    "level": "DEBUG"
+  },
+  "settings": {
+    "audio_quality": "flac",
+    "download_timeout": 300,
+    "max_concurrent_downloads": 5
+  }
+}

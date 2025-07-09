@@ -1,0 +1,63 @@
+2025-07-09 11:36:49 - newmusic - [92mINFO[0m - setup_logging:57 - Logging initialized with level: DEBUG
+2025-07-09 11:36:49 - newmusic.main - [92mINFO[0m - main:261 - Starting NewMusic application
+2025-07-09 11:36:55 - newmusic.spotify_client - [91mERROR[0m - _setup_client:87 - Failed to authenticate with Spotify: Server listening on localhost has not been accessed
+2025-07-09 11:36:55 - newmusic.plex_client - [92mINFO[0m - _find_music_library:98 - Found music library: Music
+2025-07-09 11:36:55 - newmusic.plex_client - [92mINFO[0m - _setup_client:84 - Successfully connected to Plex server: PLEX-MACHINE
+2025-07-09 11:36:55 - newmusic.soulseek_client - [92mINFO[0m - _setup_client:88 - Soulseek client configured with slskd at http://localhost:5030
+2025-07-09 11:40:35 - newmusic - [92mINFO[0m - setup_logging:57 - Logging initialized with level: DEBUG
+2025-07-09 11:40:35 - newmusic.main - [92mINFO[0m - main:261 - Starting NewMusic application
+2025-07-09 11:40:38 - newmusic.spotify_client - [91mERROR[0m - _setup_client:87 - Failed to authenticate with Spotify: error: upstream connect error or disconnect/reset before headers. reset reason: connection termination, error_description: None
+2025-07-09 11:40:38 - newmusic.plex_client - [92mINFO[0m - _find_music_library:98 - Found music library: Music
+2025-07-09 11:40:38 - newmusic.plex_client - [92mINFO[0m - _setup_client:84 - Successfully connected to Plex server: PLEX-MACHINE
+2025-07-09 11:40:38 - newmusic.soulseek_client - [92mINFO[0m - _setup_client:88 - Soulseek client configured with slskd at http://localhost:5030
+2025-07-09 11:42:17 - newmusic - [92mINFO[0m - setup_logging:57 - Logging initialized with level: DEBUG
+2025-07-09 11:42:17 - newmusic.main - [92mINFO[0m - main:261 - Starting NewMusic application
+2025-07-09 11:42:18 - newmusic.spotify_client - [92mINFO[0m - _setup_client:84 - Successfully authenticated with Spotify as broquethomas
+2025-07-09 11:42:18 - newmusic.plex_client - [92mINFO[0m - _find_music_library:98 - Found music library: Music
+2025-07-09 11:42:18 - newmusic.plex_client - [92mINFO[0m - _setup_client:84 - Successfully connected to Plex server: PLEX-MACHINE
+2025-07-09 11:42:18 - newmusic.soulseek_client - [92mINFO[0m - _setup_client:88 - Soulseek client configured with slskd at http://localhost:5030
+2025-07-09 11:42:24 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Aether
+2025-07-09 11:42:24 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Favorite Artists
+2025-07-09 11:42:26 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Brittnea
+2025-07-09 11:42:27 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Baleigh
+2025-07-09 11:42:29 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Extra Music
+2025-07-09 11:42:29 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Maggi Main
+2025-07-09 11:42:34 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Broque Main
+2025-07-09 11:42:42 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:113 - Retrieved 7 playlists
+2025-07-09 12:00:42 - newmusic - [92mINFO[0m - setup_logging:57 - Logging initialized with level: DEBUG
+2025-07-09 12:00:42 - newmusic.main - [92mINFO[0m - main:173 - Starting NewMusic application
+2025-07-09 12:00:42 - newmusic.spotify_client - [92mINFO[0m - _setup_client:84 - Successfully authenticated with Spotify as broquethomas
+2025-07-09 12:00:42 - newmusic.plex_client - [92mINFO[0m - _find_music_library:98 - Found music library: Music
+2025-07-09 12:00:42 - newmusic.plex_client - [92mINFO[0m - _setup_client:84 - Successfully connected to Plex server: PLEX-MACHINE
+2025-07-09 12:00:42 - newmusic.soulseek_client - [92mINFO[0m - _setup_client:88 - Soulseek client configured with slskd at http://localhost:5030
+2025-07-09 12:01:02 - newmusic - [92mINFO[0m - setup_logging:57 - Logging initialized with level: DEBUG
+2025-07-09 12:01:02 - newmusic.main - [92mINFO[0m - main:173 - Starting NewMusic application
+2025-07-09 12:01:03 - newmusic.spotify_client - [92mINFO[0m - _setup_client:84 - Successfully authenticated with Spotify as broquethomas
+2025-07-09 12:01:03 - newmusic.plex_client - [92mINFO[0m - _find_music_library:98 - Found music library: Music
+2025-07-09 12:01:03 - newmusic.plex_client - [92mINFO[0m - _setup_client:84 - Successfully connected to Plex server: PLEX-MACHINE
+2025-07-09 12:01:03 - newmusic.soulseek_client - [92mINFO[0m - _setup_client:88 - Soulseek client configured with slskd at http://localhost:5030
+2025-07-09 12:01:09 - newmusic - [92mINFO[0m - setup_logging:57 - Logging initialized with level: DEBUG
+2025-07-09 12:01:09 - newmusic.main - [92mINFO[0m - main:173 - Starting NewMusic application
+2025-07-09 12:01:09 - newmusic.spotify_client - [92mINFO[0m - _setup_client:84 - Successfully authenticated with Spotify as broquethomas
+2025-07-09 12:01:09 - newmusic.plex_client - [92mINFO[0m - _find_music_library:98 - Found music library: Music
+2025-07-09 12:01:09 - newmusic.plex_client - [92mINFO[0m - _setup_client:84 - Successfully connected to Plex server: PLEX-MACHINE
+2025-07-09 12:01:09 - newmusic.soulseek_client - [92mINFO[0m - _setup_client:88 - Soulseek client configured with slskd at http://localhost:5030
+2025-07-09 12:03:25 - newmusic - [92mINFO[0m - setup_logging:57 - Logging initialized with level: DEBUG
+2025-07-09 12:03:25 - newmusic.main - [92mINFO[0m - main:173 - Starting NewMusic application
+2025-07-09 12:03:25 - newmusic.spotify_client - [92mINFO[0m - _setup_client:84 - Successfully authenticated with Spotify as broquethomas
+2025-07-09 12:03:25 - newmusic.plex_client - [92mINFO[0m - _find_music_library:98 - Found music library: Music
+2025-07-09 12:03:25 - newmusic.plex_client - [92mINFO[0m - _setup_client:84 - Successfully connected to Plex server: PLEX-MACHINE
+2025-07-09 12:03:25 - newmusic.soulseek_client - [92mINFO[0m - _setup_client:88 - Soulseek client configured with slskd at http://localhost:5030
+2025-07-09 12:03:26 - newmusic.main - [92mINFO[0m - change_page:139 - Changed to page: dashboard
+2025-07-09 12:03:32 - newmusic.main - [92mINFO[0m - change_page:139 - Changed to page: sync
+2025-07-09 12:03:33 - newmusic.main - [92mINFO[0m - change_page:139 - Changed to page: downloads
+2025-07-09 12:03:34 - newmusic.main - [92mINFO[0m - change_page:139 - Changed to page: artists
+2025-07-09 12:03:34 - newmusic.main - [92mINFO[0m - change_page:139 - Changed to page: settings
+2025-07-09 12:03:35 - newmusic.main - [92mINFO[0m - change_page:139 - Changed to page: dashboard
+2025-07-09 12:06:27 - newmusic.main - [92mINFO[0m - change_page:139 - Changed to page: settings
+2025-07-09 12:06:28 - newmusic.main - [92mINFO[0m - change_page:139 - Changed to page: sync
+2025-07-09 12:06:28 - newmusic.main - [92mINFO[0m - change_page:139 - Changed to page: dashboard
+2025-07-09 12:06:29 - newmusic.main - [92mINFO[0m - change_page:139 - Changed to page: sync
+2025-07-09 12:06:29 - newmusic.main - [92mINFO[0m - change_page:139 - Changed to page: downloads
+2025-07-09 12:06:30 - newmusic.main - [92mINFO[0m - change_page:139 - Changed to page: dashboard
+2025-07-09 12:06:56 - newmusic.main - [92mINFO[0m - change_page:139 - Changed to page: settings
