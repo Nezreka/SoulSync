@@ -288,6 +288,22 @@ class SoulseekClient:
         logger.info(f"Downloading: {best_result.filename} ({best_result.quality}) from {best_result.username}")
         return await self.download(best_result.username, best_result.filename)
     
+    async def check_connection(self) -> bool:
+        """Check if slskd is running and accessible"""
+        if not self.base_url:
+            return False
+        
+        try:
+            response = await self._make_request('GET', 'session')
+            return response is not None
+        except Exception as e:
+            logger.debug(f"Connection check failed: {e}")
+            return False
+    
+    def is_configured(self) -> bool:
+        """Check if slskd is configured (has base_url)"""
+        return self.base_url is not None
+    
     async def close(self):
         if self.session:
             await self.session.close()

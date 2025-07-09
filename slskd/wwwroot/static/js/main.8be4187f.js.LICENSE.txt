@@ -1,0 +1,183 @@
+/*
+        object-assign
+        (c) Sindre Sorhus
+        @license MIT
+        */
+
+/*
+object-assign
+(c) Sindre Sorhus
+@license MIT
+*/
+
+/*!
+  Copyright (c) 2015 Jed Watson.
+  Based on code that is Copyright 2013-2015, Facebook, Inc.
+  All rights reserved.
+*/
+
+/*! ./Component */
+
+/*! ./Context */
+
+/*! ./checkPropTypes */
+
+/*! ./cjs/react-is.development.js */
+
+/*! ./factoryWithTypeCheckers */
+
+/*! ./lib/ReactPropTypesSecret */
+
+/*! ./lib/has */
+
+/*! ./mediaQuery */
+
+/*! ./toQuery */
+
+/*! ./useMediaQuery */
+
+/*! css-mediaquery */
+
+/*! hyphenate-style-name */
+
+/*! matchmediaquery */
+
+/*! object-assign */
+
+/*! prop-types */
+
+/*! react */
+
+/*! react-is */
+
+/*! shallow-equal */
+
+/*!**********************!*\
+        !*** ./src/index.ts ***!
+        \**********************/
+
+/*!************************!*\
+        !*** ./src/Context.ts ***!
+        \************************/
+
+/*!************************!*\
+        !*** ./src/toQuery.ts ***!
+        \************************/
+
+/*!**************************!*\
+        !*** ./src/Component.ts ***!
+        \**************************/
+
+/*!***************************!*\
+        !*** ./src/mediaQuery.ts ***!
+        \***************************/
+
+/*!******************************!*\
+        !*** ./src/useMediaQuery.ts ***!
+        \******************************/
+
+/*!****************************************!*\
+        !*** ./node_modules/react-is/index.js ***!
+        \****************************************/
+
+/*!******************************************!*\
+        !*** ./node_modules/prop-types/index.js ***!
+        \******************************************/
+
+/*!********************************************!*\
+        !*** ./node_modules/prop-types/lib/has.js ***!
+        \********************************************/
+
+/*!*********************************************!*\
+        !*** ./node_modules/object-assign/index.js ***!
+        \*********************************************/
+
+/*!**********************************************!*\
+        !*** ./node_modules/css-mediaquery/index.js ***!
+        \**********************************************/
+
+/*!***********************************************!*\
+        !*** ./node_modules/matchmediaquery/index.js ***!
+        \***********************************************/
+
+/*!***************************************************!*\
+        !*** ./node_modules/prop-types/checkPropTypes.js ***!
+        \***************************************************/
+
+/*!****************************************************!*\
+        !*** ./node_modules/hyphenate-style-name/index.js ***!
+        \****************************************************/
+
+/*!******************************************************!*\
+        !*** ./node_modules/shallow-equal/dist/index.esm.js ***!
+        \******************************************************/
+
+/*!***********************************************************!*\
+        !*** ./node_modules/react-is/cjs/react-is.development.js ***!
+        \***********************************************************/
+
+/*!************************************************************!*\
+        !*** ./node_modules/prop-types/factoryWithTypeCheckers.js ***!
+        \************************************************************/
+
+/*!*************************************************************!*\
+        !*** ./node_modules/prop-types/lib/ReactPropTypesSecret.js ***!
+        \*************************************************************/
+
+/*!**************************************************************************************!*\
+        !*** external {"commonjs":"react","commonjs2":"react","amd":"react","root":"React"} ***!
+        \**************************************************************************************/
+
+/** @license React v0.19.1
+ * scheduler.production.min.js
+ *
+ * Copyright (c) Facebook, Inc. and its affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+/** @license React v16.13.1
+         * react-is.development.js
+         *
+         * Copyright (c) Facebook, Inc. and its affiliates.
+         *
+         * This source code is licensed under the MIT license found in the
+         * LICENSE file in the root directory of this source tree.
+         */
+
+/** @license React v16.13.1
+ * react-is.production.min.js
+ *
+ * Copyright (c) Facebook, Inc. and its affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+/** @license React v16.14.0
+ * react-dom.production.min.js
+ *
+ * Copyright (c) Facebook, Inc. and its affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+/** @license React v16.14.0
+ * react-jsx-runtime.production.min.js
+ *
+ * Copyright (c) Facebook, Inc. and its affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+/** @license React v16.14.0
+ * react.production.min.js
+ *
+ * Copyright (c) Facebook, Inc. and its affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */

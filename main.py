@@ -43,8 +43,8 @@ class ServiceStatusThread(QThread):
                 plex_status = self.plex_client.is_connected()
                 self.status_updated.emit("plex", plex_status)
                 
-                # Check Soulseek connection
-                soulseek_status = self.soulseek_client.base_url is not None
+                # Check Soulseek connection (simplified check to avoid event loop issues)
+                soulseek_status = self.soulseek_client.is_configured()
                 self.status_updated.emit("soulseek", soulseek_status)
                 
                 self.msleep(3000)  # Check every 3 seconds
