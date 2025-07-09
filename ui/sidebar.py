@@ -52,14 +52,15 @@ class SidebarButton(QPushButton):
         if self.is_active:
             self.setStyleSheet("""
                 SidebarButton {
-                    background: rgba(29, 185, 84, 0.2);
-                    border-left: 3px solid #1db954;
-                    border-radius: 0px;
+                    background: rgba(29, 185, 84, 0.15);
+                    border-left: 4px solid #1db954;
+                    border-radius: 12px;
                     text-align: left;
                     padding: 0px;
                 }
                 SidebarButton:hover {
-                    background: rgba(29, 185, 84, 0.3);
+                    background: rgba(29, 185, 84, 0.25);
+                    transform: scale(1.02);
                 }
             """)
             self.text_label.setStyleSheet("color: #1db954; font-weight: bold;")
@@ -68,8 +69,8 @@ class SidebarButton(QPushButton):
                     color: #1db954;
                     font-size: 16px;
                     font-weight: bold;
-                    border-radius: 12px;
-                    background: rgba(29, 185, 84, 0.2);
+                    border-radius: 14px;
+                    background: rgba(29, 185, 84, 0.25);
                 }
             """)
         else:
@@ -77,12 +78,13 @@ class SidebarButton(QPushButton):
                 SidebarButton {
                     background: transparent;
                     border: none;
-                    border-radius: 0px;
+                    border-radius: 12px;
                     text-align: left;
                     padding: 0px;
                 }
                 SidebarButton:hover {
-                    background: rgba(255, 255, 255, 0.1);
+                    background: rgba(255, 255, 255, 0.08);
+                    border-left: 2px solid rgba(255, 255, 255, 0.3);
                 }
             """)
             self.text_label.setStyleSheet("color: #b3b3b3;")
@@ -91,8 +93,8 @@ class SidebarButton(QPushButton):
                     color: #b3b3b3;
                     font-size: 16px;
                     font-weight: bold;
-                    border-radius: 12px;
-                    background: rgba(255, 255, 255, 0.1);
+                    border-radius: 14px;
+                    background: rgba(255, 255, 255, 0.08);
                 }
             """)
 
@@ -104,18 +106,27 @@ class StatusIndicator(QWidget):
         self.setup_ui()
     
     def setup_ui(self):
+        self.setFixedHeight(35)  # Ensure enough height
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(15, 5, 15, 5)
-        layout.setSpacing(10)
+        layout.setContentsMargins(15, 8, 15, 8)
+        layout.setSpacing(12)
         
-        # Status dot
+        # Status dot with rounded background
         self.status_dot = QLabel("●")
-        self.status_dot.setFixedSize(12, 12)
+        self.status_dot.setFixedSize(16, 16)
         self.status_dot.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.status_dot.setStyleSheet("""
+            QLabel {
+                border-radius: 8px;
+                font-size: 12px;
+                font-weight: bold;
+            }
+        """)
         
         # Service name
         self.service_label = QLabel(self.service_name)
-        self.service_label.setFont(QFont("Arial", 9))
+        self.service_label.setFont(QFont("Arial", 10, QFont.Weight.Medium))
+        self.service_label.setMinimumWidth(80)  # Ensure text doesn't get cut off
         
         layout.addWidget(self.status_dot)
         layout.addWidget(self.service_label)
@@ -126,11 +137,27 @@ class StatusIndicator(QWidget):
     def update_status(self, connected: bool):
         self.is_connected = connected
         if connected:
-            self.status_dot.setStyleSheet("color: #1db954;")
-            self.service_label.setStyleSheet("color: #ffffff;")
+            self.status_dot.setStyleSheet("""
+                QLabel {
+                    color: #1db954;
+                    background: rgba(29, 185, 84, 0.15);
+                    border-radius: 8px;
+                    font-size: 12px;
+                    font-weight: bold;
+                }
+            """)
+            self.service_label.setStyleSheet("color: #ffffff; font-weight: 500;")
         else:
-            self.status_dot.setStyleSheet("color: #e22134;")
-            self.service_label.setStyleSheet("color: #b3b3b3;")
+            self.status_dot.setStyleSheet("""
+                QLabel {
+                    color: #e22134;
+                    background: rgba(226, 33, 52, 0.15);
+                    border-radius: 8px;
+                    font-size: 12px;
+                    font-weight: bold;
+                }
+            """)
+            self.service_label.setStyleSheet("color: #b3b3b3; font-weight: 400;")
 
 class ModernSidebar(QWidget):
     page_changed = pyqtSignal(str)
@@ -171,21 +198,29 @@ class ModernSidebar(QWidget):
     
     def create_header(self):
         header = QWidget()
-        header.setFixedHeight(80)
-        header.setStyleSheet("background: #121212; border-bottom: 1px solid #282828;")
+        header.setFixedHeight(85)
+        header.setStyleSheet("""
+            QWidget {
+                background: #121212; 
+                border-bottom: 1px solid #282828;
+                border-bottom-left-radius: 8px;
+                border-bottom-right-radius: 8px;
+            }
+        """)
         
         layout = QVBoxLayout(header)
-        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setContentsMargins(20, 22, 20, 22)
+        layout.setSpacing(3)
         
         # App name
         app_name = QLabel("NewMusic")
-        app_name.setFont(QFont("Arial", 18, QFont.Weight.Bold))
-        app_name.setStyleSheet("color: #ffffff;")
+        app_name.setFont(QFont("Arial", 19, QFont.Weight.Bold))
+        app_name.setStyleSheet("color: #ffffff; letter-spacing: -0.5px;")
         
         # Subtitle
         subtitle = QLabel("Music Sync & Manager")
-        subtitle.setFont(QFont("Arial", 9))
-        subtitle.setStyleSheet("color: #b3b3b3;")
+        subtitle.setFont(QFont("Arial", 10))
+        subtitle.setStyleSheet("color: #b3b3b3; opacity: 0.8;")
         
         layout.addWidget(app_name)
         layout.addWidget(subtitle)
@@ -194,9 +229,15 @@ class ModernSidebar(QWidget):
     
     def create_navigation(self):
         nav_widget = QWidget()
+        nav_widget.setStyleSheet("""
+            QWidget {
+                background: #121212;
+                border-radius: 8px;
+            }
+        """)
         layout = QVBoxLayout(nav_widget)
-        layout.setContentsMargins(0, 20, 0, 20)
-        layout.setSpacing(5)
+        layout.setContentsMargins(8, 20, 8, 20)
+        layout.setSpacing(6)
         
         # Navigation buttons
         nav_items = [
@@ -220,17 +261,24 @@ class ModernSidebar(QWidget):
     
     def create_status_section(self):
         status_widget = QWidget()
-        status_widget.setFixedHeight(120)
-        status_widget.setStyleSheet("background: #181818; border-top: 1px solid #282828;")
+        status_widget.setFixedHeight(140)  # Increased height
+        status_widget.setStyleSheet("""
+            QWidget {
+                background: #181818; 
+                border-top: 1px solid #282828;
+                border-top-left-radius: 8px;
+                border-top-right-radius: 8px;
+            }
+        """)
         
         layout = QVBoxLayout(status_widget)
-        layout.setContentsMargins(0, 15, 0, 15)
-        layout.setSpacing(8)
+        layout.setContentsMargins(0, 18, 0, 18)  # Better margins
+        layout.setSpacing(6)  # Tighter spacing between items
         
         # Status title
         status_title = QLabel("Connection Status")
-        status_title.setFont(QFont("Arial", 10, QFont.Weight.Bold))
-        status_title.setStyleSheet("color: #ffffff; padding: 0 15px;")
+        status_title.setFont(QFont("Arial", 11, QFont.Weight.Bold))
+        status_title.setStyleSheet("color: #ffffff; padding: 0 15px; margin-bottom: 5px;")
         layout.addWidget(status_title)
         
         # Status indicators

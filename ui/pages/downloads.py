@@ -436,7 +436,7 @@ class DownloadsPage(QWidget):
     
     def create_missing_tracks_section(self):
         section = QFrame()
-        section.setFixedHeight(200)
+        section.setFixedHeight(250)
         section.setStyleSheet("""
             QFrame {
                 background: #282828;
@@ -456,6 +456,10 @@ class DownloadsPage(QWidget):
         title_label.setFont(QFont("Arial", 16, QFont.Weight.Bold))
         title_label.setStyleSheet("color: #ffffff;")
         
+        count_label = QLabel("23 tracks")
+        count_label.setFont(QFont("Arial", 11))
+        count_label.setStyleSheet("color: #b3b3b3;")
+        
         download_all_btn = QPushButton("📥 Download All")
         download_all_btn.setFixedSize(120, 35)
         download_all_btn.setStyleSheet("""
@@ -473,16 +477,108 @@ class DownloadsPage(QWidget):
         """)
         
         header_layout.addWidget(title_label)
+        header_layout.addWidget(count_label)
         header_layout.addStretch()
         header_layout.addWidget(download_all_btn)
         
-        # Missing tracks list (simplified)
-        missing_text = QLabel("23 tracks are missing from your Plex library and available for download")
-        missing_text.setFont(QFont("Arial", 12))
-        missing_text.setStyleSheet("color: #b3b3b3;")
+        # Missing tracks scroll area
+        missing_scroll = QScrollArea()
+        missing_scroll.setWidgetResizable(True)
+        missing_scroll.setStyleSheet("""
+            QScrollArea {
+                border: none;
+                background: transparent;
+            }
+            QScrollBar:vertical {
+                background: #404040;
+                width: 6px;
+                border-radius: 3px;
+            }
+            QScrollBar::handle:vertical {
+                background: #1db954;
+                border-radius: 3px;
+            }
+        """)
+        
+        missing_widget = QWidget()
+        missing_layout = QVBoxLayout(missing_widget)
+        missing_layout.setSpacing(8)
+        missing_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Sample missing tracks with playlist info
+        missing_tracks = [
+            ("Song Title 1", "Artist Name 1", "Liked Songs"),
+            ("Another Track", "Different Artist", "Road Trip Mix"),
+            ("Cool Song", "Band Name", "Workout Playlist"),
+            ("Missing Hit", "Popular Artist", "Discover Weekly"),
+            ("Rare Track", "Indie Artist", "Chill Vibes")
+        ]
+        
+        for track_title, artist, playlist in missing_tracks:
+            track_item = self.create_missing_track_item(track_title, artist, playlist)
+            missing_layout.addWidget(track_item)
+        
+        missing_layout.addStretch()
+        missing_scroll.setWidget(missing_widget)
         
         layout.addLayout(header_layout)
-        layout.addWidget(missing_text)
-        layout.addStretch()
+        layout.addWidget(missing_scroll)
         
         return section
+    
+    def create_missing_track_item(self, track_title: str, artist: str, playlist: str):
+        item = QFrame()
+        item.setFixedHeight(45)
+        item.setStyleSheet("""
+            QFrame {
+                background: #333333;
+                border-radius: 6px;
+                border: 1px solid #404040;
+            }
+            QFrame:hover {
+                background: #3a3a3a;
+                border: 1px solid #1db954;
+            }
+        """)
+        
+        layout = QHBoxLayout(item)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(10)
+        
+        # Track info
+        info_layout = QVBoxLayout()
+        info_layout.setSpacing(2)
+        
+        track_label = QLabel(f"{track_title} - {artist}")
+        track_label.setFont(QFont("Arial", 10, QFont.Weight.Medium))
+        track_label.setStyleSheet("color: #ffffff;")
+        
+        playlist_label = QLabel(f"from: {playlist}")
+        playlist_label.setFont(QFont("Arial", 9))
+        playlist_label.setStyleSheet("color: #1db954;")
+        
+        info_layout.addWidget(track_label)
+        info_layout.addWidget(playlist_label)
+        
+        # Download button
+        download_btn = QPushButton("📥")
+        download_btn.setFixedSize(30, 30)
+        download_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(29, 185, 84, 0.2);
+                border: 1px solid #1db954;
+                border-radius: 15px;
+                color: #1db954;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background: #1db954;
+                color: #000000;
+            }
+        """)
+        
+        layout.addLayout(info_layout)
+        layout.addStretch()
+        layout.addWidget(download_btn)
+        
+        return item
