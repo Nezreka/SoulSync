@@ -104,3 +104,62 @@
 2025-07-09 12:28:42 - newmusic.main - [92mINFO[0m - change_page:139 - Changed to page: downloads
 2025-07-09 12:28:43 - newmusic.main - [92mINFO[0m - change_page:139 - Changed to page: artists
 2025-07-09 12:28:44 - newmusic.main - [92mINFO[0m - change_page:139 - Changed to page: settings
+2025-07-09 12:29:52 - newmusic.main - [92mINFO[0m - change_page:139 - Changed to page: downloads
+2025-07-09 12:29:53 - newmusic.main - [92mINFO[0m - change_page:139 - Changed to page: artists
+2025-07-09 12:29:54 - newmusic.main - [92mINFO[0m - change_page:139 - Changed to page: dashboard
+2025-07-09 12:30:23 - newmusic.main - [92mINFO[0m - change_page:139 - Changed to page: settings
+2025-07-09 12:30:24 - newmusic.main - [92mINFO[0m - change_page:139 - Changed to page: artists
+2025-07-09 12:34:29 - newmusic.main - [92mINFO[0m - change_page:139 - Changed to page: settings
+2025-07-09 12:34:56 - newmusic.main - [92mINFO[0m - change_page:139 - Changed to page: artists
+2025-07-09 12:34:57 - newmusic.main - [92mINFO[0m - change_page:139 - Changed to page: downloads
+2025-07-09 12:36:03 - newmusic.main - [92mINFO[0m - change_page:139 - Changed to page: sync
+2025-07-09 12:37:31 - newmusic.main - [92mINFO[0m - closeEvent:152 - Closing application...
+2025-07-09 12:40:45 - newmusic - [92mINFO[0m - setup_logging:57 - Logging initialized with level: DEBUG
+2025-07-09 12:40:45 - newmusic.main - [92mINFO[0m - main:173 - Starting NewMusic application
+2025-07-09 12:40:45 - newmusic.spotify_client - [92mINFO[0m - _setup_client:84 - Successfully authenticated with Spotify as broquethomas
+2025-07-09 12:40:45 - newmusic.plex_client - [92mINFO[0m - _find_music_library:98 - Found music library: Music
+2025-07-09 12:40:45 - newmusic.plex_client - [92mINFO[0m - _setup_client:84 - Successfully connected to Plex server: PLEX-MACHINE
+2025-07-09 12:40:45 - newmusic.soulseek_client - [92mINFO[0m - _setup_client:88 - Soulseek client configured with slskd at http://localhost:5030
+2025-07-09 12:40:46 - newmusic.main - [92mINFO[0m - change_page:139 - Changed to page: dashboard
+2025-07-09 12:40:48 - newmusic.main - [92mINFO[0m - change_page:139 - Changed to page: sync
+2025-07-09 12:40:59 - newmusic.main - [92mINFO[0m - change_page:139 - Changed to page: downloads
+2025-07-09 12:41:00 - newmusic.main - [92mINFO[0m - change_page:139 - Changed to page: artists
+2025-07-09 12:41:41 - newmusic.main - [92mINFO[0m - change_page:139 - Changed to page: settings
+2025-07-09 12:42:45 - newmusic.main - [92mINFO[0m - change_page:139 - Changed to page: dashboard
+2025-07-09 12:42:47 - newmusic.main - [92mINFO[0m - change_page:139 - Changed to page: sync
+2025-07-09 12:43:27 - newmusic.main - [92mINFO[0m - change_page:139 - Changed to page: settings
+2025-07-09 12:47:49 - newmusic.main - [92mINFO[0m - closeEvent:152 - Closing application...
+2025-07-09 12:51:25 - newmusic - [92mINFO[0m - setup_logging:57 - Logging initialized with level: DEBUG
+2025-07-09 12:51:25 - newmusic.main - [92mINFO[0m - main:173 - Starting NewMusic application
+2025-07-09 12:51:26 - newmusic.spotify_client - [92mINFO[0m - _setup_client:84 - Successfully authenticated with Spotify as broquethomas
+2025-07-09 12:51:26 - newmusic.plex_client - [92mINFO[0m - _find_music_library:98 - Found music library: Music
+2025-07-09 12:51:26 - newmusic.plex_client - [92mINFO[0m - _setup_client:84 - Successfully connected to Plex server: PLEX-MACHINE
+2025-07-09 12:51:26 - newmusic.soulseek_client - [92mINFO[0m - _setup_client:88 - Soulseek client configured with slskd at http://localhost:5030
+2025-07-09 12:51:26 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Aether
+2025-07-09 12:51:26 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Favorite Artists
+2025-07-09 12:51:29 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Brittnea
+2025-07-09 12:51:30 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Baleigh
+2025-07-09 12:51:31 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Extra Music
+2025-07-09 12:51:32 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Maggi Main
+2025-07-09 12:51:38 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Broque Main
+2025-07-09 12:51:45 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:113 - Retrieved 7 playlists
+2025-07-09 12:58:18 - newmusic - [92mINFO[0m - setup_logging:57 - Logging initialized with level: DEBUG
+2025-07-09 12:58:18 - newmusic.main - [92mINFO[0m - main:173 - Starting NewMusic application
+2025-07-09 12:58:18 - newmusic.spotify_client - [92mINFO[0m - _setup_client:84 - Successfully authenticated with Spotify as broquethomas
+2025-07-09 12:58:18 - newmusic.plex_client - [92mINFO[0m - _find_music_library:98 - Found music library: Music
+2025-07-09 12:58:18 - newmusic.plex_client - [92mINFO[0m - _setup_client:84 - Successfully connected to Plex server: PLEX-MACHINE
+2025-07-09 12:58:18 - newmusic.soulseek_client - [92mINFO[0m - _setup_client:88 - Soulseek client configured with slskd at http://localhost:5030
+2025-07-09 12:58:19 - newmusic.main - [92mINFO[0m - change_page:139 - Changed to page: dashboard
+2025-07-09 12:58:19 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Aether
+2025-07-09 12:58:19 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Favorite Artists
+2025-07-09 12:58:22 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Brittnea
+2025-07-09 12:58:23 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Baleigh
+2025-07-09 12:58:24 - newmusic.main - [92mINFO[0m - change_page:139 - Changed to page: sync
+2025-07-09 12:58:24 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Extra Music
+2025-07-09 12:58:25 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Maggi Main
+2025-07-09 12:58:30 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Broque Main
+2025-07-09 12:58:37 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:113 - Retrieved 7 playlists
+2025-07-09 12:58:50 - newmusic.main - [92mINFO[0m - change_page:139 - Changed to page: settings
+2025-07-09 12:59:15 - newmusic.plex_client - [92mINFO[0m - _find_music_library:98 - Found music library: Music
+2025-07-09 12:59:15 - newmusic.plex_client - [92mINFO[0m - _setup_client:84 - Successfully connected to Plex server: PLEX-MACHINE
+2025-07-09 12:59:17 - newmusic.spotify_client - [92mINFO[0m - _setup_client:84 - Successfully authenticated with Spotify as broquethomas

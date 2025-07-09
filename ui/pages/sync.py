@@ -1,9 +1,39 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                            QFrame, QPushButton, QListWidget, QListWidgetItem,
                            QProgressBar, QTextEdit, QCheckBox, QComboBox,
-                           QScrollArea, QSizePolicy)
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+                           QScrollArea, QSizePolicy, QMessageBox)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont
+
+class PlaylistLoaderThread(QThread):
+    playlist_loaded = pyqtSignal(object)  # Single playlist
+    loading_finished = pyqtSignal(int)  # Total count
+    loading_failed = pyqtSignal(str)  # Error message
+    progress_updated = pyqtSignal(str)  # Progress text
+    
+    def __init__(self, spotify_client):
+        super().__init__()
+        self.spotify_client = spotify_client
+        
+    def run(self):
+        try:
+            self.progress_updated.emit("Connecting to Spotify...")
+            if not self.spotify_client or not self.spotify_client.is_authenticated():
+                self.loading_failed.emit("Spotify not authenticated")
+                return
+            
+            self.progress_updated.emit("Fetching playlists...")
+            playlists = self.spotify_client.get_user_playlists()
+            
+            for i, playlist in enumerate(playlists):
+                self.progress_updated.emit(f"Loading playlist {i+1}/{len(playlists)}: {playlist.name}")
+                self.playlist_loaded.emit(playlist)
+                self.msleep(50)  # Small delay to show progressive loading
+            
+            self.loading_finished.emit(len(playlists))
+            
+        except Exception as e:
+            self.loading_failed.emit(str(e))
 
 class PlaylistItem(QFrame):
     def __init__(self, name: str, track_count: int, sync_status: str, parent=None):
@@ -191,9 +221,16 @@ class SyncOptionsPanel(QFrame):
         layout.addLayout(quality_layout)
 
 class SyncPage(QWidget):
-    def __init__(self, parent=None):
+    def __init__(self, spotify_client=None, plex_client=None, parent=None):
         super().__init__(parent)
+        self.spotify_client = spotify_client
+        self.plex_client = plex_client
+        self.current_playlists = []
+        self.playlist_loader = None
         self.setup_ui()
+        
+        # Start loading playlists asynchronously after UI is ready
+        QTimer.singleShot(100, self.load_playlists_async)
     
     def setup_ui(self):
         self.setStyleSheet("""
@@ -261,9 +298,10 @@ class SyncPage(QWidget):
         section_title.setFont(QFont("Arial", 16, QFont.Weight.Bold))
         section_title.setStyleSheet("color: #ffffff;")
         
-        refresh_btn = QPushButton("🔄 Refresh")
-        refresh_btn.setFixedSize(100, 35)
-        refresh_btn.setStyleSheet("""
+        self.refresh_btn = QPushButton("🔄 Refresh")
+        self.refresh_btn.setFixedSize(100, 35)
+        self.refresh_btn.clicked.connect(self.refresh_playlists)
+        self.refresh_btn.setStyleSheet("""
             QPushButton {
                 background: #1db954;
                 border: none;
@@ -282,7 +320,7 @@ class SyncPage(QWidget):
         
         header_layout.addWidget(section_title)
         header_layout.addStretch()
-        header_layout.addWidget(refresh_btn)
+        header_layout.addWidget(self.refresh_btn)
         
         # Playlist container
         playlist_container = QScrollArea()
@@ -303,26 +341,14 @@ class SyncPage(QWidget):
             }
         """)
         
-        playlist_widget = QWidget()
-        playlist_layout = QVBoxLayout(playlist_widget)
-        playlist_layout.setSpacing(10)
+        self.playlist_widget = QWidget()
+        self.playlist_layout = QVBoxLayout(self.playlist_widget)
+        self.playlist_layout.setSpacing(10)
         
-        # Sample playlists
-        playlists = [
-            ("Liked Songs", 247, "Synced"),
-            ("Discover Weekly", 30, "Needs Sync"),
-            ("Chill Vibes", 89, "Synced"),
-            ("Workout Mix", 156, "Needs Sync"),
-            ("Road Trip", 67, "Never Synced"),
-            ("Focus Music", 45, "Synced")
-        ]
+        # Playlists will be loaded asynchronously after UI setup
         
-        for name, count, status in playlists:
-            item = PlaylistItem(name, count, status)
-            playlist_layout.addWidget(item)
-        
-        playlist_layout.addStretch()
-        playlist_container.setWidget(playlist_widget)
+        self.playlist_layout.addStretch()
+        playlist_container.setWidget(self.playlist_widget)
         
         layout.addLayout(header_layout)
         layout.addWidget(playlist_container)
@@ -456,3 +482,102 @@ class SyncPage(QWidget):
         layout.addWidget(self.progress_bar)
         layout.addWidget(self.progress_text)
         layout.addWidget(self.log_area)
+        
+        return section
+    
+    def load_playlists_async(self):
+        """Start asynchronous playlist loading"""
+        if self.playlist_loader and self.playlist_loader.isRunning():
+            return
+        
+        # Clear existing playlists
+        self.clear_playlists()
+        
+        # Show loading state
+        self.refresh_btn.setText("🔄 Loading...")
+        self.refresh_btn.setEnabled(False)
+        self.log_area.append("Starting playlist loading...")
+        
+        # Create and start loader thread
+        self.playlist_loader = PlaylistLoaderThread(self.spotify_client)
+        self.playlist_loader.playlist_loaded.connect(self.add_playlist_to_ui)
+        self.playlist_loader.loading_finished.connect(self.on_loading_finished)
+        self.playlist_loader.loading_failed.connect(self.on_loading_failed)
+        self.playlist_loader.progress_updated.connect(self.update_progress)
+        self.playlist_loader.start()
+    
+    def add_playlist_to_ui(self, playlist):
+        """Add a single playlist to the UI as it's loaded"""
+        # Simple sync status (placeholder for now)
+        sync_status = "Never Synced"  # TODO: Check actual sync status
+        item = PlaylistItem(playlist.name, playlist.total_tracks, sync_status)
+        # Insert before the stretch item
+        self.playlist_layout.insertWidget(self.playlist_layout.count() - 1, item)
+        self.current_playlists.append(playlist)
+        
+        # Update log
+        self.log_area.append(f"Added playlist: {playlist.name} ({playlist.total_tracks} tracks)")
+    
+    def on_loading_finished(self, count):
+        """Handle completion of playlist loading"""
+        self.refresh_btn.setText("🔄 Refresh")
+        self.refresh_btn.setEnabled(True)
+        self.log_area.append(f"✓ Loaded {count} Spotify playlists successfully")
+        
+    def on_loading_failed(self, error_msg):
+        """Handle playlist loading failure"""
+        self.refresh_btn.setText("🔄 Refresh")
+        self.refresh_btn.setEnabled(True)
+        self.log_area.append(f"✗ Failed to load playlists: {error_msg}")
+        QMessageBox.critical(self, "Error", f"Failed to load playlists: {error_msg}")
+    
+    def update_progress(self, message):
+        """Update progress text"""
+        self.log_area.append(message)
+    
+    def load_initial_playlists(self):
+        """Load initial playlist data (placeholder or real)"""
+        if self.spotify_client and self.spotify_client.is_authenticated():
+            self.refresh_playlists()
+        else:
+            # Show placeholder playlists
+            playlists = [
+                ("Liked Songs", 247, "Synced"),
+                ("Discover Weekly", 30, "Needs Sync"),
+                ("Chill Vibes", 89, "Synced"),
+                ("Workout Mix", 156, "Needs Sync"),
+                ("Road Trip", 67, "Never Synced"),
+                ("Focus Music", 45, "Synced")
+            ]
+            
+            for name, count, status in playlists:
+                item = PlaylistItem(name, count, status)
+                self.playlist_layout.addWidget(item)
+    
+    def refresh_playlists(self):
+        """Refresh playlists from Spotify API using async loader"""
+        if not self.spotify_client:
+            QMessageBox.warning(self, "Error", "Spotify client not available")
+            return
+        
+        if not self.spotify_client.is_authenticated():
+            QMessageBox.warning(self, "Error", "Spotify not authenticated. Please check your settings.")
+            return
+        
+        # Use the async loader
+        self.load_playlists_async()
+    
+    def clear_playlists(self):
+        """Clear all playlist items from the layout"""
+        # Clear the current playlists list
+        self.current_playlists = []
+        
+        # Remove all items except the stretch
+        for i in reversed(range(self.playlist_layout.count())):
+            item = self.playlist_layout.itemAt(i)
+            if item.widget():
+                item.widget().deleteLater()
+            elif item.spacerItem():
+                continue  # Keep the stretch spacer
+            else:
+                self.playlist_layout.removeItem(item)
