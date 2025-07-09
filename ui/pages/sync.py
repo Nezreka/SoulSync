@@ -186,15 +186,9 @@ class SyncOptionsPanel(QFrame):
         quality_layout.addWidget(self.quality_combo)
         quality_layout.addStretch()
         
-        # Update metadata option
-        self.update_metadata = QCheckBox("Update metadata from Spotify")
-        self.update_metadata.setChecked(True)
-        self.update_metadata.setStyleSheet(self.download_missing.styleSheet())
-        
         layout.addWidget(title_label)
         layout.addWidget(self.download_missing)
         layout.addLayout(quality_layout)
-        layout.addWidget(self.update_metadata)
 
 class SyncPage(QWidget):
     def __init__(self, parent=None):
