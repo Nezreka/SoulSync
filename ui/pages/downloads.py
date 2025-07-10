@@ -2,9 +2,94 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                            QFrame, QPushButton, QProgressBar, QListWidget,
                            QListWidgetItem, QComboBox, QLineEdit, QScrollArea, QMessageBox,
                            QSplitter, QSizePolicy, QSpacerItem, QTabWidget)
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QUrl
 from PyQt6.QtGui import QFont
+from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 import functools  # For fixing lambda memory leaks
+import os
+
+class AudioPlayer(QMediaPlayer):
+    """Simple audio player for streaming music files"""
+    playback_finished = pyqtSignal()
+    playback_error = pyqtSignal(str)
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        
+        # Set up audio output
+        self.audio_output = QAudioOutput()
+        self.setAudioOutput(self.audio_output)
+        
+        # Connect signals
+        self.mediaStatusChanged.connect(self._on_media_status_changed)
+        self.errorOccurred.connect(self._on_error_occurred)
+        
+        # Track current file
+        self.current_file_path = None
+        self.is_playing = False
+    
+    def play_file(self, file_path):
+        """Play an audio file from the given path"""
+        try:
+            if not file_path or not os.path.exists(file_path):
+                self.playback_error.emit(f"File not found: {file_path}")
+                return False
+            
+            # Stop any current playback
+            self.stop()
+            
+            # Set the new media source
+            self.current_file_path = file_path
+            self.setSource(QUrl.fromLocalFile(file_path))
+            
+            # Start playback
+            self.play()
+            self.is_playing = True
+            
+            print(f"🎵 Started playing: {os.path.basename(file_path)}")
+            return True
+            
+        except Exception as e:
+            error_msg = f"Error playing audio file: {str(e)}"
+            print(error_msg)
+            self.playback_error.emit(error_msg)
+            return False
+    
+    def toggle_playback(self):
+        """Toggle between play and pause"""
+        if self.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            self.pause()
+            self.is_playing = False
+            return False  # Now paused
+        else:
+            self.play()
+            self.is_playing = True
+            return True   # Now playing
+    
+    def stop_playback(self):
+        """Stop playback and reset"""
+        self.stop()
+        self.is_playing = False
+        self.current_file_path = None
+    
+    def _on_media_status_changed(self, status):
+        """Handle media status changes"""
+        if status == QMediaPlayer.MediaStatus.EndOfMedia:
+            print("🎵 Playback finished")
+            self.is_playing = False
+            self.playback_finished.emit()
+        elif status == QMediaPlayer.MediaStatus.InvalidMedia:
+            error_msg = "Invalid media file or unsupported format"
+            print(f"❌ {error_msg}")
+            self.is_playing = False
+            self.playback_error.emit(error_msg)
+    
+    def _on_error_occurred(self, error, error_string):
+        """Handle playback errors"""
+        error_msg = f"Audio playback error: {error_string}"
+        print(f"❌ {error_msg}")
+        self.is_playing = False
+        self.playback_error.emit(error_msg)
 
 class DownloadThread(QThread):
     download_completed = pyqtSignal(str, object)  # Download ID or success message, download_item
@@ -316,9 +401,11 @@ class StreamingThread(QThread):
         loop = None
         try:
             import asyncio
-            import tempfile
             import os
             import time
+            import shutil
+            import glob
+            from pathlib import Path
             
             self.streaming_started.emit(f"Starting stream: {self.search_result.filename}", self.search_result)
             
@@ -326,51 +413,79 @@ class StreamingThread(QThread):
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             
-            # Create dedicated streaming temp folder
+            # Get paths
             from config.settings import config_manager
             download_path = config_manager.get('soulseek.download_path', './downloads')
-            temp_streaming_dir = os.path.join(download_path, 'temp_streaming')
             
-            # Ensure temp streaming directory exists
-            os.makedirs(temp_streaming_dir, exist_ok=True)
+            # Use the Stream folder in project root (not inside downloads)
+            project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))  # Go up from ui/pages/
+            stream_folder = os.path.join(project_root, 'Stream')
             
-            # Use consistent filename (overwrites previous stream)
-            file_extension = os.path.splitext(self.search_result.filename)[1]
-            temp_filename = f"current_stream{file_extension}"
-            temp_path = os.path.join(temp_streaming_dir, temp_filename)
+            # Ensure Stream directory exists
+            os.makedirs(stream_folder, exist_ok=True)
             
-            # Remove any existing temp stream file
-            if os.path.exists(temp_path):
+            # Clear any existing files in Stream folder (only one file at a time)
+            for existing_file in glob.glob(os.path.join(stream_folder, '*')):
                 try:
-                    os.remove(temp_path)
+                    if os.path.isfile(existing_file):
+                        os.remove(existing_file)
+                    elif os.path.isdir(existing_file):
+                        shutil.rmtree(existing_file)
                 except Exception as e:
-                    print(f"Warning: Could not remove existing temp file: {e}")
+                    print(f"Warning: Could not remove existing stream file: {e}")
             
-            # Start the download to temporary streaming location
+            # Start the download (goes to normal downloads folder initially)
             download_result = loop.run_until_complete(self._do_stream_download())
             
             if not self._stop_requested:
                 if download_result:
-                    # Stream started successfully - file is being downloaded to temp location
-                    self.streaming_started.emit(f"Streaming: {self.search_result.filename}", self.search_result)
+                    self.streaming_started.emit(f"Downloading for stream: {self.search_result.filename}", self.search_result)
                     
-                    # Wait for download to complete by polling the temp location
-                    max_wait_time = 30  # Wait up to 30 seconds
-                    poll_interval = 1   # Check every second
+                    # Wait for download to complete and find the file
+                    max_wait_time = 45  # Wait up to 45 seconds
+                    poll_interval = 2   # Check every 2 seconds
+                    found_file = None
                     
-                    for wait_count in range(max_wait_time):
-                        if os.path.exists(temp_path) and os.path.getsize(temp_path) > 0:
-                            # File exists and has content - streaming ready
-                            self.streaming_finished.emit(f"Stream ready: {self.search_result.filename}", self.search_result)
-                            self.temp_file_path = temp_path
-                            print(f"✓ Stream file ready for playback: {temp_path}")
+                    for wait_count in range(max_wait_time // poll_interval):
+                        if self._stop_requested:
                             break
+                            
+                        # Search for the downloaded file in the downloads directory
+                        found_file = self._find_downloaded_file(download_path)
+                        
+                        if found_file:
+                            print(f"✓ Found downloaded file: {found_file}")
+                            
+                            # Move the file to Stream folder
+                            file_extension = os.path.splitext(found_file)[1]
+                            stream_filename = f"current_stream{file_extension}"
+                            stream_path = os.path.join(stream_folder, stream_filename)
+                            
+                            try:
+                                # Move file to Stream folder
+                                shutil.move(found_file, stream_path)
+                                print(f"✓ Moved file to stream folder: {stream_path}")
+                                
+                                # Clean up empty directories left behind
+                                self._cleanup_empty_directories(download_path, found_file)
+                                
+                                # Signal that streaming is ready
+                                self.streaming_finished.emit(f"Stream ready: {os.path.basename(found_file)}", self.search_result)
+                                self.temp_file_path = stream_path
+                                print(f"✓ Stream file ready for playback: {stream_path}")
+                                break
+                                
+                            except Exception as e:
+                                print(f"Error moving file to stream folder: {e}")
+                                self.streaming_failed.emit(f"Failed to prepare stream file: {e}", self.search_result)
+                                break
                         else:
                             # Still downloading, wait a bit more
+                            print(f"Waiting for download to complete... ({wait_count * poll_interval}s elapsed)")
                             time.sleep(poll_interval)
                     else:
                         # Timed out waiting for file
-                        self.streaming_failed.emit("Stream download timed out", self.search_result)
+                        self.streaming_failed.emit("Stream download timed out - file not found", self.search_result)
                         
                 else:
                     self.streaming_failed.emit("Streaming failed to start", self.search_result)
@@ -394,10 +509,79 @@ class StreamingThread(QThread):
                 except Exception as e:
                     print(f"Error cleaning up streaming event loop: {e}")
     
+    def _find_downloaded_file(self, download_path):
+        """Find the downloaded audio file in the downloads directory tree"""
+        import os
+        
+        # Audio file extensions to look for
+        audio_extensions = {'.mp3', '.flac', '.ogg', '.aac', '.wma', '.wav', '.m4a'}
+        
+        # Get the base filename without path
+        target_filename = os.path.basename(self.search_result.filename)
+        
+        try:
+            # Walk through the downloads directory to find the file
+            for root, dirs, files in os.walk(download_path):
+                for file in files:
+                    # Check if this is our target file
+                    if file == target_filename:
+                        file_path = os.path.join(root, file)
+                        # Verify it's an audio file and has content
+                        if (os.path.splitext(file)[1].lower() in audio_extensions and 
+                            os.path.getsize(file_path) > 1024):  # At least 1KB
+                            return file_path
+                    
+                    # Also check for any audio files that might match partially
+                    # (in case filename is slightly different)
+                    file_lower = file.lower()
+                    target_lower = target_filename.lower()
+                    
+                    # Remove common variations
+                    target_clean = target_lower.replace(' ', '').replace('-', '').replace('_', '')
+                    file_clean = file_lower.replace(' ', '').replace('-', '').replace('_', '')
+                    
+                    if (os.path.splitext(file)[1].lower() in audio_extensions and
+                        len(file_clean) > 10 and  # Reasonable filename length
+                        (target_clean in file_clean or file_clean in target_clean) and
+                        os.path.getsize(os.path.join(root, file)) > 1024):
+                        return os.path.join(root, file)
+                        
+        except Exception as e:
+            print(f"Error searching for downloaded file: {e}")
+            
+        return None
+    
+    def _cleanup_empty_directories(self, download_path, moved_file_path):
+        """Clean up empty directories left after moving a file"""
+        import os
+        
+        try:
+            # Get the directory that contained the moved file
+            file_dir = os.path.dirname(moved_file_path)
+            
+            # Only clean up if it's a subdirectory of downloads (not the downloads folder itself)
+            if file_dir != download_path and file_dir.startswith(download_path):
+                # Check if directory is empty
+                if os.path.isdir(file_dir) and not os.listdir(file_dir):
+                    print(f"Removing empty directory: {file_dir}")
+                    os.rmdir(file_dir)
+                    
+                    # Recursively check parent directories
+                    parent_dir = os.path.dirname(file_dir)
+                    if (parent_dir != download_path and 
+                        parent_dir.startswith(download_path) and
+                        os.path.isdir(parent_dir) and 
+                        not os.listdir(parent_dir)):
+                        print(f"Removing empty parent directory: {parent_dir}")
+                        os.rmdir(parent_dir)
+                        
+        except Exception as e:
+            print(f"Warning: Could not clean up empty directories: {e}")
+    
     async def _do_stream_download(self):
         """Perform the streaming download using normal download mechanism"""
         # Use the same download mechanism as regular downloads
-        # The temp location will be handled by the download path configuration
+        # The file will be downloaded to the normal downloads folder first
         return await self.soulseek_client.download(
             self.search_result.username, 
             self.search_result.filename,
@@ -864,23 +1048,59 @@ class SearchResultItem(QFrame):
         is_audio = any(filename_lower.endswith(ext) for ext in audio_extensions)
         
         if is_audio:
-            # Change button state to indicate streaming
-            original_text = self.play_btn.text()
+            # Get reference to the DownloadsPage to check audio player state
+            downloads_page = self.get_downloads_page()
+            
+            # If this button is currently playing, toggle pause/resume
+            if (downloads_page and 
+                downloads_page.currently_playing_button == self and 
+                downloads_page.audio_player.is_playing):
+                
+                # Toggle playback (pause/resume)
+                is_playing = downloads_page.audio_player.toggle_playback()
+                if is_playing:
+                    self.set_playing_state()
+                else:
+                    self.play_btn.setText("▶️")  # Play icon when paused
+                    self.play_btn.setEnabled(True)
+                return
+            
+            # Otherwise, start new streaming
+            # Change button state to indicate streaming is starting
             self.play_btn.setText("⏸️")  # Pause icon to indicate playing
             self.play_btn.setEnabled(False)
             
             # Emit streaming request
             self.stream_requested.emit(self.search_result)
             
-            # Reset button after a delay (basic state management)
-            QTimer.singleShot(2000, lambda: self.reset_play_state(original_text))
+            # Note: Button state will be managed by the audio player callbacks
+            # No timer reset - the audio player will handle state changes
         else:
             print(f"Cannot stream non-audio file: {self.search_result.filename}")
+    
+    def get_downloads_page(self):
+        """Get reference to the parent DownloadsPage"""
+        parent = self.parent()
+        while parent:
+            if hasattr(parent, 'audio_player'):  # DownloadsPage has audio_player
+                return parent
+            parent = parent.parent()
+        return None
     
     def reset_play_state(self, original_text="▶️"):
         """Reset the play button state"""
         self.play_btn.setText(original_text)
         self.play_btn.setEnabled(True)
+    
+    def set_playing_state(self):
+        """Set button to playing state"""
+        self.play_btn.setText("⏸️")
+        self.play_btn.setEnabled(True)
+    
+    def set_loading_state(self):
+        """Set button to loading state"""
+        self.play_btn.setText("⌛")
+        self.play_btn.setEnabled(False)
     
     def reset_download_state(self):
         """Reset the download button state"""
@@ -1270,33 +1490,37 @@ class DownloadQueue(QFrame):
     def setup_ui(self):
         self.setStyleSheet("""
             DownloadQueue {
-                background: #282828;
-                border-radius: 8px;
-                border: 1px solid #404040;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(45, 45, 45, 0.9),
+                    stop:1 rgba(35, 35, 35, 0.95));
+                border-radius: 10px;
+                border: 1px solid rgba(80, 80, 80, 0.5);
             }
         """)
         
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 8, 16, 16)  # Reduced top padding
-        layout.setSpacing(8)  # Tighter spacing for more compact layout
+        layout.setContentsMargins(12, 6, 12, 12)  # Further reduced padding
+        layout.setSpacing(6)  # Even tighter spacing for more compact layout
         
         # Header
         header_layout = QHBoxLayout()
         header_layout.setContentsMargins(0, 0, 0, 0)
         
         self.title_label = QLabel(self.queue_title)
-        self.title_label.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
+        self.title_label.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
         self.title_label.setStyleSheet("""
             color: rgba(255, 255, 255, 0.95);
             font-weight: 600;
             padding: 0;
+            margin: 0;
         """)
         
         queue_count = QLabel("Empty")
-        queue_count.setFont(QFont("Segoe UI", 10))
+        queue_count.setFont(QFont("Segoe UI", 9))
         queue_count.setStyleSheet("""
             color: rgba(255, 255, 255, 0.6);
             padding: 0;
+            margin: 0;
         """)
         
         header_layout.addWidget(self.title_label)
@@ -1306,7 +1530,7 @@ class DownloadQueue(QFrame):
         # Queue list
         queue_scroll = QScrollArea()
         queue_scroll.setWidgetResizable(True)
-        queue_scroll.setFixedHeight(300)
+        queue_scroll.setFixedHeight(280)
         queue_scroll.setStyleSheet("""
             QScrollArea {
                 border: none;
@@ -1334,8 +1558,8 @@ class DownloadQueue(QFrame):
         
         # Add initial message when queue is empty
         self.empty_message = QLabel("No downloads yet. Start downloading music to see them here!")
-        self.empty_message.setFont(QFont("Arial", 11))
-        self.empty_message.setStyleSheet("color: rgba(255, 255, 255, 0.5); padding: 20px; text-align: center;")
+        self.empty_message.setFont(QFont("Arial", 10))
+        self.empty_message.setStyleSheet("color: rgba(255, 255, 255, 0.5); padding: 15px; text-align: center;")
         self.empty_message.setAlignment(Qt.AlignmentFlag.AlignCenter)
         queue_layout.addWidget(self.empty_message)
         
@@ -1440,7 +1664,7 @@ class TabbedDownloadManager(QTabWidget):
         self.finished_queue = DownloadQueue("Finished Downloads")
         
         # Update the finished queue count label
-        self.finished_queue.queue_count_label.setText("No finished downloads")
+        self.finished_queue.queue_count_label.setText("Empty")
         
         # Add tabs
         self.addTab(self.active_queue, "Download Queue")
@@ -1519,6 +1743,12 @@ class DownloadsPage(QWidget):
         self.displayed_results = 0  # Track how many results are currently displayed
         self.results_per_page = 15  # Show 15 results at a time
         self.is_loading_more = False  # Prevent multiple simultaneous loads
+        
+        # Initialize audio player for streaming
+        self.audio_player = AudioPlayer(self)
+        self.audio_player.playback_finished.connect(self.on_audio_playback_finished)
+        self.audio_player.playback_error.connect(self.on_audio_playback_error)
+        self.currently_playing_button = None  # Track which play button is active
         self.currently_expanded_item = None  # Track which item is currently expanded
         
         # Download status polling timer
@@ -1808,67 +2038,71 @@ class DownloadsPage(QWidget):
         panel.setStyleSheet("""
             QFrame {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 rgba(35, 35, 35, 0.8),
-                    stop:1 rgba(25, 25, 25, 0.9));
-                border-radius: 16px;
-                border: 1px solid rgba(64, 64, 64, 0.3);
+                    stop:0 rgba(40, 40, 40, 0.85),
+                    stop:1 rgba(25, 25, 25, 0.95));
+                border-radius: 18px;
+                border: 1px solid rgba(80, 80, 80, 0.4);
             }
         """)
         
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(12, 12, 12, 12)  # Consistent responsive spacing
-        layout.setSpacing(12)  # Consistent spacing throughout
+        layout.setContentsMargins(10, 10, 10, 10)  # Consistent responsive spacing
+        layout.setSpacing(10)  # Consistent spacing throughout
         
         # Panel header
         header = QLabel("Download Manager")
-        header.setFont(QFont("Arial", 14, QFont.Weight.Bold))
-        header.setStyleSheet("color: rgba(255, 255, 255, 0.9); padding: 8px 0;")
+        header.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        header.setStyleSheet("color: rgba(255, 255, 255, 0.9); padding: 6px 0; margin: 0;")
         layout.addWidget(header)
         
-        # Quick stats
+        # Quick stats with improved styling
         stats_frame = QFrame()
         stats_frame.setStyleSheet("""
             QFrame {
-                background: rgba(45, 45, 45, 0.6);
-                border-radius: 8px;
-                border: 1px solid rgba(64, 64, 64, 0.4);
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(45, 45, 45, 0.7),
+                    stop:1 rgba(35, 35, 35, 0.8));
+                border-radius: 10px;
+                border: 1px solid rgba(80, 80, 80, 0.3);
             }
         """)
         stats_layout = QVBoxLayout(stats_frame)
-        stats_layout.setContentsMargins(12, 10, 12, 10)
-        stats_layout.setSpacing(6)
+        stats_layout.setContentsMargins(10, 8, 10, 8)
+        stats_layout.setSpacing(4)
         
         self.active_downloads_label = QLabel("• Active Downloads: 0")
-        self.active_downloads_label.setFont(QFont("Arial", 10))
-        self.active_downloads_label.setStyleSheet("color: rgba(255, 255, 255, 0.8);")
+        self.active_downloads_label.setFont(QFont("Arial", 9))
+        self.active_downloads_label.setStyleSheet("color: rgba(255, 255, 255, 0.8); margin: 0; padding: 2px 0;")
         
         self.finished_downloads_label = QLabel("• Finished Downloads: 0")
-        self.finished_downloads_label.setFont(QFont("Arial", 10))
-        self.finished_downloads_label.setStyleSheet("color: rgba(255, 255, 255, 0.8);")
+        self.finished_downloads_label.setFont(QFont("Arial", 9))
+        self.finished_downloads_label.setStyleSheet("color: rgba(255, 255, 255, 0.8); margin: 0; padding: 2px 0;")
         
         stats_layout.addWidget(self.active_downloads_label)
         stats_layout.addWidget(self.finished_downloads_label)
         layout.addWidget(stats_frame)
         
-        # Control buttons
+        # Control buttons with enhanced styling
         controls_frame = QFrame()
         controls_frame.setStyleSheet("""
             QFrame {
-                background: rgba(40, 40, 40, 0.5);
-                border-radius: 8px;
-                border: 1px solid rgba(64, 64, 64, 0.3);
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(50, 50, 50, 0.6),
+                    stop:1 rgba(30, 30, 30, 0.7));
+                border-radius: 10px;
+                border: 1px solid rgba(70, 70, 70, 0.4);
             }
         """)
         controls_layout = QVBoxLayout(controls_frame)
-        controls_layout.setContentsMargins(12, 12, 12, 12)
-        controls_layout.setSpacing(8)
+        controls_layout.setContentsMargins(10, 10, 10, 10)
+        controls_layout.setSpacing(6)
         
         pause_btn = QPushButton("⏸️ Pause All")
-        pause_btn.setFixedHeight(32)
+        pause_btn.setFixedHeight(28)
         pause_btn.setStyleSheet(self._get_control_button_style("#ffa500"))
         
         clear_btn = QPushButton("🗑️ Clear Completed")
-        clear_btn.setFixedHeight(32)
+        clear_btn.setFixedHeight(28)
         clear_btn.clicked.connect(self.clear_completed_downloads)
         clear_btn.setStyleSheet(self._get_control_button_style("#e22134"))
         
@@ -1877,8 +2111,20 @@ class DownloadsPage(QWidget):
         layout.addWidget(controls_frame)
         
         # Download Queue Section - Now with tabs for active and finished downloads
+        queue_container = QFrame()
+        queue_container.setStyleSheet("""
+            QFrame {
+                background: transparent;
+                border: none;
+                margin-top: 5px;
+            }
+        """)
+        queue_layout = QVBoxLayout(queue_container)
+        queue_layout.setContentsMargins(0, 0, 0, 0)
+        
         self.download_queue = TabbedDownloadManager()
-        layout.addWidget(self.download_queue)
+        queue_layout.addWidget(self.download_queue)
+        layout.addWidget(queue_container)
         
         # Initialize stats display
         self.update_download_manager_stats(0, 0)
@@ -1926,19 +2172,30 @@ class DownloadsPage(QWidget):
         return status_bar
     
     def _get_control_button_style(self, color):
-        """Get consistent button styling"""
+        """Get consistent button styling with improved aesthetics"""
         return f"""
             QPushButton {{
-                background: rgba{tuple(int(color[i:i+2], 16) for i in (1, 3, 5)) + (51,)};
-                border: 1px solid {color};
-                border-radius: 16px;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba{tuple(int(color[i:i+2], 16) for i in (1, 3, 5)) + (40,)},
+                    stop:1 rgba{tuple(int(color[i:i+2], 16) for i in (1, 3, 5)) + (25,)});
+                border: 1px solid rgba{tuple(int(color[i:i+2], 16) for i in (1, 3, 5)) + (80,)};
+                border-radius: 14px;
                 color: {color};
-                font-size: 11px;
-                font-weight: bold;
-                padding: 6px 12px;
+                font-size: 10px;
+                font-weight: 600;
+                padding: 5px 10px;
+                text-align: center;
             }}
             QPushButton:hover {{
-                background: rgba{tuple(int(color[i:i+2], 16) for i in (1, 3, 5)) + (77,)};
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba{tuple(int(color[i:i+2], 16) for i in (1, 3, 5)) + (60,)},
+                    stop:1 rgba{tuple(int(color[i:i+2], 16) for i in (1, 3, 5)) + (40,)});
+                border: 1px solid {color};
+                color: #ffffff;
+            }}
+            QPushButton:pressed {{
+                background: rgba{tuple(int(color[i:i+2], 16) for i in (1, 3, 5)) + (80,)};
+                border: 1px solid {color};
             }}
         """
     
@@ -2149,7 +2406,7 @@ class DownloadsPage(QWidget):
             for result in results_to_show:
                 result_item = SearchResultItem(result)
                 result_item.download_requested.connect(self.start_download)
-                result_item.stream_requested.connect(self.start_stream)
+                result_item.stream_requested.connect(lambda search_result, item=result_item: self.start_stream(search_result, item))
                 result_item.expansion_requested.connect(self.handle_expansion_request)
                 # Insert before the stretch
                 insert_position = self.search_results_layout.count() - 1
@@ -2246,7 +2503,7 @@ class DownloadsPage(QWidget):
             result = self.search_results[i]
             result_item = SearchResultItem(result)
             result_item.download_requested.connect(self.start_download)
-            result_item.stream_requested.connect(self.start_stream)
+            result_item.stream_requested.connect(lambda search_result, item=result_item: self.start_stream(search_result, item))
             result_item.expansion_requested.connect(self.handle_expansion_request)
             # Insert before the stretch (which is always last)
             insert_position = self.search_results_layout.count() - 1
@@ -2349,10 +2606,18 @@ class DownloadsPage(QWidget):
         except Exception as e:
             print(f"Failed to start download: {str(e)}")
     
-    def start_stream(self, search_result):
+    def start_stream(self, search_result, result_item=None):
         """Start streaming a search result using StreamingThread"""
         try:
             print(f"Starting stream: {search_result.filename} from {search_result.username}")
+            
+            # Stop any currently playing audio and reset previous button
+            if self.currently_playing_button:
+                self.audio_player.stop_playback()
+                self.currently_playing_button.reset_play_state()
+            
+            # Track the new currently playing button
+            self.currently_playing_button = result_item
             
             # Check if file is a valid audio type
             audio_extensions = ['.mp3', '.flac', '.ogg', '.aac', '.wma', '.wav']
@@ -2393,14 +2658,61 @@ class DownloadsPage(QWidget):
     def on_streaming_started(self, message, search_result):
         """Handle streaming start"""
         print(f"Streaming started: {message}")
+        # Set button to loading state while file is being prepared
+        if self.currently_playing_button:
+            self.currently_playing_button.set_loading_state()
     
     def on_streaming_finished(self, message, search_result):
-        """Handle streaming completion"""
+        """Handle streaming completion - start actual audio playback"""
         print(f"Streaming finished: {message}")
+        
+        try:
+            # Find the stream file in the Stream folder
+            project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))  # Go up from ui/pages/
+            stream_folder = os.path.join(project_root, 'Stream')
+            
+            # Find the current stream file
+            stream_file = None
+            for filename in os.listdir(stream_folder):
+                if filename.startswith('current_stream') and os.path.isfile(os.path.join(stream_folder, filename)):
+                    stream_file = os.path.join(stream_folder, filename)
+                    break
+            
+            if stream_file and os.path.exists(stream_file):
+                # Start audio playback
+                success = self.audio_player.play_file(stream_file)
+                if success:
+                    print(f"🎵 Started audio playback: {os.path.basename(stream_file)}")
+                    # Set button to playing state
+                    if self.currently_playing_button:
+                        self.currently_playing_button.set_playing_state()
+                else:
+                    print(f"❌ Failed to start audio playback")
+                    # Reset button on failure
+                    if self.currently_playing_button:
+                        self.currently_playing_button.reset_play_state()
+                        self.currently_playing_button = None
+            else:
+                print(f"❌ Stream file not found in {stream_folder}")
+                # Reset button on failure
+                if self.currently_playing_button:
+                    self.currently_playing_button.reset_play_state()
+                    self.currently_playing_button = None
+                
+        except Exception as e:
+            print(f"❌ Error starting audio playback: {e}")
+            # Reset button on error
+            if self.currently_playing_button:
+                self.currently_playing_button.reset_play_state()
+                self.currently_playing_button = None
     
     def on_streaming_failed(self, error_msg, search_result):
         """Handle streaming failure"""
         print(f"Streaming failed: {error_msg}")
+        # Reset any play button that might be waiting
+        if self.currently_playing_button:
+            self.currently_playing_button.reset_play_state()
+            self.currently_playing_button = None
     
     def on_streaming_thread_finished(self, thread):
         """Clean up when streaming thread finishes"""
@@ -2427,6 +2739,22 @@ class DownloadsPage(QWidget):
             
         except Exception as e:
             print(f"Error cleaning up finished streaming thread: {e}")
+    
+    def on_audio_playback_finished(self):
+        """Handle when audio playback finishes"""
+        print("🎵 Audio playback completed")
+        # Reset the play button to play state
+        if self.currently_playing_button:
+            self.currently_playing_button.reset_play_state()
+            self.currently_playing_button = None
+    
+    def on_audio_playback_error(self, error_msg):
+        """Handle audio playback errors"""
+        print(f"❌ Audio playback error: {error_msg}")
+        # Reset the play button to play state
+        if self.currently_playing_button:
+            self.currently_playing_button.reset_play_state()
+            self.currently_playing_button = None
     
     def on_download_completed(self, message, download_item):
         """Handle successful download start"""
