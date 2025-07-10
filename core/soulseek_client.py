@@ -234,7 +234,7 @@ class SoulseekClient:
         
         return search_results
     
-    async def search(self, query: str, timeout: int = 30) -> List[SearchResult]:
+    async def search(self, query: str, timeout: int = 30, progress_callback=None) -> List[SearchResult]:
         if not self.base_url:
             logger.error("Soulseek client not configured")
             return []
@@ -286,6 +286,17 @@ class SoulseekClient:
                     
                     if new_results:
                         logger.info(f"Found {len(new_results)} new results (total: {len(all_results)}) at {poll_count * poll_interval:.1f}s")
+                        # Call progress callback with new results
+                        if progress_callback:
+                            try:
+                                progress_callback(new_results, len(all_results))
+                            except Exception as e:
+                                logger.error(f"Error in progress callback: {e}")
+                        
+                        # Early termination if we have enough results
+                        if len(all_results) >= 100:  # Stop after 100 results for better performance
+                            logger.info(f"Early termination: Found {len(all_results)} results, stopping search")
+                            break
                     elif len(all_results) > 0:
                         logger.debug(f"No new results, total still: {len(all_results)}")
                     else:
