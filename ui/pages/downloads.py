@@ -1,9 +1,10 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                            QFrame, QPushButton, QProgressBar, QListWidget,
                            QListWidgetItem, QComboBox, QLineEdit, QScrollArea, QMessageBox,
-                           QSplitter, QSizePolicy, QSpacerItem)
+                           QSplitter, QSizePolicy, QSpacerItem, QTabWidget)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont
+import functools  # For fixing lambda memory leaks
 
 class DownloadThread(QThread):
     download_completed = pyqtSignal(str, object)  # Download ID or success message, download_item
@@ -249,8 +250,167 @@ class SearchThread(QThread):
         """Stop the search gracefully"""
         self._stop_requested = True
 
+class TrackedStatusUpdateThread(QThread):
+    """Tracked status update thread that can be properly stopped and cleaned up"""
+    status_updated = pyqtSignal(list)
+    
+    def __init__(self, soulseek_client, parent=None):
+        super().__init__(parent)
+        self.soulseek_client = soulseek_client
+        self._stop_requested = False
+        
+    def run(self):
+        loop = None
+        try:
+            import asyncio
+            
+            # Check if stop was requested before starting
+            if self._stop_requested:
+                return
+                
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            downloads = loop.run_until_complete(self.soulseek_client.get_all_downloads())
+            
+            # Only emit if not stopped
+            if not self._stop_requested:
+                self.status_updated.emit(downloads or [])
+                
+        except Exception as e:
+            if not self._stop_requested:
+                print(f"Error fetching download status: {e}")
+                self.status_updated.emit([])
+        finally:
+            # Ensure proper cleanup
+            if loop:
+                try:
+                    # Close any remaining tasks
+                    pending = asyncio.all_tasks(loop)
+                    for task in pending:
+                        task.cancel()
+                    
+                    if pending:
+                        loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                    
+                    loop.close()
+                except Exception as e:
+                    print(f"Error cleaning up status update event loop: {e}")
+    
+    def stop(self):
+        """Stop the status update thread gracefully"""
+        self._stop_requested = True
+
+class StreamingThread(QThread):
+    """Thread for streaming audio files without saving them permanently"""
+    streaming_started = pyqtSignal(str, object)  # Message, search_result
+    streaming_finished = pyqtSignal(str, object)  # Message, search_result  
+    streaming_failed = pyqtSignal(str, object)   # Error message, search_result
+    
+    def __init__(self, soulseek_client, search_result):
+        super().__init__()
+        self.soulseek_client = soulseek_client
+        self.search_result = search_result
+        self._stop_requested = False
+        
+    def run(self):
+        loop = None
+        try:
+            import asyncio
+            import tempfile
+            import os
+            import time
+            
+            self.streaming_started.emit(f"Starting stream: {self.search_result.filename}", self.search_result)
+            
+            # Create a fresh event loop for this thread
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            # Create dedicated streaming temp folder
+            from config.settings import config_manager
+            download_path = config_manager.get('soulseek.download_path', './downloads')
+            temp_streaming_dir = os.path.join(download_path, 'temp_streaming')
+            
+            # Ensure temp streaming directory exists
+            os.makedirs(temp_streaming_dir, exist_ok=True)
+            
+            # Use consistent filename (overwrites previous stream)
+            file_extension = os.path.splitext(self.search_result.filename)[1]
+            temp_filename = f"current_stream{file_extension}"
+            temp_path = os.path.join(temp_streaming_dir, temp_filename)
+            
+            # Remove any existing temp stream file
+            if os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except Exception as e:
+                    print(f"Warning: Could not remove existing temp file: {e}")
+            
+            # Start the download to temporary streaming location
+            download_result = loop.run_until_complete(self._do_stream_download())
+            
+            if not self._stop_requested:
+                if download_result:
+                    # Stream started successfully - file is being downloaded to temp location
+                    self.streaming_started.emit(f"Streaming: {self.search_result.filename}", self.search_result)
+                    
+                    # Wait for download to complete by polling the temp location
+                    max_wait_time = 30  # Wait up to 30 seconds
+                    poll_interval = 1   # Check every second
+                    
+                    for wait_count in range(max_wait_time):
+                        if os.path.exists(temp_path) and os.path.getsize(temp_path) > 0:
+                            # File exists and has content - streaming ready
+                            self.streaming_finished.emit(f"Stream ready: {self.search_result.filename}", self.search_result)
+                            self.temp_file_path = temp_path
+                            print(f"✓ Stream file ready for playback: {temp_path}")
+                            break
+                        else:
+                            # Still downloading, wait a bit more
+                            time.sleep(poll_interval)
+                    else:
+                        # Timed out waiting for file
+                        self.streaming_failed.emit("Stream download timed out", self.search_result)
+                        
+                else:
+                    self.streaming_failed.emit("Streaming failed to start", self.search_result)
+                
+        except Exception as e:
+            if not self._stop_requested:
+                self.streaming_failed.emit(str(e), self.search_result)
+        finally:
+            # Ensure proper cleanup
+            if loop:
+                try:
+                    # Close any remaining tasks
+                    pending = asyncio.all_tasks(loop)
+                    for task in pending:
+                        task.cancel()
+                    
+                    if pending:
+                        loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                    
+                    loop.close()
+                except Exception as e:
+                    print(f"Error cleaning up streaming event loop: {e}")
+    
+    async def _do_stream_download(self):
+        """Perform the streaming download using normal download mechanism"""
+        # Use the same download mechanism as regular downloads
+        # The temp location will be handled by the download path configuration
+        return await self.soulseek_client.download(
+            self.search_result.username, 
+            self.search_result.filename,
+            self.search_result.size
+        )
+    
+    def stop(self):
+        """Stop the streaming gracefully"""
+        self._stop_requested = True
+
 class SearchResultItem(QFrame):
     download_requested = pyqtSignal(object)  # SearchResult object
+    stream_requested = pyqtSignal(object)    # SearchResult object for streaming
     expansion_requested = pyqtSignal(object)  # Signal when this item wants to expand
     
     def __init__(self, search_result, parent=None):
@@ -286,7 +446,6 @@ class SearchResultItem(QFrame):
                     stop:0 rgba(50, 50, 50, 0.95),
                     stop:1 rgba(40, 40, 40, 0.98));
                 border: 1px solid rgba(29, 185, 84, 0.7);
-                cursor: pointer;
             }
         """)
         
@@ -325,7 +484,38 @@ class SearchResultItem(QFrame):
         # Create both compact and expanded content but show only one
         self.create_persistent_content(primary_info)
         
-        # Right section: Always-visible download button
+        # Right section: Play and download buttons
+        buttons_layout = QHBoxLayout()
+        buttons_layout.setSpacing(4)
+        
+        # Play button for streaming preview
+        self.play_btn = QPushButton("▶️")
+        self.play_btn.setFixedSize(36, 36)
+        self.play_btn.clicked.connect(self.request_stream)
+        self.play_btn.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(255, 193, 7, 0.9),
+                    stop:1 rgba(255, 152, 0, 0.9));
+                border: none;
+                border-radius: 18px;
+                color: #000000;
+                font-size: 14px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(255, 213, 79, 1.0),
+                    stop:1 rgba(255, 171, 64, 1.0));
+            }
+            QPushButton:pressed {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(255, 152, 0, 1.0),
+                    stop:1 rgba(245, 124, 0, 1.0));
+            }
+        """)
+        
+        # Download button
         self.download_btn = QPushButton("⬇️")
         self.download_btn.setFixedSize(36, 36)
         self.download_btn.clicked.connect(self.request_download)
@@ -356,8 +546,11 @@ class SearchResultItem(QFrame):
         left_section.addWidget(music_icon)
         left_section.addWidget(self.content_widget, 1)
         
+        buttons_layout.addWidget(self.play_btn)
+        buttons_layout.addWidget(self.download_btn)
+        
         layout.addLayout(left_section, 1)
-        layout.addWidget(self.download_btn)
+        layout.addLayout(buttons_layout)
     
     def create_persistent_content(self, primary_info):
         """Create both compact and expanded content with visibility control"""
@@ -662,6 +855,33 @@ class SearchResultItem(QFrame):
             self.download_btn.setEnabled(False)
             self.download_requested.emit(self.search_result)
     
+    def request_stream(self):
+        """Request streaming of this audio file"""
+        # Check if file is a valid audio type
+        audio_extensions = ['.mp3', '.flac', '.ogg', '.aac', '.wma', '.wav']
+        filename_lower = self.search_result.filename.lower()
+        
+        is_audio = any(filename_lower.endswith(ext) for ext in audio_extensions)
+        
+        if is_audio:
+            # Change button state to indicate streaming
+            original_text = self.play_btn.text()
+            self.play_btn.setText("⏸️")  # Pause icon to indicate playing
+            self.play_btn.setEnabled(False)
+            
+            # Emit streaming request
+            self.stream_requested.emit(self.search_result)
+            
+            # Reset button after a delay (basic state management)
+            QTimer.singleShot(2000, lambda: self.reset_play_state(original_text))
+        else:
+            print(f"Cannot stream non-audio file: {self.search_result.filename}")
+    
+    def reset_play_state(self, original_text="▶️"):
+        """Reset the play button state"""
+        self.play_btn.setText(original_text)
+        self.play_btn.setEnabled(True)
+    
     def reset_download_state(self):
         """Reset the download button state"""
         self.is_downloading = False
@@ -670,7 +890,8 @@ class SearchResultItem(QFrame):
 
 class DownloadItem(QFrame):
     def __init__(self, title: str, artist: str, status: str, progress: int = 0, 
-                 file_size: int = 0, download_speed: int = 0, file_path: str = "", parent=None):
+                 file_size: int = 0, download_speed: int = 0, file_path: str = "", 
+                 download_id: str = "", soulseek_client=None, parent=None):
         super().__init__(parent)
         self.title = title
         self.artist = artist
@@ -679,6 +900,8 @@ class DownloadItem(QFrame):
         self.file_size = file_size
         self.download_speed = download_speed
         self.file_path = file_path
+        self.download_id = download_id  # Track download ID for cancellation
+        self.soulseek_client = soulseek_client  # For cancellation functionality
         self.setup_ui()
     
     def setup_ui(self):
@@ -770,11 +993,11 @@ class DownloadItem(QFrame):
         progress_layout = QVBoxLayout()
         progress_layout.setSpacing(5)
         
-        # Progress bar
-        progress_bar = QProgressBar()
-        progress_bar.setFixedHeight(6)
-        progress_bar.setValue(self.progress)
-        progress_bar.setStyleSheet("""
+        # Progress bar - Store reference for safe updates
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setFixedHeight(6)
+        self.progress_bar.setValue(self.progress)
+        self.progress_bar.setStyleSheet("""
             QProgressBar {
                 border: none;
                 border-radius: 3px;
@@ -786,29 +1009,42 @@ class DownloadItem(QFrame):
             }
         """)
         
-        # Status text
-        status_text = f"{self.status.title()}"
-        if self.status == "downloading":
+        # Status text - Store reference for safe updates with clean mapping
+        status_mapping = {
+            "completed, succeeded": "Finished",
+            "completed, cancelled": "Cancelled",
+            "completed": "Finished",
+            "cancelled": "Cancelled",
+            "downloading": "Downloading",
+            "failed": "Failed",
+            "queued": "Queued"
+        }
+        
+        clean_status = status_mapping.get(self.status.lower(), self.status.title())
+        status_text = clean_status
+        
+        if self.status.lower() in ["downloading", "queued"]:
             status_text += f" - {self.progress}%"
         
-        status_label = QLabel(status_text)
-        status_label.setFont(QFont("Arial", 9))
-        status_label.setStyleSheet("color: #b3b3b3;")
+        self.status_label = QLabel(status_text)
+        self.status_label.setFont(QFont("Arial", 9))
+        self.status_label.setStyleSheet("color: #b3b3b3;")
         
-        progress_layout.addWidget(progress_bar)
-        progress_layout.addWidget(status_label)
+        progress_layout.addWidget(self.progress_bar)
+        progress_layout.addWidget(self.status_label)
         
         # Action buttons section
         actions_layout = QVBoxLayout()
         actions_layout.setSpacing(4)
         
         # Primary action button
-        action_btn = QPushButton()
-        action_btn.setFixedSize(80, 28)
+        self.action_btn = QPushButton()
+        self.action_btn.setFixedSize(80, 28)
         
         if self.status == "downloading":
-            action_btn.setText("Cancel")
-            action_btn.setStyleSheet("""
+            self.action_btn.setText("Cancel")
+            self.action_btn.clicked.connect(self.cancel_download)
+            self.action_btn.setStyleSheet("""
                 QPushButton {
                     background: transparent;
                     border: 1px solid #e22134;
@@ -823,8 +1059,9 @@ class DownloadItem(QFrame):
                 }
             """)
         elif self.status == "failed":
-            action_btn.setText("Retry")
-            action_btn.setStyleSheet("""
+            self.action_btn.setText("Retry")
+            self.action_btn.clicked.connect(self.retry_download)
+            self.action_btn.setStyleSheet("""
                 QPushButton {
                     background: transparent;
                     border: 1px solid #1db954;
@@ -839,8 +1076,9 @@ class DownloadItem(QFrame):
                 }
             """)
         else:
-            action_btn.setText("Details")
-            action_btn.setStyleSheet("""
+            self.action_btn.setText("Details")
+            self.action_btn.clicked.connect(self.show_details)
+            self.action_btn.setStyleSheet("""
                 QPushButton {
                     background: transparent;
                     border: 1px solid #b3b3b3;
@@ -874,7 +1112,7 @@ class DownloadItem(QFrame):
             }
         """)
         
-        actions_layout.addWidget(action_btn)
+        actions_layout.addWidget(self.action_btn)
         if self.status == "completed" and self.file_path:
             actions_layout.addWidget(location_btn)
         
@@ -923,7 +1161,8 @@ class DownloadItem(QFrame):
             print(f"Error opening download location: {e}")
     
     def update_status(self, status: str, progress: int = None, download_speed: int = None, file_path: str = None):
-        """Update download item status and refresh UI"""
+        """SAFE UPDATE: Update download item status without UI destruction"""
+        # Update properties
         self.status = status
         if progress is not None:
             self.progress = progress
@@ -932,19 +1171,100 @@ class DownloadItem(QFrame):
         if file_path:
             self.file_path = file_path
             
-        # Refresh the UI by recreating it
-        # Clear current layout
-        while self.layout().count():
-            child = self.layout().takeAt(0)
-            if child.widget():
-                child.widget().deleteLater()
-        
-        # Recreate UI with updated values
-        self.setup_ui()
+        # SAFE UI UPDATES: Update widgets directly instead of recreating
+        try:
+            # Update progress bar safely
+            if hasattr(self, 'progress_bar') and self.progress_bar:
+                self.progress_bar.setValue(self.progress)
+            
+            # Update status label safely
+            if hasattr(self, 'status_label') and self.status_label:
+                # Clean up status text display
+                status_mapping = {
+                    "completed, succeeded": "Finished",
+                    "completed, cancelled": "Cancelled",
+                    "completed": "Finished",
+                    "cancelled": "Cancelled",
+                    "downloading": "Downloading",
+                    "failed": "Failed",
+                    "queued": "Queued"
+                }
+                
+                clean_status = status_mapping.get(self.status.lower(), self.status.title())
+                status_text = clean_status
+                
+                if self.status.lower() in ["downloading", "queued"]:
+                    status_text += f" - {self.progress}%"
+                    
+                self.status_label.setText(status_text)
+                
+        except Exception as e:
+            print(f"Error updating download item UI: {e}")
+            # Fallback: only recreate if safe update fails
+            self.setup_ui()
+    
+    def cancel_download(self):
+        """Cancel the download using the SoulseekClient"""
+        if not self.soulseek_client or not self.download_id:
+            print(f"Cannot cancel download: missing client or download ID")
+            return
+            
+        try:
+            # Use async cancellation in a simple way
+            import asyncio
+            loop = None
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            
+            # Run the cancellation
+            result = loop.run_until_complete(self.soulseek_client.cancel_download(self.download_id))
+            
+            if result:
+                print(f"Successfully cancelled download: {self.title}")
+                self.update_status("cancelled", progress=0)
+                
+                # Find the parent TabbedDownloadManager and move to finished tab
+                parent_widget = self.parent()
+                while parent_widget:
+                    if hasattr(parent_widget, 'move_to_finished'):
+                        parent_widget.move_to_finished(self)
+                        break
+                    parent_widget = parent_widget.parent()
+                    
+            else:
+                print(f"Failed to cancel download: {self.title}")
+                
+        except Exception as e:
+            print(f"Error cancelling download {self.title}: {e}")
+    
+    def retry_download(self):
+        """Retry a failed download"""
+        # For now, just update status back to downloading
+        # In a full implementation, this would restart the download
+        self.update_status("downloading", progress=0)
+        print(f"Retry requested for: {self.title}")
+    
+    def show_details(self):
+        """Show download details"""
+        details = f"""
+Download Details:
+Title: {self.title}
+Artist: {self.artist}
+Status: {self.status}
+Progress: {self.progress}%
+File Size: {self.file_size // (1024*1024)}MB
+Download ID: {self.download_id}
+File Path: {self.file_path}
+        """
+        print(details)
 
 class DownloadQueue(QFrame):
-    def __init__(self, parent=None):
+    def __init__(self, title="Download Queue", parent=None):
         super().__init__(parent)
+        self.queue_title = title
         self.setup_ui()
     
     def setup_ui(self):
@@ -964,9 +1284,9 @@ class DownloadQueue(QFrame):
         header_layout = QHBoxLayout()
         header_layout.setContentsMargins(0, 0, 0, 0)
         
-        title_label = QLabel("Download Queue")
-        title_label.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
-        title_label.setStyleSheet("""
+        self.title_label = QLabel(self.queue_title)
+        self.title_label.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
+        self.title_label.setStyleSheet("""
             color: rgba(255, 255, 255, 0.95);
             font-weight: 600;
             padding: 0;
@@ -979,7 +1299,7 @@ class DownloadQueue(QFrame):
             padding: 0;
         """)
         
-        header_layout.addWidget(title_label)
+        header_layout.addWidget(self.title_label)
         header_layout.addStretch()
         header_layout.addWidget(queue_count)
         
@@ -1026,14 +1346,15 @@ class DownloadQueue(QFrame):
         layout.addWidget(queue_scroll)
     
     def add_download_item(self, title: str, artist: str, status: str = "queued", 
-                         progress: int = 0, file_size: int = 0, download_speed: int = 0, file_path: str = ""):
+                         progress: int = 0, file_size: int = 0, download_speed: int = 0, 
+                         file_path: str = "", download_id: str = "", soulseek_client=None):
         """Add a new download item to the queue"""
         # Hide empty message if this is the first item
         if len(self.download_items) == 0:
             self.empty_message.hide()
         
         # Create new download item
-        item = DownloadItem(title, artist, status, progress, file_size, download_speed, file_path)
+        item = DownloadItem(title, artist, status, progress, file_size, download_speed, file_path, download_id, soulseek_client)
         self.download_items.append(item)
         
         # Insert before the stretch (which is always last)
@@ -1073,6 +1394,117 @@ class DownloadQueue(QFrame):
         for item in items_to_remove:
             self.remove_download_item(item)
 
+class TabbedDownloadManager(QTabWidget):
+    """Tabbed interface for managing active and finished downloads"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setup_ui()
+    
+    def setup_ui(self):
+        """Setup the tabbed interface with active and finished download queues"""
+        self.setStyleSheet("""
+            QTabWidget::pane {
+                border: 1px solid #404040;
+                border-radius: 8px;
+                background: #282828;
+            }
+            QTabWidget::tab-bar {
+                alignment: center;
+            }
+            QTabBar::tab {
+                background: #404040;
+                color: #ffffff;
+                border: 1px solid #606060;
+                border-bottom: none;
+                border-top-left-radius: 8px;
+                border-top-right-radius: 8px;
+                padding: 6px 12px;
+                margin-right: 1px;
+                font-size: 10px;
+                font-weight: bold;
+                min-width: 80px;
+            }
+            QTabBar::tab:selected {
+                background: #1db954;
+                color: #000000;
+                border: 1px solid #1db954;
+            }
+            QTabBar::tab:hover:!selected {
+                background: #505050;
+            }
+        """)
+        
+        # Create two download queues with appropriate titles
+        self.active_queue = DownloadQueue("Active Downloads")
+        self.finished_queue = DownloadQueue("Finished Downloads")
+        
+        # Update the finished queue count label
+        self.finished_queue.queue_count_label.setText("No finished downloads")
+        
+        # Add tabs
+        self.addTab(self.active_queue, "Download Queue")
+        self.addTab(self.finished_queue, "Finished Downloads")
+        
+        # Set initial tab counts
+        self.update_tab_counts()
+    
+    def add_download_item(self, title: str, artist: str, status: str = "queued", 
+                         progress: int = 0, file_size: int = 0, download_speed: int = 0, 
+                         file_path: str = "", download_id: str = "", soulseek_client=None):
+        """Add a new download item to the active queue"""
+        item = self.active_queue.add_download_item(
+            title, artist, status, progress, file_size, download_speed, 
+            file_path, download_id, soulseek_client
+        )
+        self.update_tab_counts()
+        return item
+    
+    def move_to_finished(self, download_item):
+        """Move a download item from active to finished queue"""
+        if download_item in self.active_queue.download_items:
+            # Remove from active queue
+            self.active_queue.remove_download_item(download_item)
+            
+            # Add to finished queue
+            finished_item = self.finished_queue.add_download_item(
+                title=download_item.title,
+                artist=download_item.artist,
+                status=download_item.status,
+                progress=download_item.progress,
+                file_size=download_item.file_size,
+                download_speed=download_item.download_speed,
+                file_path=download_item.file_path,
+                download_id=download_item.download_id,
+                soulseek_client=download_item.soulseek_client
+            )
+            
+            self.update_tab_counts()
+            return finished_item
+        return None
+    
+    def update_tab_counts(self):
+        """Update tab labels with current counts"""
+        active_count = len(self.active_queue.download_items)
+        finished_count = len(self.finished_queue.download_items)
+        
+        self.setTabText(0, f"Download Queue ({active_count})")
+        self.setTabText(1, f"Finished Downloads ({finished_count})")
+        
+        # Also update the download manager stats if they exist
+        if hasattr(self.parent(), 'update_download_manager_stats'):
+            self.parent().update_download_manager_stats(active_count, finished_count)
+    
+    def clear_completed_downloads(self):
+        """Clear completed downloads from the finished queue"""
+        self.finished_queue.clear_completed_downloads()
+        self.update_tab_counts()
+    
+    @property
+    def download_items(self):
+        """Return all download items from active queue for compatibility"""
+        return self.active_queue.download_items
+
 class DownloadsPage(QWidget):
     def __init__(self, soulseek_client=None, parent=None):
         super().__init__(parent)
@@ -1081,6 +1513,7 @@ class DownloadsPage(QWidget):
         self.explore_thread = None  # Track API exploration thread
         self.session_thread = None  # Track session info thread
         self.download_threads = []  # Track active download threads
+        self.status_update_threads = []  # Track status update threads (CRITICAL FIX)
         self.search_results = []
         self.download_items = []  # Track download items for the queue
         self.displayed_results = 0  # Track how many results are currently displayed
@@ -1405,16 +1838,16 @@ class DownloadsPage(QWidget):
         stats_layout.setContentsMargins(12, 10, 12, 10)
         stats_layout.setSpacing(6)
         
-        active_downloads = QLabel("• Active Downloads: 0")
-        active_downloads.setFont(QFont("Arial", 10))
-        active_downloads.setStyleSheet("color: rgba(255, 255, 255, 0.8);")
+        self.active_downloads_label = QLabel("• Active Downloads: 0")
+        self.active_downloads_label.setFont(QFont("Arial", 10))
+        self.active_downloads_label.setStyleSheet("color: rgba(255, 255, 255, 0.8);")
         
-        queue_length = QLabel("• Queue Length: 0")
-        queue_length.setFont(QFont("Arial", 10))
-        queue_length.setStyleSheet("color: rgba(255, 255, 255, 0.8);")
+        self.finished_downloads_label = QLabel("• Finished Downloads: 0")
+        self.finished_downloads_label.setFont(QFont("Arial", 10))
+        self.finished_downloads_label.setStyleSheet("color: rgba(255, 255, 255, 0.8);")
         
-        stats_layout.addWidget(active_downloads)
-        stats_layout.addWidget(queue_length)
+        stats_layout.addWidget(self.active_downloads_label)
+        stats_layout.addWidget(self.finished_downloads_label)
         layout.addWidget(stats_frame)
         
         # Control buttons
@@ -1443,14 +1876,24 @@ class DownloadsPage(QWidget):
         controls_layout.addWidget(clear_btn)
         layout.addWidget(controls_frame)
         
-        # Download Queue Section
-        self.download_queue = DownloadQueue()
+        # Download Queue Section - Now with tabs for active and finished downloads
+        self.download_queue = TabbedDownloadManager()
         layout.addWidget(self.download_queue)
+        
+        # Initialize stats display
+        self.update_download_manager_stats(0, 0)
         
         # Add stretch to push everything to top
         layout.addStretch()
         
         return panel
+    
+    def update_download_manager_stats(self, active_count, finished_count):
+        """Update the download manager statistics display"""
+        if hasattr(self, 'active_downloads_label'):
+            self.active_downloads_label.setText(f"• Active Downloads: {active_count}")
+        if hasattr(self, 'finished_downloads_label'):
+            self.finished_downloads_label.setText(f"• Finished Downloads: {finished_count}")
     
     def create_compact_status_bar(self):
         """Create a minimal status bar"""
@@ -1706,6 +2149,7 @@ class DownloadsPage(QWidget):
             for result in results_to_show:
                 result_item = SearchResultItem(result)
                 result_item.download_requested.connect(self.start_download)
+                result_item.stream_requested.connect(self.start_stream)
                 result_item.expansion_requested.connect(self.handle_expansion_request)
                 # Insert before the stretch
                 insert_position = self.search_results_layout.count() - 1
@@ -1802,6 +2246,7 @@ class DownloadsPage(QWidget):
             result = self.search_results[i]
             result_item = SearchResultItem(result)
             result_item.download_requested.connect(self.start_download)
+            result_item.stream_requested.connect(self.start_stream)
             result_item.expansion_requested.connect(self.handle_expansion_request)
             # Insert before the stretch (which is always last)
             insert_position = self.search_results_layout.count() - 1
@@ -1868,13 +2313,19 @@ class DownloadsPage(QWidget):
                 title = filename
                 artist = search_result.username
             
+            # Generate a unique download ID for tracking and cancellation
+            import time
+            download_id = f"{search_result.username}_{search_result.filename}_{int(time.time())}"
+            
             # Add to download queue immediately as "downloading"
             download_item = self.download_queue.add_download_item(
                 title=title,
                 artist=artist,
                 status="downloading",
                 progress=0,
-                file_size=search_result.size
+                file_size=search_result.size,
+                download_id=download_id,
+                soulseek_client=self.soulseek_client
             )
             
             # Create and start download thread
@@ -1882,7 +2333,10 @@ class DownloadsPage(QWidget):
             download_thread.download_completed.connect(self.on_download_completed, Qt.ConnectionType.QueuedConnection)
             download_thread.download_failed.connect(self.on_download_failed, Qt.ConnectionType.QueuedConnection)
             download_thread.download_progress.connect(self.on_download_progress, Qt.ConnectionType.QueuedConnection)
-            download_thread.finished.connect(lambda: self.on_download_thread_finished(download_thread), Qt.ConnectionType.QueuedConnection)
+            download_thread.finished.connect(
+                functools.partial(self.on_download_thread_finished, download_thread), 
+                Qt.ConnectionType.QueuedConnection
+            )
             
             # Track the thread
             self.download_threads.append(download_thread)
@@ -1894,6 +2348,85 @@ class DownloadsPage(QWidget):
             
         except Exception as e:
             print(f"Failed to start download: {str(e)}")
+    
+    def start_stream(self, search_result):
+        """Start streaming a search result using StreamingThread"""
+        try:
+            print(f"Starting stream: {search_result.filename} from {search_result.username}")
+            
+            # Check if file is a valid audio type
+            audio_extensions = ['.mp3', '.flac', '.ogg', '.aac', '.wma', '.wav']
+            filename_lower = search_result.filename.lower()
+            
+            is_audio = any(filename_lower.endswith(ext) for ext in audio_extensions)
+            
+            if is_audio:
+                print(f"✓ Streaming audio file: {search_result.filename}")
+                print(f"  Quality: {search_result.quality}")
+                print(f"  Size: {search_result.size // (1024*1024)}MB")
+                print(f"  User: {search_result.username}")
+                
+                # Create and start streaming thread
+                streaming_thread = StreamingThread(self.soulseek_client, search_result)
+                streaming_thread.streaming_started.connect(self.on_streaming_started, Qt.ConnectionType.QueuedConnection)
+                streaming_thread.streaming_finished.connect(self.on_streaming_finished, Qt.ConnectionType.QueuedConnection)
+                streaming_thread.streaming_failed.connect(self.on_streaming_failed, Qt.ConnectionType.QueuedConnection)
+                streaming_thread.finished.connect(
+                    functools.partial(self.on_streaming_thread_finished, streaming_thread),
+                    Qt.ConnectionType.QueuedConnection
+                )
+                
+                # Track the streaming thread
+                if not hasattr(self, 'streaming_threads'):
+                    self.streaming_threads = []
+                self.streaming_threads.append(streaming_thread)
+                
+                # Start the streaming
+                streaming_thread.start()
+                
+            else:
+                print(f"✗ Cannot stream non-audio file: {search_result.filename}")
+                
+        except Exception as e:
+            print(f"Failed to start stream: {str(e)}")
+    
+    def on_streaming_started(self, message, search_result):
+        """Handle streaming start"""
+        print(f"Streaming started: {message}")
+    
+    def on_streaming_finished(self, message, search_result):
+        """Handle streaming completion"""
+        print(f"Streaming finished: {message}")
+    
+    def on_streaming_failed(self, error_msg, search_result):
+        """Handle streaming failure"""
+        print(f"Streaming failed: {error_msg}")
+    
+    def on_streaming_thread_finished(self, thread):
+        """Clean up when streaming thread finishes"""
+        try:
+            if hasattr(self, 'streaming_threads') and thread in self.streaming_threads:
+                self.streaming_threads.remove(thread)
+            
+            # Disconnect all signals to prevent stale connections
+            try:
+                thread.streaming_started.disconnect()
+                thread.streaming_finished.disconnect()
+                thread.streaming_failed.disconnect()
+                thread.finished.disconnect()
+            except Exception:
+                pass  # Ignore if signals are already disconnected
+            
+            # Ensure thread is properly stopped before deletion
+            if thread.isRunning():
+                thread.stop()
+                thread.wait(1000)  # Wait up to 1 second
+            
+            # Use QTimer.singleShot for delayed cleanup
+            QTimer.singleShot(100, thread.deleteLater)
+            
+        except Exception as e:
+            print(f"Error cleaning up finished streaming thread: {e}")
     
     def on_download_completed(self, message, download_item):
         """Handle successful download start"""
@@ -1949,43 +2482,41 @@ class DownloadsPage(QWidget):
         self.download_queue.clear_completed_downloads()
     
     def update_download_status(self):
-        """Poll slskd API for download status updates (QTimer callback)"""
+        """Poll slskd API for download status updates (QTimer callback) - FIXED VERSION"""
         if not self.soulseek_client or not self.download_queue.download_items:
             return
             
-        # Create a thread to handle the async operation
-        from PyQt6.QtCore import QThread, pyqtSignal
-        
-        class StatusUpdateThread(QThread):
-            status_updated = pyqtSignal(list)
-            
-            def __init__(self, soulseek_client):
-                super().__init__()
-                self.soulseek_client = soulseek_client
-                
-            def run(self):
-                import asyncio
-                try:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    downloads = loop.run_until_complete(self.soulseek_client.get_all_downloads())
-                    self.status_updated.emit(downloads or [])
-                except Exception as e:
-                    print(f"Error fetching download status: {e}")
-                    self.status_updated.emit([])
-                finally:
-                    if 'loop' in locals():
-                        loop.close()
-        
+        # CRITICAL FIX: Use tracked thread instead of anonymous thread
         def handle_status_update(downloads):
-            """Handle the download status update in the main thread"""
+            """Handle the download status update in the main thread - IMPROVED MATCHING"""
             try:
+                print(f"[DEBUG] Processing {len(downloads)} downloads from API")
+                
                 for download_item in self.download_queue.download_items:
-                    # Find matching download by filename
-                    filename = f"{download_item.artist} - {download_item.title}"
+                    # IMPROVED: Try multiple matching strategies
+                    queue_title = download_item.title.lower()
+                    queue_artist = download_item.artist.lower() 
                     
+                    print(f"[DEBUG] Looking for: '{queue_artist} - {queue_title}'")
+                    
+                    found_match = False
                     for download in downloads:
-                        if filename.lower() in download.filename.lower():
+                        api_filename = download.filename.lower()
+                        print(f"[DEBUG] Checking against: '{download.filename}'")
+                        
+                        # Strategy 1: Check if title is in the filename
+                        title_match = queue_title in api_filename
+                        
+                        # Strategy 2: Check if artist is in the filename  
+                        artist_match = queue_artist in api_filename
+                        
+                        # Strategy 3: Reverse check - see if any part of queue item is in API filename
+                        combined_check = f"{queue_artist} - {queue_title}" in api_filename
+                        
+                        if title_match or artist_match or combined_check:
+                            print(f"[DEBUG] ✓ MATCH FOUND: {download.filename}")
+                            print(f"[DEBUG] Status: {download.state}, Progress: {download.progress}%")
+                            
                             # Update the UI item with real data
                             download_item.update_status(
                                 status=download.state,
@@ -1993,14 +2524,43 @@ class DownloadsPage(QWidget):
                                 download_speed=download.speed,
                                 file_path=download.filename
                             )
+                            
+                            # AUTO-MOVE: Check if download is finished and move to finished tab
+                            finished_states = ["completed", "cancelled", "completed, succeeded", "completed, cancelled"]
+                            if download.state.lower() in [state.lower() for state in finished_states]:
+                                print(f"[DEBUG] Moving finished download to finished tab: {download_item.title}")
+                                self.download_queue.move_to_finished(download_item)
+                            
+                            found_match = True
                             break
+                    
+                    if not found_match:
+                        print(f"[DEBUG] ✗ NO MATCH for: '{queue_artist} - {queue_title}'")
+                        
             except Exception as e:
                 print(f"Error updating download UI: {e}")
+                import traceback
+                traceback.print_exc()
         
-        # Start the status update thread
-        status_thread = StatusUpdateThread(self.soulseek_client)
-        status_thread.status_updated.connect(handle_status_update)
-        status_thread.finished.connect(status_thread.deleteLater)
+        def on_status_thread_finished(thread):
+            """Clean up status thread when finished"""
+            try:
+                if thread in self.status_update_threads:
+                    self.status_update_threads.remove(thread)
+                thread.deleteLater()
+            except Exception as e:
+                print(f"Error cleaning up status thread: {e}")
+        
+        # CRITICAL FIX: Create tracked status update thread
+        status_thread = TrackedStatusUpdateThread(self.soulseek_client, self)
+        status_thread.status_updated.connect(handle_status_update, Qt.ConnectionType.QueuedConnection)
+        status_thread.finished.connect(
+            functools.partial(on_status_thread_finished, status_thread), 
+            Qt.ConnectionType.QueuedConnection
+        )
+        
+        # CRITICAL FIX: Track the thread for proper cleanup
+        self.status_update_threads.append(status_thread)
         status_thread.start()
     
     
@@ -2040,6 +2600,28 @@ class DownloadsPage(QWidget):
                     self.session_thread.wait(1000)
                 self.session_thread.deleteLater()
                 self.session_thread = None
+            
+            # CRITICAL FIX: Stop all status update threads
+            for status_thread in self.status_update_threads[:]:  # Copy list to avoid modification during iteration
+                try:
+                    # Disconnect signals first
+                    try:
+                        status_thread.status_updated.disconnect()
+                        status_thread.finished.disconnect()
+                    except Exception:
+                        pass  # Ignore if signals are already disconnected
+                    
+                    if status_thread.isRunning():
+                        status_thread.stop()
+                        status_thread.wait(2000)  # Wait up to 2 seconds
+                        if status_thread.isRunning():
+                            status_thread.terminate()
+                            status_thread.wait(1000)
+                    status_thread.deleteLater()
+                except Exception as e:
+                    print(f"Error cleaning up status update thread: {e}")
+            
+            self.status_update_threads.clear()
             
             # Stop all download threads with proper cleanup
             for download_thread in self.download_threads[:]:  # Copy list to avoid modification during iteration
