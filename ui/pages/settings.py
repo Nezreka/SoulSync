@@ -101,6 +101,7 @@ class SettingsPage(QWidget):
             soulseek_config = config_manager.get_soulseek_config()
             self.slskd_url_input.setText(soulseek_config.get('slskd_url', ''))
             self.api_key_input.setText(soulseek_config.get('api_key', ''))
+            self.download_path_input.setText(soulseek_config.get('download_path', './downloads'))
             
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to load configuration: {e}")
@@ -119,6 +120,7 @@ class SettingsPage(QWidget):
             # Save Soulseek settings
             config_manager.set('soulseek.slskd_url', self.slskd_url_input.text())
             config_manager.set('soulseek.api_key', self.api_key_input.text())
+            config_manager.set('soulseek.download_path', self.download_path_input.text())
             
             # Show success message
             QMessageBox.information(self, "Success", "Settings saved successfully!")
@@ -273,6 +275,21 @@ class SettingsPage(QWidget):
             QMessageBox.critical(self, "Request Error", f"✗ Request failed:\n{str(e)}")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"✗ Unexpected error:\n{str(e)}")
+    
+    def browse_download_path(self):
+        """Open a directory dialog to select download path"""
+        from PyQt6.QtWidgets import QFileDialog
+        
+        current_path = self.download_path_input.text()
+        selected_path = QFileDialog.getExistingDirectory(
+            self, 
+            "Select Download Directory", 
+            current_path if current_path else ".",
+            QFileDialog.Option.ShowDirsOnly
+        )
+        
+        if selected_path:
+            self.download_path_input.setText(selected_path)
     
     def create_header(self):
         header = QWidget()
@@ -465,15 +482,16 @@ class SettingsPage(QWidget):
         path_label = QLabel("Download Path:")
         path_label.setStyleSheet("color: #ffffff; font-size: 12px;")
         
-        path_input = QLineEdit("./downloads")
-        path_input.setStyleSheet(self.get_input_style())
+        self.download_path_input = QLineEdit("./downloads")
+        self.download_path_input.setStyleSheet(self.get_input_style())
         
         browse_btn = QPushButton("Browse")
         browse_btn.setFixedSize(70, 30)
+        browse_btn.clicked.connect(self.browse_download_path)
         browse_btn.setStyleSheet(self.get_test_button_style())
         
         path_layout.addWidget(path_label)
-        path_layout.addWidget(path_input)
+        path_layout.addWidget(self.download_path_input)
         path_layout.addWidget(browse_btn)
         
         download_layout.addLayout(quality_layout)

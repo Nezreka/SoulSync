@@ -9,8 +9,8 @@
   },
   "soulseek": {
     "slskd_url": "http://localhost:5030",
-    "api_key": "123456789123456789",
-    "download_path": "./downloads"
+    "api_key": "1234567891234567",
+    "download_path": "E:\\Broque Projects\\newMusic\\downloads"
   },
   "database": {
     "path": "database/artists.db"

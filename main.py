@@ -100,7 +100,7 @@ class MainWindow(QMainWindow):
         # Create and add pages
         self.dashboard_page = DashboardPage()
         self.sync_page = SyncPage(self.spotify_client, self.plex_client)
-        self.downloads_page = DownloadsPage()
+        self.downloads_page = DownloadsPage(self.soulseek_client)
         self.artists_page = ArtistsPage()
         self.settings_page = SettingsPage()
         
@@ -151,18 +151,32 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         logger.info("Closing application...")
         
-        # Stop status monitoring thread
-        if self.status_thread:
-            self.status_thread.stop()
-        
-        # Close Soulseek client
         try:
-            loop = asyncio.get_event_loop()
-            loop.run_until_complete(self.soulseek_client.close())
+            # Stop all page threads first
+            if hasattr(self, 'downloads_page') and self.downloads_page:
+                logger.info("Cleaning up Downloads page threads...")
+                self.downloads_page.cleanup_all_threads()
+            
+            # Stop status monitoring thread
+            if self.status_thread:
+                logger.info("Stopping status monitoring thread...")
+                self.status_thread.stop()
+            
+            # Close Soulseek client
+            try:
+                logger.info("Closing Soulseek client...")
+                loop = asyncio.get_event_loop()
+                loop.run_until_complete(self.soulseek_client.close())
+            except Exception as e:
+                logger.error(f"Error closing Soulseek client: {e}")
+            
+            logger.info("Application closed successfully")
+            event.accept()
+            
         except Exception as e:
-            logger.error(f"Error closing Soulseek client: {e}")
-        
-        event.accept()
+            logger.error(f"Error during application shutdown: {e}")
+            # Force accept the event to prevent hanging
+            event.accept()
 
 def main():
     logging_config = config_manager.get_logging_config()
