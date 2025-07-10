@@ -237,91 +237,267 @@ class SearchResultItem(QFrame):
     def __init__(self, search_result, parent=None):
         super().__init__(parent)
         self.search_result = search_result
+        self.is_downloading = False
         self.setup_ui()
     
     def setup_ui(self):
-        self.setFixedHeight(60)
+        self.setFixedHeight(120)  # Increased height for better spacing
         self.setStyleSheet("""
             SearchResultItem {
-                background: #282828;
-                border-radius: 6px;
-                border: 1px solid #404040;
-                margin: 2px;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(40, 40, 40, 0.95),
+                    stop:1 rgba(30, 30, 30, 0.95));
+                border-radius: 12px;
+                border: 1px solid rgba(64, 64, 64, 0.8);
+                margin: 8px;
             }
             SearchResultItem:hover {
-                background: #333333;
-                border: 1px solid #1db954;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(51, 51, 51, 0.95),
+                    stop:1 rgba(40, 40, 40, 0.95));
+                border: 1px solid rgba(29, 185, 84, 0.6);
+                box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
             }
         """)
         
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(15, 10, 15, 10)
-        layout.setSpacing(12)
+        layout.setContentsMargins(20, 15, 20, 15)
+        layout.setSpacing(20)
         
-        # File info
-        info_layout = QVBoxLayout()
-        info_layout.setSpacing(3)
+        # Album art placeholder
+        album_art = QLabel()
+        album_art.setFixedSize(80, 80)
+        album_art.setStyleSheet("""
+            QLabel {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(29, 185, 84, 0.3),
+                    stop:1 rgba(29, 185, 84, 0.1));
+                border-radius: 8px;
+                border: 2px solid rgba(29, 185, 84, 0.2);
+            }
+        """)
+        album_art.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        album_art.setText("🎵")
+        album_art.setFont(QFont("Arial", 24))
         
-        # Filename
-        filename_label = QLabel(self.search_result.filename)
-        filename_label.setFont(QFont("Arial", 10, QFont.Weight.Medium))
-        filename_label.setStyleSheet("color: #ffffff;")
-        filename_label.setWordWrap(True)
+        # Main content area
+        content_layout = QVBoxLayout()
+        content_layout.setSpacing(8)
         
-        # Details
-        details = []
-        if self.search_result.bitrate:
-            details.append(f"{self.search_result.bitrate}kbps")
-        details.append(self.search_result.quality.upper())
-        details.append(f"{self.search_result.size // (1024*1024)}MB")
-        details.append(f"User: {self.search_result.username}")
+        # Primary info (song/artist extracted from filename)
+        primary_info = self._extract_song_info()
         
-        details_label = QLabel(" • ".join(details))
-        details_label.setFont(QFont("Arial", 9))
-        details_label.setStyleSheet("color: #b3b3b3;")
+        # Song title
+        song_title = QLabel(primary_info['title'])
+        song_title.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+        song_title.setStyleSheet("color: #ffffff; margin-bottom: 2px;")
+        song_title.setWordWrap(True)
         
-        info_layout.addWidget(filename_label)
-        info_layout.addWidget(details_label)
+        # Artist/Album info
+        artist_info = QLabel(primary_info['artist'])
+        artist_info.setFont(QFont("Arial", 12, QFont.Weight.Normal))
+        artist_info.setStyleSheet("color: #b3b3b3; margin-bottom: 6px;")
         
-        # Quality indicator
-        quality_label = QLabel(f"★ {self.search_result.quality_score:.1f}")
-        quality_label.setFixedWidth(50)
-        quality_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        quality_label.setFont(QFont("Arial", 9, QFont.Weight.Bold))
+        # Technical details
+        tech_layout = QHBoxLayout()
+        tech_layout.setSpacing(15)
+        
+        # Quality badge
+        quality_badge = self._create_quality_badge()
+        tech_layout.addWidget(quality_badge)
+        
+        # File size
+        size_mb = self.search_result.size // (1024*1024)
+        size_label = QLabel(f"{size_mb} MB")
+        size_label.setFont(QFont("Arial", 10, QFont.Weight.Medium))
+        size_label.setStyleSheet("color: #888888;")
+        tech_layout.addWidget(size_label)
+        
+        # Duration if available
+        if self.search_result.duration:
+            duration_mins = self.search_result.duration // 60
+            duration_secs = self.search_result.duration % 60
+            duration_label = QLabel(f"{duration_mins}:{duration_secs:02d}")
+            duration_label.setFont(QFont("Arial", 10, QFont.Weight.Medium))
+            duration_label.setStyleSheet("color: #888888;")
+            tech_layout.addWidget(duration_label)
+        
+        tech_layout.addStretch()
+        
+        # User info
+        user_layout = QHBoxLayout()
+        user_layout.setSpacing(10)
+        
+        # User avatar placeholder
+        user_avatar = QLabel("👤")
+        user_avatar.setFont(QFont("Arial", 14))
+        user_avatar.setStyleSheet("color: #1db954;")
+        
+        # Username
+        username_label = QLabel(self.search_result.username)
+        username_label.setFont(QFont("Arial", 11, QFont.Weight.Medium))
+        username_label.setStyleSheet("color: #1db954;")
+        
+        # Upload speed indicator
+        speed_indicator = self._create_speed_indicator()
+        
+        user_layout.addWidget(user_avatar)
+        user_layout.addWidget(username_label)
+        user_layout.addWidget(speed_indicator)
+        user_layout.addStretch()
+        
+        content_layout.addWidget(song_title)
+        content_layout.addWidget(artist_info)
+        content_layout.addLayout(tech_layout)
+        content_layout.addLayout(user_layout)
+        content_layout.addStretch()
+        
+        # Action area
+        action_layout = QVBoxLayout()
+        action_layout.setSpacing(10)
+        action_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        # Quality score
+        quality_score = QLabel(f"★ {self.search_result.quality_score:.1f}")
+        quality_score.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        quality_score.setFont(QFont("Arial", 12, QFont.Weight.Bold))
         
         if self.search_result.quality_score >= 0.9:
-            quality_label.setStyleSheet("color: #1db954;")
+            quality_score.setStyleSheet("color: #1db954; background: rgba(29, 185, 84, 0.1); padding: 4px 8px; border-radius: 6px;")
         elif self.search_result.quality_score >= 0.7:
-            quality_label.setStyleSheet("color: #ffa500;")
+            quality_score.setStyleSheet("color: #ffa500; background: rgba(255, 165, 0, 0.1); padding: 4px 8px; border-radius: 6px;")
         else:
-            quality_label.setStyleSheet("color: #e22134;")
+            quality_score.setStyleSheet("color: #e22134; background: rgba(226, 33, 52, 0.1); padding: 4px 8px; border-radius: 6px;")
         
         # Download button
-        download_btn = QPushButton("📥 Download")
-        download_btn.setFixedSize(90, 30)
-        download_btn.clicked.connect(self.request_download)
-        download_btn.setStyleSheet("""
+        self.download_btn = QPushButton("⬇️ Download")
+        self.download_btn.setFixedSize(120, 40)
+        self.download_btn.clicked.connect(self.request_download)
+        self.download_btn.setStyleSheet("""
             QPushButton {
-                background: rgba(29, 185, 84, 0.2);
-                border: 1px solid #1db954;
-                border-radius: 15px;
-                color: #1db954;
-                font-size: 9px;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(29, 185, 84, 0.9),
+                    stop:1 rgba(24, 156, 71, 0.9));
+                border: none;
+                border-radius: 20px;
+                color: #000000;
+                font-size: 12px;
                 font-weight: bold;
             }
             QPushButton:hover {
-                background: #1db954;
-                color: #000000;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(30, 215, 96, 1.0),
+                    stop:1 rgba(25, 180, 80, 1.0));
+                transform: translateY(-1px);
+            }
+            QPushButton:pressed {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(24, 156, 71, 1.0),
+                    stop:1 rgba(20, 130, 60, 1.0));
             }
         """)
         
-        layout.addLayout(info_layout)
-        layout.addStretch()
-        layout.addWidget(quality_label)
-        layout.addWidget(download_btn)
+        action_layout.addWidget(quality_score)
+        action_layout.addWidget(self.download_btn)
+        action_layout.addStretch()
+        
+        layout.addWidget(album_art)
+        layout.addLayout(content_layout)
+        layout.addLayout(action_layout)
+    
+    def _extract_song_info(self):
+        """Extract song title and artist from filename"""
+        filename = self.search_result.filename
+        
+        # Remove file extension
+        name_without_ext = filename.rsplit('.', 1)[0]
+        
+        # Common patterns for artist - title separation
+        separators = [' - ', ' – ', ' — ', '_-_', ' | ']
+        
+        for sep in separators:
+            if sep in name_without_ext:
+                parts = name_without_ext.split(sep, 1)
+                return {
+                    'title': parts[1].strip(),
+                    'artist': parts[0].strip()
+                }
+        
+        # If no separator found, use filename as title
+        return {
+            'title': name_without_ext,
+            'artist': 'Unknown Artist'
+        }
+    
+    def _create_quality_badge(self):
+        """Create a quality indicator badge"""
+        quality = self.search_result.quality.upper()
+        bitrate = self.search_result.bitrate
+        
+        if quality == 'FLAC':
+            badge_text = "FLAC"
+            badge_color = "#1db954"
+        elif bitrate and bitrate >= 320:
+            badge_text = f"{bitrate}k"
+            badge_color = "#1db954"
+        elif bitrate and bitrate >= 256:
+            badge_text = f"{bitrate}k"
+            badge_color = "#ffa500"
+        elif bitrate and bitrate >= 192:
+            badge_text = f"{bitrate}k"
+            badge_color = "#ffaa00"
+        else:
+            badge_text = quality
+            badge_color = "#e22134"
+        
+        badge = QLabel(badge_text)
+        badge.setFont(QFont("Arial", 9, QFont.Weight.Bold))
+        badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        badge.setFixedSize(60, 24)
+        badge.setStyleSheet(f"""
+            QLabel {{
+                background: {badge_color};
+                color: #000000;
+                border-radius: 12px;
+                padding: 2px 8px;
+            }}
+        """)
+        
+        return badge
+    
+    def _create_speed_indicator(self):
+        """Create upload speed indicator"""
+        speed = self.search_result.upload_speed
+        slots = self.search_result.free_upload_slots
+        
+        if slots > 0 and speed > 100:
+            indicator_color = "#1db954"
+            speed_text = "🚀 Fast"
+        elif slots > 0:
+            indicator_color = "#ffa500"
+            speed_text = "⚡ Available"
+        else:
+            indicator_color = "#e22134"
+            speed_text = "⏳ Queued"
+        
+        indicator = QLabel(speed_text)
+        indicator.setFont(QFont("Arial", 9, QFont.Weight.Medium))
+        indicator.setStyleSheet(f"color: {indicator_color};")
+        
+        return indicator
     
     def request_download(self):
-        self.download_requested.emit(self.search_result)
+        if not self.is_downloading:
+            self.is_downloading = True
+            self.download_btn.setText("⏳ Downloading...")
+            self.download_btn.setEnabled(False)
+            self.download_requested.emit(self.search_result)
+    
+    def reset_download_state(self):
+        """Reset the download button state"""
+        self.is_downloading = False
+        self.download_btn.setText("⬇️ Download")
+        self.download_btn.setEnabled(True)
 
 class DownloadItem(QFrame):
     def __init__(self, title: str, artist: str, status: str, progress: int = 0, parent=None):
@@ -881,113 +1057,6 @@ class DownloadsPage(QWidget):
             self.download_threads.remove(thread)
             thread.deleteLater()
     
-    def explore_slskd_api(self):
-        """Explore slskd API endpoints to find the correct download endpoint"""
-        if not self.soulseek_client:
-            QMessageBox.warning(self, "Error", "Soulseek client not available")
-            return
-        
-        # Stop any existing exploration thread
-        if self.explore_thread and self.explore_thread.isRunning():
-            self.explore_thread.stop()
-            self.explore_thread.wait(1000)  # Wait up to 1 second
-            if self.explore_thread.isRunning():
-                self.explore_thread.terminate()
-        
-        # Create and track new exploration thread
-        self.explore_thread = ExploreApiThread(self.soulseek_client)
-        self.explore_thread.exploration_completed.connect(self.on_api_exploration_completed)
-        self.explore_thread.exploration_failed.connect(self.on_api_exploration_failed)
-        self.explore_thread.finished.connect(self.on_explore_thread_finished)
-        self.explore_thread.start()
-        
-    def on_api_exploration_completed(self, api_info):
-        """Handle API exploration results"""
-        message = "slskd API Exploration Results:\n\n"
-        
-        if api_info.get('swagger_available'):
-            message += "✓ Swagger Documentation Available\n\n"
-            download_endpoints = api_info.get('download_endpoints', {})
-            if download_endpoints:
-                message += "Download/Transfer Endpoints Found:\n"
-                for path, methods in download_endpoints.items():
-                    message += f"  {path}: {list(methods.keys())}\n"
-            else:
-                message += "No download/transfer endpoints found in Swagger docs\n"
-        else:
-            message += "✗ Swagger Documentation Not Available\n\n"
-            available_endpoints = api_info.get('available_endpoints', {})
-            if available_endpoints:
-                message += "Available Endpoints Found:\n"
-                for endpoint, status in available_endpoints.items():
-                    message += f"  {endpoint}: {status}\n"
-            else:
-                message += "No endpoints found\n"
-        
-        message += f"\nBase URL: {api_info.get('base_url', 'Unknown')}"
-        message += f"\n\nYou can also check: {api_info.get('base_url', 'http://localhost:5030')}/swagger"
-        
-        QMessageBox.information(self, "API Exploration Results", message)
-        
-    def on_api_exploration_failed(self, error_msg):
-        """Handle API exploration failure"""
-        QMessageBox.critical(self, "API Exploration Failed", f"Failed to explore API: {error_msg}")
-    
-    def on_explore_thread_finished(self):
-        """Clean up when explore thread finishes"""
-        if self.explore_thread:
-            self.explore_thread.deleteLater()
-            self.explore_thread = None
-    
-    def get_session_info(self):
-        """Get slskd session info including version"""
-        if not self.soulseek_client:
-            QMessageBox.warning(self, "Error", "Soulseek client not available")
-            return
-        
-        # Stop any existing session thread
-        if self.session_thread and self.session_thread.isRunning():
-            self.session_thread.stop()
-            self.session_thread.wait(1000)  # Wait up to 1 second
-            if self.session_thread.isRunning():
-                self.session_thread.terminate()
-        
-        # Create and track new session thread
-        self.session_thread = SessionInfoThread(self.soulseek_client)
-        self.session_thread.session_info_completed.connect(self.on_session_info_completed)
-        self.session_thread.session_info_failed.connect(self.on_session_info_failed)
-        self.session_thread.finished.connect(self.on_session_thread_finished)
-        self.session_thread.start()
-        
-    def on_session_info_completed(self, session_info):
-        """Handle session info results"""
-        message = "slskd Session Information:\n\n"
-        
-        if session_info:
-            for key, value in session_info.items():
-                message += f"{key}: {value}\n"
-        else:
-            message += "No session information available"
-        
-        message += f"\n\nManual Steps:\n"
-        message += f"1. Open: http://localhost:5030\n"
-        message += f"2. Press F12 → Network tab\n"
-        message += f"3. Search for a file\n"
-        message += f"4. Click Download\n"
-        message += f"5. Check the HTTP request in Network tab\n"
-        message += f"6. Note the endpoint, method, and payload"
-        
-        QMessageBox.information(self, "slskd Session Info", message)
-        
-    def on_session_info_failed(self, error_msg):
-        """Handle session info failure"""
-        QMessageBox.critical(self, "Session Info Failed", f"Failed to get session info: {error_msg}")
-    
-    def on_session_thread_finished(self):
-        """Clean up when session thread finishes"""
-        if self.session_thread:
-            self.session_thread.deleteLater()
-            self.session_thread = None
     
     def cleanup_all_threads(self):
         """Stop and cleanup all active threads"""
@@ -1097,47 +1166,9 @@ class DownloadsPage(QWidget):
             }
         """)
         
-        # API Explorer button (for debugging)
-        explore_btn = QPushButton("🔍 Explore API")
-        explore_btn.setFixedHeight(35)
-        explore_btn.clicked.connect(self.explore_slskd_api)
-        explore_btn.setStyleSheet("""
-            QPushButton {
-                background: transparent;
-                border: 1px solid #1db954;
-                border-radius: 17px;
-                color: #1db954;
-                font-size: 11px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background: rgba(29, 185, 84, 0.1);
-            }
-        """)
-        
-        # Session Info button (for debugging)
-        session_btn = QPushButton("ℹ️ Session Info")
-        session_btn.setFixedHeight(35)
-        session_btn.clicked.connect(self.get_session_info)
-        session_btn.setStyleSheet("""
-            QPushButton {
-                background: transparent;
-                border: 1px solid #ffa500;
-                border-radius: 17px;
-                color: #ffa500;
-                font-size: 11px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background: rgba(255, 165, 0, 0.1);
-            }
-        """)
-        
         controls_layout.addWidget(controls_title)
         controls_layout.addWidget(pause_btn)
         controls_layout.addWidget(clear_btn)
-        controls_layout.addWidget(explore_btn)
-        controls_layout.addWidget(session_btn)
         
         # Download stats
         stats_frame = QFrame()

@@ -201,7 +201,40 @@ class SoulseekClient:
                 except:
                     pass
     
-    async def search(self, query: str, timeout: int = 10) -> List[SearchResult]:
+    def _process_search_responses(self, responses_data: List[Dict[str, Any]]) -> List[SearchResult]:
+        """Process search response data into SearchResult objects"""
+        search_results = []
+        
+        logger.debug(f"Processing {len(responses_data)} user responses")
+        
+        for response_data in responses_data:
+            username = response_data.get('username', '')
+            files = response_data.get('files', [])
+            logger.debug(f"User {username} has {len(files)} files")
+            
+            for file_data in files:
+                filename = file_data.get('filename', '')
+                size = file_data.get('size', 0)
+                
+                file_ext = Path(filename).suffix.lower().lstrip('.')
+                quality = file_ext if file_ext in ['flac', 'mp3', 'ogg', 'aac', 'wma'] else 'unknown'
+                
+                result = SearchResult(
+                    username=username,
+                    filename=filename,
+                    size=size,
+                    bitrate=file_data.get('bitRate'),
+                    duration=file_data.get('length'),
+                    quality=quality,
+                    free_upload_slots=response_data.get('freeUploadSlots', 0),
+                    upload_speed=response_data.get('uploadSpeed', 0),
+                    queue_length=response_data.get('queueLength', 0)
+                )
+                search_results.append(result)
+        
+        return search_results
+    
+    async def search(self, query: str, timeout: int = 30) -> List[SearchResult]:
         if not self.base_url:
             logger.error("Soulseek client not configured")
             return []
@@ -233,59 +266,40 @@ class SoulseekClient:
             
             logger.info(f"Search initiated with ID: {search_id}")
             
-            # Wait for search to complete (reduced timeout for testing)
-            await asyncio.sleep(timeout)
+            # Poll for results instead of blocking sleep - like web interface does
+            all_results = []
+            poll_interval = 1.5  # Check every 1.5 seconds for more responsive updates
+            max_polls = int(timeout / poll_interval)  # 20 attempts over 30 seconds
             
-            logger.debug(f"Getting results for search ID: {search_id}")
-            
-            # Use the correct endpoint to get search responses (actual files)
-            responses_data = await self._make_request('GET', f'searches/{search_id}/responses')
-            if not responses_data:
-                logger.error("No response from search responses GET request")
-                return []
-            
-            logger.debug(f"Responses data type: {type(responses_data)}")
-            logger.debug(f"Responses data length: {len(responses_data) if isinstance(responses_data, list) else 'Not a list'}")
-            
-            search_results = []
-            
-            # responses_data should be a list of user responses
-            if isinstance(responses_data, list):
-                responses = responses_data
-            else:
-                logger.error(f"Expected list of responses, got: {type(responses_data)}")
-                return []
+            for poll_count in range(max_polls):
+                logger.debug(f"Polling for results (attempt {poll_count + 1}/{max_polls}) - elapsed: {poll_count * poll_interval:.1f}s")
                 
-            logger.info(f"Processing {len(responses)} user responses")
-            
-            for response_data in responses:
-                username = response_data.get('username', '')
-                files = response_data.get('files', [])
-                logger.debug(f"User {username} has {len(files)} files")
+                # Get current search responses
+                responses_data = await self._make_request('GET', f'searches/{search_id}/responses')
+                if responses_data and isinstance(responses_data, list):
+                    current_results = self._process_search_responses(responses_data)
+                    
+                    # Add new unique results
+                    existing_filenames = {r.filename for r in all_results}
+                    new_results = [r for r in current_results if r.filename not in existing_filenames]
+                    all_results.extend(new_results)
+                    
+                    if new_results:
+                        logger.info(f"Found {len(new_results)} new results (total: {len(all_results)}) at {poll_count * poll_interval:.1f}s")
+                    elif len(all_results) > 0:
+                        logger.debug(f"No new results, total still: {len(all_results)}")
+                    else:
+                        logger.debug(f"Still waiting for results... ({poll_count * poll_interval:.1f}s elapsed)")
                 
-                for file_data in files:
-                    filename = file_data.get('filename', '')
-                    size = file_data.get('size', 0)
-                    
-                    file_ext = Path(filename).suffix.lower().lstrip('.')
-                    quality = file_ext if file_ext in ['flac', 'mp3', 'ogg', 'aac', 'wma'] else 'unknown'
-                    
-                    result = SearchResult(
-                        username=username,
-                        filename=filename,
-                        size=size,
-                        bitrate=file_data.get('bitRate'),
-                        duration=file_data.get('length'),
-                        quality=quality,
-                        free_upload_slots=response_data.get('freeUploadSlots', 0),
-                        upload_speed=response_data.get('uploadSpeed', 0),
-                        queue_length=response_data.get('queueLength', 0)
-                    )
-                    search_results.append(result)
+                # Wait before next poll (unless this is the last attempt)
+                if poll_count < max_polls - 1:
+                    await asyncio.sleep(poll_interval)
             
-            search_results.sort(key=lambda x: x.quality_score, reverse=True)
-            logger.info(f"Found {len(search_results)} results for query: {query}")
-            return search_results
+            logger.info(f"Search completed. Found {len(all_results)} total results for query: {query}")
+            
+            # Sort by quality score and return
+            all_results.sort(key=lambda x: x.quality_score, reverse=True)
+            return all_results
             
         except Exception as e:
             logger.error(f"Error searching: {e}")
@@ -301,10 +315,12 @@ class SoulseekClient:
             
             # Use the exact format observed in the web interface
             # Payload: [{filename: "...", size: 123}] - array of files
+            # Try adding path parameter to see if slskd supports custom download paths
             download_data = [
                 {
                     "filename": filename,
-                    "size": file_size
+                    "size": file_size,
+                    "path": str(self.download_path)  # Try custom download path
                 }
             ]
             
