@@ -69,7 +69,6 @@ class SoulseekClient:
     def __init__(self):
         self.base_url: Optional[str] = None
         self.api_key: Optional[str] = None
-        self.session: Optional[aiohttp.ClientSession] = None
         self.download_path: Path = Path("./downloads")
         self._setup_client()
     
@@ -90,6 +89,7 @@ class SoulseekClient:
     def _get_headers(self) -> Dict[str, str]:
         headers = {'Content-Type': 'application/json'}
         if self.api_key:
+            # Use X-API-Key authentication (Bearer tokens are session-based JWT tokens)
             headers['X-API-Key'] = self.api_key
         return headers
     
@@ -100,60 +100,170 @@ class SoulseekClient:
         
         url = f"{self.base_url}/api/v0/{endpoint}"
         
-        if not self.session:
-            self.session = aiohttp.ClientSession()
-        
+        # Create a fresh session for each thread/event loop to avoid conflicts
+        session = None
         try:
-            async with self.session.request(
+            session = aiohttp.ClientSession()
+            
+            headers = self._get_headers()
+            logger.debug(f"Making {method} request to: {url}")
+            logger.debug(f"Headers: {headers}")
+            if 'json' in kwargs:
+                logger.debug(f"JSON payload: {kwargs['json']}")
+            
+            async with session.request(
                 method, 
                 url, 
-                headers=self._get_headers(),
+                headers=headers,
                 **kwargs
             ) as response:
-                if response.status == 200:
-                    return await response.json()
+                response_text = await response.text()
+                logger.debug(f"Response status: {response.status}")
+                logger.debug(f"Response text: {response_text[:500]}...")  # First 500 chars
+                
+                if response.status in [200, 201]:  # Accept both 200 OK and 201 Created
+                    try:
+                        if response_text.strip():  # Only parse if there's content
+                            return await response.json()
+                        else:
+                            # Return empty dict for successful requests with no content (like 201 Created)
+                            return {}
+                    except:
+                        # If response_text was already consumed, parse it manually
+                        import json
+                        if response_text.strip():
+                            return json.loads(response_text)
+                        else:
+                            return {}
                 else:
-                    logger.error(f"API request failed: {response.status} - {await response.text()}")
+                    logger.error(f"API request failed: {response.status} - {response_text}")
                     return None
                     
         except Exception as e:
             logger.error(f"Error making API request: {e}")
             return None
+        finally:
+            # Always clean up the session
+            if session:
+                try:
+                    await session.close()
+                except:
+                    pass
     
-    async def search(self, query: str, timeout: int = 30) -> List[SearchResult]:
+    async def _make_direct_request(self, method: str, endpoint: str, **kwargs) -> Optional[Dict[str, Any]]:
+        """Make a direct request to slskd without /api/v0/ prefix (for endpoints that work directly)"""
+        if not self.base_url:
+            logger.error("Soulseek client not configured")
+            return None
+        
+        url = f"{self.base_url}/{endpoint}"
+        
+        # Create a fresh session for each thread/event loop to avoid conflicts
+        session = None
+        try:
+            session = aiohttp.ClientSession()
+            
+            headers = self._get_headers()
+            logger.debug(f"Making direct {method} request to: {url}")
+            logger.debug(f"Headers: {headers}")
+            if 'json' in kwargs:
+                logger.debug(f"JSON payload: {kwargs['json']}")
+            
+            async with session.request(
+                method, 
+                url, 
+                headers=headers,
+                **kwargs
+            ) as response:
+                response_text = await response.text()
+                logger.debug(f"Response status: {response.status}")
+                logger.debug(f"Response text: {response_text[:500]}...")  # First 500 chars
+                
+                if response.status == 200:
+                    try:
+                        return await response.json()
+                    except:
+                        # If response_text was already consumed, parse it manually
+                        import json
+                        return json.loads(response_text)
+                else:
+                    logger.error(f"Direct API request failed: {response.status} - {response_text}")
+                    return None
+                    
+        except Exception as e:
+            logger.error(f"Error making direct API request: {e}")
+            return None
+        finally:
+            # Always clean up the session
+            if session:
+                try:
+                    await session.close()
+                except:
+                    pass
+    
+    async def search(self, query: str, timeout: int = 10) -> List[SearchResult]:
         if not self.base_url:
             logger.error("Soulseek client not configured")
             return []
         
         try:
+            logger.info(f"Starting search for: '{query}'")
+            
             search_data = {
                 'searchText': query,
-                'timeout': timeout * 1000,
+                'timeout': timeout * 1000,  # slskd expects milliseconds
                 'filterResponses': True,
                 'minimumResponseFileCount': 1,
                 'minimumPeerUploadSpeed': 0
             }
             
+            logger.debug(f"Search data: {search_data}")
+            logger.debug(f"Making POST request to: {self.base_url}/api/v0/searches")
+            
             response = await self._make_request('POST', 'searches', json=search_data)
             if not response:
+                logger.error("No response from search POST request")
                 return []
             
             search_id = response.get('id')
             if not search_id:
-                logger.error("No search ID returned")
+                logger.error("No search ID returned from POST request")
+                logger.debug(f"Full response: {response}")
                 return []
             
+            logger.info(f"Search initiated with ID: {search_id}")
+            
+            # Wait for search to complete (reduced timeout for testing)
             await asyncio.sleep(timeout)
             
-            results_response = await self._make_request('GET', f'searches/{search_id}')
-            if not results_response:
+            logger.debug(f"Getting results for search ID: {search_id}")
+            
+            # Use the correct endpoint to get search responses (actual files)
+            responses_data = await self._make_request('GET', f'searches/{search_id}/responses')
+            if not responses_data:
+                logger.error("No response from search responses GET request")
                 return []
             
+            logger.debug(f"Responses data type: {type(responses_data)}")
+            logger.debug(f"Responses data length: {len(responses_data) if isinstance(responses_data, list) else 'Not a list'}")
+            
             search_results = []
-            for response_data in results_response.get('responses', []):
-                username = response_data.get('username', '')
+            
+            # responses_data should be a list of user responses
+            if isinstance(responses_data, list):
+                responses = responses_data
+            else:
+                logger.error(f"Expected list of responses, got: {type(responses_data)}")
+                return []
                 
-                for file_data in response_data.get('files', []):
+            logger.info(f"Processing {len(responses)} user responses")
+            
+            for response_data in responses:
+                username = response_data.get('username', '')
+                files = response_data.get('files', [])
+                logger.debug(f"User {username} has {len(files)} files")
+                
+                for file_data in files:
                     filename = file_data.get('filename', '')
                     size = file_data.get('size', 0)
                     
@@ -181,22 +291,93 @@ class SoulseekClient:
             logger.error(f"Error searching: {e}")
             return []
     
-    async def download(self, username: str, filename: str) -> Optional[str]:
+    async def download(self, username: str, filename: str, file_size: int = 0) -> Optional[str]:
         if not self.base_url:
             logger.error("Soulseek client not configured")
             return None
         
         try:
-            download_data = {
-                'username': username,
-                'files': [filename]
+            logger.debug(f"Attempting to download: {filename} from {username} (size: {file_size})")
+            
+            # Use the exact format observed in the web interface
+            # Payload: [{filename: "...", size: 123}] - array of files
+            download_data = [
+                {
+                    "filename": filename,
+                    "size": file_size
+                }
+            ]
+            
+            logger.debug(f"Using web interface API format: {download_data}")
+            
+            # Use the correct endpoint pattern from web interface: /api/v0/transfers/downloads/{username}
+            endpoint = f'transfers/downloads/{username}'
+            logger.debug(f"Trying web interface endpoint: {endpoint}")
+            
+            try:
+                response = await self._make_request('POST', endpoint, json=download_data)
+                if response is not None:  # 201 Created returns empty dict {} but status 201
+                    logger.info(f"[SUCCESS] Started download: {filename} from {username}")
+                    return filename
+                else:
+                    logger.debug(f"Web interface endpoint returned no response")
+                    
+            except Exception as e:
+                logger.debug(f"Web interface endpoint failed: {e}")
+            
+            # Fallback: Try alternative patterns if the main one fails
+            logger.debug("Web interface endpoint failed, trying alternatives...")
+            
+            # Try different username-based endpoint patterns
+            username_endpoints_to_try = [
+                f'transfers/{username}/enqueue',
+                f'users/{username}/downloads', 
+                f'users/{username}/enqueue'
+            ]
+            
+            # Try with array format first
+            for endpoint in username_endpoints_to_try:
+                logger.debug(f"Trying endpoint: {endpoint} with array format")
+                
+                try:
+                    response = await self._make_request('POST', endpoint, json=download_data)
+                    if response is not None:
+                        logger.info(f"[SUCCESS] Started download: {filename} from {username} using endpoint: {endpoint}")
+                        return filename
+                    else:
+                        logger.debug(f"Endpoint {endpoint} returned no response")
+                        
+                except Exception as e:
+                    logger.debug(f"Endpoint {endpoint} failed: {e}")
+                    continue
+            
+            # Try with old format as final fallback
+            logger.debug("Array format failed, trying old object format")
+            fallback_data = {
+                "files": [
+                    {
+                        "filename": filename,
+                        "size": file_size
+                    }
+                ]
             }
             
-            response = await self._make_request('POST', 'transfers/downloads', json=download_data)
-            if response:
-                logger.info(f"Started download: {filename} from {username}")
-                return filename
+            for endpoint in username_endpoints_to_try:
+                logger.debug(f"Trying endpoint: {endpoint} with object format")
+                
+                try:
+                    response = await self._make_request('POST', endpoint, json=fallback_data)
+                    if response is not None:
+                        logger.info(f"[SUCCESS] Started download: {filename} from {username} using fallback endpoint: {endpoint}")
+                        return filename
+                    else:
+                        logger.debug(f"Fallback endpoint {endpoint} returned no response")
+                        
+                except Exception as e:
+                    logger.debug(f"Fallback endpoint {endpoint} failed: {e}")
+                    continue
             
+            logger.error(f"All download endpoints failed for {filename} from {username}")
             return None
             
         except Exception as e:
@@ -233,7 +414,12 @@ class SoulseekClient:
             return []
         
         try:
-            response = await self._make_request('GET', 'transfers/downloads')
+            # Try different endpoints for getting downloads
+            response = await self._make_request('GET', 'downloads')
+            if not response:
+                # Fallback to the old endpoint
+                response = await self._make_request('GET', 'transfers/downloads')
+                
             if not response:
                 return []
             
@@ -286,7 +472,7 @@ class SoulseekClient:
             logger.info(f"Preferred quality {preferred_quality} not found, using {best_result.quality}")
         
         logger.info(f"Downloading: {best_result.filename} ({best_result.quality}) from {best_result.username}")
-        return await self.download(best_result.username, best_result.filename)
+        return await self.download(best_result.username, best_result.filename, best_result.size)
     
     async def check_connection(self) -> bool:
         """Check if slskd is running and accessible"""
@@ -300,17 +486,116 @@ class SoulseekClient:
             logger.debug(f"Connection check failed: {e}")
             return False
     
+    async def get_session_info(self) -> Optional[Dict[str, Any]]:
+        """Get slskd session information including version"""
+        if not self.base_url:
+            return None
+        
+        try:
+            response = await self._make_request('GET', 'session')
+            if response:
+                logger.info(f"slskd session info: {response}")
+                return response
+            return None
+        except Exception as e:
+            logger.error(f"Error getting session info: {e}")
+            return None
+    
+    async def explore_api_endpoints(self) -> Dict[str, Any]:
+        """Explore available API endpoints to find the correct download endpoint"""
+        if not self.base_url:
+            return {}
+        
+        try:
+            logger.info("Exploring slskd API endpoints...")
+            
+            # Try to get Swagger/OpenAPI documentation
+            swagger_url = f"{self.base_url}/swagger/v1/swagger.json"
+            
+            session = aiohttp.ClientSession()
+            try:
+                headers = self._get_headers()
+                async with session.get(swagger_url, headers=headers) as response:
+                    if response.status == 200:
+                        swagger_data = await response.json()
+                        logger.info("✓ Found Swagger documentation")
+                        
+                        # Look for download/transfer related endpoints
+                        paths = swagger_data.get('paths', {})
+                        download_endpoints = {}
+                        
+                        for path, methods in paths.items():
+                            if any(keyword in path.lower() for keyword in ['download', 'transfer', 'enqueue']):
+                                download_endpoints[path] = methods
+                                logger.info(f"Found endpoint: {path} with methods: {list(methods.keys())}")
+                        
+                        return {
+                            'swagger_available': True,
+                            'download_endpoints': download_endpoints,
+                            'base_url': self.base_url
+                        }
+                    else:
+                        logger.debug(f"Swagger endpoint returned {response.status}")
+            except Exception as e:
+                logger.debug(f"Could not access Swagger docs: {e}")
+            finally:
+                await session.close()
+            
+            # If Swagger is not available, try common endpoints manually
+            logger.info("Swagger not available, testing common endpoints...")
+            
+            common_endpoints = [
+                'transfers',
+                'downloads', 
+                'transfers/downloads',
+                'api/transfers',
+                'api/downloads'
+            ]
+            
+            available_endpoints = {}
+            
+            for endpoint in common_endpoints:
+                try:
+                    response = await self._make_request('GET', endpoint)
+                    if response is not None:
+                        available_endpoints[endpoint] = 'GET available'
+                        logger.info(f"[OK] Endpoint available: {endpoint}")
+                    else:
+                        # Try different endpoints without /api/v0 prefix
+                        simple_url = f"{self.base_url}/{endpoint}"
+                        session = aiohttp.ClientSession()
+                        try:
+                            headers = self._get_headers()
+                            async with session.get(simple_url, headers=headers) as resp:
+                                if resp.status in [200, 405]:  # 405 means endpoint exists but wrong method
+                                    available_endpoints[f"direct_{endpoint}"] = f"Status: {resp.status}"
+                                    logger.info(f"[OK] Direct endpoint available: {simple_url} (Status: {resp.status})")
+                        except:
+                            pass
+                        finally:
+                            await session.close()
+                            
+                except Exception as e:
+                    logger.debug(f"Endpoint {endpoint} failed: {e}")
+            
+            return {
+                'swagger_available': False,
+                'available_endpoints': available_endpoints,
+                'base_url': self.base_url
+            }
+            
+        except Exception as e:
+            logger.error(f"Error exploring API endpoints: {e}")
+            return {'error': str(e)}
+    
     def is_configured(self) -> bool:
         """Check if slskd is configured (has base_url)"""
         return self.base_url is not None
     
     async def close(self):
-        if self.session:
-            await self.session.close()
+        # No persistent session to close - each request creates its own session
+        pass
     
     def __del__(self):
-        if self.session and not self.session.closed:
-            try:
-                asyncio.get_event_loop().run_until_complete(self.session.close())
-            except:
-                pass
+        # No persistent session to clean up
+        pass

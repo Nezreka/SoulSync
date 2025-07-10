@@ -189,8 +189,8 @@
 # soulseek:
 #   address: vps.slsknet.org
 #   port: 2271
-#   username: ~
-#   password: ~
+#   username: bipidiboop
+#   password: Thomasclan123@
 #   description: |
 #     A slskd user. https://github.com/slskd/slskd
 #   picture: path/to/slsk-profile-picture.jpg
