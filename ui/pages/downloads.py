@@ -362,9 +362,10 @@ class SearchResultItem(QFrame):
         self.title_label.setFont(QFont("Arial", 11, QFont.Weight.Bold))  # Reduced from 13px to 11px
         self.title_label.setStyleSheet("color: #ffffff;")
         self.title_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        # Ensure text doesn't overflow the label
+        # Ensure text doesn't overflow the label and allow click-through
         self.title_label.setWordWrap(False)
-        self.title_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        # Remove text selection to allow clicks to propagate to parent widget
+        self.title_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
         
         # Expand indicator
         self.expand_indicator = QLabel("⏵")
@@ -386,7 +387,7 @@ class SearchResultItem(QFrame):
         self.expanded_content = QWidget()
         expanded_layout = QVBoxLayout(self.expanded_content)
         expanded_layout.setContentsMargins(0, 0, 0, 0)
-        expanded_layout.setSpacing(2)  # Very tight spacing for dense layout
+        expanded_layout.setSpacing(1)  # Ultra-tight spacing for more compact layout
         
         # Artist info
         self.artist_info = QLabel(primary_info['artist'])
@@ -412,28 +413,18 @@ class SearchResultItem(QFrame):
         bottom_row.setContentsMargins(0, 0, 0, 0)
         bottom_row.setSpacing(8)
         
-        self.user_info = QLabel(f"👤 {self.search_result.username}")
+        # Apply intelligent path truncation to username/file location
+        truncated_path = self._truncate_file_path(self.search_result.username, self.search_result.filename)
+        self.user_info = QLabel(f"👤 {truncated_path}")
         self.user_info.setFont(QFont("Arial", 9, QFont.Weight.Medium))  # Smaller font
         self.user_info.setStyleSheet("color: rgba(29, 185, 84, 0.8);")
         
         self.speed_indicator = self._create_compact_speed_indicator()
         
-        self.quality_score = QLabel(f"★{self.search_result.quality_score:.1f}")
-        self.quality_score.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.quality_score.setFont(QFont("Arial", 8, QFont.Weight.Bold))  # Smaller font
-        self.quality_score.setFixedSize(32, 16)  # Smaller size
-        
-        if self.search_result.quality_score >= 0.9:
-            self.quality_score.setStyleSheet("color: #1db954; background: rgba(29, 185, 84, 0.15); border-radius: 8px;")
-        elif self.search_result.quality_score >= 0.7:
-            self.quality_score.setStyleSheet("color: #ffa500; background: rgba(255, 165, 0, 0.15); border-radius: 8px;")
-        else:
-            self.quality_score.setStyleSheet("color: #e22134; background: rgba(226, 33, 52, 0.15); border-radius: 8px;")
-        
+        # Add widgets to bottom row (removed misleading star rating)
         bottom_row.addWidget(self.user_info)
         bottom_row.addWidget(self.speed_indicator)
         bottom_row.addStretch()
-        bottom_row.addWidget(self.quality_score)
         
         # Add all expanded content
         expanded_layout.addWidget(self.artist_info)
@@ -535,6 +526,36 @@ class SearchResultItem(QFrame):
             return self.size().expandedTo(self.minimumSize()).boundedTo(self.maximumSize())
         else:
             return self.size().expandedTo(self.minimumSize()).boundedTo(self.maximumSize())
+    
+    def _truncate_file_path(self, username, filename):
+        """Truncate file path to show max 3 levels: file + parent + grandparent folder"""
+        import os
+        
+        # If username looks like a simple username (no path separators), return as-is
+        if '/' not in username and '\\' not in username:
+            return username
+        
+        # Get filename without extension for comparison
+        file_base = os.path.splitext(os.path.basename(filename))[0]
+        
+        # Split path using both Windows and Unix separators
+        path_parts = username.replace('\\', '/').split('/')
+        
+        # Remove empty parts
+        path_parts = [part for part in path_parts if part.strip()]
+        
+        # If path is already short, return as-is
+        if len(path_parts) <= 3:
+            return '/'.join(path_parts)
+        
+        # Take last 3 components (file + parent + grandparent)
+        truncated_parts = path_parts[-3:]
+        
+        # If we truncated, add ellipsis at the beginning
+        if len(path_parts) > 3:
+            return '.../' + '/'.join(truncated_parts)
+        else:
+            return '/'.join(truncated_parts)
     
     def _extract_song_info(self):
         """Extract song title and artist from filename"""
