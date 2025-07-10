@@ -294,7 +294,7 @@ class SoulseekClient:
                                 logger.error(f"Error in progress callback: {e}")
                         
                         # Early termination if we have enough results
-                        if len(all_results) >= 100:  # Stop after 100 results for better performance
+                        if len(all_results) >= 45:  # Stop after 45 results for better performance (3 pages of 15)
                             logger.info(f"Early termination: Found {len(all_results)} results, stopping search")
                             break
                     elif len(all_results) > 0:

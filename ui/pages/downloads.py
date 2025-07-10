@@ -243,15 +243,27 @@ class SearchThread(QThread):
 
 class SearchResultItem(QFrame):
     download_requested = pyqtSignal(object)  # SearchResult object
+    expansion_requested = pyqtSignal(object)  # Signal when this item wants to expand
     
     def __init__(self, search_result, parent=None):
         super().__init__(parent)
         self.search_result = search_result
         self.is_downloading = False
+        self.is_expanded = False
         self.setup_ui()
     
     def setup_ui(self):
-        self.setFixedHeight(90)  # Professional height to prevent overflow
+        # Dynamic height based on state (compact: 60px, expanded: 180px for better content fit)
+        self.compact_height = 60
+        self.expanded_height = 180  # Increased from 140px to fit content properly
+        self.setFixedHeight(self.compact_height)
+        
+        # Ensure consistent sizing and layout behavior
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        
+        # Enable mouse tracking for click detection
+        self.setMouseTracking(True)
+        
         self.setStyleSheet("""
             SearchResultItem {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -259,122 +271,53 @@ class SearchResultItem(QFrame):
                     stop:1 rgba(32, 32, 32, 0.95));
                 border-radius: 12px;
                 border: 1px solid rgba(64, 64, 64, 0.4);
-                margin: 6px 4px;
+                margin: 4px 2px;
             }
             SearchResultItem:hover {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 rgba(50, 50, 50, 0.95),
                     stop:1 rgba(40, 40, 40, 0.98));
                 border: 1px solid rgba(29, 185, 84, 0.7);
+                cursor: pointer;
             }
         """)
         
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(16, 12, 16, 12)  # Professional padding
-        layout.setSpacing(16)  # Consistent spacing
+        layout.setContentsMargins(12, 8, 12, 8)  # Tighter padding for compact view
+        layout.setSpacing(12)
         
-        # Compact album art
-        album_art = QLabel()
-        album_art.setFixedSize(56, 56)
-        album_art.setStyleSheet("""
+        # Left section: Music icon + filename
+        left_section = QHBoxLayout()
+        left_section.setSpacing(8)
+        
+        # Compact music icon
+        music_icon = QLabel("🎵")
+        music_icon.setFixedSize(32, 32)
+        music_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        music_icon.setStyleSheet("""
             QLabel {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 rgba(29, 185, 84, 0.25),
-                    stop:1 rgba(29, 185, 84, 0.08));
-                border-radius: 6px;
-                border: 1px solid rgba(29, 185, 84, 0.3);
+                    stop:0 rgba(29, 185, 84, 0.3),
+                    stop:1 rgba(29, 185, 84, 0.1));
+                border-radius: 16px;
+                border: 1px solid rgba(29, 185, 84, 0.4);
+                font-size: 14px;
             }
         """)
-        album_art.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        album_art.setText("🎵")
-        album_art.setFont(QFont("Arial", 18))
         
-        # Efficient content layout - single column
-        content_layout = QVBoxLayout()
-        content_layout.setSpacing(2)
-        content_layout.setContentsMargins(0, 0, 0, 0)
+        # Content area that will change based on expanded state
+        self.content_widget = QWidget()
+        self.content_layout = QVBoxLayout(self.content_widget)
+        self.content_layout.setContentsMargins(0, 0, 0, 0)
+        self.content_layout.setSpacing(3)  # Tighter spacing for better content density
         
         # Extract song info
         primary_info = self._extract_song_info()
         
-        # Top row: Song title + quality badge
-        top_row = QHBoxLayout()
-        top_row.setSpacing(8)
+        # Create both compact and expanded content but show only one
+        self.create_persistent_content(primary_info)
         
-        song_title = QLabel(primary_info['title'])
-        song_title.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-        song_title.setStyleSheet("color: #ffffff;")
-        song_title.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        
-        quality_badge = self._create_compact_quality_badge()
-        
-        top_row.addWidget(song_title)
-        top_row.addWidget(quality_badge)
-        
-        # Middle row: Artist + file size + duration
-        middle_row = QHBoxLayout()
-        middle_row.setSpacing(12)
-        
-        artist_info = QLabel(primary_info['artist'])
-        artist_info.setFont(QFont("Arial", 10, QFont.Weight.Normal))
-        artist_info.setStyleSheet("color: rgba(179, 179, 179, 0.9);")
-        artist_info.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        
-        # File details (compact)
-        details = []
-        size_mb = self.search_result.size // (1024*1024)
-        details.append(f"{size_mb}MB")
-        
-        if self.search_result.duration:
-            duration_mins = self.search_result.duration // 60
-            duration_secs = self.search_result.duration % 60
-            details.append(f"{duration_mins}:{duration_secs:02d}")
-        
-        file_details = QLabel(" • ".join(details))
-        file_details.setFont(QFont("Arial", 9))
-        file_details.setStyleSheet("color: rgba(136, 136, 136, 0.8);")
-        
-        middle_row.addWidget(artist_info)
-        middle_row.addWidget(file_details)
-        
-        # Bottom row: User info + speed indicator
-        bottom_row = QHBoxLayout()
-        bottom_row.setSpacing(8)
-        
-        user_info = QLabel(f"👤 {self.search_result.username}")
-        user_info.setFont(QFont("Arial", 9, QFont.Weight.Medium))
-        user_info.setStyleSheet("color: rgba(29, 185, 84, 0.8);")
-        
-        speed_indicator = self._create_compact_speed_indicator()
-        
-        bottom_row.addWidget(user_info)
-        bottom_row.addWidget(speed_indicator)
-        bottom_row.addStretch()
-        
-        content_layout.addLayout(top_row)
-        content_layout.addLayout(middle_row)
-        content_layout.addLayout(bottom_row)
-        
-        # Compact action area
-        action_layout = QVBoxLayout()
-        action_layout.setSpacing(4)
-        action_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        action_layout.setContentsMargins(0, 0, 0, 0)
-        
-        # Compact quality score
-        quality_score = QLabel(f"★{self.search_result.quality_score:.1f}")
-        quality_score.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        quality_score.setFont(QFont("Arial", 9, QFont.Weight.Bold))
-        quality_score.setFixedSize(36, 18)
-        
-        if self.search_result.quality_score >= 0.9:
-            quality_score.setStyleSheet("color: #1db954; background: rgba(29, 185, 84, 0.15); border-radius: 9px;")
-        elif self.search_result.quality_score >= 0.7:
-            quality_score.setStyleSheet("color: #ffa500; background: rgba(255, 165, 0, 0.15); border-radius: 9px;")
-        else:
-            quality_score.setStyleSheet("color: #e22134; background: rgba(226, 33, 52, 0.15); border-radius: 9px;")
-        
-        # Compact download button
+        # Right section: Always-visible download button
         self.download_btn = QPushButton("⬇️")
         self.download_btn.setFixedSize(36, 36)
         self.download_btn.clicked.connect(self.request_download)
@@ -401,12 +344,197 @@ class SearchResultItem(QFrame):
             }
         """)
         
-        action_layout.addWidget(quality_score)
-        action_layout.addWidget(self.download_btn)
+        # Assemble the layout
+        left_section.addWidget(music_icon)
+        left_section.addWidget(self.content_widget, 1)
         
-        layout.addWidget(album_art)
-        layout.addLayout(content_layout, 1)  # Take most space
-        layout.addLayout(action_layout)
+        layout.addLayout(left_section, 1)
+        layout.addWidget(self.download_btn)
+    
+    def create_persistent_content(self, primary_info):
+        """Create both compact and expanded content with visibility control"""
+        # Title row (always visible) with character limit and ellipsis
+        title_text = primary_info['title']
+        if len(title_text) > 50:  # Character limit for long titles
+            title_text = title_text[:47] + "..."
+        
+        self.title_label = QLabel(title_text)
+        self.title_label.setFont(QFont("Arial", 11, QFont.Weight.Bold))  # Reduced from 13px to 11px
+        self.title_label.setStyleSheet("color: #ffffff;")
+        self.title_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        # Ensure text doesn't overflow the label
+        self.title_label.setWordWrap(False)
+        self.title_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        
+        # Expand indicator
+        self.expand_indicator = QLabel("⏵")
+        self.expand_indicator.setFixedSize(16, 16)
+        self.expand_indicator.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.expand_indicator.setStyleSheet("color: rgba(255, 255, 255, 0.6); font-size: 12px;")
+        
+        # Quality badge (only visible when expanded)
+        self.quality_badge = self._create_compact_quality_badge()
+        self.quality_badge.hide()  # Initially hidden
+        
+        title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
+        title_row.addWidget(self.title_label)
+        title_row.addWidget(self.quality_badge)
+        title_row.addWidget(self.expand_indicator)
+        
+        # Expanded content (initially hidden)
+        self.expanded_content = QWidget()
+        expanded_layout = QVBoxLayout(self.expanded_content)
+        expanded_layout.setContentsMargins(0, 0, 0, 0)
+        expanded_layout.setSpacing(2)  # Very tight spacing for dense layout
+        
+        # Artist info
+        self.artist_info = QLabel(primary_info['artist'])
+        self.artist_info.setFont(QFont("Arial", 10, QFont.Weight.Normal))  # Slightly smaller font
+        self.artist_info.setStyleSheet("color: rgba(179, 179, 179, 0.9);")
+        
+        # File details
+        details = []
+        size_mb = self.search_result.size // (1024*1024)
+        details.append(f"{size_mb}MB")
+        
+        if self.search_result.duration:
+            duration_mins = self.search_result.duration // 60
+            duration_secs = self.search_result.duration % 60
+            details.append(f"{duration_mins}:{duration_secs:02d}")
+        
+        self.file_details = QLabel(" • ".join(details))
+        self.file_details.setFont(QFont("Arial", 9))  # Smaller font for compactness
+        self.file_details.setStyleSheet("color: rgba(136, 136, 136, 0.8);")
+        
+        # User info and quality score in one compact row
+        bottom_row = QHBoxLayout()
+        bottom_row.setContentsMargins(0, 0, 0, 0)
+        bottom_row.setSpacing(8)
+        
+        self.user_info = QLabel(f"👤 {self.search_result.username}")
+        self.user_info.setFont(QFont("Arial", 9, QFont.Weight.Medium))  # Smaller font
+        self.user_info.setStyleSheet("color: rgba(29, 185, 84, 0.8);")
+        
+        self.speed_indicator = self._create_compact_speed_indicator()
+        
+        self.quality_score = QLabel(f"★{self.search_result.quality_score:.1f}")
+        self.quality_score.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.quality_score.setFont(QFont("Arial", 8, QFont.Weight.Bold))  # Smaller font
+        self.quality_score.setFixedSize(32, 16)  # Smaller size
+        
+        if self.search_result.quality_score >= 0.9:
+            self.quality_score.setStyleSheet("color: #1db954; background: rgba(29, 185, 84, 0.15); border-radius: 8px;")
+        elif self.search_result.quality_score >= 0.7:
+            self.quality_score.setStyleSheet("color: #ffa500; background: rgba(255, 165, 0, 0.15); border-radius: 8px;")
+        else:
+            self.quality_score.setStyleSheet("color: #e22134; background: rgba(226, 33, 52, 0.15); border-radius: 8px;")
+        
+        bottom_row.addWidget(self.user_info)
+        bottom_row.addWidget(self.speed_indicator)
+        bottom_row.addStretch()
+        bottom_row.addWidget(self.quality_score)
+        
+        # Add all expanded content
+        expanded_layout.addWidget(self.artist_info)
+        expanded_layout.addWidget(self.file_details)
+        expanded_layout.addLayout(bottom_row)
+        
+        # Initially hide expanded content
+        self.expanded_content.hide()
+        
+        # Add to main layout
+        self.content_layout.addLayout(title_row)
+        self.content_layout.addWidget(self.expanded_content)
+    
+    def update_expanded_state(self):
+        """Update UI based on expanded state without recreating widgets"""
+        if self.is_expanded:
+            self.expand_indicator.setText("⏷")
+            self.quality_badge.show()
+            self.expanded_content.show()
+        else:
+            self.expand_indicator.setText("⏵")
+            self.quality_badge.hide()
+            self.expanded_content.hide()
+    
+    def mousePressEvent(self, event):
+        """Handle mouse clicks to toggle expand/collapse"""
+        # Only respond to left clicks and avoid clicks on the download button
+        if event.button() == Qt.MouseButton.LeftButton:
+            # Check if click is on download button (more precise detection)
+            button_rect = self.download_btn.geometry()
+            # Add some padding to the button area to be more forgiving
+            button_rect.adjust(-5, -5, 5, 5)
+            if not button_rect.contains(event.pos()):
+                # Emit signal to parent to handle accordion behavior
+                self.expansion_requested.emit(self)
+        super().mousePressEvent(event)
+    
+    def set_expanded(self, expanded, animate=True):
+        """Set expanded state externally (called by parent for accordion behavior)"""
+        if self.is_expanded == expanded:
+            return  # No change needed
+        
+        self.is_expanded = expanded
+        
+        if animate:
+            self._animate_to_state()
+        else:
+            # Immediate state change without animation
+            if self.is_expanded:
+                self.setFixedHeight(self.expanded_height)
+            else:
+                self.setFixedHeight(self.compact_height)
+            self.update_expanded_state()
+    
+    def toggle_expanded(self):
+        """Toggle between compact and expanded states with animation"""
+        self.set_expanded(not self.is_expanded, animate=True)
+    
+    def _animate_to_state(self):
+        """Animate to the current expanded state"""
+        from PyQt6.QtCore import QPropertyAnimation, QEasingCurve
+        
+        # Start height animation first
+        self.animation = QPropertyAnimation(self, b"minimumHeight")
+        self.animation.setDuration(200)  # Slightly faster animation for better responsiveness
+        self.animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        
+        if self.is_expanded:
+            # Expand animation
+            self.animation.setStartValue(self.compact_height)
+            self.animation.setEndValue(self.expanded_height)
+            # Show content immediately for expand (feels more responsive)
+            self.update_expanded_state()
+        else:
+            # Collapse animation
+            self.animation.setStartValue(self.expanded_height)
+            self.animation.setEndValue(self.compact_height)
+            # Hide content immediately for collapse (cleaner look)
+            self.update_expanded_state()
+        
+        # Update fixed height when animation completes
+        self.animation.finished.connect(self._finalize_height)
+        self.animation.start()
+    
+    def _finalize_height(self):
+        """Set final height after animation completes"""
+        if self.is_expanded:
+            self.setFixedHeight(self.expanded_height)
+        else:
+            self.setFixedHeight(self.compact_height)
+        
+        # Force parent layout update to ensure proper spacing
+        if self.parent():
+            self.parent().updateGeometry()
+    
+    def sizeHint(self):
+        """Provide consistent size hint for layout calculations"""
+        if self.is_expanded:
+            return self.size().expandedTo(self.minimumSize()).boundedTo(self.maximumSize())
+        else:
+            return self.size().expandedTo(self.minimumSize()).boundedTo(self.maximumSize())
     
     def _extract_song_info(self):
         """Extract song title and artist from filename"""
@@ -800,25 +928,26 @@ class DownloadQueue(QFrame):
         """)
         
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 12, 16, 16)  # Professional spacing - less top padding
-        layout.setSpacing(12)  # Reduced spacing for tighter layout
+        layout.setContentsMargins(16, 8, 16, 16)  # Reduced top padding
+        layout.setSpacing(8)  # Tighter spacing for more compact layout
         
         # Header
         header_layout = QHBoxLayout()
+        header_layout.setContentsMargins(0, 0, 0, 0)
         
         title_label = QLabel("Download Queue")
         title_label.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
         title_label.setStyleSheet("""
             color: rgba(255, 255, 255, 0.95);
             font-weight: 600;
-            padding: 4px 0;
+            padding: 0;
         """)
         
         queue_count = QLabel("Empty")
         queue_count.setFont(QFont("Segoe UI", 10))
         queue_count.setStyleSheet("""
             color: rgba(255, 255, 255, 0.6);
-            padding: 4px 0;
+            padding: 0;
         """)
         
         header_layout.addWidget(title_label)
@@ -926,15 +1055,15 @@ class DownloadsPage(QWidget):
         self.search_results = []
         self.download_items = []  # Track download items for the queue
         self.displayed_results = 0  # Track how many results are currently displayed
-        self.results_per_page = 20  # Show 20 results at a time
+        self.results_per_page = 15  # Show 15 results at a time
+        self.is_loading_more = False  # Prevent multiple simultaneous loads
+        self.currently_expanded_item = None  # Track which item is currently expanded
         
         # Download status polling timer
         self.download_status_timer = QTimer()
         self.download_status_timer.timeout.connect(self.update_download_status)
         self.download_status_timer.start(2000)  # Poll every 2 seconds
         
-        # Initialize load more button (will be added to layout in setup_ui)
-        self.load_more_btn = None
         
         self.setup_ui()
     
@@ -948,26 +1077,35 @@ class DownloadsPage(QWidget):
         """)
         
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(24, 16, 24, 20)  # Professional spacing using 8px grid
-        main_layout.setSpacing(16)
+        # Responsive margins that adapt to window size  
+        main_layout.setContentsMargins(16, 12, 16, 16)  # Reduced for tighter responsive feel
+        main_layout.setSpacing(12)  # Consistent 12px spacing
         
         # Elegant Header
         header = self.create_elegant_header()
         main_layout.addWidget(header)
         
-        # Main Content Area - Prioritize Search Results
-        content_splitter = QHBoxLayout()
-        content_splitter.setSpacing(16)
+        # Main Content Area with responsive splitter
+        content_splitter = QSplitter(Qt.Orientation.Horizontal)
+        content_splitter.setChildrenCollapsible(False)  # Prevent panels from collapsing completely
         
-        # LEFT: Search & Results (70% of space)
+        # LEFT: Search & Results section
         search_and_results = self.create_search_and_results_section()
-        content_splitter.addWidget(search_and_results, 7)
+        search_and_results.setMinimumWidth(400)  # Minimum width for usability
+        content_splitter.addWidget(search_and_results)
         
-        # RIGHT: Collapsible Controls Panel (30% of space)
+        # RIGHT: Controls Panel
         controls_panel = self.create_collapsible_controls_panel()
-        content_splitter.addWidget(controls_panel, 3)
+        controls_panel.setMinimumWidth(280)  # Minimum width for controls
+        controls_panel.setMaximumWidth(400)  # Maximum width to prevent overgrowth
+        content_splitter.addWidget(controls_panel)
         
-        main_layout.addLayout(content_splitter)
+        # Set initial splitter proportions (roughly 70/30)
+        content_splitter.setSizes([700, 300])
+        content_splitter.setStretchFactor(0, 1)  # Search results gets priority for extra space
+        content_splitter.setStretchFactor(1, 0)  # Controls panel stays fixed width when possible
+        
+        main_layout.addWidget(content_splitter)
         
         # Optional: Compact status bar at bottom
         status_bar = self.create_compact_status_bar()
@@ -976,7 +1114,9 @@ class DownloadsPage(QWidget):
     def create_elegant_header(self):
         """Create an elegant, minimal header"""
         header = QFrame()
-        header.setFixedHeight(100)  # Increased height to prevent text clipping
+        header.setMinimumHeight(80)  # Minimum height, can grow if needed
+        header.setMaximumHeight(120)  # Maximum to prevent overgrowth
+        header.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         header.setStyleSheet("""
             QFrame {
                 background: transparent;
@@ -985,8 +1125,8 @@ class DownloadsPage(QWidget):
         """)
         
         layout = QHBoxLayout(header)
-        layout.setContentsMargins(24, 20, 24, 20)  # More balanced padding
-        layout.setSpacing(16)
+        layout.setContentsMargins(16, 12, 16, 12)  # Responsive padding consistent with main layout
+        layout.setSpacing(12)  # Consistent spacing
         
         # Icon and Title
         title_section = QVBoxLayout()
@@ -1031,8 +1171,8 @@ class DownloadsPage(QWidget):
         """)
         
         layout = QVBoxLayout(section)
-        layout.setContentsMargins(24, 20, 24, 20)  # Professional spacing consistent with main layout
-        layout.setSpacing(16)
+        layout.setContentsMargins(16, 12, 16, 12)  # Responsive spacing consistent with main layout
+        layout.setSpacing(12)  # Consistent 12px spacing
         
         # Elegant Search Bar
         search_container = self.create_elegant_search_bar()
@@ -1063,8 +1203,8 @@ class DownloadsPage(QWidget):
         """)
         
         results_layout = QVBoxLayout(results_container)
-        results_layout.setContentsMargins(16, 12, 16, 16)  # Consistent with card padding
-        results_layout.setSpacing(8)
+        results_layout.setContentsMargins(12, 8, 12, 12)  # Tighter responsive spacing
+        results_layout.setSpacing(8)  # Consistent small spacing for tight layout
         
         # Results header
         results_header = QLabel("Search Results")
@@ -1112,6 +1252,10 @@ class DownloadsPage(QWidget):
         self.search_results_layout.addStretch()
         self.search_results_scroll.setWidget(self.search_results_widget)
         
+        # Connect scroll detection for automatic loading
+        scroll_bar = self.search_results_scroll.verticalScrollBar()
+        scroll_bar.valueChanged.connect(self.on_scroll_changed)
+        
         results_layout.addWidget(self.search_results_scroll)
         layout.addWidget(results_container, 1)  # This takes all remaining space
         
@@ -1132,13 +1276,14 @@ class DownloadsPage(QWidget):
         """)
         
         layout = QHBoxLayout(container)
-        layout.setContentsMargins(24, 16, 24, 16)  # Professional spacing using 8px grid
-        layout.setSpacing(12)
+        layout.setContentsMargins(16, 12, 16, 12)  # Consistent responsive spacing
+        layout.setSpacing(12)  # Consistent spacing throughout
         
         # Search input with enhanced styling
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Search for music... (e.g., 'Virtual Mage', 'Queen Bohemian Rhapsody')")
         self.search_input.setFixedHeight(40)
+        self.search_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)  # Responsive width
         self.search_input.returnPressed.connect(self.perform_search)
         self.search_input.setStyleSheet("""
             QLineEdit {
@@ -1209,8 +1354,8 @@ class DownloadsPage(QWidget):
         """)
         
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(12)
+        layout.setContentsMargins(12, 12, 12, 12)  # Consistent responsive spacing
+        layout.setSpacing(12)  # Consistent spacing throughout
         
         # Panel header
         header = QLabel("Download Manager")
@@ -1418,31 +1563,7 @@ class DownloadsPage(QWidget):
         self.search_results_layout = QVBoxLayout(self.search_results_widget)
         self.search_results_layout.setSpacing(5)
         
-        # Create Load More button and add to search results layout
-        self.load_more_btn = QPushButton("📚 Load More Results")
-        self.load_more_btn.setFixedHeight(40)
-        self.load_more_btn.clicked.connect(self.show_more_results)
-        self.load_more_btn.setStyleSheet("""
-            QPushButton {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 rgba(29, 185, 84, 0.8),
-                    stop:1 rgba(25, 160, 75, 0.9));
-                border: none;
-                border-radius: 20px;
-                color: #000000;
-                font-size: 12px;
-                font-weight: bold;
-                margin: 8px;
-            }
-            QPushButton:hover {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 rgba(30, 215, 96, 0.9),
-                    stop:1 rgba(25, 180, 80, 1.0));
-            }
-        """)
-        self.load_more_btn.hide()  # Initially hidden
-        
-        self.search_results_layout.addWidget(self.load_more_btn)
+        # Just add stretch - no load more button needed with auto-scroll
         self.search_results_layout.addStretch()
         self.search_results_scroll.setWidget(self.search_results_widget)
         
@@ -1473,8 +1594,8 @@ class DownloadsPage(QWidget):
         # Clear previous results and reset state
         self.clear_search_results()
         self.displayed_results = 0
-        if self.load_more_btn:
-            self.load_more_btn.hide()
+        self.is_loading_more = False
+        self.currently_expanded_item = None  # Reset expanded state
         
         # Enhanced searching state with animation
         self.search_btn.setText("🔍 Searching...")
@@ -1536,70 +1657,79 @@ class DownloadsPage(QWidget):
     
     def on_search_results_partial(self, new_results, total_count):
         """Handle progressive search results as they come in"""
-        # Sort new results by quality score
+        # Sort new results by quality score and add to master list
         new_results.sort(key=lambda x: x.quality_score, reverse=True)
         
-        # Add new result items to UI immediately
-        for result in new_results:
-            result_item = SearchResultItem(result)
-            result_item.download_requested.connect(self.start_download)
-            # Insert before the Load More button (which is before the stretch)
-            insert_position = self.search_results_layout.count() - 2
-            self.search_results_layout.insertWidget(insert_position, result_item)
+        # Add to master search results list (don't display all immediately)
+        if not hasattr(self, '_temp_search_results'):
+            self._temp_search_results = []
         
-        # Update displayed count
-        self.displayed_results += len(new_results)
+        self._temp_search_results.extend(new_results)
+        
+        # Only display up to the current page limit 
+        remaining_slots = self.results_per_page - self.displayed_results
+        if remaining_slots > 0:
+            results_to_show = new_results[:remaining_slots]
+            
+            # Temporarily disable layout updates for smoother batch loading
+            self.search_results_widget.setUpdatesEnabled(False)
+            
+            for result in results_to_show:
+                result_item = SearchResultItem(result)
+                result_item.download_requested.connect(self.start_download)
+                result_item.expansion_requested.connect(self.handle_expansion_request)
+                # Insert before the stretch
+                insert_position = self.search_results_layout.count() - 1
+                self.search_results_layout.insertWidget(insert_position, result_item)
+            
+            # Re-enable updates and force layout refresh
+            self.search_results_widget.setUpdatesEnabled(True)
+            self.search_results_widget.updateGeometry()
+            self.search_results_layout.update()
+            self.search_results_scroll.updateGeometry()
+            
+            self.displayed_results += len(results_to_show)
         
         # Update status message with real-time feedback
-        self.update_search_status(f"✨ Found {total_count} results so far • Still searching...", "#1db954")
-        
-        # If we have enough results, show the Load More button
-        if total_count >= self.results_per_page and self.load_more_btn:
-            # Don't show Load More yet during live search - wait for completion
-            pass
+        if self.displayed_results < self.results_per_page:
+            self.update_search_status(f"✨ Found {total_count} results so far • Showing first {self.displayed_results}", "#1db954")
+        else:
+            self.update_search_status(f"✨ Found {total_count} results so far • Showing first {self.results_per_page} (scroll for more)", "#1db954")
     
     def on_search_completed(self, results):
         self.search_btn.setText("🔍 Search")
         self.search_btn.setEnabled(True)
         
-        if not results:
-            # Only show no results if we haven't already displayed some via progressive loading
+        # Use temp results from progressive loading if available, otherwise use results
+        if hasattr(self, '_temp_search_results') and self._temp_search_results:
+            self.search_results = self._temp_search_results
+            del self._temp_search_results  # Clean up temp storage
+        else:
+            self.search_results = results or []
+        
+        total_results = len(self.search_results)
+        
+        if total_results == 0:
             if self.displayed_results == 0:
                 self.update_search_status("😔 No results found • Try a different search term or artist name", "#ffa500")
             else:
-                # Search completed with some results already shown
                 self.update_search_status(f"✨ Search completed • Found {self.displayed_results} total results", "#1db954")
             return
         
-        # Store all results for pagination
-        self.search_results = results
-        
-        # If we already have results from progressive loading, just finalize the status
-        if self.displayed_results > 0:
-            total_results = len(results)
+        # Update status based on whether there are more results to load
+        if self.displayed_results < total_results:
             remaining = total_results - self.displayed_results
-            
-            if remaining > 0:
-                # Show Load More button for remaining results
-                self.update_search_status(f"✨ Showing {self.displayed_results} of {total_results} results • {remaining} more available", "#1db954")
-                if self.load_more_btn:
-                    self.load_more_btn.show()
-                    self.load_more_btn.setText(f"📚 Load {min(remaining, self.results_per_page)} More Results")
-            else:
-                # All results already displayed
-                self.update_search_status(f"✨ Showing all {total_results} results", "#1db954")
-                if self.load_more_btn:
-                    self.load_more_btn.hide()
+            self.update_search_status(f"✨ Found {total_results} results • Showing first {self.displayed_results} (scroll down for {remaining} more)", "#1db954")
         else:
-            # Fallback: No progressive results, show first page normally
-            self.search_results.sort(key=lambda x: x.quality_score, reverse=True)
-            self.clear_search_results()
-            self.displayed_results = 0
-            self.show_more_results()
+            self.update_search_status(f"✨ Search completed • Showing all {total_results} results", "#1db954")
+        
+        # If we have no displayed results yet, show the first batch
+        if self.displayed_results == 0 and total_results > 0:
+            self.load_more_results()
     
     def clear_search_results(self):
         """Clear all search result items from the layout"""
-        # Remove all SearchResultItem widgets (but keep Load More button and stretch)
+        # Remove all SearchResultItem widgets (but keep stretch)
         items_to_remove = []
         for i in range(self.search_results_layout.count()):
             item = self.search_results_layout.itemAt(i)
@@ -1610,60 +1740,80 @@ class DownloadsPage(QWidget):
             self.search_results_layout.removeWidget(widget)
             widget.deleteLater()
     
-    def show_more_results(self):
-        """Show the next batch of search results"""
-        if not self.search_results:
+    def on_scroll_changed(self, value):
+        """Handle scroll changes to implement lazy loading"""
+        if self.is_loading_more or not self.search_results:
             return
+        
+        scroll_bar = self.search_results_scroll.verticalScrollBar()
+        
+        # Check if we're near the bottom (90% scrolled)
+        if scroll_bar.maximum() > 0:
+            scroll_percentage = value / scroll_bar.maximum()
             
+            if scroll_percentage >= 0.9 and self.displayed_results < len(self.search_results):
+                self.load_more_results()
+    
+    def load_more_results(self):
+        """Load the next batch of search results"""
+        if self.is_loading_more or not self.search_results:
+            return
+        
+        self.is_loading_more = True
+        
         # Calculate how many more results to show
         start_index = self.displayed_results
         end_index = min(start_index + self.results_per_page, len(self.search_results))
         
-        # Only add results that haven't been displayed yet
-        # (Progressive loading may have already shown some results)
-        currently_displayed = self.count_displayed_results()
+        # Temporarily disable layout updates for smoother batch loading
+        self.search_results_widget.setUpdatesEnabled(False)
         
         # Add result items to UI
-        for i in range(max(start_index, currently_displayed), end_index):
-            if i < len(self.search_results):
-                result = self.search_results[i]
-                result_item = SearchResultItem(result)
-                result_item.download_requested.connect(self.start_download)
-                # Insert before the Load More button (which is before the stretch)
-                insert_position = self.search_results_layout.count() - 2
-                self.search_results_layout.insertWidget(insert_position, result_item)
+        for i in range(start_index, end_index):
+            result = self.search_results[i]
+            result_item = SearchResultItem(result)
+            result_item.download_requested.connect(self.start_download)
+            result_item.expansion_requested.connect(self.handle_expansion_request)
+            # Insert before the stretch (which is always last)
+            insert_position = self.search_results_layout.count() - 1
+            self.search_results_layout.insertWidget(insert_position, result_item)
+        
+        # Re-enable updates and force layout refresh
+        self.search_results_widget.setUpdatesEnabled(True)
+        self.search_results_widget.updateGeometry()
+        self.search_results_layout.update()
+        
+        # Force scroll area to recognize new content size
+        self.search_results_scroll.updateGeometry()
         
         # Update displayed count
         self.displayed_results = end_index
         
-        # Update status and Load More button
-        self.update_load_more_status()
-    
-    def count_displayed_results(self):
-        """Count how many SearchResultItem widgets are currently displayed"""
-        count = 0
-        for i in range(self.search_results_layout.count()):
-            item = self.search_results_layout.itemAt(i)
-            if item and item.widget() and isinstance(item.widget(), SearchResultItem):
-                count += 1
-        return count
-        
-    def update_load_more_status(self):
-        """Update status message and Load More button based on current state"""
-        if not self.search_results:
-            return
-            
+        # Update status
         total_results = len(self.search_results)
         if self.displayed_results >= total_results:
-            self.update_search_status(f"✨ Showing all {total_results} results by quality", "#1db954")
-            if self.load_more_btn:
-                self.load_more_btn.hide()
+            self.update_search_status(f"✨ Showing all {total_results} results", "#1db954")
         else:
             remaining = total_results - self.displayed_results
-            self.update_search_status(f"✨ Showing {self.displayed_results} of {total_results} results • {remaining} more available", "#1db954")
-            if self.load_more_btn:
-                self.load_more_btn.show()
-                self.load_more_btn.setText(f"📚 Load {min(remaining, self.results_per_page)} More Results")
+            self.update_search_status(f"✨ Showing {self.displayed_results} of {total_results} results (scroll for {remaining} more)", "#1db954")
+        
+        self.is_loading_more = False
+    
+    def handle_expansion_request(self, requesting_item):
+        """Handle accordion-style expansion where only one item can be expanded at a time"""
+        # If there's a currently expanded item and it's not the requesting item, collapse it
+        if self.currently_expanded_item and self.currently_expanded_item != requesting_item:
+            self.currently_expanded_item.set_expanded(False, animate=True)
+        
+        # Toggle the requesting item
+        new_expanded_state = not requesting_item.is_expanded
+        requesting_item.set_expanded(new_expanded_state, animate=True)
+        
+        # Update tracking
+        if new_expanded_state:
+            self.currently_expanded_item = requesting_item
+        else:
+            self.currently_expanded_item = None
     
     def on_search_failed(self, error_msg):
         self.search_btn.setText("🔍 Search")
