@@ -441,30 +441,45 @@ class SoulseekClient:
             return []
         
         try:
-            # Try different endpoints for getting downloads
-            response = await self._make_request('GET', 'downloads')
-            if not response:
-                # Fallback to the old endpoint
-                response = await self._make_request('GET', 'transfers/downloads')
+            # FIXED: Skip the 404 endpoint and go straight to the working one
+            response = await self._make_request('GET', 'transfers/downloads')
                 
             if not response:
                 return []
             
             downloads = []
-            for download_data in response:
-                status = DownloadStatus(
-                    id=download_data.get('id', ''),
-                    filename=download_data.get('filename', ''),
-                    username=download_data.get('username', ''),
-                    state=download_data.get('state', ''),
-                    progress=download_data.get('percentComplete', 0.0),
-                    size=download_data.get('size', 0),
-                    transferred=download_data.get('bytesTransferred', 0),
-                    speed=download_data.get('averageSpeed', 0),
-                    time_remaining=download_data.get('timeRemaining')
-                )
-                downloads.append(status)
             
+            # FIXED: Parse the nested response structure correctly
+            # Response format: [{"username": "user", "directories": [{"files": [...]}]}]
+            for user_data in response:
+                username = user_data.get('username', '')
+                directories = user_data.get('directories', [])
+                
+                for directory in directories:
+                    files = directory.get('files', [])
+                    
+                    for file_data in files:
+                        # Parse progress from the state if available
+                        progress = 0.0
+                        if file_data.get('state', '').lower().startswith('completed'):
+                            progress = 100.0
+                        elif 'progress' in file_data:
+                            progress = float(file_data.get('progress', 0.0))
+                        
+                        status = DownloadStatus(
+                            id=file_data.get('id', ''),
+                            filename=file_data.get('filename', ''),
+                            username=username,
+                            state=file_data.get('state', ''),
+                            progress=progress,
+                            size=file_data.get('size', 0),
+                            transferred=file_data.get('bytesTransferred', 0),  # May not exist in API
+                            speed=file_data.get('averageSpeed', 0),  # May not exist in API  
+                            time_remaining=file_data.get('timeRemaining')
+                        )
+                        downloads.append(status)
+            
+            logger.debug(f"Parsed {len(downloads)} downloads from API response")
             return downloads
             
         except Exception as e:
