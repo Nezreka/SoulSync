@@ -6,21 +6,22 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont
 
 class DownloadThread(QThread):
-    download_completed = pyqtSignal(str)  # Download ID or success message
-    download_failed = pyqtSignal(str)  # Error message
-    download_progress = pyqtSignal(str)  # Progress message
+    download_completed = pyqtSignal(str, object)  # Download ID or success message, download_item
+    download_failed = pyqtSignal(str, object)  # Error message, download_item
+    download_progress = pyqtSignal(str, object)  # Progress message, download_item
     
-    def __init__(self, soulseek_client, search_result):
+    def __init__(self, soulseek_client, search_result, download_item):
         super().__init__()
         self.soulseek_client = soulseek_client
         self.search_result = search_result
+        self.download_item = download_item
         self._stop_requested = False
         
     def run(self):
         loop = None
         try:
             import asyncio
-            self.download_progress.emit(f"Starting download: {self.search_result.filename}")
+            self.download_progress.emit(f"Starting download: {self.search_result.filename}", self.download_item)
             
             # Create a completely fresh event loop for this thread
             loop = asyncio.new_event_loop()
@@ -31,13 +32,20 @@ class DownloadThread(QThread):
             
             if not self._stop_requested:
                 if download_id:
-                    self.download_completed.emit(f"Download started: {download_id}")
+                    self.download_completed.emit(f"Download started: {download_id}", self.download_item)
                 else:
-                    self.download_failed.emit("Download failed to start")
+                    self.download_failed.emit("Download failed to start", self.download_item)
+                
+                # Give signals time to be processed before thread exits
+                import time
+                time.sleep(0.1)
             
         except Exception as e:
             if not self._stop_requested:
-                self.download_failed.emit(str(e))
+                self.download_failed.emit(str(e), self.download_item)
+                # Give error signal time to be processed
+                import time
+                time.sleep(0.1)
         finally:
             # Ensure proper cleanup
             if loop:
@@ -1870,12 +1878,11 @@ class DownloadsPage(QWidget):
             )
             
             # Create and start download thread
-            download_thread = DownloadThread(self.soulseek_client, search_result)
-            download_thread.download_item = download_item  # Store reference
-            download_thread.download_completed.connect(lambda msg, item=download_item: self.on_download_completed(msg, item))
-            download_thread.download_failed.connect(lambda msg, item=download_item: self.on_download_failed(msg, item))
-            download_thread.download_progress.connect(lambda msg, item=download_item: self.on_download_progress(msg, item))
-            download_thread.finished.connect(lambda: self.on_download_thread_finished(download_thread))
+            download_thread = DownloadThread(self.soulseek_client, search_result, download_item)
+            download_thread.download_completed.connect(self.on_download_completed, Qt.ConnectionType.QueuedConnection)
+            download_thread.download_failed.connect(self.on_download_failed, Qt.ConnectionType.QueuedConnection)
+            download_thread.download_progress.connect(self.on_download_progress, Qt.ConnectionType.QueuedConnection)
+            download_thread.finished.connect(lambda: self.on_download_thread_finished(download_thread), Qt.ConnectionType.QueuedConnection)
             
             # Track the thread
             self.download_threads.append(download_thread)
@@ -1883,18 +1890,10 @@ class DownloadsPage(QWidget):
             # Start the download
             download_thread.start()
             
-            # Show immediate feedback
-            QMessageBox.information(
-                self, 
-                "Download Started", 
-                f"Starting download: {search_result.filename}\n"
-                f"From user: {search_result.username}\n\n"
-                f"The download will be queued in slskd.\n"
-                f"Check the slskd web interface or Downloads page for progress."
-            )
+            # Download started - feedback will appear in download queue
             
         except Exception as e:
-            QMessageBox.critical(self, "Download Error", f"Failed to start download: {str(e)}")
+            print(f"Failed to start download: {str(e)}")
     
     def on_download_completed(self, message, download_item):
         """Handle successful download start"""
@@ -1910,7 +1909,7 @@ class DownloadsPage(QWidget):
         # Update download item status to failed
         download_item.status = "failed"
         download_item.progress = 0
-        QMessageBox.critical(self, "Download Failed", f"Download failed: {error_msg}")
+        # Error logged to console for debugging
     
     def on_download_progress(self, message, download_item):
         """Handle download progress updates"""
@@ -1921,9 +1920,29 @@ class DownloadsPage(QWidget):
     
     def on_download_thread_finished(self, thread):
         """Clean up when download thread finishes"""
-        if thread in self.download_threads:
-            self.download_threads.remove(thread)
-            thread.deleteLater()
+        try:
+            if thread in self.download_threads:
+                self.download_threads.remove(thread)
+            
+            # Disconnect all signals to prevent stale connections
+            try:
+                thread.download_completed.disconnect()
+                thread.download_failed.disconnect()
+                thread.download_progress.disconnect()
+                thread.finished.disconnect()
+            except Exception:
+                pass  # Ignore if signals are already disconnected
+            
+            # Ensure thread is properly stopped before deletion
+            if thread.isRunning():
+                thread.stop()
+                thread.wait(1000)  # Wait up to 1 second
+            
+            # Use QTimer.singleShot for delayed cleanup to ensure signal processing is complete
+            QTimer.singleShot(100, thread.deleteLater)
+            
+        except Exception as e:
+            print(f"Error cleaning up finished download thread: {e}")
     
     def clear_completed_downloads(self):
         """Clear completed downloads from the queue"""
@@ -1988,6 +2007,10 @@ class DownloadsPage(QWidget):
     def cleanup_all_threads(self):
         """Stop and cleanup all active threads"""
         try:
+            # Stop download status timer first
+            if hasattr(self, 'download_status_timer'):
+                self.download_status_timer.stop()
+            
             # Stop search thread
             if self.search_thread and self.search_thread.isRunning():
                 self.search_thread.stop()
@@ -1995,6 +2018,7 @@ class DownloadsPage(QWidget):
                 if self.search_thread.isRunning():
                     self.search_thread.terminate()
                     self.search_thread.wait(1000)
+                self.search_thread.deleteLater()
                 self.search_thread = None
             
             # Stop explore thread
@@ -2004,6 +2028,7 @@ class DownloadsPage(QWidget):
                 if self.explore_thread.isRunning():
                     self.explore_thread.terminate()
                     self.explore_thread.wait(1000)
+                self.explore_thread.deleteLater()
                 self.explore_thread = None
             
             # Stop session thread
@@ -2013,17 +2038,30 @@ class DownloadsPage(QWidget):
                 if self.session_thread.isRunning():
                     self.session_thread.terminate()
                     self.session_thread.wait(1000)
+                self.session_thread.deleteLater()
                 self.session_thread = None
             
-            # Stop all download threads
+            # Stop all download threads with proper cleanup
             for download_thread in self.download_threads[:]:  # Copy list to avoid modification during iteration
-                if download_thread.isRunning():
-                    download_thread.stop()
-                    download_thread.wait(2000)  # Wait up to 2 seconds
+                try:
+                    # Disconnect signals first
+                    try:
+                        download_thread.download_completed.disconnect()
+                        download_thread.download_failed.disconnect()
+                        download_thread.download_progress.disconnect()
+                        download_thread.finished.disconnect()
+                    except Exception:
+                        pass  # Ignore if signals are already disconnected
+                    
                     if download_thread.isRunning():
-                        download_thread.terminate()
-                        download_thread.wait(1000)
-                download_thread.deleteLater()
+                        download_thread.stop()
+                        download_thread.wait(2000)  # Wait up to 2 seconds
+                        if download_thread.isRunning():
+                            download_thread.terminate()
+                            download_thread.wait(1000)
+                    download_thread.deleteLater()
+                except Exception as e:
+                    print(f"Error cleaning up download thread: {e}")
             
             self.download_threads.clear()
             
@@ -2034,6 +2072,13 @@ class DownloadsPage(QWidget):
         """Handle widget close event"""
         self.cleanup_all_threads()
         super().closeEvent(event)
+    
+    def __del__(self):
+        """Destructor - ensure cleanup happens even if closeEvent isn't called"""
+        try:
+            self.cleanup_all_threads()
+        except:
+            pass  # Ignore errors during destruction
     
     def create_controls_section(self):
         section = QWidget()
