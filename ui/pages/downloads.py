@@ -35,6 +35,12 @@ class AudioPlayer(QMediaPlayer):
     def _on_playback_state_changed(self, state):
         """Keep is_playing flag synchronized with actual playback state"""
         from PyQt6.QtMultimedia import QMediaPlayer
+        state_names = {
+            QMediaPlayer.PlaybackState.StoppedState: "STOPPED",
+            QMediaPlayer.PlaybackState.PlayingState: "PLAYING", 
+            QMediaPlayer.PlaybackState.PausedState: "PAUSED"
+        }
+        print(f"🎵 AudioPlayer state changed to: {state_names.get(state, 'UNKNOWN')}")
         self.is_playing = (state == QMediaPlayer.PlaybackState.PlayingState)
     
     def play_file(self, file_path):
@@ -66,25 +72,45 @@ class AudioPlayer(QMediaPlayer):
     
     def toggle_playback(self):
         """Toggle between play and pause"""
-        if self.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+        current_state = self.playbackState()
+        print(f"🔄 toggle_playback() - Current state: {current_state}")
+        print(f"🔄 toggle_playback() - Current source: {self.source().toString()}")
+        
+        if current_state == QMediaPlayer.PlaybackState.PlayingState:
+            print("⏸️ AudioPlayer: Pausing playback")
             self.pause()
             # is_playing will be set automatically by _on_playback_state_changed
             return False  # Now paused
         else:
+            print("▶️ AudioPlayer: Attempting to resume/play")
+            
+            # Check if we have a valid source to play
+            if not self.source().isValid() and self.current_file_path:
+                print(f"🔧 AudioPlayer: No source set, restoring from: {self.current_file_path}")
+                self.setSource(QUrl.fromLocalFile(self.current_file_path))
+            
             self.play()
             # is_playing will be set automatically by _on_playback_state_changed
             return True   # Now playing
     
     def stop_playback(self):
         """Stop playback and reset"""
+        print("⏹️ AudioPlayer: stop_playback() called")
         self.stop()
         # is_playing will be set automatically by _on_playback_state_changed
         self.release_file()
     
-    def release_file(self):
-        """Release the current file handle by clearing the media source"""
+    def release_file(self, clear_file_path=True):
+        """Release the current file handle by clearing the media source
+        
+        Args:
+            clear_file_path (bool): Whether to clear the stored file path.
+                                  Set to False to keep the path for potential resuming.
+        """
+        print(f"🔓 AudioPlayer: release_file() called - clearing source: {self.source().toString()}")
         self.setSource(QUrl())  # Clear the media source to release file handle
-        self.current_file_path = None
+        if clear_file_path:
+            self.current_file_path = None
         print("🔓 Released audio file handle")
     
     def _on_media_status_changed(self, status):
@@ -3100,8 +3126,8 @@ class DownloadsPage(QWidget):
             self.current_track_id = new_track_id
             self.current_track_result = search_result
             
-            # Clear Stream folder before starting new stream
-            self.clear_stream_folder()
+            # Clear Stream folder before starting new stream (release current file since we're switching)
+            self.clear_stream_folder(release_current_file=True)
             
             # Check if file is a valid audio type
             audio_extensions = ['.mp3', '.flac', '.ogg', '.aac', '.wma', '.wav']
@@ -3242,8 +3268,8 @@ class DownloadsPage(QWidget):
         # Emit track finished signal for sidebar media player
         self.track_finished.emit()
         
-        # Clear Stream folder when playback finishes
-        self.clear_stream_folder()
+        # Clear Stream folder when playback finishes (release file since playback is done)
+        self.clear_stream_folder(release_current_file=True)
         
         # Clear track state
         self.current_track_id = None
@@ -3260,8 +3286,8 @@ class DownloadsPage(QWidget):
         # Emit track stopped signal for sidebar media player
         self.track_stopped.emit()
         
-        # Clear Stream folder when playback errors
-        self.clear_stream_folder()
+        # Clear Stream folder when playback errors (release file since there's an error)
+        self.clear_stream_folder(release_current_file=True)
         
         # Clear track state
         self.current_track_id = None
@@ -3272,7 +3298,12 @@ class DownloadsPage(QWidget):
         # Use the actual QMediaPlayer state instead of manual flag
         from PyQt6.QtMultimedia import QMediaPlayer
         
-        if self.audio_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+        current_state = self.audio_player.playbackState()
+        print(f"🎮 handle_sidebar_play_pause() - Current state: {current_state}")
+        print(f"🎮 handle_sidebar_play_pause() - Current source: {self.audio_player.source().toString()}")
+        
+        if current_state == QMediaPlayer.PlaybackState.PlayingState:
+            print("⏸️ Sidebar: Pausing playback")
             self.audio_player.pause()
             # is_playing will be set automatically by _on_playback_state_changed
             if self.currently_playing_button:
@@ -3280,6 +3311,7 @@ class DownloadsPage(QWidget):
             self.track_paused.emit()
             print("⏸️ Paused from sidebar")
         else:
+            print("▶️ Sidebar: Attempting to resume/play")
             self.audio_player.play()
             # is_playing will be set automatically by _on_playback_state_changed
             if self.currently_playing_button:
@@ -3297,8 +3329,8 @@ class DownloadsPage(QWidget):
         # Emit track stopped signal
         self.track_stopped.emit()
         
-        # Clear Stream folder when stopping
-        self.clear_stream_folder()
+        # Clear Stream folder when stopping (release file since user explicitly stopped)
+        self.clear_stream_folder(release_current_file=True)
         
         # Clear track state
         self.current_track_id = None
@@ -3310,11 +3342,16 @@ class DownloadsPage(QWidget):
         self.audio_player.audio_output.setVolume(volume)
         print(f"🔊 Volume set to {int(volume * 100)}% from sidebar")
     
-    def clear_stream_folder(self):
-        """Clear all files from the Stream folder to prevent playing wrong files"""
+    def clear_stream_folder(self, release_current_file=True):
+        """Clear all files from the Stream folder to prevent playing wrong files
+        
+        Args:
+            release_current_file (bool): Whether to release the current audio file handle.
+                                       Set to False if you want to clear old files but keep current playback.
+        """
         try:
-            # First, release any file handles from the audio player
-            if hasattr(self, 'audio_player') and self.audio_player:
+            # Only release file handles if explicitly requested
+            if release_current_file and hasattr(self, 'audio_player') and self.audio_player:
                 self.audio_player.release_file()
                 print("🔓 Released audio player file handle before clearing")
             
