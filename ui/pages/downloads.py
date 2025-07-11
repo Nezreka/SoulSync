@@ -1703,45 +1703,25 @@ class DownloadItem(QFrame):
                 }
             """)
         else:
-            self.action_btn.setText("Details")
-            self.action_btn.clicked.connect(self.show_details)
+            self.action_btn.setText("📂 Open")
+            self.action_btn.clicked.connect(self.open_download_location)
             self.action_btn.setStyleSheet("""
                 QPushButton {
                     background: transparent;
-                    border: 1px solid #b3b3b3;
+                    border: 1px solid rgba(29, 185, 84, 0.6);
                     border-radius: 14px;
-                    color: #b3b3b3;
+                    color: rgba(29, 185, 84, 0.9);
                     font-size: 10px;
                     font-weight: bold;
                 }
                 QPushButton:hover {
-                    background: #b3b3b3;
-                    color: #000000;
+                    background: rgba(29, 185, 84, 0.1);
+                    border: 1px solid rgba(29, 185, 84, 0.8);
+                    color: #1db954;
                 }
             """)
         
-        # Open Location button (for completed downloads)
-        location_btn = QPushButton("📂 Open")
-        location_btn.setFixedSize(80, 28)
-        location_btn.clicked.connect(self.open_download_location)
-        location_btn.setStyleSheet("""
-            QPushButton {
-                background: transparent;
-                border: 1px solid rgba(29, 185, 84, 0.6);
-                border-radius: 14px;
-                color: rgba(29, 185, 84, 0.9);
-                font-size: 10px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background: rgba(29, 185, 84, 0.1);
-                border: 1px solid rgba(29, 185, 84, 0.8);
-            }
-        """)
-        
         actions_layout.addWidget(self.action_btn)
-        if self.status == "completed" and self.file_path:
-            actions_layout.addWidget(location_btn)
         
         layout.addWidget(status_icon)
         layout.addLayout(content_layout)
@@ -2019,7 +1999,9 @@ class DownloadQueue(QFrame):
         """Remove all completed download items"""
         items_to_remove = []
         for item in self.download_items:
-            if item.status == "completed":
+            # Check for various completed status formats
+            if (item.status.lower() in ["completed", "finished"] or 
+                item.status.lower().startswith("completed")):
                 items_to_remove.append(item)
         
         for item in items_to_remove:
@@ -2726,16 +2708,11 @@ class DownloadsPage(QWidget):
         controls_layout.setContentsMargins(10, 10, 10, 10)
         controls_layout.setSpacing(6)
         
-        pause_btn = QPushButton("⏸️ Pause All")
-        pause_btn.setFixedHeight(28)
-        pause_btn.setStyleSheet(self._get_control_button_style("#ffa500"))
-        
         clear_btn = QPushButton("🗑️ Clear Completed")
         clear_btn.setFixedHeight(28)
         clear_btn.clicked.connect(self.clear_completed_downloads)
         clear_btn.setStyleSheet(self._get_control_button_style("#e22134"))
         
-        controls_layout.addWidget(pause_btn)
         controls_layout.addWidget(clear_btn)
         layout.addWidget(controls_frame)
         
