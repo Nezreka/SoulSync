@@ -574,8 +574,10 @@ class SoulseekClient:
             
             logger.info(f"Search initiated with ID: {search_id}")
             
-            # Poll for results - collect all responses first, then process at the end
+            # Poll for results - process and emit results immediately when found
             all_responses = []
+            all_tracks = []
+            all_albums = []
             poll_interval = 1.5  # Check every 1.5 seconds for more responsive updates
             max_polls = int(timeout / poll_interval)  # 20 attempts over 30 seconds
             
@@ -588,15 +590,31 @@ class SoulseekClient:
                     # Check if we got new responses
                     new_response_count = len(responses_data) - len(all_responses)
                     if new_response_count > 0:
+                        # Process only the new responses
+                        new_responses = responses_data[len(all_responses):]
                         all_responses = responses_data
-                        logger.info(f"Found {len(all_responses)} total responses at {poll_count * poll_interval:.1f}s")
                         
-                        # Call progress callback with current count
+                        logger.info(f"Found {new_response_count} new responses ({len(all_responses)} total) at {poll_count * poll_interval:.1f}s")
+                        
+                        # Process new responses immediately
+                        new_tracks, new_albums = self._process_search_responses(new_responses)
+                        
+                        # Add to cumulative results
+                        all_tracks.extend(new_tracks)
+                        all_albums.extend(new_albums)
+                        
+                        # Sort by quality score for better display order
+                        all_tracks.sort(key=lambda x: x.quality_score, reverse=True)
+                        all_albums.sort(key=lambda x: x.quality_score, reverse=True)
+                        
+                        # Call progress callback with processed results immediately
                         if progress_callback:
                             try:
-                                progress_callback([], len(all_responses))
+                                progress_callback(all_tracks, all_albums, len(all_responses))
                             except Exception as e:
                                 logger.error(f"Error in progress callback: {e}")
+                        
+                        logger.info(f"Processed results: {len(all_tracks)} tracks, {len(all_albums)} albums")
                         
                         # Early termination if we have enough responses
                         if len(all_responses) >= 30:  # Stop after 30 responses for better performance
@@ -611,19 +629,8 @@ class SoulseekClient:
                 if poll_count < max_polls - 1:
                     await asyncio.sleep(poll_interval)
             
-            # Process all collected responses at the end
-            if all_responses:
-                tracks, albums = self._process_search_responses(all_responses)
-                
-                # Sort tracks by quality score
-                tracks.sort(key=lambda x: x.quality_score, reverse=True)
-                albums.sort(key=lambda x: x.quality_score, reverse=True)
-                
-                logger.info(f"Search completed. Found {len(tracks)} tracks and {len(albums)} albums for query: {query}")
-                return tracks, albums
-            else:
-                logger.info(f"Search completed with no results for query: {query}")
-                return [], []
+            logger.info(f"Search completed. Final results: {len(all_tracks)} tracks and {len(all_albums)} albums for query: {query}")
+            return all_tracks, all_albums
             
         except Exception as e:
             logger.error(f"Error searching: {e}")

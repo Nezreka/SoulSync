@@ -279,20 +279,21 @@ class SearchThread(QThread):
     search_completed = pyqtSignal(object)  # Tuple of (tracks, albums) or list for backward compatibility
     search_failed = pyqtSignal(str)  # Error message
     search_progress = pyqtSignal(str)  # Progress message
-    search_results_partial = pyqtSignal(list, int)  # Partial results, total count
+    search_results_partial = pyqtSignal(object, object, int)  # tracks, albums, response count
     
     def __init__(self, soulseek_client, query):
         super().__init__()
         self.soulseek_client = soulseek_client
         self.query = query
         self._stop_requested = False
-        self.all_results = []  # Track all results for final emit
         
-    def progress_callback(self, new_results, total_count):
+    def progress_callback(self, tracks, albums, response_count):
         """Callback function for progressive search results"""
         if not self._stop_requested:
-            self.all_results.extend(new_results)
-            self.search_results_partial.emit(new_results, total_count)
+            # Emit live results immediately
+            self.search_results_partial.emit(tracks, albums, response_count)
+            # Update progress message with current count
+            self.search_progress.emit(f"Found {len(tracks)} tracks, {len(albums)} albums from {response_count} responses")
         
     def run(self):
         loop = None
@@ -2752,68 +2753,94 @@ class DownloadsPage(QWidget):
             else:
                 self.search_results_layout.removeItem(item)
     
-    def on_search_results_partial(self, new_results, total_count):
+    def on_search_results_partial(self, tracks, albums, response_count):
         """Handle progressive search results as they come in"""
-        # Sort new results by quality score and add to master list
-        new_results.sort(key=lambda x: x.quality_score, reverse=True)
+        # Combine tracks and albums into a single list for display (albums first, then tracks)
+        combined_results = albums + tracks
         
-        # Add to master search results list (don't display all immediately)
+        # Initialize temp results if not exists
         if not hasattr(self, '_temp_search_results'):
             self._temp_search_results = []
+        if not hasattr(self, '_temp_tracks'):
+            self._temp_tracks = []
+        if not hasattr(self, '_temp_albums'):
+            self._temp_albums = []
         
-        self._temp_search_results.extend(new_results)
+        # Store tracks and albums separately and combined
+        self._temp_tracks = tracks.copy()  # Replace with full updated list
+        self._temp_albums = albums.copy()  # Replace with full updated list
+        self._temp_search_results = combined_results.copy()
+        
+        # Clear existing results and display the updated complete set
+        # This ensures proper sorting and no duplicates
+        self.clear_search_results()
+        self.displayed_results = 0
         
         # Only display up to the current page limit 
-        remaining_slots = self.results_per_page - self.displayed_results
-        if remaining_slots > 0:
-            results_to_show = new_results[:remaining_slots]
-            
-            # Temporarily disable layout updates for smoother batch loading
-            self.search_results_widget.setUpdatesEnabled(False)
-            
-            for result in results_to_show:
+        remaining_slots = self.results_per_page
+        results_to_show = combined_results[:remaining_slots]
+        
+        # Temporarily disable layout updates for smoother batch loading
+        self.search_results_widget.setUpdatesEnabled(False)
+        
+        for result in results_to_show:
+            if isinstance(result, AlbumResult):
+                # Create expandable album result item
+                result_item = AlbumResultItem(result)
+                result_item.album_download_requested.connect(self.start_album_download)
+                result_item.track_download_requested.connect(self.start_download)  # Individual track downloads
+                result_item.track_stream_requested.connect(lambda search_result, track_item: self.start_stream(search_result, track_item))  # Individual track streaming
+            else:
+                # Create individual track result item
                 result_item = SearchResultItem(result)
                 result_item.download_requested.connect(self.start_download)
                 result_item.stream_requested.connect(lambda search_result, item=result_item: self.start_stream(search_result, item))
                 result_item.expansion_requested.connect(self.handle_expansion_request)
-                # Insert before the stretch
-                insert_position = self.search_results_layout.count() - 1
-                self.search_results_layout.insertWidget(insert_position, result_item)
             
-            # Re-enable updates and force layout refresh
-            self.search_results_widget.setUpdatesEnabled(True)
-            self.search_results_widget.updateGeometry()
-            self.search_results_layout.update()
-            self.search_results_scroll.updateGeometry()
-            
-            self.displayed_results += len(results_to_show)
+            # Insert before the stretch
+            insert_position = self.search_results_layout.count() - 1
+            self.search_results_layout.insertWidget(insert_position, result_item)
+        
+        # Re-enable updates and force layout refresh
+        self.search_results_widget.setUpdatesEnabled(True)
+        self.search_results_widget.updateGeometry()
+        self.search_results_layout.update()
+        self.search_results_scroll.updateGeometry()
+        
+        self.displayed_results = len(results_to_show)
         
         # Update status message with real-time feedback
+        total_results = len(tracks) + len(albums)
         if self.displayed_results < self.results_per_page:
-            self.update_search_status(f"✨ Found {total_count} results so far • Showing first {self.displayed_results}", "#1db954")
+            self.update_search_status(f"✨ Found {total_results} results ({len(tracks)} tracks, {len(albums)} albums) from {response_count} users • Live updating...", "#1db954")
         else:
-            self.update_search_status(f"✨ Found {total_count} results so far • Showing first {self.results_per_page} (scroll for more)", "#1db954")
+            self.update_search_status(f"✨ Found {total_results} results ({len(tracks)} tracks, {len(albums)} albums) from {response_count} users • Showing first {self.results_per_page} (scroll for more)", "#1db954")
     
     def on_search_completed(self, results):
         self.search_btn.setText("🔍 Search")
         self.search_btn.setEnabled(True)
         
-        # Handle tuple format (tracks, albums) from enhanced search
-        if isinstance(results, tuple) and len(results) == 2:
+        # Use the temp results that have been accumulating during live updates
+        if hasattr(self, '_temp_tracks') and hasattr(self, '_temp_albums'):
+            tracks = self._temp_tracks
+            albums = self._temp_albums
+            combined_results = self._temp_search_results
+        elif isinstance(results, tuple) and len(results) == 2:
+            # Fallback to final results if temp not available
             tracks, albums = results
-            
-            # Combine into single list for display - albums first, then tracks
             combined_results = albums + tracks
-            self.search_results = combined_results
-            self.track_results = tracks  # Store separately for future use
-            self.album_results = albums  # Store separately for future use
         else:
             # Fallback for old list format or empty results
-            self.search_results = results or []
-            self.track_results = results or []  # Assume all are tracks in old format
-            self.album_results = []
+            tracks = results or []
+            albums = []
+            combined_results = results or []
         
-        total_results = len(self.search_results)
+        # Store final results
+        self.search_results = combined_results
+        self.track_results = tracks
+        self.album_results = albums
+        
+        total_results = len(combined_results)
         
         if total_results == 0:
             if self.displayed_results == 0:
@@ -2823,8 +2850,8 @@ class DownloadsPage(QWidget):
             return
         
         # Update status with album/track breakdown
-        album_count = len(self.album_results) if hasattr(self, 'album_results') else 0
-        track_count = len(self.track_results) if hasattr(self, 'track_results') else total_results
+        album_count = len(albums)
+        track_count = len(tracks)
         
         status_parts = []
         if album_count > 0:
@@ -2837,13 +2864,9 @@ class DownloadsPage(QWidget):
         # Update status based on whether there are more results to load
         if self.displayed_results < total_results:
             remaining = total_results - self.displayed_results
-            self.update_search_status(f"✨ Found {result_summary} • Showing first {self.displayed_results} (scroll down for {remaining} more)", "#1db954")
+            self.update_search_status(f"✅ Search completed • Found {result_summary} • Showing first {self.displayed_results} (scroll down for {remaining} more)", "#1db954")
         else:
-            self.update_search_status(f"✨ Search completed • Found {result_summary}", "#1db954")
-        
-        # If we have no displayed results yet, show the first batch
-        if self.displayed_results == 0 and total_results > 0:
-            self.load_more_results()
+            self.update_search_status(f"✅ Search completed • Found {result_summary}", "#1db954")
     
     def clear_search_results(self):
         """Clear all search result items from the layout"""
