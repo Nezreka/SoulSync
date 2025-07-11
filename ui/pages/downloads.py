@@ -817,6 +817,65 @@ class TrackItem(QFrame):
         self.play_btn.setText("⏳")
         self.play_btn.setEnabled(False)
     
+    def set_download_queued_state(self):
+        """Set download button to queued state (disabled, shows queued)"""
+        self.download_btn.setText("⏳")
+        self.download_btn.setEnabled(False)
+        self.download_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(100, 100, 100, 0.5);
+                border: 1px solid rgba(150, 150, 150, 0.3);
+                border-radius: 16px;
+                color: rgba(255, 255, 255, 0.6);
+                font-size: 10px;
+            }
+        """)
+    
+    def set_download_downloading_state(self):
+        """Set download button to downloading state"""
+        self.download_btn.setText("📥")
+        self.download_btn.setEnabled(False)
+        self.download_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(29, 185, 84, 0.3);
+                border: 1px solid rgba(29, 185, 84, 0.6);
+                border-radius: 16px;
+                color: #1db954;
+                font-size: 10px;
+            }
+        """)
+    
+    def set_download_completed_state(self):
+        """Set download button to completed state"""
+        self.download_btn.setText("✅")
+        self.download_btn.setEnabled(False)
+        self.download_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(40, 167, 69, 0.3);
+                border: 1px solid rgba(40, 167, 69, 0.6);
+                border-radius: 16px;
+                color: #28a745;
+                font-size: 10px;
+            }
+        """)
+    
+    def reset_download_state(self):
+        """Reset download button to default state"""
+        self.download_btn.setText("⬇️")
+        self.download_btn.setEnabled(True)
+        self.download_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(64, 64, 64, 0.8);
+                border: 1px solid rgba(29, 185, 84, 0.6);
+                border-radius: 16px;
+                color: #1db954;
+                font-size: 10px;
+            }
+            QPushButton:hover {
+                background: rgba(29, 185, 84, 0.2);
+            }
+        """)
+    
     def set_playing_state(self):
         """Set play button to playing/pause state"""
         self.play_btn.setText("⏸️")
@@ -965,10 +1024,13 @@ class AlbumResultItem(QFrame):
             }
         """)
         
+        # Set minimum width to ensure buttons always visible
+        self.setMinimumWidth(350)  # Ensure minimum space for content + download button
+        
         # Assembly header
         header_layout.addLayout(icon_container)
-        header_layout.addLayout(info_section, 1)
-        header_layout.addWidget(self.download_btn)
+        header_layout.addLayout(info_section, 1)  # Flexible content area
+        header_layout.addWidget(self.download_btn, 0)  # Fixed button area, always visible
         
         # Tracks container (hidden by default)
         self.tracks_container = QWidget()
@@ -1175,8 +1237,11 @@ class SearchResultItem(QFrame):
         buttons_layout.addWidget(self.play_btn)
         buttons_layout.addWidget(self.download_btn)
         
-        layout.addLayout(left_section, 1)
-        layout.addLayout(buttons_layout)
+        # Set minimum width to ensure buttons always visible
+        self.setMinimumWidth(300)  # Ensure minimum space for content + buttons
+        
+        layout.addLayout(left_section, 1)  # Flexible content area
+        layout.addLayout(buttons_layout, 0)  # Fixed button area, always visible
     
     def create_persistent_content(self, primary_info):
         """Create both compact and expanded content with visibility control"""
@@ -1631,15 +1696,15 @@ class DownloadItem(QFrame):
         self.setup_ui()
     
     def setup_ui(self):
-        self.setFixedHeight(70)  # Reduced from 90px for more compact design
+        self.setFixedHeight(85)  # More generous height for better spacing
         self.setStyleSheet("""
             DownloadItem {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 rgba(42, 42, 42, 0.9),
+                    stop:0 rgba(40, 40, 40, 0.95),
                     stop:1 rgba(32, 32, 32, 0.95));
                 border-radius: 12px;
                 border: 1px solid rgba(64, 64, 64, 0.4);
-                margin: 4px 2px;
+                margin: 6px 4px;
             }
             DownloadItem:hover {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -1649,93 +1714,67 @@ class DownloadItem(QFrame):
             }
         """)
         
+        # Main horizontal layout
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 8, 12, 8)  # Tighter margins for compact design
-        layout.setSpacing(12)  # Reduced spacing for more compact layout
+        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setSpacing(16)
         
-        # Status icon with tighter sizing
-        status_icon = QLabel()
-        status_icon.setFixedSize(28, 28)  # Reduced from 32x32 for compact design
-        status_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # Left section: Filename + uploader (flexible)
+        left_section = QVBoxLayout()
+        left_section.setSpacing(4)
         
-        if self.status == "downloading":
-            status_icon.setText("📥")
-            status_icon.setStyleSheet("""
-                QLabel {
-                    color: #1db954;
-                    font-size: 18px;
-                    background: rgba(29, 185, 84, 0.1);
-                    border-radius: 16px;
-                }
-            """)
-        elif self.status == "completed":
-            status_icon.setText("✅")
-            status_icon.setStyleSheet("""
-                QLabel {
-                    color: #1db954;
-                    font-size: 18px;
-                    background: rgba(29, 185, 84, 0.1);
-                    border-radius: 16px;
-                }
-            """)
-        elif self.status == "failed":
-            status_icon.setText("❌")
-            status_icon.setStyleSheet("""
-                QLabel {
-                    color: #e22134;
-                    font-size: 18px;
-                    background: rgba(226, 33, 52, 0.1);
-                    border-radius: 16px;
-                }
-            """)
+        # Extract filename with extension from file_path
+        filename_with_ext = "Unknown File"
+        if self.file_path:
+            from pathlib import Path
+            try:
+                filename_with_ext = Path(self.file_path).name
+            except:
+                filename_with_ext = self.title  # fallback
         else:
-            status_icon.setText("⏳")
-            status_icon.setStyleSheet("""
-                QLabel {
-                    color: #ffa500;
-                    font-size: 18px;
-                    background: rgba(255, 165, 0, 0.1);
-                    border-radius: 16px;
-                }
-            """)
+            filename_with_ext = self.title  # fallback
         
-        # Content with tighter spacing
-        content_layout = QVBoxLayout()
-        content_layout.setSpacing(3)  # Reduced from 5px for more compact layout
+        # Filename with extension (main info)
+        filename_label = QLabel(filename_with_ext)
+        filename_label.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
+        filename_label.setStyleSheet("color: #ffffff;")
+        filename_label.setWordWrap(False)
+        filename_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         
-        # Title and artist with compact fonts
-        title_label = QLabel(self.title)
-        title_label.setFont(QFont("Arial", 11, QFont.Weight.Bold))  # Reduced from 12px
-        title_label.setStyleSheet("color: #ffffff;")
+        # Uploader info
+        uploader_label = QLabel(f"from {self.artist}")
+        uploader_label.setFont(QFont("Segoe UI", 10))
+        uploader_label.setStyleSheet("color: #b3b3b3;")
+        uploader_label.setWordWrap(False)
+        uploader_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         
-        artist_label = QLabel(f"by {self.artist}")
-        artist_label.setFont(QFont("Arial", 9))  # Reduced from 10px
-        artist_label.setStyleSheet("color: #b3b3b3;")
+        left_section.addWidget(filename_label)
+        left_section.addWidget(uploader_label)
         
-        content_layout.addWidget(title_label)
-        content_layout.addWidget(artist_label)
+        # Middle section: Progress (fixed width)
+        progress_widget = QWidget()
+        progress_widget.setFixedWidth(120)
+        progress_layout = QVBoxLayout(progress_widget)
+        progress_layout.setSpacing(6)
+        progress_layout.setContentsMargins(0, 0, 0, 0)
         
-        # Progress section with tighter spacing
-        progress_layout = QVBoxLayout()
-        progress_layout.setSpacing(3)  # Reduced from 5px
-        
-        # Progress bar - Store reference for safe updates
+        # Progress bar
         self.progress_bar = QProgressBar()
-        self.progress_bar.setFixedHeight(5)  # Slightly thinner for compact design
+        self.progress_bar.setFixedHeight(8)
         self.progress_bar.setValue(self.progress)
         self.progress_bar.setStyleSheet("""
             QProgressBar {
                 border: none;
-                border-radius: 3px;
+                border-radius: 4px;
                 background: #404040;
             }
             QProgressBar::chunk {
                 background: #1db954;
-                border-radius: 3px;
+                border-radius: 4px;
             }
         """)
         
-        # Status text - Store reference for safe updates with clean mapping
+        # Status text
         status_mapping = {
             "completed, succeeded": "Finished",
             "completed, cancelled": "Cancelled",
@@ -1747,41 +1786,41 @@ class DownloadItem(QFrame):
         }
         
         clean_status = status_mapping.get(self.status.lower(), self.status.title())
-        status_text = clean_status
-        
         if self.status.lower() in ["downloading", "queued"]:
-            status_text += f" - {self.progress}%"
+            status_text = f"{clean_status} - {self.progress}%"
+        else:
+            status_text = clean_status
         
         self.status_label = QLabel(status_text)
-        self.status_label.setFont(QFont("Arial", 8))  # Reduced from 9px
+        self.status_label.setFont(QFont("Segoe UI", 9))
         self.status_label.setStyleSheet("color: #b3b3b3;")
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         progress_layout.addWidget(self.progress_bar)
         progress_layout.addWidget(self.status_label)
         
-        # Action buttons section with tighter spacing
-        actions_layout = QVBoxLayout()
-        actions_layout.setSpacing(3)  # Reduced from 4px
-        
-        # Primary action button with compact sizing
+        # Right section: Action button (fixed width)
         self.action_btn = QPushButton()
-        self.action_btn.setFixedSize(75, 26)  # Reduced from 80x28 for compact design
+        self.action_btn.setFixedSize(90, 36)
         
         if self.status == "downloading":
             self.action_btn.setText("Cancel")
             self.action_btn.clicked.connect(self.cancel_download)
             self.action_btn.setStyleSheet("""
                 QPushButton {
-                    background: transparent;
-                    border: 1px solid #e22134;
-                    border-radius: 14px;
-                    color: #e22134;
-                    font-size: 10px;
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 rgba(220, 53, 69, 0.8),
+                        stop:1 rgba(220, 53, 69, 1.0));
+                    color: white;
+                    border: none;
+                    border-radius: 8px;
                     font-weight: bold;
+                    font-size: 11px;
                 }
                 QPushButton:hover {
-                    background: #e22134;
-                    color: #ffffff;
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 rgba(200, 33, 49, 0.9),
+                        stop:1 rgba(200, 33, 49, 1.0));
                 }
             """)
         elif self.status == "failed":
@@ -1789,16 +1828,19 @@ class DownloadItem(QFrame):
             self.action_btn.clicked.connect(self.retry_download)
             self.action_btn.setStyleSheet("""
                 QPushButton {
-                    background: transparent;
-                    border: 1px solid #1db954;
-                    border-radius: 14px;
-                    color: #1db954;
-                    font-size: 10px;
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 rgba(255, 193, 7, 0.8),
+                        stop:1 rgba(255, 193, 7, 1.0));
+                    color: #000;
+                    border: none;
+                    border-radius: 8px;
                     font-weight: bold;
+                    font-size: 11px;
                 }
                 QPushButton:hover {
-                    background: #1db954;
-                    color: #000000;
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 rgba(235, 173, 0, 0.9),
+                        stop:1 rgba(235, 173, 0, 1.0));
                 }
             """)
         else:
@@ -1806,27 +1848,26 @@ class DownloadItem(QFrame):
             self.action_btn.clicked.connect(self.open_download_location)
             self.action_btn.setStyleSheet("""
                 QPushButton {
-                    background: transparent;
-                    border: 1px solid rgba(29, 185, 84, 0.6);
-                    border-radius: 14px;
-                    color: rgba(29, 185, 84, 0.9);
-                    font-size: 10px;
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 rgba(40, 167, 69, 0.8),
+                        stop:1 rgba(40, 167, 69, 1.0));
+                    color: white;
+                    border: none;
+                    border-radius: 8px;
                     font-weight: bold;
+                    font-size: 11px;
                 }
                 QPushButton:hover {
-                    background: rgba(29, 185, 84, 0.1);
-                    border: 1px solid rgba(29, 185, 84, 0.8);
-                    color: #1db954;
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 rgba(20, 147, 49, 0.9),
+                        stop:1 rgba(20, 147, 49, 1.0));
                 }
             """)
         
-        actions_layout.addWidget(self.action_btn)
-        
-        layout.addWidget(status_icon)
-        layout.addLayout(content_layout)
-        layout.addStretch()
-        layout.addLayout(progress_layout)
-        layout.addLayout(actions_layout)
+        # Add everything to main layout
+        layout.addLayout(left_section, 1)  # Flexible
+        layout.addWidget(progress_widget)  # Fixed width
+        layout.addWidget(self.action_btn)  # Fixed width
     
     def open_download_location(self):
         """Open the download location in file explorer"""
@@ -1918,20 +1959,36 @@ class DownloadItem(QFrame):
                                 stop:1 rgba(220, 53, 69, 1.0));
                             color: white;
                             border: none;
-                            border-radius: 6px;
-                            padding: 8px 16px;
+                            border-radius: 8px;
                             font-weight: bold;
-                            font-size: 12px;
+                            font-size: 11px;
                         }
                         QPushButton:hover {
                             background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                                 stop:0 rgba(200, 33, 49, 0.9),
                                 stop:1 rgba(200, 33, 49, 1.0));
                         }
-                        QPushButton:pressed {
+                    """)
+                elif self.status == "failed":
+                    self.action_btn.setText("Retry")
+                    # Disconnect old connections
+                    self.action_btn.clicked.disconnect()
+                    self.action_btn.clicked.connect(self.retry_download)
+                    self.action_btn.setStyleSheet("""
+                        QPushButton {
                             background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                stop:0 rgba(180, 13, 29, 1.0),
-                                stop:1 rgba(180, 13, 29, 1.0));
+                                stop:0 rgba(255, 193, 7, 0.8),
+                                stop:1 rgba(255, 193, 7, 1.0));
+                            color: #000;
+                            border: none;
+                            border-radius: 8px;
+                            font-weight: bold;
+                            font-size: 11px;
+                        }
+                        QPushButton:hover {
+                            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 rgba(235, 173, 0, 0.9),
+                                stop:1 rgba(235, 173, 0, 1.0));
                         }
                     """)
                 else:
@@ -1946,20 +2003,14 @@ class DownloadItem(QFrame):
                                 stop:1 rgba(40, 167, 69, 1.0));
                             color: white;
                             border: none;
-                            border-radius: 6px;
-                            padding: 8px 16px;
+                            border-radius: 8px;
                             font-weight: bold;
-                            font-size: 12px;
+                            font-size: 11px;
                         }
                         QPushButton:hover {
                             background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                                 stop:0 rgba(20, 147, 49, 0.9),
                                 stop:1 rgba(20, 147, 49, 1.0));
-                        }
-                        QPushButton:pressed {
-                            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                stop:0 rgba(0, 127, 29, 1.0),
-                                stop:1 rgba(0, 127, 29, 1.0));
                         }
                     """)
                 
@@ -2026,10 +2077,296 @@ File Path: {self.file_path}
         """
         print(details)
 
+class CompactDownloadItem(QFrame):
+    """Compact download item optimized for queue display"""
+    def __init__(self, title: str, artist: str, status: str = "queued", 
+                 progress: int = 0, file_size: int = 0, download_speed: int = 0, 
+                 file_path: str = "", download_id: str = "", soulseek_client=None, 
+                 queue_type: str = "active", parent=None):
+        super().__init__(parent)
+        self.title = title
+        self.artist = artist
+        self.status = status
+        self.progress = progress
+        self.file_size = file_size
+        self.download_speed = download_speed
+        self.file_path = file_path
+        self.download_id = download_id
+        self.soulseek_client = soulseek_client
+        self.queue_type = queue_type  # "active" or "finished"
+        self.setup_ui()
+    
+    def setup_ui(self):
+        self.setFixedHeight(45)  # Compact height for better space utilization
+        self.setStyleSheet("""
+            CompactDownloadItem {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(45, 45, 45, 0.8),
+                    stop:1 rgba(35, 35, 35, 0.9));
+                border-radius: 8px;
+                border: 1px solid rgba(64, 64, 64, 0.3);
+                margin: 2px 1px;
+            }
+            CompactDownloadItem:hover {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(55, 55, 55, 0.9),
+                    stop:1 rgba(45, 45, 45, 0.95));
+                border: 1px solid rgba(29, 185, 84, 0.5);
+            }
+        """)
+        
+        # Main horizontal layout
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 6, 10, 6)  # Compact margins
+        layout.setSpacing(8)  # Tight spacing
+        
+        # Left section: Filename + uploader (flexible)
+        left_section = QVBoxLayout()
+        left_section.setSpacing(1)  # Very tight vertical spacing
+        left_section.setContentsMargins(0, 0, 0, 0)
+        
+        # Extract just filename with extension from file_path
+        filename_with_ext = self.get_display_filename()
+        
+        # Filename with extension (main info)
+        self.filename_label = QLabel(filename_with_ext)
+        self.filename_label.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+        self.filename_label.setStyleSheet("color: #ffffff;")
+        self.filename_label.setWordWrap(False)
+        self.filename_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        
+        # Uploader info (compact)
+        uploader_label = QLabel(f"from {self.artist}")
+        uploader_label.setFont(QFont("Segoe UI", 8))
+        uploader_label.setStyleSheet("color: #b3b3b3;")
+        uploader_label.setWordWrap(False)
+        uploader_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        
+        left_section.addWidget(self.filename_label)
+        left_section.addWidget(uploader_label)
+        
+        # Middle section: Progress (fixed width)
+        progress_widget = QWidget()
+        progress_widget.setFixedWidth(80)  # Narrower than full version
+        progress_layout = QVBoxLayout(progress_widget)
+        progress_layout.setSpacing(2)
+        progress_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Progress bar (smaller)
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setFixedHeight(6)  # Thinner progress bar
+        self.progress_bar.setValue(self.progress)
+        self.progress_bar.setStyleSheet("""
+            QProgressBar {
+                border: none;
+                border-radius: 3px;
+                background: #404040;
+            }
+            QProgressBar::chunk {
+                background: #1db954;
+                border-radius: 3px;
+            }
+        """)
+        
+        # Status text (compact)
+        status_text = self.get_status_text()
+        self.status_label = QLabel(status_text)
+        self.status_label.setFont(QFont("Segoe UI", 8))
+        self.status_label.setStyleSheet("color: #b3b3b3;")
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        progress_layout.addWidget(self.progress_bar)
+        progress_layout.addWidget(self.status_label)
+        
+        # Right section: Action button (fixed width)
+        self.action_btn = QPushButton()
+        self.action_btn.setFixedSize(70, 32)  # Smaller button
+        self.setup_action_button()
+        
+        # Add everything to main layout
+        layout.addLayout(left_section, 1)  # Flexible
+        layout.addWidget(progress_widget)  # Fixed width
+        layout.addWidget(self.action_btn)  # Fixed width
+    
+    def get_display_filename(self):
+        """Extract just the filename with extension for display"""
+        if self.file_path:
+            from pathlib import Path
+            try:
+                return Path(self.file_path).name
+            except:
+                pass
+        # Fallback to title if no file_path or error
+        return self.title if self.title else "Unknown File"
+    
+    def get_status_text(self):
+        """Get appropriate status text for display"""
+        status_mapping = {
+            "completed, succeeded": "Done",
+            "completed, cancelled": "Cancelled", 
+            "completed": "Done",
+            "cancelled": "Cancelled",
+            "downloading": f"{self.progress}%",
+            "failed": "Failed",
+            "queued": "Queued"
+        }
+        return status_mapping.get(self.status.lower(), self.status.title())
+    
+    def setup_action_button(self):
+        """Setup the action button based on queue type and status"""
+        # Clear any existing connections
+        try:
+            self.action_btn.clicked.disconnect()
+        except:
+            pass
+            
+        if self.queue_type == "active":
+            # Active downloads: Cancel or Retry buttons
+            if self.status.lower() in ["downloading", "queued"]:
+                self.action_btn.setText("Cancel")
+                self.action_btn.clicked.connect(self.cancel_download)
+                self.action_btn.setStyleSheet("""
+                    QPushButton {
+                        background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                            stop:0 rgba(220, 53, 69, 0.8),
+                            stop:1 rgba(220, 53, 69, 1.0));
+                        color: white;
+                        border: none;
+                        border-radius: 6px;
+                        font-weight: bold;
+                        font-size: 10px;
+                    }
+                    QPushButton:hover {
+                        background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                            stop:0 rgba(200, 33, 49, 0.9),
+                            stop:1 rgba(200, 33, 49, 1.0));
+                    }
+                """)
+            elif self.status.lower() == "failed":
+                self.action_btn.setText("Retry")
+                self.action_btn.clicked.connect(self.retry_download)
+                self.action_btn.setStyleSheet("""
+                    QPushButton {
+                        background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                            stop:0 rgba(255, 193, 7, 0.8),
+                            stop:1 rgba(255, 193, 7, 1.0));
+                        color: #000;
+                        border: none;
+                        border-radius: 6px;
+                        font-weight: bold;
+                        font-size: 10px;
+                    }
+                    QPushButton:hover {
+                        background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                            stop:0 rgba(235, 173, 0, 0.9),
+                            stop:1 rgba(235, 173, 0, 1.0));
+                    }
+                """)
+            else:
+                # Completed but still in active queue - this shouldn't happen normally
+                self.action_btn.setText("Done")
+                self.action_btn.setEnabled(False)
+                self.action_btn.setStyleSheet("""
+                    QPushButton {
+                        background: rgba(100, 100, 100, 0.3);
+                        color: rgba(255, 255, 255, 0.5);
+                        border: none;
+                        border-radius: 6px;
+                        font-size: 10px;
+                    }
+                """)
+        else:
+            # Finished downloads: Always show Open button
+            self.action_btn.setText("📂 Open")
+            self.action_btn.clicked.connect(self.open_download_location)
+            self.action_btn.setStyleSheet("""
+                QPushButton {
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 rgba(40, 167, 69, 0.8),
+                        stop:1 rgba(40, 167, 69, 1.0));
+                    color: white;
+                    border: none;
+                    border-radius: 6px;
+                    font-weight: bold;
+                    font-size: 10px;
+                }
+                QPushButton:hover {
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 rgba(20, 147, 49, 0.9),
+                        stop:1 rgba(20, 147, 49, 1.0));
+                }
+            """)
+    
+    def update_status(self, status: str, progress: int = None, download_speed: int = None, file_path: str = None):
+        """Update the status and progress of the download item"""
+        self.status = status
+        if progress is not None:
+            self.progress = progress
+            self.progress_bar.setValue(progress)
+        if download_speed is not None:
+            self.download_speed = download_speed
+        if file_path:
+            self.file_path = file_path
+            # Update filename display if file_path changed
+            if hasattr(self, 'filename_label') and self.filename_label:
+                self.filename_label.setText(self.get_display_filename())
+        
+        # Update status text
+        self.status_label.setText(self.get_status_text())
+        
+        # Update action button if needed
+        self.setup_action_button()
+    
+    def cancel_download(self):
+        """Cancel the download using soulseek client"""
+        if self.soulseek_client and self.download_id:
+            print(f"🚫 Cancelling download: {self.download_id}")
+            try:
+                self.soulseek_client.cancel_download(self.download_id)
+                self.update_status("cancelled")
+            except Exception as e:
+                print(f"❌ Failed to cancel download: {e}")
+    
+    def retry_download(self):
+        """Retry a failed download"""
+        print(f"🔄 Retrying download: {self.title}")
+        # This would trigger a new download attempt
+        # Implementation depends on how retries are handled in the main system
+        self.update_status("queued", 0)
+    
+    def open_download_location(self):
+        """Open the download location in file explorer"""
+        import os
+        import platform
+        from pathlib import Path
+        
+        if not self.file_path:
+            return
+            
+        try:
+            file_path = Path(self.file_path)
+            if file_path.exists():
+                folder_path = file_path.parent
+                
+                system = platform.system()
+                if system == "Windows":
+                    os.startfile(folder_path)
+                elif system == "Darwin":  # macOS
+                    os.system(f"open '{folder_path}'")
+                else:  # Linux
+                    os.system(f"xdg-open '{folder_path}'")
+                    
+                print(f"📂 Opened folder: {folder_path}")
+            else:
+                print(f"❌ File not found: {file_path}")
+        except Exception as e:
+            print(f"❌ Failed to open download location: {e}")
+
 class DownloadQueue(QFrame):
-    def __init__(self, title="Download Queue", parent=None):
+    def __init__(self, title="Download Queue", queue_type="active", parent=None):
         super().__init__(parent)
         self.queue_title = title
+        self.queue_type = queue_type  # "active" or "finished"
         self.setup_ui()
     
     def setup_ui(self):
@@ -2094,7 +2431,7 @@ class DownloadQueue(QFrame):
         
         queue_widget = QWidget()
         queue_layout = QVBoxLayout(queue_widget)
-        queue_layout.setSpacing(8)
+        queue_layout.setSpacing(4)  # Reduced from 8 to fit more compact items
         
         # Dynamic download items - initially empty
         self.queue_layout = queue_layout
@@ -2122,8 +2459,8 @@ class DownloadQueue(QFrame):
         if len(self.download_items) == 0:
             self.empty_message.hide()
         
-        # Create new download item
-        item = DownloadItem(title, artist, status, progress, file_size, download_speed, file_path, download_id, soulseek_client)
+        # Create new compact download item with queue type
+        item = CompactDownloadItem(title, artist, status, progress, file_size, download_speed, file_path, download_id, soulseek_client, self.queue_type)
         self.download_items.append(item)
         
         # Insert before the stretch (which is always last)
@@ -2206,9 +2543,9 @@ class TabbedDownloadManager(QTabWidget):
             }
         """)
         
-        # Create two download queues with appropriate titles
-        self.active_queue = DownloadQueue("Active Downloads")
-        self.finished_queue = DownloadQueue("Finished Downloads")
+        # Create two download queues with appropriate titles and queue types
+        self.active_queue = DownloadQueue("Active Downloads", "active")
+        self.finished_queue = DownloadQueue("Finished Downloads", "finished")
         
         # Update the finished queue count label
         self.finished_queue.queue_count_label.setText("Empty")
@@ -2332,8 +2669,8 @@ class DownloadsPage(QWidget):
         
         main_layout = QVBoxLayout(self)
         # Responsive margins that adapt to window size  
-        main_layout.setContentsMargins(16, 12, 16, 16)  # Reduced for tighter responsive feel
-        main_layout.setSpacing(12)  # Consistent 12px spacing
+        main_layout.setContentsMargins(20, 16, 20, 20)  # Increased for better breathing room
+        main_layout.setSpacing(16)  # Increased spacing for better visual hierarchy
         
         # Elegant Header
         header = self.create_elegant_header()
@@ -2379,15 +2716,15 @@ class DownloadsPage(QWidget):
         """)
         
         layout = QHBoxLayout(header)
-        layout.setContentsMargins(16, 12, 16, 12)  # Responsive padding consistent with main layout
-        layout.setSpacing(12)  # Consistent spacing
+        layout.setContentsMargins(20, 16, 20, 16)  # Increased padding for better header prominence
+        layout.setSpacing(16)  # Increased spacing for better hierarchy
         
         # Icon and Title
         title_section = QVBoxLayout()
-        title_section.setSpacing(4)
+        title_section.setSpacing(6)  # Increased for better title hierarchy
         
         title_label = QLabel("🎵 Music Downloads")
-        title_label.setFont(QFont("Segoe UI", 26, QFont.Weight.Bold))
+        title_label.setFont(QFont("Segoe UI", 28, QFont.Weight.Bold))  # Larger for better prominence
         title_label.setStyleSheet("""
             color: #ffffff;
             font-weight: 700;
@@ -2506,8 +2843,8 @@ class DownloadsPage(QWidget):
         
         self.search_results_widget = QWidget()
         self.search_results_layout = QVBoxLayout(self.search_results_widget)
-        self.search_results_layout.setSpacing(12)  # Increased from 8px for better card separation
-        self.search_results_layout.setContentsMargins(8, 8, 8, 8)  # Increased for better edge spacing
+        self.search_results_layout.setSpacing(16)  # Increased for better card separation and visual breathing room
+        self.search_results_layout.setContentsMargins(12, 12, 12, 12)  # Increased for better edge spacing
         self.search_results_layout.addStretch()
         self.search_results_scroll.setWidget(self.search_results_widget)
         
@@ -2535,8 +2872,8 @@ class DownloadsPage(QWidget):
         """)
         
         layout = QHBoxLayout(container)
-        layout.setContentsMargins(16, 12, 16, 12)  # Consistent responsive spacing
-        layout.setSpacing(12)  # Consistent spacing throughout
+        layout.setContentsMargins(20, 16, 20, 16)  # Increased responsive spacing for better visual balance
+        layout.setSpacing(16)  # Increased spacing for better visual hierarchy
         
         # Search input with enhanced styling
         self.search_input = QLineEdit()
@@ -2821,8 +3158,8 @@ class DownloadsPage(QWidget):
         """)
         
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(10, 10, 10, 10)  # Consistent responsive spacing
-        layout.setSpacing(10)  # Consistent spacing throughout
+        layout.setContentsMargins(16, 14, 16, 16)  # Increased for better visual breathing room
+        layout.setSpacing(14)  # Increased spacing for better section separation
         
         # Panel header
         header = QLabel("Download Manager")
@@ -3434,21 +3771,49 @@ class DownloadsPage(QWidget):
         """Start downloading a search result using threaded approach"""
         try:
             # Extract track info for queue display
-            filename = search_result.filename
-            parts = filename.split(' - ')
+            full_filename = search_result.filename
+            
+            # Extract just the filename part (without directory path)
+            import os
+            filename = os.path.basename(full_filename)
+            
+            # Parse the filename to extract artist and title
+            # First, remove file extension
+            name_without_ext = filename
+            if '.' in name_without_ext:
+                name_without_ext = '.'.join(name_without_ext.split('.')[:-1])
+            
+            # Check for track number prefix (e.g., "01. ", "28. ", etc.)
+            import re
+            track_number_match = re.match(r'^(\d+)\.\s*(.+)', name_without_ext)
+            if track_number_match:
+                track_number = track_number_match.group(1)
+                name_without_track_num = track_number_match.group(2)
+                print(f"[DEBUG] Detected album track: #{track_number} - '{name_without_track_num}'")
+            else:
+                name_without_track_num = name_without_ext
+            
+            # Now parse artist and title from the cleaned filename
+            parts = name_without_track_num.split(' - ')
             if len(parts) >= 2:
                 artist = parts[0].strip()
                 title = ' - '.join(parts[1:]).strip()
-                # Remove file extension
-                if '.' in title:
-                    title = '.'.join(title.split('.')[:-1])
             else:
-                title = filename
+                # If no ' - ' separator, use the cleaned filename as title
+                title = name_without_track_num.strip()
                 artist = search_result.username
             
-            # Generate a unique download ID for tracking and cancellation
+            # Final cleanup - ensure we have meaningful values
+            if not title or title == '':
+                title = name_without_ext  # Fallback to full filename without extension
+            if not artist or artist == '':
+                artist = search_result.username  # Fallback to uploader
+            
+            print(f"[DEBUG] Extracted title info from '{full_filename}' -> title: '{title}', artist: '{artist}'")
+            
+            # Generate a unique download ID for tracking and cancellation  
             import time
-            download_id = f"{search_result.username}_{search_result.filename}_{int(time.time())}"
+            download_id = f"{search_result.username}_{filename}_{int(time.time())}"
             
             # Add to download queue immediately as "downloading"
             download_item = self.download_queue.add_download_item(
@@ -3458,6 +3823,7 @@ class DownloadsPage(QWidget):
                 progress=0,
                 file_size=search_result.size,
                 download_id=download_id,
+                file_path=full_filename,  # Store the full path for matching
                 soulseek_client=self.soulseek_client
             )
             
@@ -3487,6 +3853,9 @@ class DownloadsPage(QWidget):
         try:
             print(f"🎵 Starting album download: {album_result.album_title} by {album_result.artist}")
             
+            # First, find and disable all track download buttons for this album
+            self.disable_album_track_buttons(album_result)
+            
             # Download each track in the album
             for track in album_result.tracks:
                 self.start_download(track)
@@ -3495,6 +3864,41 @@ class DownloadsPage(QWidget):
             
         except Exception as e:
             print(f"Failed to start album download: {str(e)}")
+    
+    def disable_album_track_buttons(self, album_result):
+        """Disable all track download buttons for an album to prevent duplicate downloads"""
+        # Find the AlbumResultItem that contains these tracks
+        for album_item in self.findChildren(AlbumResultItem):
+            if (album_item.album_result.album_title == album_result.album_title and 
+                album_item.album_result.artist == album_result.artist):
+                
+                # Disable all track download buttons in this album
+                for track_item in album_item.track_items:
+                    track_item.set_download_queued_state()
+                print(f"[DEBUG] Disabled {len(album_item.track_items)} track download buttons for album: {album_result.album_title}")
+                break
+    
+    def update_album_track_button_states(self, download_item, status):
+        """Update track download button states based on download progress"""
+        # Find the track item that corresponds to this download
+        for album_item in self.findChildren(AlbumResultItem):
+            for track_item in album_item.track_items:
+                # Match by track title and artist
+                if (track_item.track_result.title == download_item.title and 
+                    track_item.track_result.artist == download_item.artist):
+                    
+                    # Update button state based on download status
+                    if status == 'downloading':
+                        track_item.set_download_downloading_state()
+                    elif status in ['completed', 'finished']:
+                        track_item.set_download_completed_state()
+                    elif status in ['queued', 'initializing']:
+                        track_item.set_download_queued_state()
+                    elif status in ['failed', 'cancelled']:
+                        track_item.reset_download_state()  # Allow retry
+                    
+                    print(f"[DEBUG] Updated track button state for '{download_item.title}': {status}")
+                    return
     
     def start_stream(self, search_result, result_item=None):
         """Start streaming a search result using StreamingThread or toggle if same track"""
@@ -3897,22 +4301,94 @@ class DownloadsPage(QWidget):
                                 print(f"[DEBUG] ✅ Found ID match: {transfer.get('id')} -> {transfer.get('filename', 'Unknown')}")
                                 break
                     
-                    # If no ID match, try filename matching as fallback
+                    # If no ID match, try improved filename matching as fallback
                     if not matching_transfer:
                         print(f"[DEBUG] No ID match found, trying filename matching...")
                         for transfer in all_transfers:
-                            transfer_filename = transfer.get('filename', '').lower()
-                            # Simple filename matching - could be improved
-                            if (download_item.title.lower() in transfer_filename or 
-                                download_item.artist.lower() in transfer_filename):
+                            full_filename = transfer.get('filename', '')
+                            transfer_filename = full_filename.lower()
+                            
+                            # Extract just the filename part (without directory path) for better matching
+                            import os
+                            basename = os.path.basename(full_filename).lower()
+                            
+                            # Normalize both sides for better matching
+                            download_title_lower = download_item.title.lower()
+                            basename_lower = basename.lower()
+                            
+                            # Try multiple matching strategies for better accuracy
+                            matches = False
+                            match_reason = ""
+                            
+                            # Strategy 1: Direct filename match (most reliable)
+                            if basename_lower == download_title_lower + '.mp3' or basename_lower == download_title_lower + '.flac':
+                                matches = True
+                                match_reason = f"direct filename match '{download_title_lower}' == '{basename_lower}'"
+                            
+                            # Strategy 2: Match track title in the actual filename
+                            elif download_title_lower in basename_lower:
+                                matches = True
+                                match_reason = f"track title '{download_title_lower}' in filename '{basename_lower}'"
+                            
+                            # Strategy 3: For album tracks, try to match by removing common prefixes
+                            elif ' - ' in download_item.title:
+                                # Extract just the song title part (e.g., "DAMN. - 01 - BLOOD" -> "BLOOD")
+                                title_parts = download_item.title.split(' - ')
+                                if len(title_parts) >= 3:  # Format: "Album - TrackNum - Title"
+                                    song_title = title_parts[-1].strip().lower()
+                                    if song_title in basename_lower and len(song_title) > 2:  # Avoid matching very short titles
+                                        matches = True
+                                        match_reason = f"extracted song title '{song_title}' in filename '{basename_lower}'"
+                            
+                            # Strategy 3.5: Core track name matching (remove parenthetical content)
+                            elif '(' in download_item.title and ')' in download_item.title:
+                                # Extract core track name by removing parenthetical content like "(Original Mix)"
+                                import re
+                                core_title = re.sub(r'\([^)]*\)', '', download_item.title).strip()
+                                core_title_lower = core_title.lower()
+                                
+                                if core_title_lower and len(core_title_lower) > 2:
+                                    # Check if core title words (excluding common terms) are in filename
+                                    common_music_terms = {'original', 'mix', 'remix', 'extended', 'radio', 'edit', 'version', 'album', 'single', 'feat', 'featuring'}
+                                    core_words = [w.lower() for w in core_title.split() if len(w) >= 4 and w.lower() not in common_music_terms]
+                                    
+                                    if core_words:
+                                        matching_core_words = [w for w in core_words if w in basename_lower]
+                                        if len(matching_core_words) >= min(2, len(core_words)):  # At least 2 unique words
+                                            matches = True
+                                            match_reason = f"core track name match: {matching_core_words} from '{core_title}' in '{basename_lower}'"
+                            
+                            # Strategy 4: Improved word matching (exclude common music terms)
+                            elif any(word.lower() in basename_lower for word in download_item.title.split() if len(word) >= 4):
+                                # Define common music terms to exclude from matching
+                                common_music_terms = {'original', 'mix', 'remix', 'extended', 'radio', 'edit', 'version', 'album', 'single', 'feat', 'featuring'}
+                                
+                                # Get meaningful words (longer, not common music terms)
+                                title_words = [w.lower() for w in download_item.title.split() 
+                                             if len(w) >= 4 and w.lower() not in common_music_terms]
+                                matching_words = [w for w in title_words if w in basename_lower]
+                                
+                                # Require at least 3 unique meaningful words for a match (stricter than before)
+                                if len(matching_words) >= min(3, len(title_words)) and len(matching_words) >= 2:
+                                    matches = True
+                                    match_reason = f"meaningful words match: {matching_words} in '{basename_lower}' (excluded common terms)"
+                            
+                            # Strategy 5: Match by download_item's stored file_path if available
+                            elif download_item.file_path:
+                                stored_filename = os.path.basename(download_item.file_path).lower()
+                                if stored_filename == basename_lower:
+                                    matches = True
+                                    match_reason = f"exact filename match '{stored_filename}'"
+                            
+                            if matches:
                                 matching_transfer = transfer
-                                print(f"[DEBUG] ✅ Found filename match: '{download_item.title}' or '{download_item.artist}' in '{transfer_filename}'")
+                                print(f"[DEBUG] ✅ Found filename match: {match_reason}")
                                 break
                             else:
-                                print(f"[DEBUG] ❌ No match: '{download_item.title}' or '{download_item.artist}' not in '{transfer_filename[:100]}...'")
+                                print(f"[DEBUG] ❌ No match: download_title='{download_title_lower}' vs filename='{basename_lower}'")
                         
                         if not matching_transfer:
-                            print(f"[DEBUG] ⚠️ No matching transfer found for '{download_item.title}' by '{download_item.artist}'")
+                            print(f"[DEBUG] ⚠️ No matching transfer found for download_title='{download_item.title}' by artist='{download_item.artist}'")
                     
                     if matching_transfer:
                         # Extract progress information
@@ -3982,9 +4458,18 @@ class DownloadsPage(QWidget):
                             file_path=matching_transfer.get('filename', download_item.file_path)
                         )
                         
+                        # Update UI feedback for album track buttons if applicable
+                        self.update_album_track_button_states(download_item, new_status)
+                        
                         # Store/update the download ID for future matching
-                        if not download_item.download_id:
-                            download_item.download_id = matching_transfer.get('id', '')
+                        transfer_id = matching_transfer.get('id', '')
+                        if transfer_id and not download_item.download_id:
+                            download_item.download_id = transfer_id
+                            print(f"[DEBUG] Stored download ID for '{download_item.title}': {transfer_id}")
+                        elif transfer_id and download_item.download_id != transfer_id:
+                            # Update if we found a different/better ID
+                            print(f"[DEBUG] Updated download ID for '{download_item.title}': {download_item.download_id} -> {transfer_id}")
+                            download_item.download_id = transfer_id
                     
                     # (Matching transfer not found - debug message already printed above)
                 
