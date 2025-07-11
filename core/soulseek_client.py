@@ -663,9 +663,19 @@ class SoulseekClient:
             
             try:
                 response = await self._make_request('POST', endpoint, json=download_data)
-                if response is not None:  # 201 Created returns empty dict {} but status 201
+                if response is not None:  # 201 Created might return download info
                     logger.info(f"[SUCCESS] Started download: {filename} from {username}")
-                    return filename
+                    # Try to extract download ID from response if available
+                    if isinstance(response, dict) and 'id' in response:
+                        logger.debug(f"Got download ID from response: {response['id']}")
+                        return response['id']
+                    elif isinstance(response, list) and len(response) > 0 and 'id' in response[0]:
+                        logger.debug(f"Got download ID from response list: {response[0]['id']}")
+                        return response[0]['id']
+                    else:
+                        # Fallback to filename if no ID in response
+                        logger.debug(f"No ID in response, using filename as fallback: {response}")
+                        return filename
                 else:
                     logger.debug(f"Web interface endpoint returned no response")
                     
@@ -690,7 +700,17 @@ class SoulseekClient:
                     response = await self._make_request('POST', endpoint, json=download_data)
                     if response is not None:
                         logger.info(f"[SUCCESS] Started download: {filename} from {username} using endpoint: {endpoint}")
-                        return filename
+                        # Try to extract download ID from response if available
+                        if isinstance(response, dict) and 'id' in response:
+                            logger.debug(f"Got download ID from response: {response['id']}")
+                            return response['id']
+                        elif isinstance(response, list) and len(response) > 0 and 'id' in response[0]:
+                            logger.debug(f"Got download ID from response list: {response[0]['id']}")
+                            return response[0]['id']
+                        else:
+                            # Fallback to filename if no ID in response
+                            logger.debug(f"No ID in response, using filename as fallback: {response}")
+                            return filename
                     else:
                         logger.debug(f"Endpoint {endpoint} returned no response")
                         
@@ -716,7 +736,17 @@ class SoulseekClient:
                     response = await self._make_request('POST', endpoint, json=fallback_data)
                     if response is not None:
                         logger.info(f"[SUCCESS] Started download: {filename} from {username} using fallback endpoint: {endpoint}")
-                        return filename
+                        # Try to extract download ID from response if available
+                        if isinstance(response, dict) and 'id' in response:
+                            logger.debug(f"Got download ID from response: {response['id']}")
+                            return response['id']
+                        elif isinstance(response, list) and len(response) > 0 and 'id' in response[0]:
+                            logger.debug(f"Got download ID from response list: {response[0]['id']}")
+                            return response[0]['id']
+                        else:
+                            # Fallback to filename if no ID in response
+                            logger.debug(f"No ID in response, using filename as fallback: {response}")
+                            return filename
                     else:
                         logger.debug(f"Fallback endpoint {endpoint} returned no response")
                         
