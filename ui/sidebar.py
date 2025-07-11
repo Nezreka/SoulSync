@@ -173,19 +173,27 @@ class MediaPlayer(QWidget):
         self.setup_ui()
     
     def setup_ui(self):
-        self.setFixedHeight(60)  # Start collapsed
+        self.setFixedHeight(65)  # Start collapsed with more breathing room
         self.setStyleSheet("""
             MediaPlayer {
-                background: #181818;
-                border: 1px solid #282828;
-                border-radius: 8px;
-                margin: 0 8px;
+                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                                          stop: 0 #1e1e1e,
+                                          stop: 1 #141414);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 12px;
+                margin: 0 6px;
+            }
+            MediaPlayer:hover {
+                border: 1px solid rgba(255, 255, 255, 0.12);
+                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                                          stop: 0 #212121,
+                                          stop: 1 #171717);
             }
         """)
         
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(15, 8, 15, 8)
-        layout.setSpacing(8)
+        layout.setContentsMargins(16, 10, 16, 10)
+        layout.setSpacing(10)
         
         # Always visible header with basic controls
         self.header = self.create_header()
@@ -199,7 +207,16 @@ class MediaPlayer(QWidget):
         # No track message (shown when no music)
         self.no_track_label = QLabel("No track playing")
         self.no_track_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.no_track_label.setStyleSheet("color: #666666; font-size: 11px; padding: 10px;")
+        self.no_track_label.setStyleSheet("""
+            QLabel {
+                color: #6a6a6a;
+                font-size: 11px;
+                font-weight: 400;
+                padding: 12px;
+                background: transparent;
+                letter-spacing: 0.5px;
+            }
+        """)
         layout.addWidget(self.no_track_label)
     
     def create_header(self):
@@ -213,36 +230,51 @@ class MediaPlayer(QWidget):
         self.track_info.setStyleSheet("""
             QLabel {
                 color: #ffffff;
-                font-size: 12px;
-                font-weight: 500;
+                font-size: 13px;
+                font-weight: 600;
                 background: transparent;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                letter-spacing: 0.2px;
+                padding: 2px 0px;
+            }
+            QLabel:hover {
+                color: #1ed760;
             }
         """)
         self.track_info.setCursor(Qt.CursorShape.PointingHandCursor)
         self.track_info.mousePressEvent = self.toggle_expansion
         
         # Play/pause button
-        self.play_pause_btn = QPushButton("▶️")
-        self.play_pause_btn.setFixedSize(32, 32)
+        self.play_pause_btn = QPushButton("▶")
+        self.play_pause_btn.setFixedSize(36, 36)
         self.play_pause_btn.setStyleSheet("""
             QPushButton {
-                background: rgba(29, 185, 84, 0.2);
-                border: 1px solid #1db954;
-                border-radius: 16px;
-                color: #1db954;
-                font-size: 12px;
-                font-weight: bold;
+                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                                          stop: 0 #1ed760,
+                                          stop: 1 #1db954);
+                border: none;
+                border-radius: 18px;
+                color: #000000;
+                font-size: 14px;
+                font-weight: 900;
+                font-family: Arial, sans-serif;
             }
             QPushButton:hover {
-                background: rgba(29, 185, 84, 0.3);
-                transform: scale(1.05);
+                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                                          stop: 0 #1fdf64,
+                                          stop: 1 #1ed760);
+                transform: scale(1.06);
             }
             QPushButton:pressed {
-                background: rgba(29, 185, 84, 0.4);
+                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                                          stop: 0 #1ca851,
+                                          stop: 1 #169c46);
+                transform: scale(0.98);
             }
             QPushButton:disabled {
-                background: rgba(100, 100, 100, 0.2);
-                border: 1px solid #666666;
+                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                                          stop: 0 #404040,
+                                          stop: 1 #2a2a2a);
                 color: #666666;
             }
         """)
@@ -265,9 +297,13 @@ class MediaPlayer(QWidget):
         self.artist_album_label = QLabel("Unknown Artist • Unknown Album")
         self.artist_album_label.setStyleSheet("""
             QLabel {
-                color: #b3b3b3;
-                font-size: 10px;
+                color: #a7a7a7;
+                font-size: 11px;
+                font-weight: 400;
                 background: transparent;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                letter-spacing: 0.3px;
+                margin-top: 2px;
             }
         """)
         layout.addWidget(self.artist_album_label)
@@ -278,22 +314,36 @@ class MediaPlayer(QWidget):
         controls_layout.setSpacing(10)
         
         # Stop button
-        self.stop_btn = QPushButton("⏹️")
-        self.stop_btn.setFixedSize(24, 24)
+        self.stop_btn = QPushButton("⏹")
+        self.stop_btn.setFixedSize(28, 28)
         self.stop_btn.setStyleSheet("""
             QPushButton {
-                background: rgba(226, 33, 52, 0.2);
-                border: 1px solid #e22134;
-                border-radius: 12px;
+                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                                          stop: 0 rgba(226, 33, 52, 0.15),
+                                          stop: 1 rgba(180, 28, 42, 0.15));
+                border: 1px solid rgba(226, 33, 52, 0.3);
+                border-radius: 14px;
                 color: #e22134;
-                font-size: 10px;
+                font-size: 11px;
+                font-weight: 700;
+                font-family: Arial, sans-serif;
             }
             QPushButton:hover {
-                background: rgba(226, 33, 52, 0.3);
+                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                                          stop: 0 rgba(226, 33, 52, 0.25),
+                                          stop: 1 rgba(180, 28, 42, 0.25));
+                border: 1px solid rgba(226, 33, 52, 0.5);
+                transform: scale(1.05);
+            }
+            QPushButton:pressed {
+                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                                          stop: 0 rgba(180, 28, 42, 0.3),
+                                          stop: 1 rgba(150, 23, 35, 0.3));
+                transform: scale(0.95);
             }
             QPushButton:disabled {
-                background: rgba(100, 100, 100, 0.2);
-                border: 1px solid #666666;
+                background: rgba(100, 100, 100, 0.1);
+                border: 1px solid rgba(100, 100, 100, 0.2);
                 color: #666666;
             }
         """)
@@ -302,33 +352,54 @@ class MediaPlayer(QWidget):
         
         # Volume control
         volume_layout = QHBoxLayout()
-        volume_layout.setSpacing(5)
+        volume_layout.setSpacing(8)
         
-        volume_icon = QLabel("🔊")
-        volume_icon.setStyleSheet("color: #b3b3b3; font-size: 10px;")
+        volume_icon = QLabel("♪")
+        volume_icon.setStyleSheet("""
+            QLabel {
+                color: #a7a7a7;
+                font-size: 12px;
+                font-weight: 600;
+                font-family: Arial, sans-serif;
+                padding: 0px 2px;
+            }
+        """)
         
         self.volume_slider = QSlider(Qt.Orientation.Horizontal)
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setValue(70)  # Default 70% volume
-        self.volume_slider.setFixedWidth(60)
+        self.volume_slider.setFixedWidth(65)
         self.volume_slider.setStyleSheet("""
             QSlider::groove:horizontal {
                 border: none;
-                height: 3px;
-                background: #404040;
-                border-radius: 1px;
+                height: 4px;
+                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0,
+                                          stop: 0 #383838,
+                                          stop: 1 #2a2a2a);
+                border-radius: 2px;
             }
             QSlider::handle:horizontal {
-                background: #b3b3b3;
-                border: none;
-                width: 8px;
-                height: 8px;
-                border-radius: 4px;
-                margin: -3px 0;
+                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                                          stop: 0 #ffffff,
+                                          stop: 1 #e0e0e0);
+                border: 1px solid rgba(255, 255, 255, 0.3);
+                width: 12px;
+                height: 12px;
+                border-radius: 6px;
+                margin: -4px 0;
+            }
+            QSlider::handle:horizontal:hover {
+                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                                          stop: 0 #1ed760,
+                                          stop: 1 #1db954);
+                border: 1px solid rgba(30, 215, 96, 0.5);
+                transform: scale(1.1);
             }
             QSlider::sub-page:horizontal {
-                background: #b3b3b3;
-                border-radius: 1px;
+                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0,
+                                          stop: 0 #1ed760,
+                                          stop: 1 #1db954);
+                border-radius: 2px;
             }
         """)
         self.volume_slider.valueChanged.connect(self.on_volume_changed)
@@ -352,11 +423,11 @@ class MediaPlayer(QWidget):
         self.is_expanded = not self.is_expanded
         
         if self.is_expanded:
-            self.setFixedHeight(120)
+            self.setFixedHeight(125)  # Slightly taller for better spacing
             self.expanded_content.setVisible(True)
             self.no_track_label.setVisible(False)
         else:
-            self.setFixedHeight(60)
+            self.setFixedHeight(65)  # Match the updated collapsed height
             self.expanded_content.setVisible(False)
     
     def set_track_info(self, track_result):
@@ -392,9 +463,9 @@ class MediaPlayer(QWidget):
         """Update play/pause button state"""
         self.is_playing = playing
         if playing:
-            self.play_pause_btn.setText("⏸️")
+            self.play_pause_btn.setText("⏸")
         else:
-            self.play_pause_btn.setText("▶️")
+            self.play_pause_btn.setText("▶")
     
     def clear_track(self):
         """Clear current track and reset to no track state"""
@@ -404,7 +475,7 @@ class MediaPlayer(QWidget):
         # Update UI
         self.track_info.setText("No track")
         self.artist_album_label.setText("Unknown Artist • Unknown Album")
-        self.play_pause_btn.setText("▶️")
+        self.play_pause_btn.setText("▶")
         self.play_pause_btn.setEnabled(False)
         self.stop_btn.setEnabled(False)
         

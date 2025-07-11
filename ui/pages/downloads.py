@@ -3097,22 +3097,35 @@ class DownloadsPage(QWidget):
             current_track_id = getattr(self, 'current_track_id', None)
             new_track_id = f"{search_result.username}:{search_result.filename}"
             
+            print(f"🎮 start_stream() called for: {search_result.filename}")
+            print(f"🎮 Current track ID: {current_track_id}")
+            print(f"🎮 New track ID: {new_track_id}")
+            print(f"🎮 Currently playing button: {self.currently_playing_button}")
+            print(f"🎮 Result item: {result_item}")
+            print(f"🎮 Button match: {self.currently_playing_button == result_item}")
+            print(f"🎮 Track ID match: {current_track_id == new_track_id}")
+            
             if current_track_id == new_track_id and self.currently_playing_button == result_item:
                 # Same track clicked - toggle playback
-                print(f"Toggling playback for: {search_result.filename}")
+                print(f"🔄 Toggling playback for: {search_result.filename}")
                 
-                if self.audio_player.toggle_playback():
+                toggle_result = self.audio_player.toggle_playback()
+                print(f"🔄 toggle_playback() returned: {toggle_result}")
+                
+                if toggle_result:
                     # Now playing
                     result_item.set_playing_state()
                     self.track_resumed.emit()
-                    print("🎵 Resumed playback")
+                    print("🎵 Song card: Resumed playback")
                 else:
                     # Now paused
                     result_item.set_loading_state()  # Use loading as "paused" state
                     self.track_paused.emit()
-                    print("⏸️ Paused playback")
+                    print("⏸️ Song card: Paused playback")
                 
                 return
+            else:
+                print(f"🆕 Different track or button - starting new stream")
             
             print(f"Starting stream: {search_result.filename} from {search_result.username}")
             
