@@ -1964,7 +1964,7 @@ class DownloadQueue(QFrame):
         self.download_items = []
         
         # Add initial message when queue is empty
-        self.empty_message = QLabel("No downloads yet. Start downloading music to see them here!")
+        self.empty_message = QLabel("No downloads yet.")
         self.empty_message.setFont(QFont("Arial", 10))
         self.empty_message.setStyleSheet("color: rgba(255, 255, 255, 0.5); padding: 15px; text-align: center;")
         self.empty_message.setAlignment(Qt.AlignmentFlag.AlignCenter)
