@@ -26,10 +26,16 @@ class AudioPlayer(QMediaPlayer):
         # Connect signals
         self.mediaStatusChanged.connect(self._on_media_status_changed)
         self.errorOccurred.connect(self._on_error_occurred)
+        self.playbackStateChanged.connect(self._on_playback_state_changed)
         
         # Track current file
         self.current_file_path = None
         self.is_playing = False
+    
+    def _on_playback_state_changed(self, state):
+        """Keep is_playing flag synchronized with actual playback state"""
+        from PyQt6.QtMultimedia import QMediaPlayer
+        self.is_playing = (state == QMediaPlayer.PlaybackState.PlayingState)
     
     def play_file(self, file_path):
         """Play an audio file from the given path"""
@@ -47,7 +53,7 @@ class AudioPlayer(QMediaPlayer):
             
             # Start playback
             self.play()
-            self.is_playing = True
+            # is_playing will be set automatically by _on_playback_state_changed
             
             print(f"🎵 Started playing: {os.path.basename(file_path)}")
             return True
@@ -62,36 +68,42 @@ class AudioPlayer(QMediaPlayer):
         """Toggle between play and pause"""
         if self.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
             self.pause()
-            self.is_playing = False
+            # is_playing will be set automatically by _on_playback_state_changed
             return False  # Now paused
         else:
             self.play()
-            self.is_playing = True
+            # is_playing will be set automatically by _on_playback_state_changed
             return True   # Now playing
     
     def stop_playback(self):
         """Stop playback and reset"""
         self.stop()
-        self.is_playing = False
+        # is_playing will be set automatically by _on_playback_state_changed
+        self.release_file()
+    
+    def release_file(self):
+        """Release the current file handle by clearing the media source"""
+        self.setSource(QUrl())  # Clear the media source to release file handle
         self.current_file_path = None
+        print("🔓 Released audio file handle")
     
     def _on_media_status_changed(self, status):
         """Handle media status changes"""
         if status == QMediaPlayer.MediaStatus.EndOfMedia:
             print("🎵 Playback finished")
-            self.is_playing = False
+            # is_playing will be set automatically by _on_playback_state_changed
             self.playback_finished.emit()
         elif status == QMediaPlayer.MediaStatus.InvalidMedia:
             error_msg = "Invalid media file or unsupported format"
             print(f"❌ {error_msg}")
-            self.is_playing = False
+            # is_playing will be set automatically by _on_playback_state_changed
             self.playback_error.emit(error_msg)
     
     def _on_error_occurred(self, error, error_string):
         """Handle playback errors"""
         error_msg = f"Audio playback error: {error_string}"
         print(f"❌ {error_msg}")
-        self.is_playing = False
+        # is_playing will be set automatically by _on_playback_state_changed
         self.playback_error.emit(error_msg)
 
 class DownloadThread(QThread):
@@ -2099,6 +2111,14 @@ class TabbedDownloadManager(QTabWidget):
         return self.active_queue.download_items
 
 class DownloadsPage(QWidget):
+    # Signals for media player communication
+    track_started = pyqtSignal(object)  # Track result object
+    track_paused = pyqtSignal()
+    track_resumed = pyqtSignal() 
+    track_stopped = pyqtSignal()
+    track_finished = pyqtSignal()
+    track_position_updated = pyqtSignal(float, float)  # current_position, duration in seconds
+    
     def __init__(self, soulseek_client=None, parent=None):
         super().__init__(parent)
         self.soulseek_client = soulseek_client
@@ -3045,17 +3065,43 @@ class DownloadsPage(QWidget):
             print(f"Failed to start album download: {str(e)}")
     
     def start_stream(self, search_result, result_item=None):
-        """Start streaming a search result using StreamingThread"""
+        """Start streaming a search result using StreamingThread or toggle if same track"""
         try:
+            # Check if this is the same track that's currently playing
+            current_track_id = getattr(self, 'current_track_id', None)
+            new_track_id = f"{search_result.username}:{search_result.filename}"
+            
+            if current_track_id == new_track_id and self.currently_playing_button == result_item:
+                # Same track clicked - toggle playback
+                print(f"Toggling playback for: {search_result.filename}")
+                
+                if self.audio_player.toggle_playback():
+                    # Now playing
+                    result_item.set_playing_state()
+                    self.track_resumed.emit()
+                    print("🎵 Resumed playback")
+                else:
+                    # Now paused
+                    result_item.set_loading_state()  # Use loading as "paused" state
+                    self.track_paused.emit()
+                    print("⏸️ Paused playback")
+                
+                return
+            
             print(f"Starting stream: {search_result.filename} from {search_result.username}")
             
-            # Stop any currently playing audio and reset previous button
+            # Different track - stop current and start new
             if self.currently_playing_button:
                 self.audio_player.stop_playback()
                 self.currently_playing_button.reset_play_state()
             
-            # Track the new currently playing button
+            # Track the new currently playing button and track
             self.currently_playing_button = result_item
+            self.current_track_id = new_track_id
+            self.current_track_result = search_result
+            
+            # Clear Stream folder before starting new stream
+            self.clear_stream_folder()
             
             # Check if file is a valid audio type
             audio_extensions = ['.mp3', '.flac', '.ogg', '.aac', '.wma', '.wav']
@@ -3128,6 +3174,9 @@ class DownloadsPage(QWidget):
                     # Set button to playing state
                     if self.currently_playing_button:
                         self.currently_playing_button.set_playing_state()
+                    # Emit track started signal for sidebar media player
+                    if hasattr(self, 'current_track_result') and self.current_track_result:
+                        self.track_started.emit(self.current_track_result)
                 else:
                     print(f"❌ Failed to start audio playback")
                     # Reset button on failure
@@ -3189,6 +3238,16 @@ class DownloadsPage(QWidget):
         if self.currently_playing_button:
             self.currently_playing_button.reset_play_state()
             self.currently_playing_button = None
+        
+        # Emit track finished signal for sidebar media player
+        self.track_finished.emit()
+        
+        # Clear Stream folder when playback finishes
+        self.clear_stream_folder()
+        
+        # Clear track state
+        self.current_track_id = None
+        self.current_track_result = None
     
     def on_audio_playback_error(self, error_msg):
         """Handle audio playback errors"""
@@ -3197,6 +3256,83 @@ class DownloadsPage(QWidget):
         if self.currently_playing_button:
             self.currently_playing_button.reset_play_state()
             self.currently_playing_button = None
+        
+        # Emit track stopped signal for sidebar media player
+        self.track_stopped.emit()
+        
+        # Clear Stream folder when playback errors
+        self.clear_stream_folder()
+        
+        # Clear track state
+        self.current_track_id = None
+        self.current_track_result = None
+    
+    def handle_sidebar_play_pause(self):
+        """Handle play/pause request from sidebar media player"""
+        # Use the actual QMediaPlayer state instead of manual flag
+        from PyQt6.QtMultimedia import QMediaPlayer
+        
+        if self.audio_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            self.audio_player.pause()
+            # is_playing will be set automatically by _on_playback_state_changed
+            if self.currently_playing_button:
+                self.currently_playing_button.set_loading_state()  # Use as "paused" state
+            self.track_paused.emit()
+            print("⏸️ Paused from sidebar")
+        else:
+            self.audio_player.play()
+            # is_playing will be set automatically by _on_playback_state_changed
+            if self.currently_playing_button:
+                self.currently_playing_button.set_playing_state()
+            self.track_resumed.emit()
+            print("🎵 Resumed from sidebar")
+    
+    def handle_sidebar_stop(self):
+        """Handle stop request from sidebar media player"""
+        self.audio_player.stop_playback()
+        if self.currently_playing_button:
+            self.currently_playing_button.reset_play_state()
+            self.currently_playing_button = None
+        
+        # Emit track stopped signal
+        self.track_stopped.emit()
+        
+        # Clear Stream folder when stopping
+        self.clear_stream_folder()
+        
+        # Clear track state
+        self.current_track_id = None
+        self.current_track_result = None
+        print("⏹️ Stopped from sidebar")
+    
+    def handle_sidebar_volume(self, volume):
+        """Handle volume change from sidebar media player"""
+        self.audio_player.audio_output.setVolume(volume)
+        print(f"🔊 Volume set to {int(volume * 100)}% from sidebar")
+    
+    def clear_stream_folder(self):
+        """Clear all files from the Stream folder to prevent playing wrong files"""
+        try:
+            # First, release any file handles from the audio player
+            if hasattr(self, 'audio_player') and self.audio_player:
+                self.audio_player.release_file()
+                print("🔓 Released audio player file handle before clearing")
+            
+            project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))  # Go up from ui/pages/
+            stream_folder = os.path.join(project_root, 'Stream')
+            
+            if os.path.exists(stream_folder):
+                for filename in os.listdir(stream_folder):
+                    file_path = os.path.join(stream_folder, filename)
+                    if os.path.isfile(file_path):
+                        try:
+                            os.remove(file_path)
+                            print(f"🗑️ Cleared old stream file: {filename}")
+                        except Exception as e:
+                            print(f"⚠️ Could not remove stream file {filename}: {e}")
+                    
+        except Exception as e:
+            print(f"⚠️ Error clearing stream folder: {e}")
     
     def on_download_completed(self, message, download_item):
         """Handle successful download start"""

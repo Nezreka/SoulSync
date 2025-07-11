@@ -114,6 +114,9 @@ class MainWindow(QMainWindow):
         
         # Set dashboard as default page
         self.change_page("dashboard")
+        
+        # Connect media player signals between sidebar and downloads page
+        self.setup_media_player_connections()
     
     def setup_status_monitoring(self):
         # Start status monitoring thread
@@ -124,6 +127,22 @@ class MainWindow(QMainWindow):
         )
         self.status_thread.status_updated.connect(self.update_service_status)
         self.status_thread.start()
+    
+    def setup_media_player_connections(self):
+        """Connect signals between downloads page and sidebar media player"""
+        # Connect downloads page signals to sidebar media player
+        self.downloads_page.track_started.connect(self.sidebar.media_player.set_track_info)
+        self.downloads_page.track_paused.connect(lambda: self.sidebar.media_player.set_playing_state(False))
+        self.downloads_page.track_resumed.connect(lambda: self.sidebar.media_player.set_playing_state(True))
+        self.downloads_page.track_stopped.connect(self.sidebar.media_player.clear_track)
+        self.downloads_page.track_finished.connect(self.sidebar.media_player.clear_track)
+        
+        # Connect sidebar media player signals to downloads page
+        self.sidebar.media_player.play_pause_requested.connect(self.downloads_page.handle_sidebar_play_pause)
+        self.sidebar.media_player.stop_requested.connect(self.downloads_page.handle_sidebar_stop)
+        self.sidebar.media_player.volume_changed.connect(self.downloads_page.handle_sidebar_volume)
+        
+        logger.info("Media player connections established between sidebar and downloads page")
     
     def change_page(self, page_id: str):
         page_map = {
