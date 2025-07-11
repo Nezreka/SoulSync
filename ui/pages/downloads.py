@@ -2154,6 +2154,7 @@ class DownloadsPage(QWidget):
         self.download_threads = []  # Track active download threads
         self.status_update_threads = []  # Track status update threads (CRITICAL FIX)
         self.search_results = []
+        self.current_filtered_results = []  # Cache for filtered results based on active filter
         self.download_items = []  # Track download items for the queue
         self.displayed_results = 0  # Track how many results are currently displayed
         self.results_per_page = 15  # Show 15 results at a time
@@ -2601,6 +2602,9 @@ class DownloadsPage(QWidget):
         else:
             filtered_results = self._temp_albums + self._temp_tracks
         
+        # Update the filtered results cache for pagination
+        self.current_filtered_results = filtered_results
+        
         # Clear current display
         self.clear_search_results()
         self.displayed_results = 0
@@ -3034,6 +3038,19 @@ class DownloadsPage(QWidget):
         self._temp_albums = albums.copy()  # Replace with full updated list
         self._temp_search_results = combined_results.copy()
         
+        # Update filtered results cache to match current filter
+        if hasattr(self, 'current_filter'):
+            if self.current_filter == "all":
+                self.current_filtered_results = combined_results.copy()
+            elif self.current_filter == "albums":
+                self.current_filtered_results = albums.copy()
+            elif self.current_filter == "singles":
+                self.current_filtered_results = tracks.copy()
+            else:
+                self.current_filtered_results = combined_results.copy()
+        else:
+            self.current_filtered_results = combined_results.copy()
+        
         # Clear existing results and display the updated complete set
         # This ensures proper sorting and no duplicates
         self.clear_search_results()
@@ -3072,8 +3089,19 @@ class DownloadsPage(QWidget):
         
         self.displayed_results = len(results_to_show)
         
-        # Update status message with real-time feedback
+        # Show filter controls during live search when we have meaningful results
         total_results = len(tracks) + len(albums)
+        should_show_filters = (
+            # Show if we have both albums and tracks (diverse results)
+            (len(albums) > 0 and len(tracks) > 0) or
+            # Or if we have enough results to make filtering useful
+            total_results >= 5
+        )
+        
+        if should_show_filters and not self.filter_container.isVisible():
+            self.filter_container.setVisible(True)
+        
+        # Update status message with real-time feedback
         if self.displayed_results < self.results_per_page:
             self.update_search_status(f"✨ Found {total_results} results ({len(tracks)} tracks, {len(albums)} albums) from {response_count} users • Live updating...", "#1db954")
         else:
@@ -3100,6 +3128,7 @@ class DownloadsPage(QWidget):
         
         # Store final results
         self.search_results = combined_results
+        self.current_filtered_results = combined_results  # Initialize with all results
         self.track_results = tracks
         self.album_results = albums
         
@@ -3153,7 +3182,7 @@ class DownloadsPage(QWidget):
     
     def on_scroll_changed(self, value):
         """Handle scroll changes to implement lazy loading"""
-        if self.is_loading_more or not self.search_results:
+        if self.is_loading_more or not self.current_filtered_results:
             return
         
         scroll_bar = self.search_results_scroll.verticalScrollBar()
@@ -3162,26 +3191,26 @@ class DownloadsPage(QWidget):
         if scroll_bar.maximum() > 0:
             scroll_percentage = value / scroll_bar.maximum()
             
-            if scroll_percentage >= 0.9 and self.displayed_results < len(self.search_results):
+            if scroll_percentage >= 0.9 and self.displayed_results < len(self.current_filtered_results):
                 self.load_more_results()
     
     def load_more_results(self):
-        """Load the next batch of search results"""
-        if self.is_loading_more or not self.search_results:
+        """Load the next batch of search results (respecting current filter)"""
+        if self.is_loading_more or not self.current_filtered_results:
             return
         
         self.is_loading_more = True
         
-        # Calculate how many more results to show
+        # Calculate how many more results to show from filtered results
         start_index = self.displayed_results
-        end_index = min(start_index + self.results_per_page, len(self.search_results))
+        end_index = min(start_index + self.results_per_page, len(self.current_filtered_results))
         
         # Temporarily disable layout updates for smoother batch loading
         self.search_results_widget.setUpdatesEnabled(False)
         
-        # Add result items to UI
+        # Add result items to UI from filtered results
         for i in range(start_index, end_index):
-            result = self.search_results[i]
+            result = self.current_filtered_results[i]
             
             # Create appropriate UI component based on result type
             if isinstance(result, AlbumResult):
@@ -3212,13 +3241,27 @@ class DownloadsPage(QWidget):
         # Update displayed count
         self.displayed_results = end_index
         
-        # Update status
-        total_results = len(self.search_results)
-        if self.displayed_results >= total_results:
-            self.update_search_status(f"✨ Showing all {total_results} results", "#1db954")
+        # Update status based on filtered results
+        total_filtered = len(self.current_filtered_results)
+        if self.displayed_results >= total_filtered:
+            # Determine filter status text
+            if self.current_filter == "albums":
+                filter_text = "albums"
+            elif self.current_filter == "singles":
+                filter_text = "singles"
+            else:
+                filter_text = "results"
+            self.update_search_status(f"✨ Showing all {total_filtered} {filter_text}", "#1db954")
         else:
-            remaining = total_results - self.displayed_results
-            self.update_search_status(f"✨ Showing {self.displayed_results} of {total_results} results (scroll for {remaining} more)", "#1db954")
+            remaining = total_filtered - self.displayed_results
+            # Determine filter status text
+            if self.current_filter == "albums":
+                filter_text = "albums"
+            elif self.current_filter == "singles":
+                filter_text = "singles"
+            else:
+                filter_text = "results"
+            self.update_search_status(f"✨ Showing {self.displayed_results} of {total_filtered} {filter_text} (scroll for {remaining} more)", "#1db954")
         
         self.is_loading_more = False
     

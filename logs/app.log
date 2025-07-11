@@ -16210,3 +16210,547 @@
 2025-07-11 08:05:16 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 201
 2025-07-11 08:05:16 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: ...
 2025-07-11 08:05:16 - newmusic.soulseek_client - [92mINFO[0m - download:667 - [SUCCESS] Started download: @@itaam\Music\Lonely Island, The\The Wack Album\YOLO (Feat. Adam Lecine & Kendrick Lamar).mp3 from batmaster
+2025-07-11 08:07:44 - newmusic.soulseek_client - [94mDEBUG[0m - download:645 - Attempting to download: @@gqvex\Music\The Game\2011 - R.E.D. Album (Deluxe)\02 The City (Feat. Kendrick Lamar).mp3 from doodledrip (size: 13998183)
+2025-07-11 08:07:44 - newmusic.soulseek_client - [94mDEBUG[0m - download:658 - Using web interface API format: [{'filename': '@@gqvex\\Music\\The Game\\2011 - R.E.D. Album (Deluxe)\\02 The City (Feat. Kendrick Lamar).mp3', 'size': 13998183, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-11 08:07:44 - newmusic.soulseek_client - [94mDEBUG[0m - download:662 - Trying web interface endpoint: transfers/downloads/doodledrip
+2025-07-11 08:07:44 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/transfers/downloads/doodledrip
+2025-07-11 08:07:44 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:07:44 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: [{'filename': '@@gqvex\\Music\\The Game\\2011 - R.E.D. Album (Deluxe)\\02 The City (Feat. Kendrick Lamar).mp3', 'size': 13998183, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-11 08:07:44 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 201
+2025-07-11 08:07:44 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: ...
+2025-07-11 08:07:44 - newmusic.soulseek_client - [92mINFO[0m - download:667 - [SUCCESS] Started download: @@gqvex\Music\The Game\2011 - R.E.D. Album (Deluxe)\02 The City (Feat. Kendrick Lamar).mp3 from doodledrip
+2025-07-11 08:07:59 - newmusic.soulseek_client - [94mDEBUG[0m - download:645 - Attempting to download: music\Mac Miller\2016-09-16 - The Divine Feminine [ALBUM] (FLAC)\01-10 - God Is Fair, Sexy, Nasty feat. Kendrick Lamar (811kbps).flac from bswslskd (size: 51082209)
+2025-07-11 08:07:59 - newmusic.soulseek_client - [94mDEBUG[0m - download:658 - Using web interface API format: [{'filename': 'music\\Mac Miller\\2016-09-16 - The Divine Feminine [ALBUM] (FLAC)\\01-10 - God Is Fair, Sexy, Nasty feat. Kendrick Lamar (811kbps).flac', 'size': 51082209, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-11 08:07:59 - newmusic.soulseek_client - [94mDEBUG[0m - download:662 - Trying web interface endpoint: transfers/downloads/bswslskd
+2025-07-11 08:07:59 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/transfers/downloads/bswslskd
+2025-07-11 08:07:59 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:07:59 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: [{'filename': 'music\\Mac Miller\\2016-09-16 - The Divine Feminine [ALBUM] (FLAC)\\01-10 - God Is Fair, Sexy, Nasty feat. Kendrick Lamar (811kbps).flac', 'size': 51082209, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-11 08:08:00 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 201
+2025-07-11 08:08:00 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: ...
+2025-07-11 08:08:00 - newmusic.soulseek_client - [92mINFO[0m - download:667 - [SUCCESS] Started download: music\Mac Miller\2016-09-16 - The Divine Feminine [ALBUM] (FLAC)\01-10 - God Is Fair, Sexy, Nasty feat. Kendrick Lamar (811kbps).flac from bswslskd
+2025-07-11 08:14:59 - newmusic.main - [92mINFO[0m - closeEvent:171 - Closing application...
+2025-07-11 08:14:59 - newmusic.main - [92mINFO[0m - closeEvent:176 - Cleaning up Downloads page threads...
+2025-07-11 08:14:59 - newmusic.main - [92mINFO[0m - closeEvent:181 - Stopping status monitoring thread...
+2025-07-11 08:14:59 - newmusic.main - [92mINFO[0m - closeEvent:186 - Closing Soulseek client...
+2025-07-11 08:14:59 - newmusic.main - [92mINFO[0m - closeEvent:192 - Application closed successfully
+2025-07-11 08:22:04 - newmusic - [92mINFO[0m - setup_logging:57 - Logging initialized with level: DEBUG
+2025-07-11 08:22:04 - newmusic.main - [92mINFO[0m - main:206 - Starting NewMusic application
+2025-07-11 08:22:05 - newmusic.spotify_client - [92mINFO[0m - _setup_client:84 - Successfully authenticated with Spotify as broquethomas
+2025-07-11 08:22:05 - newmusic.plex_client - [92mINFO[0m - _find_music_library:98 - Found music library: Music
+2025-07-11 08:22:05 - newmusic.plex_client - [92mINFO[0m - _setup_client:84 - Successfully connected to Plex server: PLEX-MACHINE
+2025-07-11 08:22:05 - newmusic.soulseek_client - [92mINFO[0m - _setup_client:220 - Soulseek client configured with slskd at http://localhost:5030
+2025-07-11 08:22:06 - newmusic.main - [92mINFO[0m - change_page:158 - Changed to page: dashboard
+2025-07-11 08:22:06 - newmusic.main - [92mINFO[0m - setup_media_player_connections:145 - Media player connections established between sidebar and downloads page
+2025-07-11 08:22:06 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Aether
+2025-07-11 08:22:06 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Favorite Artists
+2025-07-11 08:22:07 - newmusic.main - [92mINFO[0m - change_page:158 - Changed to page: downloads
+2025-07-11 08:22:09 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Brittnea
+2025-07-11 08:22:10 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Baleigh
+2025-07-11 08:22:11 - newmusic.soulseek_client - [92mINFO[0m - search:551 - Starting search for: 'Virtual Mage'
+2025-07-11 08:22:11 - newmusic.soulseek_client - [94mDEBUG[0m - search:561 - Search data: {'searchText': 'Virtual Mage', 'timeout': 30000, 'filterResponses': True, 'minimumResponseFileCount': 1, 'minimumPeerUploadSpeed': 0}
+2025-07-11 08:22:11 - newmusic.soulseek_client - [94mDEBUG[0m - search:562 - Making POST request to: http://localhost:5030/api/v0/searches
+2025-07-11 08:22:11 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/searches
+2025-07-11 08:22:11 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:22:11 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: {'searchText': 'Virtual Mage', 'timeout': 30000, 'filterResponses': True, 'minimumResponseFileCount': 1, 'minimumPeerUploadSpeed': 0}
+2025-07-11 08:22:11 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Extra Music
+2025-07-11 08:22:11 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:22:11 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: {"fileCount":0,"id":"2928d9ef-8b70-47b6-a862-e11517210ba5","isComplete":false,"lockedFileCount":0,"responseCount":0,"responses":[],"searchText":"Virtual Mage","startedAt":"2025-07-11T15:22:11.5373112Z","state":"InProgress","token":376}...
+2025-07-11 08:22:11 - newmusic.soulseek_client - [92mINFO[0m - search:575 - Search initiated with ID: 2928d9ef-8b70-47b6-a862-e11517210ba5
+2025-07-11 08:22:11 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 1/20) - elapsed: 0.0s
+2025-07-11 08:22:11 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/2928d9ef-8b70-47b6-a862-e11517210ba5/responses
+2025-07-11 08:22:11 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:22:11 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:22:11 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 08:22:12 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Maggi Main
+2025-07-11 08:22:13 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 2/20) - elapsed: 1.5s
+2025-07-11 08:22:13 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/2928d9ef-8b70-47b6-a862-e11517210ba5/responses
+2025-07-11 08:22:13 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:22:13 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:22:13 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 08:22:15 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 3/20) - elapsed: 3.0s
+2025-07-11 08:22:15 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/2928d9ef-8b70-47b6-a862-e11517210ba5/responses
+2025-07-11 08:22:15 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:22:15 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:22:15 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 08:22:16 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 4/20) - elapsed: 4.5s
+2025-07-11 08:22:16 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/2928d9ef-8b70-47b6-a862-e11517210ba5/responses
+2025-07-11 08:22:16 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:22:17 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:22:17 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 08:22:17 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Broque Main
+2025-07-11 08:22:18 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 5/20) - elapsed: 6.0s
+2025-07-11 08:22:18 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/2928d9ef-8b70-47b6-a862-e11517210ba5/responses
+2025-07-11 08:22:18 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:22:18 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:22:18 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 08:22:20 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 6/20) - elapsed: 7.5s
+2025-07-11 08:22:20 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/2928d9ef-8b70-47b6-a862-e11517210ba5/responses
+2025-07-11 08:22:20 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:22:20 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:22:20 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 08:22:22 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 7/20) - elapsed: 9.0s
+2025-07-11 08:22:22 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/2928d9ef-8b70-47b6-a862-e11517210ba5/responses
+2025-07-11 08:22:22 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:22:22 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:22:22 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 08:22:23 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 8/20) - elapsed: 10.5s
+2025-07-11 08:22:23 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/2928d9ef-8b70-47b6-a862-e11517210ba5/responses
+2025-07-11 08:22:23 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:22:24 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:22:24 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 08:22:25 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:113 - Retrieved 7 playlists
+2025-07-11 08:22:25 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 9/20) - elapsed: 12.0s
+2025-07-11 08:22:25 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/2928d9ef-8b70-47b6-a862-e11517210ba5/responses
+2025-07-11 08:22:25 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:22:25 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:22:25 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 08:22:27 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 10/20) - elapsed: 13.5s
+2025-07-11 08:22:27 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/2928d9ef-8b70-47b6-a862-e11517210ba5/responses
+2025-07-11 08:22:27 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:22:27 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:22:27 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 08:22:29 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 11/20) - elapsed: 15.0s
+2025-07-11 08:22:29 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/2928d9ef-8b70-47b6-a862-e11517210ba5/responses
+2025-07-11 08:22:29 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:22:29 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:22:29 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":1,"files":[{"bitRate":128,"code":1,"extension":"","filename":"Shared\\Virtual Mage\\Refraction 1191940288\\Virtual Mage - Virtual Mage.mp3","isVariableBitRate":false,"length":154,"size":2476160,"isLocked":false}],"hasFreeUploadSlot":true,"lockedFileCount":0,"lockedFiles":[],"queueLength":11,"token":376,"uploadSpeed":2435604,"username":"KindaRatchet"},{"fileCount":5,"files":[{"code":1,"extension":"","filename":"TTRPG\\!Assorted Games and Systems\\World Of Darkness (OLD)\\Mage The As...
+2025-07-11 08:22:29 - newmusic.soulseek_client - [92mINFO[0m - search:597 - Found 26 new responses (26 total) at 15.0s
+2025-07-11 08:22:29 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:345 - Processing 26 user responses
+2025-07-11 08:22:29 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User KindaRatchet has 1 files
+2025-07-11 08:22:29 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User drchzbrgr has 5 files
+2025-07-11 08:22:29 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Letham has 3 files
+2025-07-11 08:22:29 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User RuuqoHoosk has 346 files
+2025-07-11 08:22:29 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User zeroscan has 2 files
+2025-07-11 08:22:29 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Ultravod has 9 files
+2025-07-11 08:22:29 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Satani-Vitales has 3 files
+2025-07-11 08:22:29 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User koalabeer has 3 files
+2025-07-11 08:22:29 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User nightmare_dronemk12 has 3 files
+2025-07-11 08:22:29 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User thinkibettergo has 1 files
+2025-07-11 08:22:29 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Dax_VR has 10 files
+2025-07-11 08:22:29 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User belthane has 3 files
+2025-07-11 08:22:29 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Seyti has 10 files
+2025-07-11 08:22:29 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Kaya-Sem has 1 files
+2025-07-11 08:22:29 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User exsanguinidraculae has 2 files
+2025-07-11 08:22:29 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User HomotopicCensorship has 3 files
+2025-07-11 08:22:29 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User FixxAlish has 1 files
+2025-07-11 08:22:29 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User kloud has 1 files
+2025-07-11 08:22:29 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User aajzugikamlzcr has 1 files
+2025-07-11 08:22:29 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User raspberry2 has 10 files
+2025-07-11 08:22:29 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Ahab has 3 files
+2025-07-11 08:22:29 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User ruszok has 1 files
+2025-07-11 08:22:29 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User leonardoclk has 3 files
+2025-07-11 08:22:29 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User ofoijacussa has 0 files
+2025-07-11 08:22:29 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User soulshookt has 3 files
+2025-07-11 08:22:29 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Shooby has 6 files
+2025-07-11 08:22:29 - newmusic.soulseek_client - [92mINFO[0m - _process_search_responses:399 - Found 10 individual tracks and 7 albums
+2025-07-11 08:22:29 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:400 - Album detection details: 17 potential albums processed
+2025-07-11 08:22:29 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:402 - Album: KindaRatchet/Shared/Virtual Mage/Refraction 1191940288 -> 1 tracks
+2025-07-11 08:22:29 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:402 - Album: zeroscan/Music/aofd3/Mallsoft & Shopping Mall Ambience -> 2 tracks
+2025-07-11 08:22:29 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:402 - Album: Ultravod/FLACs/by genre/synthwave/Virtual Mage/Virtual Mage - Aether WEB (2020) -> 1 tracks
+2025-07-11 08:22:29 - newmusic.soulseek_client - [92mINFO[0m - search:617 - Processed results: 10 tracks, 7 albums
+2025-07-11 08:22:31 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 12/20) - elapsed: 16.5s
+2025-07-11 08:22:31 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/2928d9ef-8b70-47b6-a862-e11517210ba5/responses
+2025-07-11 08:22:31 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:22:31 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:22:31 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":1,"files":[{"bitRate":128,"code":1,"extension":"","filename":"Shared\\Virtual Mage\\Refraction 1191940288\\Virtual Mage - Virtual Mage.mp3","isVariableBitRate":false,"length":154,"size":2476160,"isLocked":false}],"hasFreeUploadSlot":true,"lockedFileCount":0,"lockedFiles":[],"queueLength":11,"token":376,"uploadSpeed":2435604,"username":"KindaRatchet"},{"fileCount":5,"files":[{"code":1,"extension":"","filename":"TTRPG\\!Assorted Games and Systems\\World Of Darkness (OLD)\\Mage The As...
+2025-07-11 08:22:31 - newmusic.soulseek_client - [94mDEBUG[0m - search:624 - No new responses, total still: 26
+2025-07-11 08:22:32 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 13/20) - elapsed: 18.0s
+2025-07-11 08:22:32 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/2928d9ef-8b70-47b6-a862-e11517210ba5/responses
+2025-07-11 08:22:32 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:22:33 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:22:33 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":1,"files":[{"bitRate":128,"code":1,"extension":"","filename":"Shared\\Virtual Mage\\Refraction 1191940288\\Virtual Mage - Virtual Mage.mp3","isVariableBitRate":false,"length":154,"size":2476160,"isLocked":false}],"hasFreeUploadSlot":true,"lockedFileCount":0,"lockedFiles":[],"queueLength":11,"token":376,"uploadSpeed":2435604,"username":"KindaRatchet"},{"fileCount":5,"files":[{"code":1,"extension":"","filename":"TTRPG\\!Assorted Games and Systems\\World Of Darkness (OLD)\\Mage The As...
+2025-07-11 08:22:33 - newmusic.soulseek_client - [94mDEBUG[0m - search:624 - No new responses, total still: 26
+2025-07-11 08:22:34 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 14/20) - elapsed: 19.5s
+2025-07-11 08:22:34 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/2928d9ef-8b70-47b6-a862-e11517210ba5/responses
+2025-07-11 08:22:34 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:22:34 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:22:34 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":1,"files":[{"bitRate":128,"code":1,"extension":"","filename":"Shared\\Virtual Mage\\Refraction 1191940288\\Virtual Mage - Virtual Mage.mp3","isVariableBitRate":false,"length":154,"size":2476160,"isLocked":false}],"hasFreeUploadSlot":true,"lockedFileCount":0,"lockedFiles":[],"queueLength":11,"token":376,"uploadSpeed":2435604,"username":"KindaRatchet"},{"fileCount":5,"files":[{"code":1,"extension":"","filename":"TTRPG\\!Assorted Games and Systems\\World Of Darkness (OLD)\\Mage The As...
+2025-07-11 08:22:34 - newmusic.soulseek_client - [94mDEBUG[0m - search:624 - No new responses, total still: 26
+2025-07-11 08:22:36 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 15/20) - elapsed: 21.0s
+2025-07-11 08:22:36 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/2928d9ef-8b70-47b6-a862-e11517210ba5/responses
+2025-07-11 08:22:36 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:22:36 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:22:36 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":1,"files":[{"bitRate":128,"code":1,"extension":"","filename":"Shared\\Virtual Mage\\Refraction 1191940288\\Virtual Mage - Virtual Mage.mp3","isVariableBitRate":false,"length":154,"size":2476160,"isLocked":false}],"hasFreeUploadSlot":true,"lockedFileCount":0,"lockedFiles":[],"queueLength":11,"token":376,"uploadSpeed":2435604,"username":"KindaRatchet"},{"fileCount":5,"files":[{"code":1,"extension":"","filename":"TTRPG\\!Assorted Games and Systems\\World Of Darkness (OLD)\\Mage The As...
+2025-07-11 08:22:36 - newmusic.soulseek_client - [94mDEBUG[0m - search:624 - No new responses, total still: 26
+2025-07-11 08:22:38 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 16/20) - elapsed: 22.5s
+2025-07-11 08:22:38 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/2928d9ef-8b70-47b6-a862-e11517210ba5/responses
+2025-07-11 08:22:38 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:22:38 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:22:38 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":1,"files":[{"bitRate":128,"code":1,"extension":"","filename":"Shared\\Virtual Mage\\Refraction 1191940288\\Virtual Mage - Virtual Mage.mp3","isVariableBitRate":false,"length":154,"size":2476160,"isLocked":false}],"hasFreeUploadSlot":true,"lockedFileCount":0,"lockedFiles":[],"queueLength":11,"token":376,"uploadSpeed":2435604,"username":"KindaRatchet"},{"fileCount":5,"files":[{"code":1,"extension":"","filename":"TTRPG\\!Assorted Games and Systems\\World Of Darkness (OLD)\\Mage The As...
+2025-07-11 08:22:38 - newmusic.soulseek_client - [94mDEBUG[0m - search:624 - No new responses, total still: 26
+2025-07-11 08:22:39 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 17/20) - elapsed: 24.0s
+2025-07-11 08:22:39 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/2928d9ef-8b70-47b6-a862-e11517210ba5/responses
+2025-07-11 08:22:39 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:22:40 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:22:40 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":1,"files":[{"bitRate":128,"code":1,"extension":"","filename":"Shared\\Virtual Mage\\Refraction 1191940288\\Virtual Mage - Virtual Mage.mp3","isVariableBitRate":false,"length":154,"size":2476160,"isLocked":false}],"hasFreeUploadSlot":true,"lockedFileCount":0,"lockedFiles":[],"queueLength":11,"token":376,"uploadSpeed":2435604,"username":"KindaRatchet"},{"fileCount":5,"files":[{"code":1,"extension":"","filename":"TTRPG\\!Assorted Games and Systems\\World Of Darkness (OLD)\\Mage The As...
+2025-07-11 08:22:40 - newmusic.soulseek_client - [94mDEBUG[0m - search:624 - No new responses, total still: 26
+2025-07-11 08:22:41 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 18/20) - elapsed: 25.5s
+2025-07-11 08:22:41 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/2928d9ef-8b70-47b6-a862-e11517210ba5/responses
+2025-07-11 08:22:41 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:22:41 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:22:41 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":1,"files":[{"bitRate":128,"code":1,"extension":"","filename":"Shared\\Virtual Mage\\Refraction 1191940288\\Virtual Mage - Virtual Mage.mp3","isVariableBitRate":false,"length":154,"size":2476160,"isLocked":false}],"hasFreeUploadSlot":true,"lockedFileCount":0,"lockedFiles":[],"queueLength":11,"token":376,"uploadSpeed":2435604,"username":"KindaRatchet"},{"fileCount":5,"files":[{"code":1,"extension":"","filename":"TTRPG\\!Assorted Games and Systems\\World Of Darkness (OLD)\\Mage The As...
+2025-07-11 08:22:41 - newmusic.soulseek_client - [94mDEBUG[0m - search:624 - No new responses, total still: 26
+2025-07-11 08:22:43 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 19/20) - elapsed: 27.0s
+2025-07-11 08:22:43 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/2928d9ef-8b70-47b6-a862-e11517210ba5/responses
+2025-07-11 08:22:43 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:22:43 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:22:43 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":1,"files":[{"bitRate":128,"code":1,"extension":"","filename":"Shared\\Virtual Mage\\Refraction 1191940288\\Virtual Mage - Virtual Mage.mp3","isVariableBitRate":false,"length":154,"size":2476160,"isLocked":false}],"hasFreeUploadSlot":true,"lockedFileCount":0,"lockedFiles":[],"queueLength":11,"token":376,"uploadSpeed":2435604,"username":"KindaRatchet"},{"fileCount":5,"files":[{"code":1,"extension":"","filename":"TTRPG\\!Assorted Games and Systems\\World Of Darkness (OLD)\\Mage The As...
+2025-07-11 08:22:43 - newmusic.soulseek_client - [94mDEBUG[0m - search:624 - No new responses, total still: 26
+2025-07-11 08:22:45 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 20/20) - elapsed: 28.5s
+2025-07-11 08:22:45 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/2928d9ef-8b70-47b6-a862-e11517210ba5/responses
+2025-07-11 08:22:45 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:22:45 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:22:45 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":1,"files":[{"bitRate":128,"code":1,"extension":"","filename":"Shared\\Virtual Mage\\Refraction 1191940288\\Virtual Mage - Virtual Mage.mp3","isVariableBitRate":false,"length":154,"size":2476160,"isLocked":false}],"hasFreeUploadSlot":true,"lockedFileCount":0,"lockedFiles":[],"queueLength":11,"token":376,"uploadSpeed":2435604,"username":"KindaRatchet"},{"fileCount":5,"files":[{"code":1,"extension":"","filename":"TTRPG\\!Assorted Games and Systems\\World Of Darkness (OLD)\\Mage The As...
+2025-07-11 08:22:45 - newmusic.soulseek_client - [94mDEBUG[0m - search:624 - No new responses, total still: 26
+2025-07-11 08:22:45 - newmusic.soulseek_client - [92mINFO[0m - search:632 - Search completed. Final results: 10 tracks and 7 albums for query: Virtual Mage
+2025-07-11 08:51:29 - newmusic.main - [92mINFO[0m - closeEvent:171 - Closing application...
+2025-07-11 08:51:29 - newmusic.main - [92mINFO[0m - closeEvent:176 - Cleaning up Downloads page threads...
+2025-07-11 08:51:29 - newmusic.main - [92mINFO[0m - closeEvent:181 - Stopping status monitoring thread...
+2025-07-11 08:51:31 - newmusic.main - [92mINFO[0m - closeEvent:186 - Closing Soulseek client...
+2025-07-11 08:51:31 - newmusic.main - [92mINFO[0m - closeEvent:192 - Application closed successfully
+2025-07-11 08:51:38 - newmusic - [92mINFO[0m - setup_logging:57 - Logging initialized with level: DEBUG
+2025-07-11 08:51:38 - newmusic.main - [92mINFO[0m - main:206 - Starting NewMusic application
+2025-07-11 08:51:39 - newmusic.spotify_client - [92mINFO[0m - _setup_client:84 - Successfully authenticated with Spotify as broquethomas
+2025-07-11 08:51:39 - newmusic.plex_client - [92mINFO[0m - _find_music_library:98 - Found music library: Music
+2025-07-11 08:51:39 - newmusic.plex_client - [92mINFO[0m - _setup_client:84 - Successfully connected to Plex server: PLEX-MACHINE
+2025-07-11 08:51:39 - newmusic.soulseek_client - [92mINFO[0m - _setup_client:220 - Soulseek client configured with slskd at http://localhost:5030
+2025-07-11 08:51:39 - newmusic.main - [92mINFO[0m - change_page:158 - Changed to page: dashboard
+2025-07-11 08:51:39 - newmusic.main - [92mINFO[0m - setup_media_player_connections:145 - Media player connections established between sidebar and downloads page
+2025-07-11 08:51:40 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Aether
+2025-07-11 08:51:40 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Favorite Artists
+2025-07-11 08:51:43 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Brittnea
+2025-07-11 08:51:44 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Baleigh
+2025-07-11 08:51:45 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Extra Music
+2025-07-11 08:51:46 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Maggi Main
+2025-07-11 08:51:47 - newmusic.main - [92mINFO[0m - change_page:158 - Changed to page: sync
+2025-07-11 08:51:49 - newmusic.main - [92mINFO[0m - change_page:158 - Changed to page: downloads
+2025-07-11 08:51:51 - newmusic.soulseek_client - [92mINFO[0m - search:551 - Starting search for: 'Virtual Mage'
+2025-07-11 08:51:51 - newmusic.soulseek_client - [94mDEBUG[0m - search:561 - Search data: {'searchText': 'Virtual Mage', 'timeout': 30000, 'filterResponses': True, 'minimumResponseFileCount': 1, 'minimumPeerUploadSpeed': 0}
+2025-07-11 08:51:51 - newmusic.soulseek_client - [94mDEBUG[0m - search:562 - Making POST request to: http://localhost:5030/api/v0/searches
+2025-07-11 08:51:51 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/searches
+2025-07-11 08:51:51 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:51:51 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: {'searchText': 'Virtual Mage', 'timeout': 30000, 'filterResponses': True, 'minimumResponseFileCount': 1, 'minimumPeerUploadSpeed': 0}
+2025-07-11 08:51:52 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:51:52 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: {"fileCount":0,"id":"57166aa6-9b14-4d48-ae66-517dec30b08b","isComplete":false,"lockedFileCount":0,"responseCount":0,"responses":[],"searchText":"Virtual Mage","startedAt":"2025-07-11T15:51:52.0653012Z","state":"InProgress","token":377}...
+2025-07-11 08:51:52 - newmusic.soulseek_client - [92mINFO[0m - search:575 - Search initiated with ID: 57166aa6-9b14-4d48-ae66-517dec30b08b
+2025-07-11 08:51:52 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 1/20) - elapsed: 0.0s
+2025-07-11 08:51:52 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/57166aa6-9b14-4d48-ae66-517dec30b08b/responses
+2025-07-11 08:51:52 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:51:52 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:51:52 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 08:51:52 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Broque Main
+2025-07-11 08:51:53 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 2/20) - elapsed: 1.5s
+2025-07-11 08:51:53 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/57166aa6-9b14-4d48-ae66-517dec30b08b/responses
+2025-07-11 08:51:53 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:51:54 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:51:54 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 08:51:55 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 3/20) - elapsed: 3.0s
+2025-07-11 08:51:55 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/57166aa6-9b14-4d48-ae66-517dec30b08b/responses
+2025-07-11 08:51:55 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:51:55 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:51:55 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 08:51:57 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 4/20) - elapsed: 4.5s
+2025-07-11 08:51:57 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/57166aa6-9b14-4d48-ae66-517dec30b08b/responses
+2025-07-11 08:51:57 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:51:57 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:51:57 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 08:51:59 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 5/20) - elapsed: 6.0s
+2025-07-11 08:51:59 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/57166aa6-9b14-4d48-ae66-517dec30b08b/responses
+2025-07-11 08:51:59 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:51:59 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:51:59 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 08:52:00 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:113 - Retrieved 7 playlists
+2025-07-11 08:52:00 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 6/20) - elapsed: 7.5s
+2025-07-11 08:52:00 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/57166aa6-9b14-4d48-ae66-517dec30b08b/responses
+2025-07-11 08:52:00 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:52:01 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:52:01 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 08:52:02 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 7/20) - elapsed: 9.0s
+2025-07-11 08:52:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/57166aa6-9b14-4d48-ae66-517dec30b08b/responses
+2025-07-11 08:52:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:52:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:52:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 08:52:04 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 8/20) - elapsed: 10.5s
+2025-07-11 08:52:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/57166aa6-9b14-4d48-ae66-517dec30b08b/responses
+2025-07-11 08:52:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:52:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:52:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 08:52:06 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 9/20) - elapsed: 12.0s
+2025-07-11 08:52:06 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/57166aa6-9b14-4d48-ae66-517dec30b08b/responses
+2025-07-11 08:52:06 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:52:06 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:52:06 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 08:52:08 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 10/20) - elapsed: 13.5s
+2025-07-11 08:52:08 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/57166aa6-9b14-4d48-ae66-517dec30b08b/responses
+2025-07-11 08:52:08 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:52:08 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:52:08 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 08:52:09 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 11/20) - elapsed: 15.0s
+2025-07-11 08:52:09 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/57166aa6-9b14-4d48-ae66-517dec30b08b/responses
+2025-07-11 08:52:09 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:52:10 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:52:10 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":1,"files":[{"bitRate":128,"code":1,"extension":"","filename":"Shared\\Virtual Mage\\Refraction 1191940288\\Virtual Mage - Virtual Mage.mp3","isVariableBitRate":false,"length":154,"size":2476160,"isLocked":false}],"hasFreeUploadSlot":true,"lockedFileCount":0,"lockedFiles":[],"queueLength":7,"token":377,"uploadSpeed":2435604,"username":"KindaRatchet"},{"fileCount":9,"files":[{"code":1,"extension":"","filename":"FLACs\\by genre\\synthwave\\Virtual Mage\\Virtual Mage - Aether WEB (2020...
+2025-07-11 08:52:10 - newmusic.soulseek_client - [92mINFO[0m - search:597 - Found 25 new responses (25 total) at 15.0s
+2025-07-11 08:52:10 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:345 - Processing 25 user responses
+2025-07-11 08:52:10 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User KindaRatchet has 1 files
+2025-07-11 08:52:10 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Ultravod has 9 files
+2025-07-11 08:52:10 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User RuuqoHoosk has 346 files
+2025-07-11 08:52:10 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Letham has 3 files
+2025-07-11 08:52:10 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User zeroscan has 2 files
+2025-07-11 08:52:10 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User thinkibettergo has 1 files
+2025-07-11 08:52:10 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User nightmare_dronemk12 has 3 files
+2025-07-11 08:52:10 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Dax_VR has 10 files
+2025-07-11 08:52:10 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Kaya-Sem has 1 files
+2025-07-11 08:52:10 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Satani-Vitales has 3 files
+2025-07-11 08:52:10 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User koalabeer has 3 files
+2025-07-11 08:52:10 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Seyti has 10 files
+2025-07-11 08:52:10 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User raspberry2 has 10 files
+2025-07-11 08:52:10 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User HomotopicCensorship has 3 files
+2025-07-11 08:52:10 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User exsanguinidraculae has 2 files
+2025-07-11 08:52:10 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User belthane has 3 files
+2025-07-11 08:52:10 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User FixxAlish has 1 files
+2025-07-11 08:52:10 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User soulshookt has 3 files
+2025-07-11 08:52:10 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User kloud has 1 files
+2025-07-11 08:52:10 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Ahab has 3 files
+2025-07-11 08:52:10 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User ruszok has 1 files
+2025-07-11 08:52:10 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User leonardoclk has 3 files
+2025-07-11 08:52:10 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User ofoijacussa has 0 files
+2025-07-11 08:52:10 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User aajzugikamlzcr has 1 files
+2025-07-11 08:52:10 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Shooby has 6 files
+2025-07-11 08:52:10 - newmusic.soulseek_client - [92mINFO[0m - _process_search_responses:399 - Found 10 individual tracks and 7 albums
+2025-07-11 08:52:10 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:400 - Album detection details: 17 potential albums processed
+2025-07-11 08:52:10 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:402 - Album: KindaRatchet/Shared/Virtual Mage/Refraction 1191940288 -> 1 tracks
+2025-07-11 08:52:10 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:402 - Album: Ultravod/FLACs/by genre/synthwave/Virtual Mage/Virtual Mage - Aether WEB (2020) -> 1 tracks
+2025-07-11 08:52:10 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:402 - Album: Ultravod/FLACs/by genre/synthwave/Virtual Mage/Virtual Mage - Astral Chill WEB (2020) -> 1 tracks
+2025-07-11 08:52:10 - newmusic.soulseek_client - [92mINFO[0m - search:617 - Processed results: 10 tracks, 7 albums
+2025-07-11 08:52:11 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 12/20) - elapsed: 16.5s
+2025-07-11 08:52:11 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/57166aa6-9b14-4d48-ae66-517dec30b08b/responses
+2025-07-11 08:52:11 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:52:11 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:52:11 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":1,"files":[{"bitRate":128,"code":1,"extension":"","filename":"Shared\\Virtual Mage\\Refraction 1191940288\\Virtual Mage - Virtual Mage.mp3","isVariableBitRate":false,"length":154,"size":2476160,"isLocked":false}],"hasFreeUploadSlot":true,"lockedFileCount":0,"lockedFiles":[],"queueLength":7,"token":377,"uploadSpeed":2435604,"username":"KindaRatchet"},{"fileCount":9,"files":[{"code":1,"extension":"","filename":"FLACs\\by genre\\synthwave\\Virtual Mage\\Virtual Mage - Aether WEB (2020...
+2025-07-11 08:52:11 - newmusic.soulseek_client - [94mDEBUG[0m - search:624 - No new responses, total still: 25
+2025-07-11 08:52:13 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 13/20) - elapsed: 18.0s
+2025-07-11 08:52:13 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/57166aa6-9b14-4d48-ae66-517dec30b08b/responses
+2025-07-11 08:52:13 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:52:13 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:52:13 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":1,"files":[{"bitRate":128,"code":1,"extension":"","filename":"Shared\\Virtual Mage\\Refraction 1191940288\\Virtual Mage - Virtual Mage.mp3","isVariableBitRate":false,"length":154,"size":2476160,"isLocked":false}],"hasFreeUploadSlot":true,"lockedFileCount":0,"lockedFiles":[],"queueLength":7,"token":377,"uploadSpeed":2435604,"username":"KindaRatchet"},{"fileCount":9,"files":[{"code":1,"extension":"","filename":"FLACs\\by genre\\synthwave\\Virtual Mage\\Virtual Mage - Aether WEB (2020...
+2025-07-11 08:52:13 - newmusic.soulseek_client - [94mDEBUG[0m - search:624 - No new responses, total still: 25
+2025-07-11 08:52:15 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 14/20) - elapsed: 19.5s
+2025-07-11 08:52:15 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/57166aa6-9b14-4d48-ae66-517dec30b08b/responses
+2025-07-11 08:52:15 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:52:15 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:52:15 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":1,"files":[{"bitRate":128,"code":1,"extension":"","filename":"Shared\\Virtual Mage\\Refraction 1191940288\\Virtual Mage - Virtual Mage.mp3","isVariableBitRate":false,"length":154,"size":2476160,"isLocked":false}],"hasFreeUploadSlot":true,"lockedFileCount":0,"lockedFiles":[],"queueLength":7,"token":377,"uploadSpeed":2435604,"username":"KindaRatchet"},{"fileCount":9,"files":[{"code":1,"extension":"","filename":"FLACs\\by genre\\synthwave\\Virtual Mage\\Virtual Mage - Aether WEB (2020...
+2025-07-11 08:52:15 - newmusic.soulseek_client - [94mDEBUG[0m - search:624 - No new responses, total still: 25
+2025-07-11 08:52:16 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 15/20) - elapsed: 21.0s
+2025-07-11 08:52:16 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/57166aa6-9b14-4d48-ae66-517dec30b08b/responses
+2025-07-11 08:52:16 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:52:17 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:52:17 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":1,"files":[{"bitRate":128,"code":1,"extension":"","filename":"Shared\\Virtual Mage\\Refraction 1191940288\\Virtual Mage - Virtual Mage.mp3","isVariableBitRate":false,"length":154,"size":2476160,"isLocked":false}],"hasFreeUploadSlot":true,"lockedFileCount":0,"lockedFiles":[],"queueLength":7,"token":377,"uploadSpeed":2435604,"username":"KindaRatchet"},{"fileCount":9,"files":[{"code":1,"extension":"","filename":"FLACs\\by genre\\synthwave\\Virtual Mage\\Virtual Mage - Aether WEB (2020...
+2025-07-11 08:52:17 - newmusic.soulseek_client - [94mDEBUG[0m - search:624 - No new responses, total still: 25
+2025-07-11 08:52:18 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 16/20) - elapsed: 22.5s
+2025-07-11 08:52:18 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/57166aa6-9b14-4d48-ae66-517dec30b08b/responses
+2025-07-11 08:52:18 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:52:18 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:52:18 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":1,"files":[{"bitRate":128,"code":1,"extension":"","filename":"Shared\\Virtual Mage\\Refraction 1191940288\\Virtual Mage - Virtual Mage.mp3","isVariableBitRate":false,"length":154,"size":2476160,"isLocked":false}],"hasFreeUploadSlot":true,"lockedFileCount":0,"lockedFiles":[],"queueLength":7,"token":377,"uploadSpeed":2435604,"username":"KindaRatchet"},{"fileCount":9,"files":[{"code":1,"extension":"","filename":"FLACs\\by genre\\synthwave\\Virtual Mage\\Virtual Mage - Aether WEB (2020...
+2025-07-11 08:52:18 - newmusic.soulseek_client - [94mDEBUG[0m - search:624 - No new responses, total still: 25
+2025-07-11 08:52:20 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 17/20) - elapsed: 24.0s
+2025-07-11 08:52:20 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/57166aa6-9b14-4d48-ae66-517dec30b08b/responses
+2025-07-11 08:52:20 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:52:20 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:52:20 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":1,"files":[{"bitRate":128,"code":1,"extension":"","filename":"Shared\\Virtual Mage\\Refraction 1191940288\\Virtual Mage - Virtual Mage.mp3","isVariableBitRate":false,"length":154,"size":2476160,"isLocked":false}],"hasFreeUploadSlot":true,"lockedFileCount":0,"lockedFiles":[],"queueLength":7,"token":377,"uploadSpeed":2435604,"username":"KindaRatchet"},{"fileCount":9,"files":[{"code":1,"extension":"","filename":"FLACs\\by genre\\synthwave\\Virtual Mage\\Virtual Mage - Aether WEB (2020...
+2025-07-11 08:52:20 - newmusic.soulseek_client - [94mDEBUG[0m - search:624 - No new responses, total still: 25
+2025-07-11 08:52:22 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 18/20) - elapsed: 25.5s
+2025-07-11 08:52:22 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/57166aa6-9b14-4d48-ae66-517dec30b08b/responses
+2025-07-11 08:52:22 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:52:22 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:52:22 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":1,"files":[{"bitRate":128,"code":1,"extension":"","filename":"Shared\\Virtual Mage\\Refraction 1191940288\\Virtual Mage - Virtual Mage.mp3","isVariableBitRate":false,"length":154,"size":2476160,"isLocked":false}],"hasFreeUploadSlot":true,"lockedFileCount":0,"lockedFiles":[],"queueLength":7,"token":377,"uploadSpeed":2435604,"username":"KindaRatchet"},{"fileCount":9,"files":[{"code":1,"extension":"","filename":"FLACs\\by genre\\synthwave\\Virtual Mage\\Virtual Mage - Aether WEB (2020...
+2025-07-11 08:52:22 - newmusic.soulseek_client - [94mDEBUG[0m - search:624 - No new responses, total still: 25
+2025-07-11 08:52:24 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 19/20) - elapsed: 27.0s
+2025-07-11 08:52:24 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/57166aa6-9b14-4d48-ae66-517dec30b08b/responses
+2025-07-11 08:52:24 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:52:24 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:52:24 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":1,"files":[{"bitRate":128,"code":1,"extension":"","filename":"Shared\\Virtual Mage\\Refraction 1191940288\\Virtual Mage - Virtual Mage.mp3","isVariableBitRate":false,"length":154,"size":2476160,"isLocked":false}],"hasFreeUploadSlot":true,"lockedFileCount":0,"lockedFiles":[],"queueLength":7,"token":377,"uploadSpeed":2435604,"username":"KindaRatchet"},{"fileCount":9,"files":[{"code":1,"extension":"","filename":"FLACs\\by genre\\synthwave\\Virtual Mage\\Virtual Mage - Aether WEB (2020...
+2025-07-11 08:52:24 - newmusic.soulseek_client - [94mDEBUG[0m - search:624 - No new responses, total still: 25
+2025-07-11 08:52:25 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 20/20) - elapsed: 28.5s
+2025-07-11 08:52:25 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/57166aa6-9b14-4d48-ae66-517dec30b08b/responses
+2025-07-11 08:52:25 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:52:26 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:52:26 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":1,"files":[{"bitRate":128,"code":1,"extension":"","filename":"Shared\\Virtual Mage\\Refraction 1191940288\\Virtual Mage - Virtual Mage.mp3","isVariableBitRate":false,"length":154,"size":2476160,"isLocked":false}],"hasFreeUploadSlot":true,"lockedFileCount":0,"lockedFiles":[],"queueLength":7,"token":377,"uploadSpeed":2435604,"username":"KindaRatchet"},{"fileCount":9,"files":[{"code":1,"extension":"","filename":"FLACs\\by genre\\synthwave\\Virtual Mage\\Virtual Mage - Aether WEB (2020...
+2025-07-11 08:52:26 - newmusic.soulseek_client - [94mDEBUG[0m - search:624 - No new responses, total still: 25
+2025-07-11 08:52:26 - newmusic.soulseek_client - [92mINFO[0m - search:632 - Search completed. Final results: 10 tracks and 7 albums for query: Virtual Mage
+2025-07-11 08:52:34 - newmusic.main - [92mINFO[0m - closeEvent:171 - Closing application...
+2025-07-11 08:52:34 - newmusic.main - [92mINFO[0m - closeEvent:176 - Cleaning up Downloads page threads...
+2025-07-11 08:52:34 - newmusic.main - [92mINFO[0m - closeEvent:181 - Stopping status monitoring thread...
+2025-07-11 08:52:37 - newmusic.main - [92mINFO[0m - closeEvent:186 - Closing Soulseek client...
+2025-07-11 08:52:37 - newmusic.main - [92mINFO[0m - closeEvent:192 - Application closed successfully
+2025-07-11 08:52:49 - newmusic - [92mINFO[0m - setup_logging:57 - Logging initialized with level: DEBUG
+2025-07-11 08:52:49 - newmusic.main - [92mINFO[0m - main:206 - Starting NewMusic application
+2025-07-11 08:52:49 - newmusic.spotify_client - [92mINFO[0m - _setup_client:84 - Successfully authenticated with Spotify as broquethomas
+2025-07-11 08:52:50 - newmusic.plex_client - [92mINFO[0m - _find_music_library:98 - Found music library: Music
+2025-07-11 08:52:50 - newmusic.plex_client - [92mINFO[0m - _setup_client:84 - Successfully connected to Plex server: PLEX-MACHINE
+2025-07-11 08:52:50 - newmusic.soulseek_client - [92mINFO[0m - _setup_client:220 - Soulseek client configured with slskd at http://localhost:5030
+2025-07-11 08:52:50 - newmusic.main - [92mINFO[0m - change_page:158 - Changed to page: dashboard
+2025-07-11 08:52:50 - newmusic.main - [92mINFO[0m - setup_media_player_connections:145 - Media player connections established between sidebar and downloads page
+2025-07-11 08:52:51 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Aether
+2025-07-11 08:52:51 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Favorite Artists
+2025-07-11 08:52:54 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Brittnea
+2025-07-11 08:52:55 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Baleigh
+2025-07-11 08:52:57 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Extra Music
+2025-07-11 08:52:58 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Maggi Main
+2025-07-11 08:52:59 - newmusic.main - [92mINFO[0m - change_page:158 - Changed to page: downloads
+2025-07-11 08:53:03 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Broque Main
+2025-07-11 08:53:04 - newmusic.soulseek_client - [92mINFO[0m - search:551 - Starting search for: 'Virtual Mage'
+2025-07-11 08:53:04 - newmusic.soulseek_client - [94mDEBUG[0m - search:561 - Search data: {'searchText': 'Virtual Mage', 'timeout': 30000, 'filterResponses': True, 'minimumResponseFileCount': 1, 'minimumPeerUploadSpeed': 0}
+2025-07-11 08:53:04 - newmusic.soulseek_client - [94mDEBUG[0m - search:562 - Making POST request to: http://localhost:5030/api/v0/searches
+2025-07-11 08:53:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/searches
+2025-07-11 08:53:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:53:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: {'searchText': 'Virtual Mage', 'timeout': 30000, 'filterResponses': True, 'minimumResponseFileCount': 1, 'minimumPeerUploadSpeed': 0}
+2025-07-11 08:53:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:53:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: {"fileCount":0,"id":"49376b9b-13f4-47dc-af9f-81e9d300386c","isComplete":false,"lockedFileCount":0,"responseCount":0,"responses":[],"searchText":"Virtual Mage","startedAt":"2025-07-11T15:53:04.5723876Z","state":"InProgress","token":378}...
+2025-07-11 08:53:04 - newmusic.soulseek_client - [92mINFO[0m - search:575 - Search initiated with ID: 49376b9b-13f4-47dc-af9f-81e9d300386c
+2025-07-11 08:53:04 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 1/20) - elapsed: 0.0s
+2025-07-11 08:53:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/49376b9b-13f4-47dc-af9f-81e9d300386c/responses
+2025-07-11 08:53:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:53:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:53:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 08:53:06 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 2/20) - elapsed: 1.5s
+2025-07-11 08:53:06 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/49376b9b-13f4-47dc-af9f-81e9d300386c/responses
+2025-07-11 08:53:06 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:53:06 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:53:06 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 08:53:08 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 3/20) - elapsed: 3.0s
+2025-07-11 08:53:08 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/49376b9b-13f4-47dc-af9f-81e9d300386c/responses
+2025-07-11 08:53:08 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:53:08 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:53:08 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 08:53:09 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 4/20) - elapsed: 4.5s
+2025-07-11 08:53:09 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/49376b9b-13f4-47dc-af9f-81e9d300386c/responses
+2025-07-11 08:53:09 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:53:10 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:53:10 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 08:53:11 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:113 - Retrieved 7 playlists
+2025-07-11 08:53:11 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 5/20) - elapsed: 6.0s
+2025-07-11 08:53:11 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/49376b9b-13f4-47dc-af9f-81e9d300386c/responses
+2025-07-11 08:53:11 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:53:11 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:53:11 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 08:53:13 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 6/20) - elapsed: 7.5s
+2025-07-11 08:53:13 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/49376b9b-13f4-47dc-af9f-81e9d300386c/responses
+2025-07-11 08:53:13 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:53:13 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:53:13 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 08:53:15 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 7/20) - elapsed: 9.0s
+2025-07-11 08:53:15 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/49376b9b-13f4-47dc-af9f-81e9d300386c/responses
+2025-07-11 08:53:15 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:53:15 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:53:15 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 08:53:16 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 8/20) - elapsed: 10.5s
+2025-07-11 08:53:16 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/49376b9b-13f4-47dc-af9f-81e9d300386c/responses
+2025-07-11 08:53:16 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:53:17 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:53:17 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 08:53:18 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 9/20) - elapsed: 12.0s
+2025-07-11 08:53:18 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/49376b9b-13f4-47dc-af9f-81e9d300386c/responses
+2025-07-11 08:53:18 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:53:18 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:53:18 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 08:53:20 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 10/20) - elapsed: 13.5s
+2025-07-11 08:53:20 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/49376b9b-13f4-47dc-af9f-81e9d300386c/responses
+2025-07-11 08:53:20 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:53:20 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:53:20 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 08:53:22 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 11/20) - elapsed: 15.0s
+2025-07-11 08:53:22 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/49376b9b-13f4-47dc-af9f-81e9d300386c/responses
+2025-07-11 08:53:22 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:53:22 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:53:22 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 08:53:24 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 12/20) - elapsed: 16.5s
+2025-07-11 08:53:24 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/49376b9b-13f4-47dc-af9f-81e9d300386c/responses
+2025-07-11 08:53:24 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:53:24 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:53:24 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":3,"files":[{"code":1,"extension":"","filename":"@@fedfm\\RPGs\\oldworldofdarkness\\Mage the Ascension\\Tradition Book - Virtual Adepts (1994).pdf","size":33530594,"isLocked":false},{"code":1,"extension":"","filename":"@@fedfm\\RPGs\\oldworldofdarkness\\Mage the Ascension\\Tradition Book - Virtual Adepts (Revised) (2003).pdf","size":115110029,"isLocked":false},{"code":1,"extension":"","filename":"@@fedfm\\RPGs\\oldworldofdarkness\\Mage the Ascension\\Tradition book - Virtual Adepts,...
+2025-07-11 08:53:24 - newmusic.soulseek_client - [92mINFO[0m - search:597 - Found 23 new responses (23 total) at 16.5s
+2025-07-11 08:53:24 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:345 - Processing 23 user responses
+2025-07-11 08:53:24 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User nightmare_dronemk12 has 3 files
+2025-07-11 08:53:24 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User exsanguinidraculae has 2 files
+2025-07-11 08:53:24 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Letham has 3 files
+2025-07-11 08:53:24 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Seyti has 10 files
+2025-07-11 08:53:24 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User belthane has 3 files
+2025-07-11 08:53:24 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Satani-Vitales has 3 files
+2025-07-11 08:53:24 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User leonardoclk has 3 files
+2025-07-11 08:53:24 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User aajzugikamlzcr has 1 files
+2025-07-11 08:53:24 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User zeroscan has 2 files
+2025-07-11 08:53:24 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User HomotopicCensorship has 3 files
+2025-07-11 08:53:24 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User soulshookt has 3 files
+2025-07-11 08:53:24 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User KindaRatchet has 1 files
+2025-07-11 08:53:24 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Ultravod has 9 files
+2025-07-11 08:53:24 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User FixxAlish has 1 files
+2025-07-11 08:53:24 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Ahab has 3 files
+2025-07-11 08:53:24 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User ruszok has 1 files
+2025-07-11 08:53:24 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User kloud has 1 files
+2025-07-11 08:53:24 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Kaya-Sem has 1 files
+2025-07-11 08:53:24 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Dax_VR has 10 files
+2025-07-11 08:53:24 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User thinkibettergo has 1 files
+2025-07-11 08:53:24 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User ofoijacussa has 0 files
+2025-07-11 08:53:24 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Shooby has 6 files
+2025-07-11 08:53:24 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User RuuqoHoosk has 346 files
+2025-07-11 08:53:24 - newmusic.soulseek_client - [92mINFO[0m - _process_search_responses:399 - Found 10 individual tracks and 5 albums
+2025-07-11 08:53:24 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:400 - Album detection details: 15 potential albums processed
+2025-07-11 08:53:24 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:402 - Album: Seyti/Music/Techno/TECHNO_ 3 -> 10 tracks
+2025-07-11 08:53:24 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:402 - Album: leonardoclk/@@iizks/Music/Virtual Mage/2020 - Astral Chill -> 1 tracks
+2025-07-11 08:53:24 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:402 - Album: leonardoclk/@@iizks/iTunes Latest/Virtual Mage/2020 - Astral Chill -> 1 tracks
+2025-07-11 08:53:24 - newmusic.soulseek_client - [92mINFO[0m - search:617 - Processed results: 10 tracks, 5 albums
+2025-07-11 08:53:25 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 13/20) - elapsed: 18.0s
+2025-07-11 08:53:25 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/49376b9b-13f4-47dc-af9f-81e9d300386c/responses
+2025-07-11 08:53:25 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:53:26 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:53:26 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":3,"files":[{"code":1,"extension":"","filename":"@@fedfm\\RPGs\\oldworldofdarkness\\Mage the Ascension\\Tradition Book - Virtual Adepts (1994).pdf","size":33530594,"isLocked":false},{"code":1,"extension":"","filename":"@@fedfm\\RPGs\\oldworldofdarkness\\Mage the Ascension\\Tradition Book - Virtual Adepts (Revised) (2003).pdf","size":115110029,"isLocked":false},{"code":1,"extension":"","filename":"@@fedfm\\RPGs\\oldworldofdarkness\\Mage the Ascension\\Tradition book - Virtual Adepts,...
+2025-07-11 08:53:26 - newmusic.soulseek_client - [94mDEBUG[0m - search:624 - No new responses, total still: 23
+2025-07-11 08:53:27 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 14/20) - elapsed: 19.5s
+2025-07-11 08:53:27 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/49376b9b-13f4-47dc-af9f-81e9d300386c/responses
+2025-07-11 08:53:27 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:53:27 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:53:27 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":3,"files":[{"code":1,"extension":"","filename":"@@fedfm\\RPGs\\oldworldofdarkness\\Mage the Ascension\\Tradition Book - Virtual Adepts (1994).pdf","size":33530594,"isLocked":false},{"code":1,"extension":"","filename":"@@fedfm\\RPGs\\oldworldofdarkness\\Mage the Ascension\\Tradition Book - Virtual Adepts (Revised) (2003).pdf","size":115110029,"isLocked":false},{"code":1,"extension":"","filename":"@@fedfm\\RPGs\\oldworldofdarkness\\Mage the Ascension\\Tradition book - Virtual Adepts,...
+2025-07-11 08:53:27 - newmusic.soulseek_client - [94mDEBUG[0m - search:624 - No new responses, total still: 23
+2025-07-11 08:53:29 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 15/20) - elapsed: 21.0s
+2025-07-11 08:53:29 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/49376b9b-13f4-47dc-af9f-81e9d300386c/responses
+2025-07-11 08:53:29 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:53:29 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:53:29 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":3,"files":[{"code":1,"extension":"","filename":"@@fedfm\\RPGs\\oldworldofdarkness\\Mage the Ascension\\Tradition Book - Virtual Adepts (1994).pdf","size":33530594,"isLocked":false},{"code":1,"extension":"","filename":"@@fedfm\\RPGs\\oldworldofdarkness\\Mage the Ascension\\Tradition Book - Virtual Adepts (Revised) (2003).pdf","size":115110029,"isLocked":false},{"code":1,"extension":"","filename":"@@fedfm\\RPGs\\oldworldofdarkness\\Mage the Ascension\\Tradition book - Virtual Adepts,...
+2025-07-11 08:53:29 - newmusic.soulseek_client - [94mDEBUG[0m - search:624 - No new responses, total still: 23
+2025-07-11 08:53:31 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 16/20) - elapsed: 22.5s
+2025-07-11 08:53:31 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/49376b9b-13f4-47dc-af9f-81e9d300386c/responses
+2025-07-11 08:53:31 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:53:31 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:53:31 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":3,"files":[{"code":1,"extension":"","filename":"@@fedfm\\RPGs\\oldworldofdarkness\\Mage the Ascension\\Tradition Book - Virtual Adepts (1994).pdf","size":33530594,"isLocked":false},{"code":1,"extension":"","filename":"@@fedfm\\RPGs\\oldworldofdarkness\\Mage the Ascension\\Tradition Book - Virtual Adepts (Revised) (2003).pdf","size":115110029,"isLocked":false},{"code":1,"extension":"","filename":"@@fedfm\\RPGs\\oldworldofdarkness\\Mage the Ascension\\Tradition book - Virtual Adepts,...
+2025-07-11 08:53:31 - newmusic.soulseek_client - [94mDEBUG[0m - search:624 - No new responses, total still: 23
+2025-07-11 08:53:32 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 17/20) - elapsed: 24.0s
+2025-07-11 08:53:32 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/49376b9b-13f4-47dc-af9f-81e9d300386c/responses
+2025-07-11 08:53:32 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:53:33 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:53:33 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":3,"files":[{"code":1,"extension":"","filename":"@@fedfm\\RPGs\\oldworldofdarkness\\Mage the Ascension\\Tradition Book - Virtual Adepts (1994).pdf","size":33530594,"isLocked":false},{"code":1,"extension":"","filename":"@@fedfm\\RPGs\\oldworldofdarkness\\Mage the Ascension\\Tradition Book - Virtual Adepts (Revised) (2003).pdf","size":115110029,"isLocked":false},{"code":1,"extension":"","filename":"@@fedfm\\RPGs\\oldworldofdarkness\\Mage the Ascension\\Tradition book - Virtual Adepts,...
+2025-07-11 08:53:33 - newmusic.soulseek_client - [94mDEBUG[0m - search:624 - No new responses, total still: 23
+2025-07-11 08:53:34 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 18/20) - elapsed: 25.5s
+2025-07-11 08:53:34 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/49376b9b-13f4-47dc-af9f-81e9d300386c/responses
+2025-07-11 08:53:34 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:53:34 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:53:34 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":3,"files":[{"code":1,"extension":"","filename":"@@fedfm\\RPGs\\oldworldofdarkness\\Mage the Ascension\\Tradition Book - Virtual Adepts (1994).pdf","size":33530594,"isLocked":false},{"code":1,"extension":"","filename":"@@fedfm\\RPGs\\oldworldofdarkness\\Mage the Ascension\\Tradition Book - Virtual Adepts (Revised) (2003).pdf","size":115110029,"isLocked":false},{"code":1,"extension":"","filename":"@@fedfm\\RPGs\\oldworldofdarkness\\Mage the Ascension\\Tradition book - Virtual Adepts,...
+2025-07-11 08:53:34 - newmusic.soulseek_client - [94mDEBUG[0m - search:624 - No new responses, total still: 23
+2025-07-11 08:53:36 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 19/20) - elapsed: 27.0s
+2025-07-11 08:53:36 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/49376b9b-13f4-47dc-af9f-81e9d300386c/responses
+2025-07-11 08:53:36 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:53:36 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:53:36 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":3,"files":[{"code":1,"extension":"","filename":"@@fedfm\\RPGs\\oldworldofdarkness\\Mage the Ascension\\Tradition Book - Virtual Adepts (1994).pdf","size":33530594,"isLocked":false},{"code":1,"extension":"","filename":"@@fedfm\\RPGs\\oldworldofdarkness\\Mage the Ascension\\Tradition Book - Virtual Adepts (Revised) (2003).pdf","size":115110029,"isLocked":false},{"code":1,"extension":"","filename":"@@fedfm\\RPGs\\oldworldofdarkness\\Mage the Ascension\\Tradition book - Virtual Adepts,...
+2025-07-11 08:53:36 - newmusic.soulseek_client - [94mDEBUG[0m - search:624 - No new responses, total still: 23
+2025-07-11 08:53:38 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 20/20) - elapsed: 28.5s
+2025-07-11 08:53:38 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/49376b9b-13f4-47dc-af9f-81e9d300386c/responses
+2025-07-11 08:53:38 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 08:53:38 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 08:53:38 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":3,"files":[{"code":1,"extension":"","filename":"@@fedfm\\RPGs\\oldworldofdarkness\\Mage the Ascension\\Tradition Book - Virtual Adepts (1994).pdf","size":33530594,"isLocked":false},{"code":1,"extension":"","filename":"@@fedfm\\RPGs\\oldworldofdarkness\\Mage the Ascension\\Tradition Book - Virtual Adepts (Revised) (2003).pdf","size":115110029,"isLocked":false},{"code":1,"extension":"","filename":"@@fedfm\\RPGs\\oldworldofdarkness\\Mage the Ascension\\Tradition book - Virtual Adepts,...
+2025-07-11 08:53:38 - newmusic.soulseek_client - [94mDEBUG[0m - search:624 - No new responses, total still: 23
+2025-07-11 08:53:38 - newmusic.soulseek_client - [92mINFO[0m - search:632 - Search completed. Final results: 10 tracks and 5 albums for query: Virtual Mage
+2025-07-11 08:54:02 - newmusic.main - [92mINFO[0m - closeEvent:171 - Closing application...
+2025-07-11 08:54:02 - newmusic.main - [92mINFO[0m - closeEvent:176 - Cleaning up Downloads page threads...
+2025-07-11 08:54:02 - newmusic.main - [92mINFO[0m - closeEvent:181 - Stopping status monitoring thread...
+2025-07-11 08:54:03 - newmusic.main - [92mINFO[0m - closeEvent:186 - Closing Soulseek client...
+2025-07-11 08:54:03 - newmusic.main - [92mINFO[0m - closeEvent:192 - Application closed successfully
