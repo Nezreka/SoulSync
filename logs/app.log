@@ -1,0 +1,24 @@
+2025-07-11 09:15:10 - newmusic - [92mINFO[0m - setup_logging:57 - Logging initialized with level: DEBUG
+2025-07-11 09:15:10 - newmusic.main - [92mINFO[0m - main:206 - Starting NewMusic application
+2025-07-11 09:15:10 - newmusic.spotify_client - [92mINFO[0m - _setup_client:84 - Successfully authenticated with Spotify as broquethomas
+2025-07-11 09:15:11 - newmusic.plex_client - [92mINFO[0m - _find_music_library:98 - Found music library: Music
+2025-07-11 09:15:11 - newmusic.plex_client - [92mINFO[0m - _setup_client:84 - Successfully connected to Plex server: PLEX-MACHINE
+2025-07-11 09:15:11 - newmusic.soulseek_client - [92mINFO[0m - _setup_client:220 - Soulseek client configured with slskd at http://localhost:5030
+2025-07-11 09:15:18 - newmusic.main - [92mINFO[0m - change_page:158 - Changed to page: dashboard
+2025-07-11 09:15:18 - newmusic.main - [92mINFO[0m - setup_media_player_connections:145 - Media player connections established between sidebar and downloads page
+2025-07-11 09:15:18 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Aether
+2025-07-11 09:15:18 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Favorite Artists
+2025-07-11 09:15:21 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Brittnea
+2025-07-11 09:15:22 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Baleigh
+2025-07-11 09:15:24 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Extra Music
+2025-07-11 09:15:24 - newmusic.main - [92mINFO[0m - change_page:158 - Changed to page: downloads
+2025-07-11 09:15:25 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Maggi Main
+2025-07-11 09:15:28 - newmusic.main - [92mINFO[0m - change_page:158 - Changed to page: artists
+2025-07-11 09:15:30 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Broque Main
+2025-07-11 09:15:30 - newmusic.main - [92mINFO[0m - change_page:158 - Changed to page: downloads
+2025-07-11 09:15:37 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:113 - Retrieved 7 playlists
+2025-07-11 09:16:15 - newmusic.main - [92mINFO[0m - closeEvent:171 - Closing application...
+2025-07-11 09:16:15 - newmusic.main - [92mINFO[0m - closeEvent:176 - Cleaning up Downloads page threads...
+2025-07-11 09:16:15 - newmusic.main - [92mINFO[0m - closeEvent:181 - Stopping status monitoring thread...
+2025-07-11 09:16:15 - newmusic.main - [92mINFO[0m - closeEvent:186 - Closing Soulseek client...
+2025-07-11 09:16:15 - newmusic.main - [92mINFO[0m - closeEvent:192 - Application closed successfully
