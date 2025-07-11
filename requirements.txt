@@ -1,4 +1,4 @@
-PyQt6>=6.6.0
+PyQt6[multimedia]>=6.6.0
 spotipy>=2.23.0
 PlexAPI>=4.17.0
 requests>=2.31.0
