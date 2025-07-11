@@ -2285,6 +2285,11 @@ class DownloadsPage(QWidget):
         search_container = self.create_elegant_search_bar()
         layout.addWidget(search_container)
         
+        # Filter Controls (initially hidden until we have results)
+        self.filter_container = self.create_filter_controls()
+        self.filter_container.setVisible(False)  # Hide until we have search results
+        layout.addWidget(self.filter_container)
+        
         # Search Status with better visual feedback
         self.search_status = QLabel("Ready to search • Enter artist, song, or album name")
         self.search_status.setFont(QFont("Arial", 11))
@@ -2446,6 +2451,211 @@ class DownloadsPage(QWidget):
         layout.addWidget(self.search_btn)
         
         return container
+    
+    def create_filter_controls(self):
+        """Create elegant filter controls for Albums vs Singles"""
+        container = QFrame()
+        container.setFixedHeight(55)
+        container.setStyleSheet("""
+            QFrame {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(45, 45, 45, 0.6),
+                    stop:1 rgba(35, 35, 35, 0.8));
+                border-radius: 10px;
+                border: 1px solid rgba(80, 80, 80, 0.25);
+            }
+        """)
+        
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(16, 8, 16, 8)
+        layout.setSpacing(8)
+        
+        # Filter label
+        filter_label = QLabel("Filter:")
+        filter_label.setStyleSheet("""
+            QLabel {
+                color: rgba(255, 255, 255, 0.8);
+                font-size: 12px;
+                font-weight: 600;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                letter-spacing: 0.3px;
+            }
+        """)
+        
+        # Initialize filter state
+        self.current_filter = "all"  # "all", "albums", "singles"
+        
+        # Filter buttons with toggle behavior
+        self.filter_all_btn = QPushButton("All")
+        self.filter_albums_btn = QPushButton("Albums")
+        self.filter_singles_btn = QPushButton("Singles")
+        
+        # Store buttons for easy access
+        self.filter_buttons = {
+            "all": self.filter_all_btn,
+            "albums": self.filter_albums_btn,
+            "singles": self.filter_singles_btn
+        }
+        
+        # Connect button signals
+        self.filter_all_btn.clicked.connect(lambda: self.set_filter("all"))
+        self.filter_albums_btn.clicked.connect(lambda: self.set_filter("albums"))
+        self.filter_singles_btn.clicked.connect(lambda: self.set_filter("singles"))
+        
+        # Apply styling to all buttons
+        for btn_key, btn in self.filter_buttons.items():
+            btn.setFixedHeight(32)
+            btn.setMinimumWidth(65)
+            self.update_filter_button_style(btn, btn_key == "all")  # "All" starts active
+            
+        layout.addWidget(filter_label)
+        layout.addWidget(self.filter_all_btn)
+        layout.addWidget(self.filter_albums_btn)
+        layout.addWidget(self.filter_singles_btn)
+        layout.addStretch()
+        
+        return container
+    
+    def update_filter_button_style(self, button, is_active):
+        """Update the visual style of filter buttons based on active state"""
+        if is_active:
+            button.setStyleSheet("""
+                QPushButton {
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 #1ed760,
+                        stop:1 #1db954);
+                    border: none;
+                    border-radius: 16px;
+                    color: #000000;
+                    font-size: 11px;
+                    font-weight: 700;
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                    padding: 0 12px;
+                }
+                QPushButton:hover {
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 #1fdf64,
+                        stop:1 #1ed760);
+                    transform: scale(1.02);
+                }
+                QPushButton:pressed {
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 #1ca851,
+                        stop:1 #169c46);
+                    transform: scale(0.98);
+                }
+            """)
+        else:
+            button.setStyleSheet("""
+                QPushButton {
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 rgba(80, 80, 80, 0.4),
+                        stop:1 rgba(60, 60, 60, 0.6));
+                    border: 1px solid rgba(120, 120, 120, 0.3);
+                    border-radius: 16px;
+                    color: rgba(255, 255, 255, 0.8);
+                    font-size: 11px;
+                    font-weight: 500;
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                    padding: 0 12px;
+                }
+                QPushButton:hover {
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 rgba(100, 100, 100, 0.5),
+                        stop:1 rgba(80, 80, 80, 0.7));
+                    border: 1px solid rgba(140, 140, 140, 0.4);
+                    color: rgba(255, 255, 255, 0.9);
+                    transform: scale(1.02);
+                }
+                QPushButton:pressed {
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 rgba(60, 60, 60, 0.6),
+                        stop:1 rgba(40, 40, 40, 0.8));
+                    transform: scale(0.98);
+                }
+            """)
+    
+    def set_filter(self, filter_type):
+        """Set the active filter and update UI"""
+        self.current_filter = filter_type
+        
+        # Update button styles
+        for btn_key, btn in self.filter_buttons.items():
+            self.update_filter_button_style(btn, btn_key == filter_type)
+        
+        # Apply the filter to current results
+        self.apply_filter()
+    
+    def apply_filter(self):
+        """Apply the current filter to search results"""
+        if not hasattr(self, '_temp_tracks') or not hasattr(self, '_temp_albums'):
+            return
+            
+        # Get the filtered results based on current filter
+        if self.current_filter == "all":
+            filtered_results = self._temp_albums + self._temp_tracks
+        elif self.current_filter == "albums":
+            filtered_results = self._temp_albums
+        elif self.current_filter == "singles":
+            filtered_results = self._temp_tracks
+        else:
+            filtered_results = self._temp_albums + self._temp_tracks
+        
+        # Clear current display
+        self.clear_search_results()
+        self.displayed_results = 0
+        
+        # Show filtered results (respecting pagination)
+        remaining_slots = self.results_per_page
+        results_to_show = filtered_results[:remaining_slots]
+        
+        # Temporarily disable layout updates for smoother batch loading
+        self.search_results_widget.setUpdatesEnabled(False)
+        
+        for result in results_to_show:
+            if isinstance(result, AlbumResult):
+                # Create expandable album result item
+                result_item = AlbumResultItem(result)
+                result_item.album_download_requested.connect(self.start_album_download)
+                result_item.track_download_requested.connect(self.start_download)
+                result_item.track_stream_requested.connect(lambda search_result, track_item: self.start_stream(search_result, track_item))
+            else:
+                # Create individual track result item
+                result_item = SearchResultItem(result)
+                result_item.download_requested.connect(self.start_download)
+                result_item.stream_requested.connect(lambda search_result, item=result_item: self.start_stream(search_result, item))
+                result_item.expansion_requested.connect(self.handle_expansion_request)
+            
+            # Insert before the stretch
+            insert_position = self.search_results_layout.count() - 1
+            self.search_results_layout.insertWidget(insert_position, result_item)
+        
+        self.displayed_results = len(results_to_show)
+        
+        # Re-enable layout updates
+        self.search_results_widget.setUpdatesEnabled(True)
+        
+        # Update status to show filter results
+        total_albums = len(self._temp_albums)
+        total_tracks = len(self._temp_tracks)
+        total_filtered = len(filtered_results)
+        
+        if self.current_filter == "all":
+            filter_status = f"Showing all {total_filtered} results"
+        elif self.current_filter == "albums":
+            filter_status = f"Showing {total_albums} albums"
+        elif self.current_filter == "singles":
+            filter_status = f"Showing {total_tracks} singles"
+        else:
+            filter_status = f"Showing {total_filtered} results"
+            
+        # Update the search status to reflect filtering
+        if total_filtered > 0:
+            if total_filtered > self.results_per_page:
+                filter_status += f" (showing first {len(results_to_show)})"
+            self.search_status.setText(f"✨ {filter_status} • {total_albums} albums, {total_tracks} singles")
+        else:
+            self.search_status.setText(f"No results found for '{self.current_filter}' filter")
     
     def create_collapsible_controls_panel(self):
         """Create a compact, elegant controls panel"""
@@ -2741,6 +2951,13 @@ class DownloadsPage(QWidget):
         self.is_loading_more = False
         self.currently_expanded_item = None  # Reset expanded state
         
+        # Reset filter to "all" and hide filter controls
+        self.current_filter = "all"
+        if hasattr(self, 'filter_buttons'):
+            for btn_key, btn in self.filter_buttons.items():
+                self.update_filter_button_style(btn, btn_key == "all")
+        self.filter_container.setVisible(False)
+        
         # Enhanced searching state with animation
         self.search_btn.setText("🔍 Searching...")
         self.search_btn.setEnabled(False)
@@ -2893,6 +3110,8 @@ class DownloadsPage(QWidget):
                 self.update_search_status("😔 No results found • Try a different search term or artist name", "#ffa500")
             else:
                 self.update_search_status(f"✨ Search completed • Found {self.displayed_results} total results", "#1db954")
+            # Hide filter controls when no results
+            self.filter_container.setVisible(False)
             return
         
         # Update status with album/track breakdown
@@ -2906,6 +3125,9 @@ class DownloadsPage(QWidget):
             status_parts.append(f"{track_count} track{'s' if track_count != 1 else ''}")
         
         result_summary = " • ".join(status_parts) if status_parts else f"{total_results} results"
+        
+        # Show filter controls when we have results
+        self.filter_container.setVisible(True)
         
         # Update status based on whether there are more results to load
         if self.displayed_results < total_results:
