@@ -25,18 +25,71 @@ The application will use a central `config.json` file to store:
 
 ## Development Status
 
-This is a greenfield project with no existing codebase. When implementing:
-- Create a Python-based application with GUI framework (likely PyQt, Tkinter, or web-based with Flask/FastAPI)
-- Implement modular architecture separating concerns for different services (Spotify, Plex, Soulseek)
-- Focus on robust matching algorithms for music synchronization
-- Prioritize user experience with Spotify-like interface design
-- Ensure secure handling of API credentials and authentication tokens
+**Current State**: Active development of a PyQt6-based desktop application with functional UI and core integrations.
 
-## Key Components to Implement
+**Completed Features**:
+- ✅ PyQt6 GUI framework with Spotify-inspired dark theme
+- ✅ Modular architecture with separate service clients (Spotify, Plex, Soulseek)
+- ✅ Modern sidebar navigation with animated buttons and status indicators
+- ✅ Media player sidebar with scrolling text animation for long titles
+- ✅ Search functionality with real-time filtering (Albums vs Singles)
+- ✅ Audio streaming and playback from Soulseek search results
+- ✅ Service status monitoring and connection indicators
+- ✅ Configuration management system
 
-1. **Configuration Management**: Secure handling of API keys and service credentials
-2. **Spotify Integration**: Playlist retrieval and metadata extraction
-3. **Plex Integration**: Media server synchronization and metadata updates
-4. **Soulseek Integration**: Music discovery and download functionality
-5. **Matching Engine**: Robust algorithms for matching tracks across services
-6. **User Interface**: Spotify-inspired design with modern, animated elements
+**Active Work**:
+- 🔧 Download Manager functionality and UI improvements
+- 🔧 Download tracking system (requires fixes - see Known Issues)
+
+**Known Issues Requiring Attention**:
+
+### Download Tracking System Issues
+**Priority**: High - Download tracking is partially broken
+
+**Problem Summary**: The download tracking system has ID management issues causing cancellation failures and incomplete UI updates.
+
+**Specific Issues**:
+1. **Download Cancellation Fails (405 Errors)**:
+   - Location: `core/soulseek_client.py:809-819` (cancel_download method)
+   - Problem: Using constructed filename-based IDs instead of actual API download IDs
+   - API returns proper UUIDs like `"2f7e8184-e644-4439-b02d-e48f9c8d24ca"`
+   - Code tries to cancel with malformed IDs like `"systemdip_Music\Kendrick Lamar\DAMN. (2017)\01 - BLOOD.flac_1752258522"`
+
+2. **Download ID Mismatch**:
+   - Location: `core/soulseek_client.py:639-732` (download method)
+   - Problem: Not properly storing/returning actual download IDs from API responses
+   - Need to capture and use the real download ID returned by slskd API
+
+3. **Progress Tracking UI Updates**:
+   - Location: `ui/pages/downloads.py:3828-3865` (progress tracking)
+   - Problem: UI doesn't properly reflect download status changes
+   - Missing handling for completed downloads without `percentComplete` field
+
+**What's Working**: 
+- slskd API is responding correctly (status 200)
+- Downloads initiate successfully
+- Transfer status endpoint returns proper data
+- Download completion detection works
+
+**What Needs Fixing**:
+- Download ID storage and management
+- Cancel download endpoint URL construction
+- UI state synchronization for completed downloads
+- Error handling for missing API fields
+
+### Download Manager UI Improvements
+**Priority**: Medium - User experience enhancements requested
+
+**Requested Changes**:
+1. Remove "Pause All" button (not needed)
+2. Fix "Clear Completed" functionality (currently doesn't work)
+3. Replace "Details" button with "Reveal/Open" button that opens the folder containing downloaded files
+
+## Key Components Status
+
+1. **Configuration Management**: ✅ Implemented - Secure handling of API keys and service credentials
+2. **Spotify Integration**: ✅ Implemented - Playlist retrieval and metadata extraction
+3. **Plex Integration**: ✅ Implemented - Media server synchronization and metadata updates
+4. **Soulseek Integration**: 🔧 Partially Complete - Music discovery works, download tracking needs fixes
+5. **Matching Engine**: ⏳ Planned - Robust algorithms for matching tracks across services
+6. **User Interface**: ✅ Mostly Complete - Spotify-inspired design with modern, animated elements

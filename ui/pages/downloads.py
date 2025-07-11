@@ -313,6 +313,69 @@ class ExploreApiThread(QThread):
         """Stop the exploration gracefully"""
         self._stop_requested = True
 
+class TransferStatusThread(QThread):
+    """Thread for fetching real-time download transfer status from slskd API"""
+    transfer_status_completed = pyqtSignal(object)  # Transfer data from API
+    transfer_status_failed = pyqtSignal(str)  # Error message
+    
+    def __init__(self, soulseek_client):
+        super().__init__()
+        self.soulseek_client = soulseek_client
+        self._stop_requested = False
+        
+    def run(self):
+        loop = None
+        try:
+            import asyncio
+            
+            # Create a fresh event loop for this thread
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            # Check if stop was requested before starting
+            if self._stop_requested:
+                return
+            
+            # Get transfer status data from /api/v0/transfers/downloads
+            transfer_data = loop.run_until_complete(self._get_transfer_status())
+            
+            # Only emit if not stopped
+            if not self._stop_requested:
+                self.transfer_status_completed.emit(transfer_data or [])
+            
+        except Exception as e:
+            if not self._stop_requested:
+                self.transfer_status_failed.emit(str(e))
+        finally:
+            # Ensure proper cleanup
+            if loop:
+                try:
+                    # Close any remaining tasks
+                    pending = asyncio.all_tasks(loop)
+                    for task in pending:
+                        task.cancel()
+                    
+                    if pending:
+                        loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                    
+                    loop.close()
+                except Exception as e:
+                    print(f"Error cleaning up transfer status event loop: {e}")
+    
+    async def _get_transfer_status(self):
+        """Get the transfer status from slskd API"""
+        try:
+            # Use the soulseek client's _make_request method to get transfer data
+            response_data = await self.soulseek_client._make_request('GET', 'transfers/downloads')
+            return response_data
+        except Exception as e:
+            print(f"Error fetching transfer status: {e}")
+            return []
+    
+    def stop(self):
+        """Stop the transfer status gathering gracefully"""
+        self._stop_requested = True
+
 class SearchThread(QThread):
     search_completed = pyqtSignal(object)  # Tuple of (tracks, albums) or list for backward compatibility
     search_failed = pyqtSignal(str)  # Error message
@@ -779,8 +842,8 @@ class AlbumResultItem(QFrame):
         self.setup_ui()
     
     def setup_ui(self):
-        # Dynamic height based on expansion state
-        self.collapsed_height = 80
+        # Dynamic height based on expansion state with better proportions
+        self.collapsed_height = 90  # Increased from 80px for better breathing room
         self.setFixedHeight(self.collapsed_height)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         
@@ -792,9 +855,9 @@ class AlbumResultItem(QFrame):
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 rgba(45, 45, 45, 0.9),
                     stop:1 rgba(35, 35, 35, 0.95));
-                border-radius: 12px;
+                border-radius: 16px;
                 border: 1px solid rgba(80, 80, 80, 0.4);
-                margin: 6px 4px;
+                margin: 8px 4px;
             }
             AlbumResultItem:hover {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -811,11 +874,11 @@ class AlbumResultItem(QFrame):
         
         # Album header (always visible, clickable)
         self.header_widget = QWidget()
-        self.header_widget.setFixedHeight(80)
+        self.header_widget.setFixedHeight(90)  # Increased to match collapsed_height
         self.header_widget.setStyleSheet("QWidget { background: transparent; }")
         header_layout = QHBoxLayout(self.header_widget)
-        header_layout.setContentsMargins(16, 12, 16, 12)
-        header_layout.setSpacing(16)
+        header_layout.setContentsMargins(16, 12, 16, 16)  # More balanced padding - reduced top, added bottom
+        header_layout.setSpacing(16)  # Consistent spacing with other elements
         
         # Album icon with expand indicator
         icon_container = QVBoxLayout()
@@ -979,9 +1042,9 @@ class SearchResultItem(QFrame):
         self.setup_ui()
     
     def setup_ui(self):
-        # Dynamic height based on state (compact: 60px, expanded: 180px for better content fit)
-        self.compact_height = 60
-        self.expanded_height = 180  # Increased from 140px to fit content properly
+        # Dynamic height based on state (compact: 75px, expanded: 200px for better visual breathing room)
+        self.compact_height = 75  # Increased from 60px for less cramped feeling
+        self.expanded_height = 200  # Increased from 180px for more comfortable content layout
         self.setFixedHeight(self.compact_height)
         
         # Ensure consistent sizing and layout behavior
@@ -995,9 +1058,9 @@ class SearchResultItem(QFrame):
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 rgba(42, 42, 42, 0.9),
                     stop:1 rgba(32, 32, 32, 0.95));
-                border-radius: 12px;
+                border-radius: 16px;
                 border: 1px solid rgba(64, 64, 64, 0.4);
-                margin: 4px 2px;
+                margin: 6px 3px;
             }
             SearchResultItem:hover {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -1008,33 +1071,38 @@ class SearchResultItem(QFrame):
         """)
         
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 8, 12, 8)  # Tighter padding for compact view
-        layout.setSpacing(12)
+        layout.setContentsMargins(16, 12, 16, 12)  # More generous padding for better breathing room
+        layout.setSpacing(16)  # Increased spacing for better visual separation
         
         # Left section: Music icon + filename
         left_section = QHBoxLayout()
-        left_section.setSpacing(8)
+        left_section.setSpacing(12)  # Increased from 8px for better separation
         
-        # Compact music icon
+        # Enhanced music icon with better sizing
         music_icon = QLabel("🎵")
-        music_icon.setFixedSize(32, 32)
+        music_icon.setFixedSize(40, 40)  # Increased from 32x32 for better presence
         music_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         music_icon.setStyleSheet("""
             QLabel {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 rgba(29, 185, 84, 0.3),
-                    stop:1 rgba(29, 185, 84, 0.1));
-                border-radius: 16px;
-                border: 1px solid rgba(29, 185, 84, 0.4);
-                font-size: 14px;
+                    stop:0 rgba(29, 185, 84, 0.4),
+                    stop:1 rgba(29, 185, 84, 0.2));
+                border-radius: 20px;
+                border: 1px solid rgba(29, 185, 84, 0.5);
+                font-size: 16px;
+            }
+            QLabel:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(29, 185, 84, 0.6),
+                    stop:1 rgba(29, 185, 84, 0.4));
             }
         """)
         
         # Content area that will change based on expanded state
         self.content_widget = QWidget()
         self.content_layout = QVBoxLayout(self.content_widget)
-        self.content_layout.setContentsMargins(0, 0, 0, 0)
-        self.content_layout.setSpacing(3)  # Tighter spacing for better content density
+        self.content_layout.setContentsMargins(0, 2, 0, 2)  # Small vertical margins for better text positioning
+        self.content_layout.setSpacing(6)  # Increased from 3px for better readability
         
         # Extract song info
         primary_info = self._extract_song_info()
@@ -1044,11 +1112,11 @@ class SearchResultItem(QFrame):
         
         # Right section: Play and download buttons
         buttons_layout = QHBoxLayout()
-        buttons_layout.setSpacing(4)
+        buttons_layout.setSpacing(8)  # Increased from 4px for better button separation
         
         # Play button for streaming preview
         self.play_btn = QPushButton("▶️")
-        self.play_btn.setFixedSize(36, 36)
+        self.play_btn.setFixedSize(42, 42)  # Increased from 36x36 for better clickability
         self.play_btn.clicked.connect(self.request_stream)
         self.play_btn.setStyleSheet("""
             QPushButton {
@@ -1056,9 +1124,9 @@ class SearchResultItem(QFrame):
                     stop:0 rgba(255, 193, 7, 0.9),
                     stop:1 rgba(255, 152, 0, 0.9));
                 border: none;
-                border-radius: 18px;
+                border-radius: 21px;
                 color: #000000;
-                font-size: 14px;
+                font-size: 16px;
                 font-weight: bold;
             }
             QPushButton:hover {
@@ -1075,7 +1143,7 @@ class SearchResultItem(QFrame):
         
         # Download button
         self.download_btn = QPushButton("⬇️")
-        self.download_btn.setFixedSize(36, 36)
+        self.download_btn.setFixedSize(42, 42)  # Increased from 36x36 for better clickability
         self.download_btn.clicked.connect(self.request_download)
         self.download_btn.setStyleSheet("""
             QPushButton {
@@ -1083,9 +1151,9 @@ class SearchResultItem(QFrame):
                     stop:0 rgba(29, 185, 84, 0.9),
                     stop:1 rgba(24, 156, 71, 0.9));
                 border: none;
-                border-radius: 18px;
+                border-radius: 21px;
                 color: #000000;
-                font-size: 14px;
+                font-size: 16px;
                 font-weight: bold;
             }
             QPushButton:hover {
@@ -1118,19 +1186,30 @@ class SearchResultItem(QFrame):
             title_text = title_text[:47] + "..."
         
         self.title_label = QLabel(title_text)
-        self.title_label.setFont(QFont("Arial", 11, QFont.Weight.Bold))  # Reduced from 13px to 11px
-        self.title_label.setStyleSheet("color: #ffffff;")
+        self.title_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))  # Increased from 11px to 14px for better readability
+        self.title_label.setStyleSheet("color: #ffffff; letter-spacing: 0.2px;")
         self.title_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         # Ensure text doesn't overflow the label and allow click-through
         self.title_label.setWordWrap(False)
         # Remove text selection to allow clicks to propagate to parent widget
         self.title_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
         
-        # Expand indicator
+        # Expand indicator with enhanced styling
         self.expand_indicator = QLabel("⏵")
-        self.expand_indicator.setFixedSize(16, 16)
+        self.expand_indicator.setFixedSize(20, 20)  # Increased size for better visibility
         self.expand_indicator.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.expand_indicator.setStyleSheet("color: rgba(255, 255, 255, 0.6); font-size: 12px;")
+        self.expand_indicator.setStyleSheet("""
+            QLabel {
+                color: rgba(255, 255, 255, 0.7);
+                font-size: 14px;
+                background: rgba(255, 255, 255, 0.1);
+                border-radius: 10px;
+            }
+            QLabel:hover {
+                color: rgba(29, 185, 84, 0.9);
+                background: rgba(29, 185, 84, 0.15);
+            }
+        """)
         
         # Quality badge (only visible when expanded)
         self.quality_badge = self._create_compact_quality_badge()
@@ -1145,13 +1224,13 @@ class SearchResultItem(QFrame):
         # Expanded content (initially hidden)
         self.expanded_content = QWidget()
         expanded_layout = QVBoxLayout(self.expanded_content)
-        expanded_layout.setContentsMargins(0, 0, 0, 0)
-        expanded_layout.setSpacing(1)  # Ultra-tight spacing for more compact layout
+        expanded_layout.setContentsMargins(0, 4, 0, 4)  # Small margins for better text positioning
+        expanded_layout.setSpacing(4)  # Increased from 1px to 4px for better readability
         
         # Artist info
         self.artist_info = QLabel(primary_info['artist'])
-        self.artist_info.setFont(QFont("Arial", 10, QFont.Weight.Normal))  # Slightly smaller font
-        self.artist_info.setStyleSheet("color: rgba(179, 179, 179, 0.9);")
+        self.artist_info.setFont(QFont("Arial", 12, QFont.Weight.Normal))  # Increased from 10px to 12px for better readability
+        self.artist_info.setStyleSheet("color: rgba(179, 179, 179, 0.9); letter-spacing: 0.1px;")
         
         # File details
         details = []
@@ -1164,19 +1243,19 @@ class SearchResultItem(QFrame):
             details.append(f"{duration_mins}:{duration_secs:02d}")
         
         self.file_details = QLabel(" • ".join(details))
-        self.file_details.setFont(QFont("Arial", 9))  # Smaller font for compactness
-        self.file_details.setStyleSheet("color: rgba(136, 136, 136, 0.8);")
+        self.file_details.setFont(QFont("Arial", 10))  # Increased from 9px to 10px for better readability
+        self.file_details.setStyleSheet("color: rgba(136, 136, 136, 0.8); letter-spacing: 0.1px;")
         
         # User info and quality score in one compact row
         bottom_row = QHBoxLayout()
-        bottom_row.setContentsMargins(0, 0, 0, 0)
-        bottom_row.setSpacing(8)
+        bottom_row.setContentsMargins(0, 2, 0, 2)  # Small margins for better spacing
+        bottom_row.setSpacing(12)  # Increased from 8px for better separation
         
         # Apply intelligent path truncation to username/file location
         truncated_path = self._truncate_file_path(self.search_result.username, self.search_result.filename)
         self.user_info = QLabel(f"👤 {truncated_path}")
-        self.user_info.setFont(QFont("Arial", 9, QFont.Weight.Medium))  # Smaller font
-        self.user_info.setStyleSheet("color: rgba(29, 185, 84, 0.8);")
+        self.user_info.setFont(QFont("Arial", 10, QFont.Weight.Medium))  # Increased from 9px to 10px
+        self.user_info.setStyleSheet("color: rgba(29, 185, 84, 0.8); letter-spacing: 0.1px;")
         
         self.speed_indicator = self._create_compact_speed_indicator()
         
@@ -1201,10 +1280,30 @@ class SearchResultItem(QFrame):
         """Update UI based on expanded state without recreating widgets"""
         if self.is_expanded:
             self.expand_indicator.setText("⏷")
+            self.expand_indicator.setStyleSheet("""
+                QLabel {
+                    color: rgba(29, 185, 84, 0.9);
+                    font-size: 14px;
+                    background: rgba(29, 185, 84, 0.15);
+                    border-radius: 10px;
+                }
+            """)
             self.quality_badge.show()
             self.expanded_content.show()
         else:
             self.expand_indicator.setText("⏵")
+            self.expand_indicator.setStyleSheet("""
+                QLabel {
+                    color: rgba(255, 255, 255, 0.7);
+                    font-size: 14px;
+                    background: rgba(255, 255, 255, 0.1);
+                    border-radius: 10px;
+                }
+                QLabel:hover {
+                    color: rgba(29, 185, 84, 0.9);
+                    background: rgba(29, 185, 84, 0.15);
+                }
+            """)
             self.quality_badge.hide()
             self.expanded_content.hide()
     
@@ -1243,13 +1342,13 @@ class SearchResultItem(QFrame):
         self.set_expanded(not self.is_expanded, animate=True)
     
     def _animate_to_state(self):
-        """Animate to the current expanded state"""
+        """Animate to the current expanded state with enhanced easing"""
         from PyQt6.QtCore import QPropertyAnimation, QEasingCurve
         
-        # Start height animation first
+        # Start height animation with smoother easing
         self.animation = QPropertyAnimation(self, b"minimumHeight")
-        self.animation.setDuration(200)  # Slightly faster animation for better responsiveness
-        self.animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self.animation.setDuration(300)  # Slightly longer for smoother feel
+        self.animation.setEasingCurve(QEasingCurve.Type.OutQuart)  # More elegant easing curve
         
         if self.is_expanded:
             # Expand animation
@@ -1532,7 +1631,7 @@ class DownloadItem(QFrame):
         self.setup_ui()
     
     def setup_ui(self):
-        self.setFixedHeight(90)  # Consistent with search results
+        self.setFixedHeight(70)  # Reduced from 90px for more compact design
         self.setStyleSheet("""
             DownloadItem {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -1540,7 +1639,7 @@ class DownloadItem(QFrame):
                     stop:1 rgba(32, 32, 32, 0.95));
                 border-radius: 12px;
                 border: 1px solid rgba(64, 64, 64, 0.4);
-                margin: 6px 4px;
+                margin: 4px 2px;
             }
             DownloadItem:hover {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -1551,12 +1650,12 @@ class DownloadItem(QFrame):
         """)
         
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(16, 12, 16, 12)  # Consistent with search items
-        layout.setSpacing(16)  # Professional spacing
+        layout.setContentsMargins(12, 8, 12, 8)  # Tighter margins for compact design
+        layout.setSpacing(12)  # Reduced spacing for more compact layout
         
-        # Status icon
+        # Status icon with tighter sizing
         status_icon = QLabel()
-        status_icon.setFixedSize(32, 32)
+        status_icon.setFixedSize(28, 28)  # Reduced from 32x32 for compact design
         status_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         if self.status == "downloading":
@@ -1600,29 +1699,29 @@ class DownloadItem(QFrame):
                 }
             """)
         
-        # Content
+        # Content with tighter spacing
         content_layout = QVBoxLayout()
-        content_layout.setSpacing(5)
+        content_layout.setSpacing(3)  # Reduced from 5px for more compact layout
         
-        # Title and artist
+        # Title and artist with compact fonts
         title_label = QLabel(self.title)
-        title_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        title_label.setFont(QFont("Arial", 11, QFont.Weight.Bold))  # Reduced from 12px
         title_label.setStyleSheet("color: #ffffff;")
         
         artist_label = QLabel(f"by {self.artist}")
-        artist_label.setFont(QFont("Arial", 10))
+        artist_label.setFont(QFont("Arial", 9))  # Reduced from 10px
         artist_label.setStyleSheet("color: #b3b3b3;")
         
         content_layout.addWidget(title_label)
         content_layout.addWidget(artist_label)
         
-        # Progress section
+        # Progress section with tighter spacing
         progress_layout = QVBoxLayout()
-        progress_layout.setSpacing(5)
+        progress_layout.setSpacing(3)  # Reduced from 5px
         
         # Progress bar - Store reference for safe updates
         self.progress_bar = QProgressBar()
-        self.progress_bar.setFixedHeight(6)
+        self.progress_bar.setFixedHeight(5)  # Slightly thinner for compact design
         self.progress_bar.setValue(self.progress)
         self.progress_bar.setStyleSheet("""
             QProgressBar {
@@ -1654,19 +1753,19 @@ class DownloadItem(QFrame):
             status_text += f" - {self.progress}%"
         
         self.status_label = QLabel(status_text)
-        self.status_label.setFont(QFont("Arial", 9))
+        self.status_label.setFont(QFont("Arial", 8))  # Reduced from 9px
         self.status_label.setStyleSheet("color: #b3b3b3;")
         
         progress_layout.addWidget(self.progress_bar)
         progress_layout.addWidget(self.status_label)
         
-        # Action buttons section
+        # Action buttons section with tighter spacing
         actions_layout = QVBoxLayout()
-        actions_layout.setSpacing(4)
+        actions_layout.setSpacing(3)  # Reduced from 4px
         
-        # Primary action button
+        # Primary action button with compact sizing
         self.action_btn = QPushButton()
-        self.action_btn.setFixedSize(80, 28)
+        self.action_btn.setFixedSize(75, 26)  # Reduced from 80x28 for compact design
         
         if self.status == "downloading":
             self.action_btn.setText("Cancel")
@@ -1804,6 +1903,65 @@ class DownloadItem(QFrame):
                     status_text += f" - {self.progress}%"
                     
                 self.status_label.setText(status_text)
+                
+            # Update action button based on status
+            if hasattr(self, 'action_btn') and self.action_btn:
+                if self.status == "downloading":
+                    self.action_btn.setText("Cancel")
+                    # Disconnect old connections
+                    self.action_btn.clicked.disconnect()
+                    self.action_btn.clicked.connect(self.cancel_download)
+                    self.action_btn.setStyleSheet("""
+                        QPushButton {
+                            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 rgba(220, 53, 69, 0.8),
+                                stop:1 rgba(220, 53, 69, 1.0));
+                            color: white;
+                            border: none;
+                            border-radius: 6px;
+                            padding: 8px 16px;
+                            font-weight: bold;
+                            font-size: 12px;
+                        }
+                        QPushButton:hover {
+                            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 rgba(200, 33, 49, 0.9),
+                                stop:1 rgba(200, 33, 49, 1.0));
+                        }
+                        QPushButton:pressed {
+                            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 rgba(180, 13, 29, 1.0),
+                                stop:1 rgba(180, 13, 29, 1.0));
+                        }
+                    """)
+                else:
+                    self.action_btn.setText("📂 Open")
+                    # Disconnect old connections
+                    self.action_btn.clicked.disconnect()
+                    self.action_btn.clicked.connect(self.open_download_location)
+                    self.action_btn.setStyleSheet("""
+                        QPushButton {
+                            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 rgba(40, 167, 69, 0.8),
+                                stop:1 rgba(40, 167, 69, 1.0));
+                            color: white;
+                            border: none;
+                            border-radius: 6px;
+                            padding: 8px 16px;
+                            font-weight: bold;
+                            font-size: 12px;
+                        }
+                        QPushButton:hover {
+                            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 rgba(20, 147, 49, 0.9),
+                                stop:1 rgba(20, 147, 49, 1.0));
+                        }
+                        QPushButton:pressed {
+                            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 rgba(0, 127, 29, 1.0),
+                                stop:1 rgba(0, 127, 29, 1.0));
+                        }
+                    """)
                 
         except Exception as e:
             print(f"Error updating download item UI: {e}")
@@ -2079,12 +2237,18 @@ class TabbedDownloadManager(QTabWidget):
             # Remove from active queue
             self.active_queue.remove_download_item(download_item)
             
+            # Ensure completed downloads have 100% progress
+            final_progress = download_item.progress
+            if download_item.status == 'completed':
+                final_progress = 100
+                print(f"[DEBUG] Ensuring completed download '{download_item.title}' has 100% progress")
+            
             # Add to finished queue
             finished_item = self.finished_queue.add_download_item(
                 title=download_item.title,
                 artist=download_item.artist,
                 status=download_item.status,
-                progress=download_item.progress,
+                progress=final_progress,
                 file_size=download_item.file_size,
                 download_speed=download_item.download_speed,
                 file_path=download_item.file_path,
@@ -2298,8 +2462,8 @@ class DownloadsPage(QWidget):
         """)
         
         results_layout = QVBoxLayout(results_container)
-        results_layout.setContentsMargins(12, 8, 12, 12)  # Tighter responsive spacing
-        results_layout.setSpacing(8)  # Consistent small spacing for tight layout
+        results_layout.setContentsMargins(16, 12, 16, 16)  # Improved responsive spacing for better breathing room
+        results_layout.setSpacing(12)  # Increased spacing for better visual hierarchy
         
         # Results header
         results_header = QLabel("Search Results")
@@ -2342,8 +2506,8 @@ class DownloadsPage(QWidget):
         
         self.search_results_widget = QWidget()
         self.search_results_layout = QVBoxLayout(self.search_results_widget)
-        self.search_results_layout.setSpacing(8)
-        self.search_results_layout.setContentsMargins(4, 4, 4, 4)
+        self.search_results_layout.setSpacing(12)  # Increased from 8px for better card separation
+        self.search_results_layout.setContentsMargins(8, 8, 8, 8)  # Increased for better edge spacing
         self.search_results_layout.addStretch()
         self.search_results_scroll.setWidget(self.search_results_widget)
         
@@ -3627,12 +3791,27 @@ class DownloadsPage(QWidget):
             print(f"⚠️ Error clearing stream folder: {e}")
     
     def on_download_completed(self, message, download_item):
-        """Handle successful download start"""
-        print(f"Download success: {message}")
-        # Update download item status to completed
-        download_item.status = "completed"
-        download_item.progress = 100
-        # TODO: Add actual file path from download result
+        """Handle successful download start (NOT completion)"""
+        print(f"Download started: {message}")
+        
+        # Extract download ID from message if available
+        if "Download started:" in message and download_item:
+            # Message format is "Download started: <download_id>"
+            download_id_part = message.replace("Download started:", "").strip()
+            
+            # Check if this looks like a UUID (real download ID) vs filename
+            import re
+            uuid_pattern = r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+            if re.match(uuid_pattern, download_id_part, re.IGNORECASE):
+                download_item.download_id = download_id_part
+                print(f"[DEBUG] Stored real download ID: {download_id_part}")
+            else:
+                print(f"[DEBUG] Using filename as download ID: {download_id_part}")
+                download_item.download_id = download_id_part
+        
+        # Set status to downloading, not completed!
+        download_item.status = "downloading"
+        download_item.progress = 0
         
     def on_download_failed(self, error_msg, download_item):
         """Handle download failure"""
@@ -3685,58 +3864,132 @@ class DownloadsPage(QWidget):
             return
             
         # CRITICAL FIX: Use tracked thread instead of anonymous thread
-        def handle_status_update(downloads):
-            """Handle the download status update in the main thread - IMPROVED MATCHING"""
+        def handle_status_update(transfers_data):
+            """Handle the transfer status update from /api/v0/transfers/downloads endpoint"""
             try:
-                print(f"[DEBUG] Processing {len(downloads)} downloads from API")
+                if not transfers_data:
+                    return
+                    
+                # Flatten the transfers data structure 
+                all_transfers = []
+                for user_data in transfers_data:
+                    if 'directories' in user_data:
+                        for directory in user_data['directories']:
+                            if 'files' in directory:
+                                all_transfers.extend(directory['files'])
                 
-                for download_item in self.download_queue.download_items:
-                    # IMPROVED: Try multiple matching strategies
-                    queue_title = download_item.title.lower()
-                    queue_artist = download_item.artist.lower() 
+                print(f"[DEBUG] Processing {len(all_transfers)} active transfers from API")
+                
+                # Update download items based on transfer data
+                for download_item in self.download_queue.download_items.copy():  # Use copy to avoid modification during iteration
+                    if download_item.status.lower() in ['completed', 'finished', 'cancelled', 'failed']:
+                        continue  # Skip completed items
                     
-                    print(f"[DEBUG] Looking for: '{queue_artist} - {queue_title}'")
+                    print(f"[DEBUG] Looking for matches for download: '{download_item.title}' by '{download_item.artist}' (download_id: {getattr(download_item, 'download_id', 'None')})")
+                        
+                    # Try to match by download_id first (most reliable)
+                    matching_transfer = None
                     
-                    found_match = False
-                    for download in downloads:
-                        api_filename = download.filename.lower()
-                        print(f"[DEBUG] Checking against: '{download.filename}'")
+                    if hasattr(download_item, 'download_id') and download_item.download_id:
+                        for transfer in all_transfers:
+                            if transfer.get('id') == download_item.download_id:
+                                matching_transfer = transfer
+                                print(f"[DEBUG] ✅ Found ID match: {transfer.get('id')} -> {transfer.get('filename', 'Unknown')}")
+                                break
+                    
+                    # If no ID match, try filename matching as fallback
+                    if not matching_transfer:
+                        print(f"[DEBUG] No ID match found, trying filename matching...")
+                        for transfer in all_transfers:
+                            transfer_filename = transfer.get('filename', '').lower()
+                            # Simple filename matching - could be improved
+                            if (download_item.title.lower() in transfer_filename or 
+                                download_item.artist.lower() in transfer_filename):
+                                matching_transfer = transfer
+                                print(f"[DEBUG] ✅ Found filename match: '{download_item.title}' or '{download_item.artist}' in '{transfer_filename}'")
+                                break
+                            else:
+                                print(f"[DEBUG] ❌ No match: '{download_item.title}' or '{download_item.artist}' not in '{transfer_filename[:100]}...'")
                         
-                        # Strategy 1: Check if title is in the filename
-                        title_match = queue_title in api_filename
+                        if not matching_transfer:
+                            print(f"[DEBUG] ⚠️ No matching transfer found for '{download_item.title}' by '{download_item.artist}'")
+                    
+                    if matching_transfer:
+                        # Extract progress information
+                        state = matching_transfer.get('state', 'Unknown')
+                        progress = matching_transfer.get('percentComplete', 0)
+                        bytes_transferred = matching_transfer.get('bytesTransferred', 0)
+                        total_size = matching_transfer.get('size', 0)
+                        avg_speed = matching_transfer.get('averageSpeed', 0)
+                        remaining_time = matching_transfer.get('remainingTime', '')
                         
-                        # Strategy 2: Check if artist is in the filename  
-                        artist_match = queue_artist in api_filename
+                        # Ensure completed downloads show 100% progress
+                        if 'Completed' in state or 'Succeeded' in state:
+                            progress = 100
                         
-                        # Strategy 3: Reverse check - see if any part of queue item is in API filename
-                        combined_check = f"{queue_artist} - {queue_title}" in api_filename
+                        print(f"[DEBUG] Found transfer for '{download_item.title}': {state} - {progress:.1f}%")
                         
-                        if title_match or artist_match or combined_check:
-                            print(f"[DEBUG] ✓ MATCH FOUND: {download.filename}")
-                            print(f"[DEBUG] Status: {download.state}, Progress: {download.progress}%")
-                            
-                            # Update the UI item with real data
+                        # Map slskd states to our download states (handle compound states)
+                        if 'InProgress' in state:
+                            new_status = 'downloading'
+                        elif 'Completed' in state or 'Succeeded' in state:
+                            new_status = 'completed'
+                            # Update the download item status and progress BEFORE moving
                             download_item.update_status(
-                                status=download.state,
-                                progress=int(download.progress),
-                                download_speed=download.speed,
-                                file_path=download.filename
+                                status=new_status,
+                                progress=100,  # Force 100% for completed downloads
+                                download_speed=int(avg_speed),
+                                file_path=matching_transfer.get('filename', download_item.file_path)
                             )
-                            
-                            # AUTO-MOVE: Check if download is finished and move to finished tab
-                            finished_states = ["completed", "cancelled", "completed, succeeded", "completed, cancelled"]
-                            if download.state.lower() in [state.lower() for state in finished_states]:
-                                print(f"[DEBUG] Moving finished download to finished tab: {download_item.title}")
-                                self.download_queue.move_to_finished(download_item)
-                            
-                            found_match = True
-                            break
-                    
-                    if not found_match:
-                        print(f"[DEBUG] ✗ NO MATCH for: '{queue_artist} - {queue_title}'")
+                            # Move completed items to finished queue
+                            print(f"[DEBUG] Moving completed download '{download_item.title}' to finished queue")
+                            self.download_queue.move_to_finished(download_item)
+                            continue
+                        elif 'Cancelled' in state or 'Canceled' in state:
+                            new_status = 'cancelled'
+                            # Update the download item status BEFORE moving
+                            download_item.update_status(
+                                status=new_status,
+                                progress=download_item.progress,  # Keep current progress
+                                download_speed=0,  # No speed for cancelled
+                                file_path=download_item.file_path
+                            )
+                            print(f"[DEBUG] Moving cancelled download '{download_item.title}' to finished queue")
+                            self.download_queue.move_to_finished(download_item)
+                            continue
+                        elif 'Failed' in state or 'Errored' in state:
+                            new_status = 'failed'
+                            # Update the download item status BEFORE moving
+                            download_item.update_status(
+                                status=new_status,
+                                progress=download_item.progress,  # Keep current progress
+                                download_speed=0,  # No speed for failed
+                                file_path=download_item.file_path
+                            )
+                            print(f"[DEBUG] Moving failed download '{download_item.title}' to finished queue")
+                            self.download_queue.move_to_finished(download_item)
+                            continue
+                        elif 'Queued' in state or 'Initializing' in state:
+                            new_status = 'queued'
+                        else:
+                            new_status = state.lower()
                         
+                        # Update the download item with real-time data
+                        download_item.update_status(
+                            status=new_status,
+                            progress=int(progress),
+                            download_speed=int(avg_speed),
+                            file_path=matching_transfer.get('filename', download_item.file_path)
+                        )
+                        
+                        # Store/update the download ID for future matching
+                        if not download_item.download_id:
+                            download_item.download_id = matching_transfer.get('id', '')
+                    
+                    # (Matching transfer not found - debug message already printed above)
+                
             except Exception as e:
-                print(f"Error updating download UI: {e}")
+                print(f"[ERROR] Error processing transfer status update: {e}")
                 import traceback
                 traceback.print_exc()
         
@@ -3749,16 +4002,22 @@ class DownloadsPage(QWidget):
             except Exception as e:
                 print(f"Error cleaning up status thread: {e}")
         
-        # CRITICAL FIX: Create tracked status update thread
-        status_thread = TrackedStatusUpdateThread(self.soulseek_client, self)
-        status_thread.status_updated.connect(handle_status_update, Qt.ConnectionType.QueuedConnection)
-        status_thread.finished.connect(
-            functools.partial(on_status_thread_finished, status_thread), 
-            Qt.ConnectionType.QueuedConnection
-        )
+        # Create and start transfer status update thread
+        status_thread = TransferStatusThread(self.soulseek_client)
+        status_thread.transfer_status_completed.connect(handle_status_update)
+        status_thread.transfer_status_failed.connect(lambda error: print(f"Transfer status update failed: {error}"))
         
-        # CRITICAL FIX: Track the thread for proper cleanup
+        # Track the thread to prevent garbage collection
         self.status_update_threads.append(status_thread)
+        
+        # Clean up old threads (keep only last 2 for efficiency)
+        if len(self.status_update_threads) > 2:
+            old_thread = self.status_update_threads.pop(0)
+            if old_thread.isRunning():
+                old_thread.stop()
+                old_thread.wait(1000)
+            old_thread.deleteLater()
+            
         status_thread.start()
     
     
