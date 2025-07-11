@@ -1,7 +1,133 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
                            QLabel, QFrame, QSizePolicy, QSpacerItem, QSlider, QProgressBar)
 from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QRect, QTimer
-from PyQt6.QtGui import QFont, QPalette, QIcon, QPixmap, QPainter
+from PyQt6.QtGui import QFont, QPalette, QIcon, QPixmap, QPainter, QFontMetrics
+
+class ScrollingLabel(QLabel):
+    """A label that smoothly scrolls text horizontally when it's too long to fit"""
+    
+    def __init__(self, text="", parent=None):
+        super().__init__(parent)
+        self.full_text = text
+        self.scroll_offset = 0
+        self.text_width = 0
+        self.should_scroll = False
+        self.is_scrolling = False
+        self.scroll_speed = 30  # pixels per second
+        
+        # Animation timer
+        self.scroll_timer = QTimer()
+        self.scroll_timer.timeout.connect(self.update_scroll)
+        
+        # Pause timer for smooth start/stop
+        self.pause_timer = QTimer()
+        self.pause_timer.setSingleShot(True)
+        self.pause_timer.timeout.connect(self.start_scroll_animation)
+        
+        # Set initial properties
+        self.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.update_text_metrics()
+        
+    def setText(self, text):
+        """Override setText to handle scroll calculations"""
+        self.full_text = text
+        self.scroll_offset = 0
+        self.update_text_metrics()
+        super().setText(text)
+        
+    def update_text_metrics(self):
+        """Calculate if text needs scrolling and start animation if needed"""
+        if not self.full_text:
+            self.should_scroll = False
+            self.stop_scrolling()
+            return
+            
+        font_metrics = QFontMetrics(self.font())
+        self.text_width = font_metrics.horizontalAdvance(self.full_text)
+        available_width = self.width() - 20  # Account for padding
+        
+        self.should_scroll = self.text_width > available_width and available_width > 0
+        
+        if self.should_scroll and not self.is_scrolling:
+            # Start scrolling after a pause
+            self.pause_timer.start(1500)  # 1.5 second pause before scrolling
+        elif not self.should_scroll:
+            self.stop_scrolling()
+            
+    def start_scroll_animation(self):
+        """Start the continuous scrolling animation"""
+        if self.should_scroll and not self.is_scrolling:
+            self.is_scrolling = True
+            self.scroll_timer.start(50)  # Update every 50ms for smooth animation
+            
+    def stop_scrolling(self):
+        """Stop scrolling and reset position"""
+        self.scroll_timer.stop()
+        self.pause_timer.stop()
+        self.is_scrolling = False
+        self.scroll_offset = 0
+        self.update()
+        
+    def update_scroll(self):
+        """Update scroll position for animation"""
+        if not self.should_scroll:
+            self.stop_scrolling()
+            return
+            
+        available_width = self.width() - 20
+        max_scroll = self.text_width - available_width + 30  # Extra padding at end
+        
+        # Move scroll position
+        self.scroll_offset += 2  # 2 pixels per frame
+        
+        # Reset when we've scrolled past the end
+        if self.scroll_offset > max_scroll:
+            self.scroll_offset = -50  # Start from off-screen left
+            
+        self.update()
+        
+    def paintEvent(self, event):
+        """Custom paint event to draw scrolling text"""
+        if not self.should_scroll or not self.is_scrolling:
+            # Use default painting for non-scrolling text
+            super().paintEvent(event)
+            return
+            
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        # Set font and color from stylesheet
+        painter.setFont(self.font())
+        
+        # Get text color from current style
+        painter.setPen(self.palette().color(QPalette.ColorRole.WindowText))
+        
+        # Draw text at scroll offset position
+        text_rect = self.rect()
+        text_rect.adjust(10, 0, -10, 0)  # Account for padding
+        
+        painter.drawText(text_rect.x() - self.scroll_offset, text_rect.y(), 
+                        text_rect.width() + self.text_width, text_rect.height(),
+                        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                        self.full_text)
+        
+    def resizeEvent(self, event):
+        """Handle resize to recalculate scrolling needs"""
+        super().resizeEvent(event)
+        self.update_text_metrics()
+        
+    def enterEvent(self, event):
+        """Start scrolling on hover"""
+        super().enterEvent(event)
+        if self.should_scroll and not self.is_scrolling:
+            self.start_scroll_animation()
+            
+    def leaveEvent(self, event):
+        """Optionally stop scrolling when mouse leaves (can be customized)"""
+        super().leaveEvent(event)
+        # Note: We continue scrolling even after mouse leaves for better UX
+        # You can uncomment the line below if you want it to stop on mouse leave
+        # self.stop_scrolling()
 
 class SidebarButton(QPushButton):
     def __init__(self, text: str, icon_text: str = "", parent=None):
@@ -225,10 +351,10 @@ class MediaPlayer(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
         
-        # Track info (expandable on click)
-        self.track_info = QLabel("No track")
+        # Track info (expandable on click) - now with scrolling for long titles
+        self.track_info = ScrollingLabel("No track")
         self.track_info.setStyleSheet("""
-            QLabel {
+            ScrollingLabel {
                 color: #ffffff;
                 font-size: 13px;
                 font-weight: 600;
@@ -237,7 +363,7 @@ class MediaPlayer(QWidget):
                 letter-spacing: 0.2px;
                 padding: 2px 0px;
             }
-            QLabel:hover {
+            ScrollingLabel:hover {
                 color: #1ed760;
             }
         """)
@@ -464,13 +590,21 @@ class MediaPlayer(QWidget):
         self.is_playing = playing
         if playing:
             self.play_pause_btn.setText("⏸")
+            # Start scrolling animation when playing
+            if self.track_info.should_scroll and not self.track_info.is_scrolling:
+                self.track_info.start_scroll_animation()
         else:
             self.play_pause_btn.setText("▶")
+            # Optionally stop scrolling when paused (can be customized)
+            # self.track_info.stop_scrolling()
     
     def clear_track(self):
         """Clear current track and reset to no track state"""
         self.current_track = None
         self.is_playing = False
+        
+        # Stop any scrolling animation
+        self.track_info.stop_scrolling()
         
         # Update UI
         self.track_info.setText("No track")
