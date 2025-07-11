@@ -8,6 +8,9 @@ from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 import functools  # For fixing lambda memory leaks
 import os
 
+# Import the new search result classes
+from core.soulseek_client import TrackResult, AlbumResult
+
 class AudioPlayer(QMediaPlayer):
     """Simple audio player for streaming music files"""
     playback_finished = pyqtSignal()
@@ -273,7 +276,7 @@ class ExploreApiThread(QThread):
         self._stop_requested = True
 
 class SearchThread(QThread):
-    search_completed = pyqtSignal(list)  # List of search results
+    search_completed = pyqtSignal(object)  # Tuple of (tracks, albums) or list for backward compatibility
     search_failed = pyqtSignal(str)  # Error message
     search_progress = pyqtSignal(str)  # Progress message
     search_results_partial = pyqtSignal(list, int)  # Partial results, total count
@@ -305,8 +308,9 @@ class SearchThread(QThread):
             results = loop.run_until_complete(self._do_search())
             
             if not self._stop_requested:
-                # Emit final completion with all results
-                self.search_completed.emit(self.all_results if self.all_results else results)
+                # Emit final completion with proper tuple format
+                # results should be a tuple (tracks, albums) from the search client
+                self.search_completed.emit(results)
             
         except Exception as e:
             if not self._stop_requested:
@@ -456,10 +460,9 @@ class StreamingThread(QThread):
                         if found_file:
                             print(f"✓ Found downloaded file: {found_file}")
                             
-                            # Move the file to Stream folder
-                            file_extension = os.path.splitext(found_file)[1]
-                            stream_filename = f"current_stream{file_extension}"
-                            stream_path = os.path.join(stream_folder, stream_filename)
+                            # Move the file to Stream folder with original filename
+                            original_filename = os.path.basename(found_file)
+                            stream_path = os.path.join(stream_folder, original_filename)
                             
                             try:
                                 # Move file to Stream folder
@@ -591,6 +594,338 @@ class StreamingThread(QThread):
     def stop(self):
         """Stop the streaming gracefully"""
         self._stop_requested = True
+
+class TrackItem(QFrame):
+    """Individual track item within an album"""
+    track_download_requested = pyqtSignal(object)  # TrackResult object
+    track_stream_requested = pyqtSignal(object)    # TrackResult object
+    
+    def __init__(self, track_result, parent=None):
+        super().__init__(parent)
+        self.track_result = track_result
+        self.setup_ui()
+    
+    def setup_ui(self):
+        self.setFixedHeight(50)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        
+        self.setStyleSheet("""
+            TrackItem {
+                background: rgba(40, 40, 40, 0.5);
+                border-radius: 8px;
+                border: 1px solid rgba(60, 60, 60, 0.3);
+                margin: 2px 8px;
+            }
+            TrackItem:hover {
+                background: rgba(50, 50, 50, 0.7);
+                border: 1px solid rgba(29, 185, 84, 0.5);
+            }
+        """)
+        
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(12)
+        
+        # Track info
+        track_info = QVBoxLayout()
+        track_info.setSpacing(2)
+        
+        # Track title
+        title = QLabel(self.track_result.title or "Unknown Title")
+        title.setFont(QFont("Arial", 11, QFont.Weight.Bold))
+        title.setStyleSheet("color: #ffffff;")
+        
+        # Track details
+        details = []
+        if self.track_result.track_number:
+            details.append(f"#{self.track_result.track_number:02d}")
+        details.append(self.track_result.quality.upper())
+        if self.track_result.bitrate:
+            details.append(f"{self.track_result.bitrate}kbps")
+        details.append(f"{self.track_result.size // (1024*1024)}MB")
+        
+        details_text = " • ".join(details)
+        track_details = QLabel(details_text)
+        track_details.setFont(QFont("Arial", 9))
+        track_details.setStyleSheet("color: rgba(179, 179, 179, 0.8);")
+        
+        track_info.addWidget(title)
+        track_info.addWidget(track_details)
+        
+        # Control buttons
+        button_layout = QHBoxLayout()
+        button_layout.setSpacing(8)
+        
+        # Play button
+        play_btn = QPushButton("▶️")
+        play_btn.setFixedSize(32, 32)
+        play_btn.clicked.connect(self.request_stream)
+        play_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(29, 185, 84, 0.8);
+                border: none;
+                border-radius: 16px;
+                color: #000000;
+                font-size: 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: rgba(30, 215, 96, 1.0);
+            }
+        """)
+        
+        # Download button  
+        download_btn = QPushButton("⬇️")
+        download_btn.setFixedSize(32, 32)
+        download_btn.clicked.connect(self.request_download)
+        download_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(64, 64, 64, 0.8);
+                border: 1px solid rgba(29, 185, 84, 0.6);
+                border-radius: 16px;
+                color: #1db954;
+                font-size: 10px;
+            }
+            QPushButton:hover {
+                background: rgba(29, 185, 84, 0.2);
+            }
+        """)
+        
+        button_layout.addWidget(play_btn)
+        button_layout.addWidget(download_btn)
+        
+        # Store button references for state management
+        self.play_btn = play_btn
+        self.download_btn = download_btn
+        
+        # Assembly
+        layout.addLayout(track_info, 1)
+        layout.addLayout(button_layout)
+    
+    def request_stream(self):
+        """Request streaming of this track"""
+        self.track_stream_requested.emit(self.track_result)
+    
+    def request_download(self):
+        """Request download of this track"""
+        self.track_download_requested.emit(self.track_result)
+    
+    def set_loading_state(self):
+        """Set play button to loading state"""
+        self.play_btn.setText("⏳")
+        self.play_btn.setEnabled(False)
+    
+    def set_playing_state(self):
+        """Set play button to playing/pause state"""
+        self.play_btn.setText("⏸️")
+        self.play_btn.setEnabled(True)
+    
+    def reset_play_state(self):
+        """Reset play button to default state"""
+        self.play_btn.setText("▶️")
+        self.play_btn.setEnabled(True)
+
+class AlbumResultItem(QFrame):
+    """Expandable UI component for displaying album search results"""
+    album_download_requested = pyqtSignal(object)  # AlbumResult object
+    track_download_requested = pyqtSignal(object)  # TrackResult object  
+    track_stream_requested = pyqtSignal(object, object)  # TrackResult object, TrackItem object
+    
+    def __init__(self, album_result, parent=None):
+        super().__init__(parent)
+        self.album_result = album_result
+        self.is_expanded = False
+        self.track_items = []
+        self.tracks_container = None
+        self.setup_ui()
+    
+    def setup_ui(self):
+        # Dynamic height based on expansion state
+        self.collapsed_height = 80
+        self.setFixedHeight(self.collapsed_height)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        
+        # Enable mouse tracking for click detection
+        self.setMouseTracking(True)
+        
+        self.setStyleSheet("""
+            AlbumResultItem {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(45, 45, 45, 0.9),
+                    stop:1 rgba(35, 35, 35, 0.95));
+                border-radius: 12px;
+                border: 1px solid rgba(80, 80, 80, 0.4);
+                margin: 6px 4px;
+            }
+            AlbumResultItem:hover {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(55, 55, 55, 0.95),
+                    stop:1 rgba(45, 45, 45, 0.98));
+                border: 1px solid rgba(29, 185, 84, 0.7);
+            }
+        """)
+        
+        # Main vertical layout for album header + tracks
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        
+        # Album header (always visible, clickable)
+        self.header_widget = QWidget()
+        self.header_widget.setFixedHeight(80)
+        self.header_widget.setStyleSheet("QWidget { background: transparent; }")
+        header_layout = QHBoxLayout(self.header_widget)
+        header_layout.setContentsMargins(16, 12, 16, 12)
+        header_layout.setSpacing(16)
+        
+        # Album icon with expand indicator
+        icon_container = QVBoxLayout()
+        album_icon = QLabel("💿")
+        album_icon.setFixedSize(32, 32)
+        album_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        album_icon.setStyleSheet("""
+            QLabel {
+                font-size: 20px;
+                background: rgba(29, 185, 84, 0.1);
+                border-radius: 16px;
+                border: 1px solid rgba(29, 185, 84, 0.3);
+            }
+        """)
+        
+        # Expand indicator
+        self.expand_indicator = QLabel("▶")
+        self.expand_indicator.setFixedSize(16, 16)
+        self.expand_indicator.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.expand_indicator.setStyleSheet("""
+            QLabel {
+                color: rgba(29, 185, 84, 0.8);
+                font-size: 12px;
+                font-weight: bold;
+            }
+        """)
+        
+        icon_container.addWidget(album_icon)
+        icon_container.addWidget(self.expand_indicator)
+        
+        # Album info section
+        info_section = QVBoxLayout()
+        info_section.setSpacing(2)
+        info_section.setContentsMargins(0, 0, 0, 0)
+        
+        # Album title
+        album_title = QLabel(self.album_result.album_title)
+        album_title.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        album_title.setStyleSheet("color: #ffffff;")
+        
+        # Artist and details
+        details = []
+        if self.album_result.artist:
+            details.append(self.album_result.artist)
+        details.append(f"{self.album_result.track_count} tracks")
+        details.append(f"{self.album_result.size_mb}MB")
+        details.append(self.album_result.dominant_quality.upper())
+        if self.album_result.year:
+            details.append(f"({self.album_result.year})")
+        
+        details_text = " • ".join(details)
+        album_details = QLabel(details_text)
+        album_details.setFont(QFont("Arial", 10))
+        album_details.setStyleSheet("color: rgba(179, 179, 179, 0.9);")
+        
+        # User info
+        user_info = QLabel(f"👤 {self.album_result.username}")
+        user_info.setFont(QFont("Arial", 9))
+        user_info.setStyleSheet("color: rgba(29, 185, 84, 0.8);")
+        
+        info_section.addWidget(album_title)
+        info_section.addWidget(album_details)
+        info_section.addWidget(user_info)
+        
+        # Download button
+        self.download_btn = QPushButton("⬇️ Download Album")
+        self.download_btn.setFixedSize(120, 36)
+        self.download_btn.clicked.connect(self.request_album_download)
+        self.download_btn.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(29, 185, 84, 0.9),
+                    stop:1 rgba(24, 156, 71, 0.9));
+                border: none;
+                border-radius: 18px;
+                color: #000000;
+                font-size: 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(30, 215, 96, 1.0),
+                    stop:1 rgba(25, 180, 80, 1.0));
+            }
+        """)
+        
+        # Assembly header
+        header_layout.addLayout(icon_container)
+        header_layout.addLayout(info_section, 1)
+        header_layout.addWidget(self.download_btn)
+        
+        # Tracks container (hidden by default)
+        self.tracks_container = QWidget()
+        self.tracks_container.setVisible(False)
+        tracks_layout = QVBoxLayout(self.tracks_container)
+        tracks_layout.setContentsMargins(16, 8, 16, 16)
+        tracks_layout.setSpacing(4)
+        
+        # Create track items
+        for track in self.album_result.tracks:
+            track_item = TrackItem(track)
+            track_item.track_download_requested.connect(self.track_download_requested.emit)
+            # Use lambda to pass both track result and track item reference
+            track_item.track_stream_requested.connect(
+                lambda track_result, item=track_item: self.handle_track_stream_request(track_result, item)
+            )
+            tracks_layout.addWidget(track_item)
+            self.track_items.append(track_item)
+        
+        # Assembly main layout
+        main_layout.addWidget(self.header_widget)
+        main_layout.addWidget(self.tracks_container)
+        
+        # Make header clickable
+        self.header_widget.mousePressEvent = self.toggle_expansion
+    
+    def request_album_download(self):
+        """Request download of the entire album"""
+        self.download_btn.setText("⏳")
+        self.download_btn.setEnabled(False)
+        self.album_download_requested.emit(self.album_result)
+    
+    def toggle_expansion(self, event):
+        """Toggle album expansion to show/hide tracks"""
+        self.is_expanded = not self.is_expanded
+        
+        if self.is_expanded:
+            # Expand to show tracks
+            self.tracks_container.setVisible(True)
+            self.expand_indicator.setText("▼")
+            # Calculate height: header + (tracks * track_height) + padding
+            track_height = 54  # 50px + margin
+            total_height = self.collapsed_height + (len(self.track_items) * track_height) + 24
+            self.setFixedHeight(total_height)
+        else:
+            # Collapse to hide tracks
+            self.tracks_container.setVisible(False)
+            self.expand_indicator.setText("▶")
+            self.setFixedHeight(self.collapsed_height)
+        
+        # Force layout update
+        self.updateGeometry()
+        if self.parent():
+            self.parent().updateGeometry()
+    
+    def handle_track_stream_request(self, track_result, track_item):
+        """Handle stream request from a track item, passing the correct button reference"""
+        # Emit the stream request with the track item that contains the button
+        self.track_stream_requested.emit(track_result, track_item)
 
 class SearchResultItem(QFrame):
     download_requested = pyqtSignal(object)  # SearchResult object
@@ -943,33 +1278,63 @@ class SearchResultItem(QFrame):
             return '/'.join(truncated_parts)
     
     def _extract_song_info(self):
-        """Extract song title and artist from filename"""
-        filename = self.search_result.filename
+        """Extract song title and artist from TrackResult"""
+        # Handle case where search_result is a list (shouldn't happen but be defensive)
+        if isinstance(self.search_result, list):
+            if len(self.search_result) > 0:
+                # Take the first item if it's a list
+                actual_result = self.search_result[0]
+            else:
+                # Empty list, return defaults
+                return {'title': 'Unknown Title', 'artist': 'Unknown Artist'}
+        else:
+            actual_result = self.search_result
         
-        # Remove file extension
-        name_without_ext = filename.rsplit('.', 1)[0]
+        # TrackResult objects have parsed metadata available
+        if hasattr(actual_result, 'title') and hasattr(actual_result, 'artist'):
+            # Use parsed metadata from TrackResult
+            return {
+                'title': actual_result.title or 'Unknown Title',
+                'artist': actual_result.artist or 'Unknown Artist'
+            }
         
-        # Common patterns for artist - title separation
-        separators = [' - ', ' – ', ' — ', '_-_', ' | ']
-        
-        for sep in separators:
-            if sep in name_without_ext:
-                parts = name_without_ext.split(sep, 1)
-                return {
-                    'title': parts[1].strip(),
-                    'artist': parts[0].strip()
-                }
-        
-        # If no separator found, use filename as title
-        return {
-            'title': name_without_ext,
-            'artist': 'Unknown Artist'
-        }
+        # Fallback: parse from filename if metadata not available
+        if hasattr(actual_result, 'filename'):
+            filename = actual_result.filename
+            
+            # Remove file extension
+            name_without_ext = filename.rsplit('.', 1)[0]
+            
+            # Common patterns for artist - title separation
+            separators = [' - ', ' – ', ' — ', '_-_', ' | ']
+            
+            for sep in separators:
+                if sep in name_without_ext:
+                    parts = name_without_ext.split(sep, 1)
+                    return {
+                        'title': parts[1].strip(),
+                        'artist': parts[0].strip()
+                    }
+            
+            # If no separator found, use filename as title
+            return {
+                'title': name_without_ext,
+                'artist': 'Unknown Artist'
+            }
+        else:
+            # No filename attribute, return defaults
+            return {
+                'title': 'Unknown Title',
+                'artist': 'Unknown Artist'
+            }
     
     def _create_compact_quality_badge(self):
         """Create a compact quality indicator badge"""
-        quality = self.search_result.quality.upper()
-        bitrate = self.search_result.bitrate
+        # Handle list case defensively
+        result = self.search_result[0] if isinstance(self.search_result, list) else self.search_result
+        
+        quality = result.quality.upper()
+        bitrate = result.bitrate
         
         if quality == 'FLAC':
             badge_text = "FLAC"
@@ -1004,8 +1369,11 @@ class SearchResultItem(QFrame):
     
     def _create_compact_speed_indicator(self):
         """Create compact upload speed indicator"""
-        speed = self.search_result.upload_speed
-        slots = self.search_result.free_upload_slots
+        # Handle list case defensively
+        result = self.search_result[0] if isinstance(self.search_result, list) else self.search_result
+        
+        speed = result.upload_speed
+        slots = result.free_upload_slots
         
         if slots > 0 and speed > 100:
             indicator_color = "#1db954"
@@ -2430,12 +2798,20 @@ class DownloadsPage(QWidget):
         self.search_btn.setText("🔍 Search")
         self.search_btn.setEnabled(True)
         
-        # Use temp results from progressive loading if available, otherwise use results
-        if hasattr(self, '_temp_search_results') and self._temp_search_results:
-            self.search_results = self._temp_search_results
-            del self._temp_search_results  # Clean up temp storage
+        # Handle tuple format (tracks, albums) from enhanced search
+        if isinstance(results, tuple) and len(results) == 2:
+            tracks, albums = results
+            
+            # Combine into single list for display - albums first, then tracks
+            combined_results = albums + tracks
+            self.search_results = combined_results
+            self.track_results = tracks  # Store separately for future use
+            self.album_results = albums  # Store separately for future use
         else:
+            # Fallback for old list format or empty results
             self.search_results = results or []
+            self.track_results = results or []  # Assume all are tracks in old format
+            self.album_results = []
         
         total_results = len(self.search_results)
         
@@ -2446,12 +2822,24 @@ class DownloadsPage(QWidget):
                 self.update_search_status(f"✨ Search completed • Found {self.displayed_results} total results", "#1db954")
             return
         
+        # Update status with album/track breakdown
+        album_count = len(self.album_results) if hasattr(self, 'album_results') else 0
+        track_count = len(self.track_results) if hasattr(self, 'track_results') else total_results
+        
+        status_parts = []
+        if album_count > 0:
+            status_parts.append(f"{album_count} album{'s' if album_count != 1 else ''}")
+        if track_count > 0:
+            status_parts.append(f"{track_count} track{'s' if track_count != 1 else ''}")
+        
+        result_summary = " • ".join(status_parts) if status_parts else f"{total_results} results"
+        
         # Update status based on whether there are more results to load
         if self.displayed_results < total_results:
             remaining = total_results - self.displayed_results
-            self.update_search_status(f"✨ Found {total_results} results • Showing first {self.displayed_results} (scroll down for {remaining} more)", "#1db954")
+            self.update_search_status(f"✨ Found {result_summary} • Showing first {self.displayed_results} (scroll down for {remaining} more)", "#1db954")
         else:
-            self.update_search_status(f"✨ Search completed • Showing all {total_results} results", "#1db954")
+            self.update_search_status(f"✨ Search completed • Found {result_summary}", "#1db954")
         
         # If we have no displayed results yet, show the first batch
         if self.displayed_results == 0 and total_results > 0:
@@ -2459,12 +2847,14 @@ class DownloadsPage(QWidget):
     
     def clear_search_results(self):
         """Clear all search result items from the layout"""
-        # Remove all SearchResultItem widgets (but keep stretch)
+        # Remove all SearchResultItem and AlbumResultItem widgets (but keep stretch)
         items_to_remove = []
         for i in range(self.search_results_layout.count()):
             item = self.search_results_layout.itemAt(i)
-            if item and item.widget() and isinstance(item.widget(), SearchResultItem):
-                items_to_remove.append(item.widget())
+            if item and item.widget():
+                widget = item.widget()
+                if isinstance(widget, (SearchResultItem, AlbumResultItem)):
+                    items_to_remove.append(widget)
         
         for widget in items_to_remove:
             self.search_results_layout.removeWidget(widget)
@@ -2501,10 +2891,21 @@ class DownloadsPage(QWidget):
         # Add result items to UI
         for i in range(start_index, end_index):
             result = self.search_results[i]
-            result_item = SearchResultItem(result)
-            result_item.download_requested.connect(self.start_download)
-            result_item.stream_requested.connect(lambda search_result, item=result_item: self.start_stream(search_result, item))
-            result_item.expansion_requested.connect(self.handle_expansion_request)
+            
+            # Create appropriate UI component based on result type
+            if isinstance(result, AlbumResult):
+                # Create expandable album result item
+                result_item = AlbumResultItem(result)
+                result_item.album_download_requested.connect(self.start_album_download)
+                result_item.track_download_requested.connect(self.start_download)  # Individual track downloads
+                result_item.track_stream_requested.connect(lambda search_result, track_item: self.start_stream(search_result, track_item))  # Individual track streaming
+            else:
+                # Create track result item (play + download)
+                result_item = SearchResultItem(result)
+                result_item.download_requested.connect(self.start_download)
+                result_item.stream_requested.connect(lambda search_result, item=result_item: self.start_stream(search_result, item))
+                result_item.expansion_requested.connect(self.handle_expansion_request)
+            
             # Insert before the stretch (which is always last)
             insert_position = self.search_results_layout.count() - 1
             self.search_results_layout.insertWidget(insert_position, result_item)
@@ -2606,6 +3007,20 @@ class DownloadsPage(QWidget):
         except Exception as e:
             print(f"Failed to start download: {str(e)}")
     
+    def start_album_download(self, album_result):
+        """Start downloading all tracks in an album"""
+        try:
+            print(f"🎵 Starting album download: {album_result.album_title} by {album_result.artist}")
+            
+            # Download each track in the album
+            for track in album_result.tracks:
+                self.start_download(track)
+            
+            print(f"✓ Queued {len(album_result.tracks)} tracks for download from album: {album_result.album_title}")
+            
+        except Exception as e:
+            print(f"Failed to start album download: {str(e)}")
+    
     def start_stream(self, search_result, result_item=None):
         """Start streaming a search result using StreamingThread"""
         try:
@@ -2671,11 +3086,15 @@ class DownloadsPage(QWidget):
             project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))  # Go up from ui/pages/
             stream_folder = os.path.join(project_root, 'Stream')
             
-            # Find the current stream file
+            # Find any audio file in the stream folder (should only be one)
             stream_file = None
+            audio_extensions = {'.mp3', '.flac', '.ogg', '.aac', '.wma', '.wav', '.m4a'}
+            
             for filename in os.listdir(stream_folder):
-                if filename.startswith('current_stream') and os.path.isfile(os.path.join(stream_folder, filename)):
-                    stream_file = os.path.join(stream_folder, filename)
+                file_path = os.path.join(stream_folder, filename)
+                if (os.path.isfile(file_path) and 
+                    os.path.splitext(filename)[1].lower() in audio_extensions):
+                    stream_file = file_path
                     break
             
             if stream_file and os.path.exists(stream_file):

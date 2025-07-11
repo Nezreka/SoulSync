@@ -12,6 +12,7 @@ logger = get_logger("soulseek_client")
 
 @dataclass
 class SearchResult:
+    """Base class for search results"""
     username: str
     filename: str
     size: int
@@ -21,6 +22,7 @@ class SearchResult:
     free_upload_slots: int
     upload_speed: int
     queue_length: int
+    result_type: str = "track"  # "track" or "album"
     
     @property
     def quality_score(self) -> float:
@@ -52,6 +54,137 @@ class SearchResult:
             base_score -= 0.1
         
         return min(base_score, 1.0)
+
+@dataclass  
+class TrackResult(SearchResult):
+    """Individual track search result"""
+    artist: Optional[str] = None
+    title: Optional[str] = None
+    album: Optional[str] = None
+    track_number: Optional[int] = None
+    
+    def __post_init__(self):
+        self.result_type = "track"
+        # Try to extract metadata from filename if not provided
+        if not self.title or not self.artist:
+            self._parse_filename_metadata()
+    
+    def _parse_filename_metadata(self):
+        """Extract artist, title, album from filename patterns"""
+        import re
+        import os
+        
+        # Get just the filename without extension and path
+        base_name = os.path.splitext(os.path.basename(self.filename))[0]
+        
+        # Common patterns for track naming
+        patterns = [
+            r'^(\d+)\s*[-\.]\s*(.+?)\s*[-–]\s*(.+)$',  # "01 - Artist - Title" or "01. Artist - Title"
+            r'^(.+?)\s*[-–]\s*(.+)$',  # "Artist - Title"
+            r'^(\d+)\s*[-\.]\s*(.+)$',  # "01 - Title" or "01. Title"
+        ]
+        
+        for pattern in patterns:
+            match = re.match(pattern, base_name)
+            if match:
+                groups = match.groups()
+                if len(groups) == 3:  # Track number, artist, title
+                    try:
+                        self.track_number = int(groups[0])
+                        self.artist = self.artist or groups[1].strip()
+                        self.title = self.title or groups[2].strip()
+                    except ValueError:
+                        # First group might not be a number
+                        self.artist = self.artist or groups[0].strip()
+                        self.title = self.title or f"{groups[1]} - {groups[2]}".strip()
+                elif len(groups) == 2:
+                    if groups[0].isdigit():  # Track number and title
+                        try:
+                            self.track_number = int(groups[0])
+                            self.title = self.title or groups[1].strip()
+                        except ValueError:
+                            pass
+                    else:  # Artist and title
+                        self.artist = self.artist or groups[0].strip()
+                        self.title = self.title or groups[1].strip()
+                break
+        
+        # Fallback: use filename as title if nothing was extracted
+        if not self.title:
+            self.title = base_name
+        
+        # Try to extract album from directory path
+        if not self.album and '/' in self.filename:
+            path_parts = self.filename.split('/')
+            if len(path_parts) >= 2:
+                # Look for album-like directory names
+                for part in reversed(path_parts[:-1]):  # Exclude filename
+                    if part and not part.startswith('@'):  # Skip system directories
+                        # Clean up common patterns
+                        cleaned = re.sub(r'^\d+\s*[-\.]\s*', '', part)  # Remove leading numbers
+                        if len(cleaned) > 3:  # Must be substantial
+                            self.album = cleaned
+                            break
+
+@dataclass
+class AlbumResult:
+    """Album/folder search result containing multiple tracks"""
+    username: str
+    album_path: str  # Directory path
+    album_title: str
+    artist: Optional[str]
+    track_count: int
+    total_size: int
+    tracks: List[TrackResult]
+    dominant_quality: str  # Most common quality in album
+    year: Optional[str] = None
+    free_upload_slots: int = 0
+    upload_speed: int = 0
+    queue_length: int = 0
+    result_type: str = "album"
+    
+    @property
+    def quality_score(self) -> float:
+        """Calculate album quality score based on dominant quality and track count"""
+        quality_weights = {
+            'flac': 1.0,
+            'mp3': 0.8,
+            'ogg': 0.7,
+            'aac': 0.6,
+            'wma': 0.5
+        }
+        
+        base_score = quality_weights.get(self.dominant_quality.lower(), 0.3)
+        
+        # Bonus for complete albums (typically 8-15 tracks)
+        if 8 <= self.track_count <= 20:
+            base_score += 0.1
+        elif self.track_count > 20:
+            base_score += 0.05
+        
+        # User metrics (same as individual tracks)
+        if self.free_upload_slots > 0:
+            base_score += 0.1
+        
+        if self.upload_speed > 100:
+            base_score += 0.05
+        
+        if self.queue_length > 10:
+            base_score -= 0.1
+        
+        return min(base_score, 1.0)
+    
+    @property
+    def size_mb(self) -> int:
+        """Album size in MB"""
+        return self.total_size // (1024 * 1024)
+    
+    @property 
+    def average_track_size_mb(self) -> float:
+        """Average track size in MB"""
+        if self.track_count > 0:
+            return self.size_mb / self.track_count
+        return 0
 
 @dataclass
 class DownloadStatus:
@@ -201,11 +334,18 @@ class SoulseekClient:
                 except:
                     pass
     
-    def _process_search_responses(self, responses_data: List[Dict[str, Any]]) -> List[SearchResult]:
-        """Process search response data into SearchResult objects"""
-        search_results = []
+    def _process_search_responses(self, responses_data: List[Dict[str, Any]]) -> tuple[List[TrackResult], List[AlbumResult]]:
+        """Process search response data into TrackResult and AlbumResult objects"""
+        from collections import defaultdict
+        import re
+        
+        all_tracks = []
+        albums_by_path = defaultdict(list)
         
         logger.debug(f"Processing {len(responses_data)} user responses")
+        
+        # Audio file extensions to filter for
+        audio_extensions = {'.mp3', '.flac', '.ogg', '.aac', '.wma', '.wav', '.m4a'}
         
         for response_data in responses_data:
             username = response_data.get('username', '')
@@ -217,9 +357,15 @@ class SoulseekClient:
                 size = file_data.get('size', 0)
                 
                 file_ext = Path(filename).suffix.lower().lstrip('.')
+                
+                # Only process audio files
+                if f'.{file_ext}' not in audio_extensions:
+                    continue
+                
                 quality = file_ext if file_ext in ['flac', 'mp3', 'ogg', 'aac', 'wma'] else 'unknown'
                 
-                result = SearchResult(
+                # Create TrackResult
+                track = TrackResult(
                     username=username,
                     filename=filename,
                     size=size,
@@ -230,14 +376,176 @@ class SoulseekClient:
                     upload_speed=response_data.get('uploadSpeed', 0),
                     queue_length=response_data.get('queueLength', 0)
                 )
-                search_results.append(result)
+                
+                all_tracks.append(track)
+                
+                # Group tracks by album path for album detection
+                album_path = self._extract_album_path(filename)
+                if album_path:
+                    albums_by_path[(username, album_path)].append(track)
         
-        return search_results
+        # Create AlbumResults from grouped tracks
+        album_results = self._create_album_results(albums_by_path)
+        
+        # Keep individual tracks that weren't grouped into albums
+        album_track_filenames = set()
+        for album in album_results:
+            for track in album.tracks:
+                album_track_filenames.add(track.filename)
+        
+        # Individual tracks are those not part of any album
+        individual_tracks = [track for track in all_tracks if track.filename not in album_track_filenames]
+        
+        logger.info(f"Found {len(individual_tracks)} individual tracks and {len(album_results)} albums")
+        logger.debug(f"Album detection details: {len(albums_by_path)} potential albums processed")
+        for (username, album_path), tracks in list(albums_by_path.items())[:3]:  # Log first 3 for debugging
+            logger.debug(f"Album: {username}/{album_path} -> {len(tracks)} tracks")
+        
+        return individual_tracks, album_results
     
-    async def search(self, query: str, timeout: int = 30, progress_callback=None) -> List[SearchResult]:
+    def _extract_album_path(self, filename: str) -> Optional[str]:
+        """Extract potential album directory path from filename"""
+        # Handle both Windows (\) and Unix (/) path separators
+        if '/' not in filename and '\\' not in filename:
+            return None
+        
+        # Normalize path separators to forward slashes for consistent processing
+        normalized_path = filename.replace('\\', '/')
+        path_parts = normalized_path.split('/')
+        
+        if len(path_parts) < 2:
+            return None
+        
+        # Take the directory containing the file as potential album path
+        album_dir = path_parts[-2]  # Directory containing the file
+        
+        # Skip system directories that start with @ or are too short
+        if album_dir.startswith('@') or len(album_dir) < 2:
+            return None
+        
+        # Return the full path up to the album directory (keeping forward slashes)
+        return '/'.join(path_parts[:-1])
+    
+    
+    def _create_album_results(self, albums_by_path: dict) -> List[AlbumResult]:
+        """Create AlbumResult objects from grouped tracks"""
+        import re
+        from collections import Counter
+        
+        album_results = []
+        
+        for (username, album_path), tracks in albums_by_path.items():
+            # Only create albums for paths with multiple tracks (2+ tracks)
+            if len(tracks) < 2:
+                continue
+            
+            # Calculate album metadata
+            total_size = sum(track.size for track in tracks)
+            quality_counts = Counter(track.quality for track in tracks)
+            dominant_quality = quality_counts.most_common(1)[0][0]
+            
+            # Extract album title from path
+            album_title = self._extract_album_title(album_path)
+            
+            # Try to determine artist from tracks or path
+            artist = self._determine_album_artist(tracks, album_path)
+            
+            # Extract year if present
+            year = self._extract_year(album_path, album_title)
+            
+            # Use user metrics from first track (they should be the same for all tracks from same user)
+            first_track = tracks[0]
+            
+            album = AlbumResult(
+                username=username,
+                album_path=album_path,
+                album_title=album_title,
+                artist=artist,
+                track_count=len(tracks),
+                total_size=total_size,
+                tracks=sorted(tracks, key=lambda t: t.track_number or 0),  # Sort by track number
+                dominant_quality=dominant_quality,
+                year=year,
+                free_upload_slots=first_track.free_upload_slots,
+                upload_speed=first_track.upload_speed,
+                queue_length=first_track.queue_length
+            )
+            
+            album_results.append(album)
+        
+        return album_results
+    
+    def _extract_album_title(self, album_path: str) -> str:
+        """Extract album title from directory path"""
+        import re
+        
+        # Get the last directory name as album title
+        album_dir = album_path.split('/')[-1]
+        
+        # Clean up common patterns
+        # Remove leading numbers and separators
+        cleaned = re.sub(r'^\d+\s*[-\.\s]+', '', album_dir)
+        
+        # Remove year patterns at the end: (2023), [2023], - 2023
+        cleaned = re.sub(r'\s*[-\(\[]?\d{4}[-\)\]]?\s*$', '', cleaned)
+        
+        # Remove common separators and extra spaces
+        cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+        
+        return cleaned if cleaned else album_dir
+    
+    def _determine_album_artist(self, tracks: List[TrackResult], album_path: str) -> Optional[str]:
+        """Determine album artist from track artists or path"""
+        from collections import Counter
+        
+        # Get artist from tracks
+        track_artists = [track.artist for track in tracks if track.artist]
+        if track_artists:
+            # Use most common artist
+            artist_counts = Counter(track_artists)
+            return artist_counts.most_common(1)[0][0]
+        
+        # Try to extract from path
+        import re
+        album_dir = album_path.split('/')[-1]
+        
+        # Look for "Artist - Album" pattern
+        artist_match = re.match(r'^(.+?)\s*[-–]\s*(.+)$', album_dir)
+        if artist_match:
+            potential_artist = artist_match.group(1).strip()
+            if len(potential_artist) > 1:
+                return potential_artist
+        
+        return None
+    
+    def _extract_year(self, album_path: str, album_title: str) -> Optional[str]:
+        """Extract year from album path or title"""
+        import re
+        
+        # Look for 4-digit year in parentheses, brackets, or after dash
+        text_to_search = f"{album_path} {album_title}"
+        year_patterns = [
+            r'\((\d{4})\)',    # (2023)
+            r'\[(\d{4})\]',    # [2023]
+            r'\s-(\d{4})$',     # - 2023 at end
+            r'\s(\d{4})\s',    # 2023 with spaces
+            r'\s(\d{4})$'       # 2023 at end
+        ]
+        
+        for pattern in year_patterns:
+            match = re.search(pattern, text_to_search)
+            if match:
+                year = match.group(1)
+                # Validate year range (1900-2030)
+                if 1900 <= int(year) <= 2030:
+                    return year
+        
+        return None
+    
+    async def search(self, query: str, timeout: int = 30, progress_callback=None) -> tuple[List[TrackResult], List[AlbumResult]]:
         if not self.base_url:
             logger.error("Soulseek client not configured")
-            return []
+            return [], []
         
         try:
             logger.info(f"Starting search for: '{query}'")
@@ -256,18 +564,18 @@ class SoulseekClient:
             response = await self._make_request('POST', 'searches', json=search_data)
             if not response:
                 logger.error("No response from search POST request")
-                return []
+                return [], []
             
             search_id = response.get('id')
             if not search_id:
                 logger.error("No search ID returned from POST request")
                 logger.debug(f"Full response: {response}")
-                return []
+                return [], []
             
             logger.info(f"Search initiated with ID: {search_id}")
             
-            # Poll for results instead of blocking sleep - like web interface does
-            all_results = []
+            # Poll for results - collect all responses first, then process at the end
+            all_responses = []
             poll_interval = 1.5  # Check every 1.5 seconds for more responsive updates
             max_polls = int(timeout / poll_interval)  # 20 attempts over 30 seconds
             
@@ -277,44 +585,49 @@ class SoulseekClient:
                 # Get current search responses
                 responses_data = await self._make_request('GET', f'searches/{search_id}/responses')
                 if responses_data and isinstance(responses_data, list):
-                    current_results = self._process_search_responses(responses_data)
-                    
-                    # Add new unique results
-                    existing_filenames = {r.filename for r in all_results}
-                    new_results = [r for r in current_results if r.filename not in existing_filenames]
-                    all_results.extend(new_results)
-                    
-                    if new_results:
-                        logger.info(f"Found {len(new_results)} new results (total: {len(all_results)}) at {poll_count * poll_interval:.1f}s")
-                        # Call progress callback with new results
+                    # Check if we got new responses
+                    new_response_count = len(responses_data) - len(all_responses)
+                    if new_response_count > 0:
+                        all_responses = responses_data
+                        logger.info(f"Found {len(all_responses)} total responses at {poll_count * poll_interval:.1f}s")
+                        
+                        # Call progress callback with current count
                         if progress_callback:
                             try:
-                                progress_callback(new_results, len(all_results))
+                                progress_callback([], len(all_responses))
                             except Exception as e:
                                 logger.error(f"Error in progress callback: {e}")
                         
-                        # Early termination if we have enough results
-                        if len(all_results) >= 45:  # Stop after 45 results for better performance (3 pages of 15)
-                            logger.info(f"Early termination: Found {len(all_results)} results, stopping search")
+                        # Early termination if we have enough responses
+                        if len(all_responses) >= 30:  # Stop after 30 responses for better performance
+                            logger.info(f"Early termination: Found {len(all_responses)} responses, stopping search")
                             break
-                    elif len(all_results) > 0:
-                        logger.debug(f"No new results, total still: {len(all_results)}")
+                    elif len(all_responses) > 0:
+                        logger.debug(f"No new responses, total still: {len(all_responses)}")
                     else:
-                        logger.debug(f"Still waiting for results... ({poll_count * poll_interval:.1f}s elapsed)")
+                        logger.debug(f"Still waiting for responses... ({poll_count * poll_interval:.1f}s elapsed)")
                 
                 # Wait before next poll (unless this is the last attempt)
                 if poll_count < max_polls - 1:
                     await asyncio.sleep(poll_interval)
             
-            logger.info(f"Search completed. Found {len(all_results)} total results for query: {query}")
-            
-            # Sort by quality score and return
-            all_results.sort(key=lambda x: x.quality_score, reverse=True)
-            return all_results
+            # Process all collected responses at the end
+            if all_responses:
+                tracks, albums = self._process_search_responses(all_responses)
+                
+                # Sort tracks by quality score
+                tracks.sort(key=lambda x: x.quality_score, reverse=True)
+                albums.sort(key=lambda x: x.quality_score, reverse=True)
+                
+                logger.info(f"Search completed. Found {len(tracks)} tracks and {len(albums)} albums for query: {query}")
+                return tracks, albums
+            else:
+                logger.info(f"Search completed with no results for query: {query}")
+                return [], []
             
         except Exception as e:
             logger.error(f"Error searching: {e}")
-            return []
+            return [], []
     
     async def download(self, username: str, filename: str, file_size: int = 0) -> Optional[str]:
         if not self.base_url:
