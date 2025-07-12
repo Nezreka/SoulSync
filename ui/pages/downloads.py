@@ -1016,6 +1016,7 @@ class AlbumResultItem(QFrame):
                 color: #000000;
                 font-size: 12px;
                 font-weight: bold;
+                padding: 8px 12px;
             }
             QPushButton:hover {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,

@@ -578,6 +578,9 @@ class MediaPlayer(QWidget):
         self.play_pause_btn.setEnabled(True)
         self.stop_btn.setEnabled(True)
         
+        # Set to playing state (show pause button since track just started)
+        self.set_playing_state(True)
+        
         # Hide no track message and show player
         self.no_track_label.setVisible(False)
         
