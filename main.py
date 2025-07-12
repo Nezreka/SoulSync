@@ -137,6 +137,11 @@ class MainWindow(QMainWindow):
         self.downloads_page.track_stopped.connect(self.sidebar.media_player.clear_track)
         self.downloads_page.track_finished.connect(self.sidebar.media_player.clear_track)
         
+        # Connect loading animation signals
+        self.downloads_page.track_loading_started.connect(lambda result: self.sidebar.media_player.show_loading())
+        self.downloads_page.track_loading_finished.connect(lambda result: self.sidebar.media_player.hide_loading())
+        self.downloads_page.track_loading_progress.connect(lambda progress, result: self.sidebar.media_player.set_loading_progress(progress))
+        
         # Connect sidebar media player signals to downloads page
         self.sidebar.media_player.play_pause_requested.connect(self.downloads_page.handle_sidebar_play_pause)
         self.sidebar.media_player.stop_requested.connect(self.downloads_page.handle_sidebar_stop)

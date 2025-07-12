@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
                            QLabel, QFrame, QSizePolicy, QSpacerItem, QSlider, QProgressBar)
-from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QRect, QTimer
-from PyQt6.QtGui import QFont, QPalette, QIcon, QPixmap, QPainter, QFontMetrics
+from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QRect, QTimer, pyqtProperty
+from PyQt6.QtGui import QFont, QPalette, QIcon, QPixmap, QPainter, QFontMetrics, QColor, QLinearGradient
 
 class ScrollingLabel(QLabel):
     """A label that smoothly scrolls text horizontally when it's too long to fit"""
@@ -285,6 +285,173 @@ class StatusIndicator(QWidget):
             """)
             self.service_label.setStyleSheet("color: #b3b3b3; font-weight: 400;")
 
+class LoadingAnimation(QWidget):
+    """Thin horizontal loading animation for media player with dual-mode capability"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(12)  # Increased height for text overlay
+        self._progress = 0.0
+        self._is_active = False
+        self._mode = "indefinite"  # "indefinite" or "determinate"
+        self._determinate_progress = 0.0  # 0-100% for determinate mode
+        
+        # Animation setup for indefinite mode
+        self.animation = QPropertyAnimation(self, b"progress")
+        self.animation.setDuration(1200)  # 1.2 second cycle
+        self.animation.setStartValue(0.0)
+        self.animation.setEndValue(1.0)
+        self.animation.setLoopCount(-1)  # Infinite loop
+        self.animation.setEasingCurve(QEasingCurve.Type.InOutSine)
+        
+        # Progress value animation for smooth transitions in determinate mode
+        self.progress_animation = QPropertyAnimation(self, b"determinate_progress")
+        self.progress_animation.setDuration(300)  # Smooth 300ms transitions
+        self.progress_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        
+        # Completion glow effect
+        self._glow_opacity = 0.0
+        self.glow_animation = QPropertyAnimation(self, b"glow_opacity")
+        self.glow_animation.setDuration(800)  # Slower glow pulse
+        self.glow_animation.setStartValue(0.0)
+        self.glow_animation.setEndValue(1.0)
+        self.glow_animation.setLoopCount(3)  # Pulse 3 times
+        self.glow_animation.setEasingCurve(QEasingCurve.Type.InOutSine)
+        
+        self.hide()  # Start hidden
+    
+    @pyqtProperty(float)
+    def progress(self):
+        return self._progress
+    
+    @progress.setter
+    def progress(self, value):
+        self._progress = value
+        self.update()
+    
+    @pyqtProperty(float)
+    def determinate_progress(self):
+        return self._determinate_progress
+    
+    @determinate_progress.setter
+    def determinate_progress(self, value):
+        self._determinate_progress = value
+        self.update()
+    
+    @pyqtProperty(float)
+    def glow_opacity(self):
+        return self._glow_opacity
+    
+    @glow_opacity.setter
+    def glow_opacity(self, value):
+        self._glow_opacity = value
+        self.update()
+    
+    def start_animation(self):
+        """Start the indefinite loading animation"""
+        self._is_active = True
+        self._mode = "indefinite"
+        self.show()
+        self.animation.start()
+    
+    def set_progress(self, percentage):
+        """Set determinate progress (0-100%) with smooth animation"""
+        if not self._is_active:
+            self._is_active = True
+            self.show()
+        
+        # Switch to determinate mode
+        if self._mode == "indefinite":
+            self._mode = "determinate"
+            self.animation.stop()  # Stop indefinite animation
+        
+        # Animate to new progress value
+        self.progress_animation.setStartValue(self._determinate_progress)
+        self.progress_animation.setEndValue(percentage)
+        self.progress_animation.start()
+        
+        # Trigger completion glow effect when reaching 100%
+        if percentage >= 100 and self._determinate_progress < 100:
+            self.glow_animation.start()
+    
+    def stop_animation(self):
+        """Stop the loading animation"""
+        self._is_active = False
+        self._mode = "indefinite"
+        self.animation.stop()
+        self.progress_animation.stop()
+        self.glow_animation.stop()
+        self.hide()
+        self._progress = 0.0
+        self._determinate_progress = 0.0
+        self._glow_opacity = 0.0
+        self.update()
+    
+    def paintEvent(self, event):
+        """Custom paint event for dual-mode animation with text overlay"""
+        if not self._is_active:
+            return
+            
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+        
+        width = self.width()
+        height = self.height()
+        progress_bar_height = 4  # Bottom 4px for progress bar
+        text_height = height - progress_bar_height  # Top area for text
+        
+        # Background for progress bar area
+        progress_rect = self.rect()
+        progress_rect.setTop(text_height)
+        painter.fillRect(progress_rect, QColor(40, 40, 40))
+        
+        if self._mode == "indefinite":
+            # Indefinite mode: animated gradient wave
+            gradient_width = width * 0.3  # 30% of total width
+            center_x = self._progress * width
+            
+            for i in range(int(gradient_width)):
+                alpha = max(0, 255 - (abs(i - gradient_width/2) * 8))
+                color = QColor(29, 185, 84, int(alpha))  # Spotify green with fade
+                x = int(center_x - gradient_width/2 + i)
+                if 0 <= x < width:
+                    painter.fillRect(x, text_height, 1, progress_bar_height, color)
+        
+        else:  # determinate mode
+            # Determinate mode: progress bar with percentage
+            progress_width = (self._determinate_progress / 100.0) * width
+            
+            # Progress bar with gradient
+            if progress_width > 0:
+                progress_fill_rect = QRect(0, text_height, int(progress_width), progress_bar_height)
+                
+                # Create subtle gradient for progress bar
+                gradient = QLinearGradient(0, text_height, progress_width, text_height)
+                gradient.setColorAt(0, QColor(29, 185, 84))  # Spotify green
+                gradient.setColorAt(1, QColor(30, 215, 96))  # Lighter green
+                
+                painter.fillRect(progress_fill_rect, gradient)
+                
+                # Add animated glow effect during completion
+                if self._glow_opacity > 0:
+                    glow_alpha = int(120 * self._glow_opacity)  # Max alpha of 120
+                    glow_color = QColor(29, 185, 84, glow_alpha)
+                    
+                    # Expand glow slightly beyond progress bar for effect
+                    glow_rect = QRect(0, text_height - 1, width, progress_bar_height + 2)
+                    painter.fillRect(glow_rect, glow_color)
+            
+            # Percentage text overlay (elegant, small font)
+            if text_height > 0 and self._determinate_progress > 0:
+                font = QFont("Segoe UI", 7, QFont.Weight.Medium)  # Small, elegant font
+                painter.setFont(font)
+                painter.setPen(QColor(180, 180, 180))  # Light gray text
+                
+                percentage_text = f"{int(self._determinate_progress)}%"
+                text_rect = QRect(0, 0, width, text_height)
+                painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, percentage_text)
+
 class MediaPlayer(QWidget):
     # Signals for media control
     play_pause_requested = pyqtSignal()
@@ -320,6 +487,10 @@ class MediaPlayer(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 10, 16, 10)
         layout.setSpacing(10)
+        
+        # Loading animation at the top
+        self.loading_animation = LoadingAnimation()
+        layout.addWidget(self.loading_animation)
         
         # Always visible header with basic controls
         self.header = self.create_header()
@@ -581,6 +752,9 @@ class MediaPlayer(QWidget):
         # Set to playing state (show pause button since track just started)
         self.set_playing_state(True)
         
+        # Hide loading animation now that track is ready
+        self.hide_loading()
+        
         # Hide no track message and show player
         self.no_track_label.setVisible(False)
         
@@ -606,8 +780,9 @@ class MediaPlayer(QWidget):
         self.current_track = None
         self.is_playing = False
         
-        # Stop any scrolling animation
+        # Stop any animations
         self.track_info.stop_scrolling()
+        self.hide_loading()
         
         # Update UI
         self.track_info.setText("No track")
@@ -635,6 +810,18 @@ class MediaPlayer(QWidget):
         """Handle volume slider change"""
         volume = value / 100.0  # Convert to 0.0-1.0
         self.volume_changed.emit(volume)
+    
+    def show_loading(self):
+        """Show and start the loading animation"""
+        self.loading_animation.start_animation()
+    
+    def hide_loading(self):
+        """Hide and stop the loading animation"""
+        self.loading_animation.stop_animation()
+    
+    def set_loading_progress(self, percentage):
+        """Set loading progress percentage (0-100)"""
+        self.loading_animation.set_progress(percentage)
     
 
 class ModernSidebar(QWidget):
