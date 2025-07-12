@@ -1152,7 +1152,7 @@ class AlbumResultItem(QFrame):
         
         # Download button
         self.download_btn = QPushButton("⬇️ Download Album")
-        self.download_btn.setFixedSize(120, 36)
+        self.download_btn.setFixedSize(150, 36)
         self.download_btn.clicked.connect(self.request_album_download)
         self.download_btn.setStyleSheet("""
             QPushButton {
@@ -5252,7 +5252,7 @@ class DownloadsPage(QWidget):
         count_label.setStyleSheet("color: #b3b3b3;")
         
         download_all_btn = QPushButton("📥 Download All")
-        download_all_btn.setFixedSize(120, 35)
+        download_all_btn.setFixedSize(150, 35)
         download_all_btn.setStyleSheet("""
             QPushButton {
                 background: #1db954;
