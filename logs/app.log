@@ -3853,3 +3853,74 @@
 2025-07-11 19:00:06 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
 2025-07-11 19:00:08 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
 2025-07-11 19:00:08 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 19:00:08 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 19:00:08 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 19:00:10 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-11 19:00:10 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 19:00:10 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 19:00:10 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 19:00:12 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-11 19:00:12 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 19:00:12 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 19:00:12 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 19:00:14 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-11 19:00:14 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 19:00:14 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 19:00:14 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 19:00:16 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-11 19:00:16 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 19:00:16 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 19:00:16 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 19:00:18 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-11 19:00:18 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 19:00:18 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 19:00:18 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 19:00:20 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-11 19:00:20 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 19:00:20 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 19:00:20 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 19:00:22 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-11 19:00:22 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 19:00:22 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 19:00:22 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 19:00:24 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-11 19:00:24 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 19:00:24 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 19:00:24 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 19:00:26 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-11 19:00:26 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 19:00:26 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 19:00:26 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 19:00:28 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-11 19:00:28 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 19:00:28 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 19:00:28 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 19:00:30 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-11 19:00:30 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 19:00:30 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 19:00:30 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 19:00:32 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-11 19:00:32 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 19:00:32 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 19:00:32 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 19:00:34 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-11 19:00:34 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 19:00:34 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 19:00:34 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 19:00:36 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-11 19:00:36 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 19:00:36 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 19:00:36 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 19:00:38 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-11 19:00:38 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 19:00:38 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 19:00:38 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 19:00:40 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-11 19:00:40 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 19:00:40 - newmusic.main - [92mINFO[0m - closeEvent:171 - Closing application...
+2025-07-11 19:00:40 - newmusic.main - [92mINFO[0m - closeEvent:176 - Cleaning up Downloads page threads...
+2025-07-11 19:00:40 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 19:00:40 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 19:00:40 - newmusic.main - [92mINFO[0m - closeEvent:181 - Stopping status monitoring thread...
+2025-07-11 19:00:42 - newmusic.main - [92mINFO[0m - closeEvent:186 - Closing Soulseek client...
+2025-07-11 19:00:42 - newmusic.main - [92mINFO[0m - closeEvent:192 - Application closed successfully
