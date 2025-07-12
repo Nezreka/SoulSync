@@ -2,14 +2,161 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                            QFrame, QPushButton, QProgressBar, QListWidget,
                            QListWidgetItem, QComboBox, QLineEdit, QScrollArea, QMessageBox,
                            QSplitter, QSizePolicy, QSpacerItem, QTabWidget)
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QUrl
-from PyQt6.QtGui import QFont
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QUrl, QPropertyAnimation, QEasingCurve, QSequentialAnimationGroup, QParallelAnimationGroup, QFileSystemWatcher
+from PyQt6.QtGui import QFont, QPainter, QPen
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 import functools  # For fixing lambda memory leaks
 import os
 
 # Import the new search result classes
 from core.soulseek_client import TrackResult, AlbumResult
+
+class BouncingDotsWidget(QWidget):
+    """Animated bouncing dots loading indicator"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(60, 20)
+        self.dots = ['●', '●', '●']
+        self.current_dot = 0
+        
+        # Animation setup
+        self.animation_group = QSequentialAnimationGroup()
+        self.setup_animation()
+        
+    def setup_animation(self):
+        """Set up the bouncing animation sequence"""
+        # Create animation for each dot bouncing
+        for i in range(3):
+            animation = QPropertyAnimation(self, b"current_dot")
+            animation.setDuration(200)
+            animation.setStartValue(i)
+            animation.setEndValue(i)
+            animation.finished.connect(self.update)
+            self.animation_group.addAnimation(animation)
+        
+        # Loop the animation
+        self.animation_group.setLoopCount(-1)  # Infinite loop
+        
+    def start_animation(self):
+        """Start the bouncing animation"""
+        self.animation_group.start()
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.update_dots)
+        self.timer.start(300)  # Update every 300ms
+        
+    def stop_animation(self):
+        """Stop the bouncing animation"""
+        self.animation_group.stop()
+        if hasattr(self, 'timer'):
+            self.timer.stop()
+        self.current_dot = 0
+        self.update()
+        
+    def update_dots(self):
+        """Update which dot is bouncing"""
+        self.current_dot = (self.current_dot + 1) % 3
+        self.update()
+        
+    def paintEvent(self, event):
+        """Custom paint event to draw the bouncing dots"""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        # Set color and font
+        painter.setPen(QPen(Qt.GlobalColor.white, 2))
+        font = painter.font()
+        font.setPointSize(12)
+        painter.setFont(font)
+        
+        # Draw three dots with bouncing effect
+        dot_width = 20
+        for i in range(3):
+            x = i * dot_width
+            y = 15 if i == self.current_dot else 10  # Bounce effect
+            
+            # Make current dot larger and brighter
+            if i == self.current_dot:
+                painter.setPen(QPen(Qt.GlobalColor.green, 3))
+            else:
+                painter.setPen(QPen(Qt.GlobalColor.gray, 2))
+                
+            painter.drawText(x, y, self.dots[i])
+
+class SpinningCircleWidget(QWidget):
+    """Animated spinning circle loading indicator"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(60, 60)  # Increased from 30x30 to 60x60
+        self._angle = 0
+        
+        # Animation setup
+        self.animation = QPropertyAnimation(self, b"rotation_angle")
+        self.animation.setDuration(1000)  # 1 second per rotation
+        self.animation.setStartValue(0)
+        self.animation.setEndValue(360)
+        self.animation.setLoopCount(-1)  # Infinite loop
+        self.animation.setEasingCurve(QEasingCurve.Type.Linear)
+        
+    def start_animation(self):
+        """Start the spinning animation"""
+        self.animation.start()
+        
+    def stop_animation(self):
+        """Stop the spinning animation"""
+        self.animation.stop()
+        self._angle = 0
+        self.update()
+        
+    def get_rotation_angle(self):
+        return self._angle
+        
+    def set_rotation_angle(self, angle):
+        self._angle = angle
+        self.update()
+        
+    rotation_angle = property(get_rotation_angle, set_rotation_angle)
+        
+    def paintEvent(self, event):
+        """Custom paint event to draw the spinning circle"""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        # Set up the painting area
+        rect = self.rect()
+        center_x = rect.width() // 2
+        center_y = rect.height() // 2
+        radius = min(center_x, center_y) - 2
+        
+        # Rotate the painter
+        painter.translate(center_x, center_y)
+        painter.rotate(self._angle)
+        
+        # Draw circle segments with varying opacity
+        pen = QPen(Qt.GlobalColor.green, 3)
+        painter.setPen(pen)
+        
+        # Draw 8 dots around the circle
+        import math
+        for i in range(8):
+            angle_step = 2 * math.pi / 8
+            dot_angle = i * angle_step
+            
+            # Calculate position for each dot
+            x = radius * 0.7 * math.cos(dot_angle)
+            y = radius * 0.7 * math.sin(dot_angle)
+            
+            # Fade effect - dots further from current position are dimmer
+            distance = abs(i - (self._angle / 45)) % 8
+            opacity = max(0.2, 1.0 - distance * 0.15)
+            
+            # Set color with opacity
+            color = Qt.GlobalColor.green
+            pen.setColor(color)
+            painter.setPen(pen)
+            
+            painter.drawEllipse(int(x-2), int(y-2), 4, 4)
 
 class AudioPlayer(QMediaPlayer):
     """Simple audio player for streaming music files"""
@@ -547,7 +694,7 @@ class StreamingThread(QThread):
                 if download_result:
                     self.streaming_started.emit(f"Downloading for stream: {self.search_result.filename}", self.search_result)
                     
-                    # Wait for download to complete and find the file
+                    # Standard streaming - wait for complete download
                     max_wait_time = 45  # Wait up to 45 seconds
                     poll_interval = 2   # Check every 2 seconds
                     found_file = None
@@ -692,6 +839,7 @@ class StreamingThread(QThread):
             self.search_result.filename,
             self.search_result.size
         )
+    
     
     def stop(self):
         """Stop the streaming gracefully"""
@@ -2895,19 +3043,45 @@ class DownloadsPage(QWidget):
         self.filter_container.setVisible(False)  # Hide until we have search results
         layout.addWidget(self.filter_container)
         
-        # Search Status with better visual feedback
+        # Search Status with better visual feedback and loading animations
+        status_container = QWidget()
+        status_layout = QHBoxLayout(status_container)
+        status_layout.setContentsMargins(10, 8, 10, 8)
+        status_layout.setSpacing(12)
+        
+        # Search status label
         self.search_status = QLabel("Ready to search • Enter artist, song, or album name")
         self.search_status.setFont(QFont("Arial", 11))
         self.search_status.setStyleSheet("""
             color: rgba(255, 255, 255, 0.7);
-            padding: 10px 18px;
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                stop:0 rgba(29, 185, 84, 0.12),
-                stop:1 rgba(29, 185, 84, 0.08));
-            border-radius: 10px;
-            border: 1px solid rgba(29, 185, 84, 0.25);
+            padding: 2px 8px;
         """)
-        layout.addWidget(self.search_status)
+        
+        # Loading animations (initially hidden)
+        self.bouncing_dots = BouncingDotsWidget()
+        self.bouncing_dots.setVisible(False)
+        
+        self.spinning_circle = SpinningCircleWidget()
+        self.spinning_circle.setVisible(False)
+        
+        # Add to status layout
+        status_layout.addWidget(self.spinning_circle)
+        status_layout.addWidget(self.search_status)
+        status_layout.addWidget(self.bouncing_dots)
+        status_layout.addStretch()
+        
+        # Style the container
+        status_container.setStyleSheet("""
+            QWidget {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 rgba(29, 185, 84, 0.12),
+                    stop:1 rgba(29, 185, 84, 0.08));
+                border-radius: 10px;
+                border: 1px solid rgba(29, 185, 84, 0.25);
+            }
+        """)
+        
+        layout.addWidget(status_container)
         
         # Search Results - The main attraction
         results_container = QFrame()
@@ -2966,6 +3140,27 @@ class DownloadsPage(QWidget):
         self.search_results_layout = QVBoxLayout(self.search_results_widget)
         self.search_results_layout.setSpacing(16)  # Increased for better card separation and visual breathing room
         self.search_results_layout.setContentsMargins(12, 12, 12, 12)  # Increased for better edge spacing
+        
+        # Add centered loading animation for search results area
+        self.results_loading_container = QWidget()
+        results_loading_layout = QVBoxLayout(self.results_loading_container)
+        results_loading_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        self.results_spinning_circle = SpinningCircleWidget()
+        self.results_loading_label = QLabel("Searching for results...")
+        self.results_loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.results_loading_label.setStyleSheet("""
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 14px;
+            margin-top: 10px;
+        """)
+        
+        results_loading_layout.addWidget(self.results_spinning_circle, 0, Qt.AlignmentFlag.AlignCenter)
+        results_loading_layout.addWidget(self.results_loading_label, 0, Qt.AlignmentFlag.AlignCenter)
+        self.results_loading_container.setVisible(False)  # Initially hidden
+        
+        # Add to main results layout
+        self.search_results_layout.addWidget(self.results_loading_container)
         self.search_results_layout.addStretch()
         self.search_results_scroll.setWidget(self.search_results_widget)
         
@@ -3564,7 +3759,10 @@ class DownloadsPage(QWidget):
         # Enhanced searching state with animation
         self.search_btn.setText("🔍 Searching...")
         self.search_btn.setEnabled(False)
-        self.update_search_status(f"🔍 Searching for '{query}'... Results will appear as they are found", "#1db954")
+        self.update_search_status(f"Searching for '{query}'... Results will appear as they are found", "#1db954")
+        
+        # Show loading animations
+        self.start_search_animations()
         
         # Start new search thread
         self.search_thread = SearchThread(self.soulseek_client, query)
@@ -3594,13 +3792,32 @@ class DownloadsPage(QWidget):
         
         self.search_status.setStyleSheet(f"""
             color: {color};
-            padding: 12px 20px;
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                stop:0 {bg_color},
-                stop:1 rgba(255, 255, 255, 0.02));
-            border-radius: 12px;
-            border: 1px solid {border_color};
+            padding: 2px 8px;
         """)
+    
+    def start_search_animations(self):
+        """Start all search loading animations"""
+        # Show and start status area animations
+        self.spinning_circle.setVisible(True)
+        self.spinning_circle.start_animation()
+        self.bouncing_dots.setVisible(True)
+        self.bouncing_dots.start_animation()
+        
+        # Show and start results area loading
+        self.results_loading_container.setVisible(True)
+        self.results_spinning_circle.start_animation()
+    
+    def stop_search_animations(self):
+        """Stop and hide all search loading animations"""
+        # Stop and hide status area animations
+        self.spinning_circle.stop_animation()
+        self.spinning_circle.setVisible(False)
+        self.bouncing_dots.stop_animation()
+        self.bouncing_dots.setVisible(False)
+        
+        # Stop and hide results area loading
+        self.results_spinning_circle.stop_animation()
+        self.results_loading_container.setVisible(False)
     
     def on_search_thread_finished(self):
         """Clean up when search thread finishes"""
@@ -3709,6 +3926,9 @@ class DownloadsPage(QWidget):
     def on_search_completed(self, results):
         self.search_btn.setText("🔍 Search")
         self.search_btn.setEnabled(True)
+        
+        # Stop loading animations
+        self.stop_search_animations()
         
         # Use the temp results that have been accumulating during live updates
         if hasattr(self, '_temp_tracks') and hasattr(self, '_temp_albums'):
@@ -3883,6 +4103,10 @@ class DownloadsPage(QWidget):
     def on_search_failed(self, error_msg):
         self.search_btn.setText("🔍 Search")
         self.search_btn.setEnabled(True)
+        
+        # Stop loading animations
+        self.stop_search_animations()
+        
         self.update_search_status(f"❌ Search failed: {error_msg}", "#e22134")
     
     def on_search_progress(self, message):
@@ -4091,6 +4315,9 @@ class DownloadsPage(QWidget):
                     # Button was deleted, ignore
                     pass
             
+            # Stop any existing streaming threads to prevent old downloads from interrupting
+            self._stop_all_streaming_threads()
+            
             # Track the new currently playing button and track
             self.currently_playing_button = result_item
             self.current_track_id = new_track_id
@@ -4149,6 +4376,18 @@ class DownloadsPage(QWidget):
     def on_streaming_finished(self, message, search_result):
         """Handle streaming completion - start actual audio playback"""
         print(f"Streaming finished: {message}")
+        
+        # Check if this streaming result is for the currently requested track
+        # Prevent old downloads from interrupting new songs
+        if hasattr(self, 'current_track_result') and self.current_track_result:
+            current_track_id = f"{self.current_track_result.username}:{self.current_track_result.filename}"
+            finished_track_id = f"{search_result.username}:{search_result.filename}"
+            
+            if current_track_id != finished_track_id:
+                print(f"🚫 Ignoring old streaming result for: {search_result.filename}")
+                print(f"   Current track: {current_track_id}")
+                print(f"   Finished track: {finished_track_id}")
+                return
         
         try:
             # Find the stream file in the Stream folder
@@ -4224,6 +4463,32 @@ class DownloadsPage(QWidget):
                 # Button was deleted, ignore
                 pass
             self.currently_playing_button = None
+    
+    def _stop_all_streaming_threads(self):
+        """Stop all active streaming threads to prevent old downloads from interrupting new streams"""
+        if hasattr(self, 'streaming_threads'):
+            print(f"🛑 Stopping {len(self.streaming_threads)} active streaming threads")
+            
+            for thread in self.streaming_threads[:]:  # Use slice copy to avoid modification during iteration
+                try:
+                    if thread.isRunning():
+                        print(f"🛑 Stopping streaming thread for: {getattr(thread.search_result, 'filename', 'unknown')}")
+                        thread.stop()  # Request stop
+                        
+                        # Give thread a moment to stop gracefully
+                        if not thread.wait(1000):  # Wait up to 1 second
+                            print(f"⚠️ Force terminating streaming thread")
+                            thread.terminate()
+                            thread.wait(1000)  # Wait for termination
+                    
+                    # Remove from list
+                    if thread in self.streaming_threads:
+                        self.streaming_threads.remove(thread)
+                        
+                except Exception as e:
+                    print(f"⚠️ Error stopping streaming thread: {e}")
+            
+            print(f"✓ All streaming threads stopped")
     
     def on_streaming_thread_finished(self, thread):
         """Clean up when streaming thread finishes"""
