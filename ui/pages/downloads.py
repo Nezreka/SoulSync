@@ -3044,8 +3044,16 @@ class TabbedDownloadManager(QTabWidget):
         self.setTabText(1, f"Finished Downloads ({finished_count})")
         
         # Also update the download manager stats if they exist
-        if hasattr(self.parent(), 'update_download_manager_stats'):
-            self.parent().update_download_manager_stats(active_count, finished_count)
+        # Find the DownloadsPage in the parent hierarchy
+        parent_widget = self.parent()
+        while parent_widget and not hasattr(parent_widget, 'update_download_manager_stats'):
+            parent_widget = parent_widget.parent()
+        
+        if parent_widget and hasattr(parent_widget, 'update_download_manager_stats'):
+            parent_widget.update_download_manager_stats(active_count, finished_count)
+            print(f"[DEBUG] Updated download manager stats: Active={active_count}, Finished={finished_count}")
+        else:
+            print(f"[DEBUG] Could not find parent with update_download_manager_stats method")
     
     def clear_completed_downloads(self):
         """Clear completed and cancelled downloads from both slskd backend and local queues"""
@@ -3825,6 +3833,10 @@ class DownloadsPage(QWidget):
         queue_layout.addWidget(self.download_queue)
         layout.addWidget(queue_container)
         
+        # Force initial counter update after queue is set up
+        if self.download_queue:
+            self.download_queue.update_tab_counts()
+        
         # Initialize stats display
         self.update_download_manager_stats(0, 0)
         
@@ -4591,8 +4603,9 @@ class DownloadsPage(QWidget):
                     # Button was deleted, ignore
                     pass
             
-            # Stop any existing streaming threads to prevent old downloads from interrupting
+            # Stop any existing streaming threads AND cancel their downloads
             self._stop_all_streaming_threads()
+            self._cancel_current_streaming_download_sync()
             
             # Track the new currently playing button and track
             self.currently_playing_button = result_item
@@ -4613,6 +4626,14 @@ class DownloadsPage(QWidget):
                 print(f"  Quality: {search_result.quality}")
                 print(f"  Size: {search_result.size // (1024*1024)}MB")
                 print(f"  User: {search_result.username}")
+                
+                # Track current streaming download for potential cancellation
+                self.current_streaming_download = {
+                    'username': search_result.username,
+                    'filename': search_result.filename,
+                    'download_id': None  # Will be set when download starts
+                }
+                print(f"🎯 Tracking new streaming download: {search_result.username}:{search_result.filename}")
                 
                 # Create and start streaming thread
                 streaming_thread = StreamingThread(self.soulseek_client, search_result)
@@ -4807,6 +4828,121 @@ class DownloadsPage(QWidget):
                     print(f"⚠️ Error stopping streaming thread: {e}")
             
             print(f"✓ All streaming threads stopped")
+    
+    async def _cancel_current_streaming_download(self):
+        """Cancel the current streaming download via slskd API to prevent queue clogging"""
+        if not hasattr(self, 'current_streaming_download') or not self.current_streaming_download:
+            return
+            
+        try:
+            username = self.current_streaming_download['username']
+            filename = self.current_streaming_download['filename']
+            print(f"🚫 Attempting to cancel streaming download: {username}:{os.path.basename(filename)}")
+            
+            # Find the download ID by searching current transfers
+            all_transfers = await self.soulseek_client._make_request('GET', 'transfers/downloads')
+            download_id = None
+            
+            if all_transfers:
+                # Flatten transfer data to find our download
+                for user_data in all_transfers:
+                    if user_data.get('username') == username:
+                        for directory in user_data.get('directories', []):
+                            for file_data in directory.get('files', []):
+                                if os.path.basename(file_data.get('filename', '')) == os.path.basename(filename):
+                                    download_id = file_data.get('id')
+                                    break
+                            if download_id:
+                                break
+                    if download_id:
+                        break
+            
+            if download_id:
+                print(f"🚫 Found streaming download ID: {download_id}")
+                # Cancel the download with remove=True to clean it up
+                success = await self.soulseek_client.cancel_download(download_id, username, remove=True)
+                if success:
+                    print(f"✓ Successfully cancelled streaming download: {os.path.basename(filename)}")
+                else:
+                    print(f"⚠️ Failed to cancel streaming download: {os.path.basename(filename)}")
+            else:
+                print(f"⚠️ Could not find download ID for streaming download: {os.path.basename(filename)}")
+                
+        except Exception as e:
+            print(f"⚠️ Error cancelling streaming download: {e}")
+        finally:
+            # Clear tracking regardless of success
+            self.current_streaming_download = None
+            
+        # Also clean up any completed streaming downloads to prevent queue clogging
+        await self._cleanup_completed_streaming_downloads()
+    
+    async def _cleanup_completed_streaming_downloads(self):
+        """Remove completed streaming downloads from slskd to prevent queue clogging"""
+        try:
+            print(f"🧹 Cleaning up completed streaming downloads...")
+            
+            # Get current transfers to find completed ones
+            all_transfers = await self.soulseek_client._make_request('GET', 'transfers/downloads')
+            completed_streaming_downloads = []
+            
+            if all_transfers:
+                # Look for completed downloads that might be from streaming
+                for user_data in all_transfers:
+                    username = user_data.get('username', '')
+                    for directory in user_data.get('directories', []):
+                        for file_data in directory.get('files', []):
+                            state = file_data.get('state', '')
+                            filename = file_data.get('filename', '')
+                            download_id = file_data.get('id', '')
+                            
+                            # Check if this is a completed download
+                            if ('Completed' in state and 'Succeeded' in state) and download_id:
+                                # Consider audio files as potential streaming downloads
+                                audio_extensions = {'.mp3', '.flac', '.ogg', '.aac', '.wma', '.wav', '.m4a'}
+                                file_ext = os.path.splitext(filename)[1].lower()
+                                
+                                if file_ext in audio_extensions:
+                                    completed_streaming_downloads.append({
+                                        'id': download_id,
+                                        'username': username,
+                                        'filename': filename
+                                    })
+            
+            # Remove completed streaming downloads (limit to prevent excessive cleanup)
+            max_cleanup = 5  # Only clean up 5 at a time to be conservative
+            for download in completed_streaming_downloads[:max_cleanup]:
+                try:
+                    success = await self.soulseek_client.cancel_download(
+                        download['id'], download['username'], remove=True
+                    )
+                    if success:
+                        print(f"🧹 Cleaned up completed streaming download: {os.path.basename(download['filename'])}")
+                    else:
+                        print(f"⚠️ Failed to clean up: {os.path.basename(download['filename'])}")
+                except Exception as e:
+                    print(f"⚠️ Error cleaning up download {download['id']}: {e}")
+                    
+            if completed_streaming_downloads:
+                print(f"🧹 Completed streaming download cleanup: {len(completed_streaming_downloads[:max_cleanup])} items removed")
+            else:
+                print(f"🧹 No completed streaming downloads found to clean up")
+                
+        except Exception as e:
+            print(f"⚠️ Error during streaming download cleanup: {e}")
+    
+    def _cancel_current_streaming_download_sync(self):
+        """Synchronous wrapper for cancelling current streaming download"""
+        if hasattr(self, 'current_streaming_download') and self.current_streaming_download:
+            # Use async event loop to run the cancellation
+            import asyncio
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(self._cancel_current_streaming_download())
+                loop.close()
+            except Exception as e:
+                print(f"⚠️ Error in sync streaming download cancellation: {e}")
     
     def on_streaming_thread_finished(self, thread):
         """Clean up when streaming thread finishes"""
