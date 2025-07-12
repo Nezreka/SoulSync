@@ -2680,12 +2680,14 @@ class DownloadQueue(QFrame):
             self.update_queue_count()
     
     def clear_completed_downloads(self):
-        """Remove all completed download items"""
+        """Remove all completed and cancelled download items"""
         items_to_remove = []
         for item in self.download_items:
-            # Check for various completed status formats
-            if (item.status.lower() in ["completed", "finished"] or 
-                item.status.lower().startswith("completed")):
+            # Check for various completed and cancelled status formats
+            if (item.status.lower() in ["completed", "finished", "cancelled", "canceled", "failed"] or 
+                item.status.lower().startswith("completed") or
+                item.status.lower().startswith("cancelled") or
+                item.status.lower().startswith("canceled")):
                 items_to_remove.append(item)
         
         for item in items_to_remove:
@@ -2801,13 +2803,15 @@ class TabbedDownloadManager(QTabWidget):
             self.parent().update_download_manager_stats(active_count, finished_count)
     
     def clear_completed_downloads(self):
-        """Clear completed downloads from both slskd backend and local queues"""
+        """Clear completed and cancelled downloads from both slskd backend and local queues"""
         # Delegate to parent (DownloadsPage) which has access to soulseek_client
         if hasattr(self.parent(), 'clear_completed_downloads'):
             self.parent().clear_completed_downloads()
         else:
             # Fallback to local clearing if parent method not available
             print("[DEBUG] No parent clear method found, clearing locally only")
+            # Clear from both active and finished queues
+            self.active_queue.clear_completed_downloads()
             self.finished_queue.clear_completed_downloads()
             self.update_tab_counts()
     
@@ -4457,7 +4461,7 @@ class DownloadsPage(QWidget):
             print(f"Error cleaning up finished download thread: {e}")
     
     def clear_completed_downloads(self):
-        """Clear completed downloads from both slskd backend and local queue"""
+        """Clear completed and cancelled downloads from both slskd backend and local queues"""
         if not self.soulseek_client:
             print("[ERROR] No soulseek client available for clearing downloads")
             return
@@ -4472,17 +4476,17 @@ class DownloadsPage(QWidget):
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
             
-            print("[DEBUG] 🗑️ Clearing all completed downloads from slskd backend...")
+            print("[DEBUG] 🗑️ Clearing all completed/cancelled downloads from slskd backend...")
             success = loop.run_until_complete(self.soulseek_client.clear_all_completed_downloads())
             
             if success:
-                print("[DEBUG] ✅ Successfully cleared completed downloads from backend")
-                # Also clear from local UI
+                print("[DEBUG] ✅ Successfully cleared completed/cancelled downloads from backend")
+                # Also clear from local UI (both active and finished queues)
                 self.download_queue.clear_completed_downloads()
                 # Trigger immediate status update to refresh UI
                 self.update_download_status()
             else:
-                print("[ERROR] ❌ Failed to clear completed downloads from backend")
+                print("[ERROR] ❌ Failed to clear completed/cancelled downloads from backend")
                 
         except Exception as e:
             print(f"[ERROR] Exception during clear completed downloads: {e}")
