@@ -2343,37 +2343,41 @@ class DownloadItem(QFrame):
         if not self.soulseek_client or not self.download_id:
             print(f"Cannot cancel download: missing client or download ID")
             return
-            
-        try:
-            # Use async cancellation in a simple way
-            import asyncio
-            loop = None
-            try:
-                loop = asyncio.get_event_loop()
-            except RuntimeError:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-            
-            # Run the cancellation
-            result = loop.run_until_complete(self.soulseek_client.cancel_download(self.download_id))
-            
-            if result:
-                print(f"Successfully cancelled download: {self.title}")
-                self.update_status("cancelled", progress=0)
-                
-                # Find the parent TabbedDownloadManager and move to finished tab
-                parent_widget = self.parent()
-                while parent_widget:
-                    if hasattr(parent_widget, 'move_to_finished'):
-                        parent_widget.move_to_finished(self)
-                        break
-                    parent_widget = parent_widget.parent()
+        
+        # Find the parent DownloadsPage to use its async helper
+        parent_page = self.parent()
+        while parent_page and not hasattr(parent_page, '_run_async_operation'):
+            parent_page = parent_page.parent()
+        
+        if parent_page:
+            # Use the parent's async helper for safe event loop management
+            def on_success(result):
+                if result:
+                    print(f"Successfully cancelled download: {self.title}")
+                    self.update_status("cancelled", progress=0)
                     
-            else:
-                print(f"Failed to cancel download: {self.title}")
-                
-        except Exception as e:
-            print(f"Error cancelling download {self.title}: {e}")
+                    # Find the parent TabbedDownloadManager and move to finished tab
+                    parent_widget = self.parent()
+                    while parent_widget:
+                        if hasattr(parent_widget, 'move_to_finished'):
+                            parent_widget.move_to_finished(self)
+                            break
+                        parent_widget = parent_widget.parent()
+                        
+                else:
+                    print(f"Failed to cancel download: {self.title}")
+            
+            def on_error(error):
+                print(f"Error cancelling download {self.title}: {error}")
+            
+            parent_page._run_async_operation(
+                self.soulseek_client.cancel_download,
+                self.download_id,
+                success_callback=on_success,
+                error_callback=on_error
+            )
+        else:
+            print(f"[ERROR] Could not find parent DownloadsPage for async operation")
     
     def retry_download(self):
         """Retry a failed download"""
@@ -2662,28 +2666,33 @@ class CompactDownloadItem(QFrame):
         print(f"[DEBUG] Cancel button clicked - download_id: {self.download_id}, username: {self.username}, title: {self.title}")
         if self.soulseek_client and self.download_id:
             print(f"🚫 Cancelling download: {self.download_id}")
-            try:
-                import asyncio
+            
+            # Find the parent DownloadsPage to use its async helper
+            parent_page = self.parent()
+            while parent_page and not hasattr(parent_page, '_run_async_operation'):
+                parent_page = parent_page.parent()
+            
+            if parent_page:
+                # Use the parent's async helper for safe event loop management
+                def on_success(result):
+                    print(f"[DEBUG] Cancel result: {result}")
+                    if result:
+                        print(f"✅ Successfully cancelled download: {self.title}")
+                        self.update_status("cancelled")
+                    else:
+                        print(f"❌ Failed to cancel download: {self.title}")
                 
-                # Get or create event loop for async operation
-                try:
-                    loop = asyncio.get_event_loop()
-                except RuntimeError:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
+                def on_error(error):
+                    print(f"❌ Failed to cancel download: {error}")
                 
-                # Run the cancellation with username
-                result = loop.run_until_complete(self.soulseek_client.cancel_download(self.download_id, self.username))
-                print(f"[DEBUG] Cancel result: {result}")
-                
-                if result:
-                    print(f"✅ Successfully cancelled download: {self.title}")
-                    self.update_status("cancelled")
-                else:
-                    print(f"❌ Failed to cancel download: {self.title}")
-                    
-            except Exception as e:
-                print(f"❌ Failed to cancel download: {e}")
+                parent_page._run_async_operation(
+                    self.soulseek_client.cancel_download,
+                    self.download_id, self.username,
+                    success_callback=on_success,
+                    error_callback=on_error
+                )
+            else:
+                print(f"[ERROR] Could not find parent DownloadsPage for async operation")
         else:
             print(f"[DEBUG] Cancel failed - soulseek_client: {self.soulseek_client}, download_id: {self.download_id}")
     
@@ -2911,32 +2920,71 @@ class DownloadQueue(QFrame):
     
     def remove_download_item(self, item):
         """Remove a download item from the queue"""
+        print(f"[DEBUG] remove_download_item() called for '{item.title}' with status '{item.status}'")
+        print(f"[DEBUG] Queue has {len(self.download_items)} items before removal")
+        
         if item in self.download_items:
+            print(f"[DEBUG] Item found in download_items list, removing...")
             self.download_items.remove(item)
+            print(f"[DEBUG] Removed from download_items list. New count: {len(self.download_items)}")
+            
+            print(f"[DEBUG] Removing widget from queue_layout...")
             self.queue_layout.removeWidget(item)
+            print(f"[DEBUG] Scheduling widget deletion...")
             item.deleteLater()
+            
+            print(f"[DEBUG] Updating queue count...")
             self.update_queue_count()
             
             # Notify parent download manager to update tab counts
+            print(f"[DEBUG] Finding parent to update tab counts...")
             parent_widget = self.parent()
             while parent_widget and not hasattr(parent_widget, 'update_tab_counts'):
                 parent_widget = parent_widget.parent()
             if parent_widget and hasattr(parent_widget, 'update_tab_counts'):
+                print(f"[DEBUG] Calling parent.update_tab_counts()...")
                 parent_widget.update_tab_counts()
+            else:
+                print(f"[DEBUG] No parent with update_tab_counts found")
+                
+            print(f"[DEBUG] remove_download_item() completed for '{item.title}'")
+        else:
+            print(f"[DEBUG] Item '{item.title}' NOT found in download_items list!")
     
     def clear_completed_downloads(self):
         """Remove all completed and cancelled download items"""
+        print(f"[DEBUG] DownloadQueue.clear_completed_downloads() called with {len(self.download_items)} items")
         items_to_remove = []
-        for item in self.download_items:
-            # Check for various completed and cancelled status formats
-            if (item.status.lower() in ["completed", "finished", "cancelled", "canceled", "failed"] or 
-                item.status.lower().startswith("completed") or
-                item.status.lower().startswith("cancelled") or
-                item.status.lower().startswith("canceled")):
-                items_to_remove.append(item)
         
+        for item in self.download_items:
+            print(f"[DEBUG] Checking item '{item.title}' with status '{item.status}'")
+            
+            # Normalize status for comparison (handle compound statuses like "Completed, Succeeded")
+            status_lower = item.status.lower()
+            should_remove = False
+            
+            # Check for exact matches
+            if status_lower in ["completed", "finished", "cancelled", "canceled", "failed"]:
+                should_remove = True
+                print(f"[DEBUG] Exact status match: '{item.status}'")
+            
+            # Check for partial matches (handles compound statuses)
+            elif any(keyword in status_lower for keyword in ["completed", "finished", "cancelled", "canceled", "failed", "succeeded"]):
+                should_remove = True
+                print(f"[DEBUG] Partial status match: '{item.status}'")
+            
+            if should_remove:
+                print(f"[DEBUG] Item '{item.title}' marked for removal (status: '{item.status}')")
+                items_to_remove.append(item)
+            else:
+                print(f"[DEBUG] Item '{item.title}' NOT marked for removal (status: '{item.status}')")
+        
+        print(f"[DEBUG] Removing {len(items_to_remove)} items from queue")
         for item in items_to_remove:
+            print(f"[DEBUG] Removing item: '{item.title}'")
             self.remove_download_item(item)
+        
+        print(f"[DEBUG] DownloadQueue.clear_completed_downloads() finished. Remaining items: {len(self.download_items)}")
 
 class TabbedDownloadManager(QTabWidget):
     """Tabbed interface for managing active and finished downloads"""
@@ -3007,8 +3055,12 @@ class TabbedDownloadManager(QTabWidget):
     
     def move_to_finished(self, download_item):
         """Move a download item from active to finished queue"""
+        print(f"[DEBUG] move_to_finished() called for '{download_item.title}' with status '{download_item.status}'")
+        print(f"[DEBUG] Finished queue currently has {len(self.finished_queue.download_items)} items")
+        
         if download_item in self.active_queue.download_items:
             # Remove from active queue
+            print(f"[DEBUG] Removing '{download_item.title}' from active queue...")
             self.active_queue.remove_download_item(download_item)
             
             # Ensure completed downloads have 100% progress
@@ -3018,6 +3070,7 @@ class TabbedDownloadManager(QTabWidget):
                 print(f"[DEBUG] Ensuring completed download '{download_item.title}' has 100% progress")
             
             # Add to finished queue
+            print(f"[DEBUG] Adding '{download_item.title}' to finished queue with status '{download_item.status}'...")
             finished_item = self.finished_queue.add_download_item(
                 title=download_item.title,
                 artist=download_item.artist,
@@ -3030,6 +3083,7 @@ class TabbedDownloadManager(QTabWidget):
                 username=download_item.username,
                 soulseek_client=download_item.soulseek_client
             )
+            print(f"[DEBUG] Finished queue now has {len(self.finished_queue.download_items)} items")
             
             self.update_tab_counts()
             return finished_item
@@ -3068,6 +3122,22 @@ class TabbedDownloadManager(QTabWidget):
             self.finished_queue.clear_completed_downloads()
             self.update_tab_counts()
     
+    def clear_local_queues_only(self):
+        """Clear only the local UI queues without backend operations (for use by parent)"""
+        print("[DEBUG] TabbedDownloadManager.clear_local_queues_only() called")
+        print(f"[DEBUG] Active queue has {len(self.active_queue.download_items)} items")
+        print(f"[DEBUG] Finished queue has {len(self.finished_queue.download_items)} items")
+        
+        # Clear from both active and finished queues
+        print("[DEBUG] Clearing active queue...")
+        self.active_queue.clear_completed_downloads()
+        print("[DEBUG] Clearing finished queue...")
+        self.finished_queue.clear_completed_downloads()
+        print("[DEBUG] Updating tab counts...")
+        self.update_tab_counts()
+        
+        print(f"[DEBUG] After clearing - Active: {len(self.active_queue.download_items)}, Finished: {len(self.finished_queue.download_items)}")
+    
     @property
     def download_items(self):
         """Return all download items from active queue for compatibility"""
@@ -3084,6 +3154,9 @@ class DownloadsPage(QWidget):
     track_loading_started = pyqtSignal(object)  # Track result object when streaming starts
     track_loading_finished = pyqtSignal(object)  # Track result object when streaming completes
     track_loading_progress = pyqtSignal(float, object)  # Progress percentage (0-100), track result object
+    
+    # Signal for clear completed downloads completion (thread-safe communication)
+    clear_completed_finished = pyqtSignal(bool, object)  # backend_success, ui_callback
     
     def __init__(self, soulseek_client=None, parent=None):
         super().__init__(parent)
@@ -3112,6 +3185,8 @@ class DownloadsPage(QWidget):
         self.download_status_timer.timeout.connect(self.update_download_status)
         self.download_status_timer.start(2000)  # Poll every 2 seconds
         
+        # Connect clear completed signal for thread-safe communication
+        self.clear_completed_finished.connect(self._handle_clear_completion)
         
         self.setup_ui()
     
@@ -4814,11 +4889,18 @@ class DownloadsPage(QWidget):
                         print(f"🛑 Stopping streaming thread for: {getattr(thread.search_result, 'filename', 'unknown')}")
                         thread.stop()  # Request stop
                         
-                        # Give thread a moment to stop gracefully
-                        if not thread.wait(1000):  # Wait up to 1 second
-                            print(f"⚠️ Force terminating streaming thread")
-                            thread.terminate()
-                            thread.wait(1000)  # Wait for termination
+                        # Give thread more time to stop gracefully (3 seconds)
+                        if not thread.wait(3000):  # Wait up to 3 seconds
+                            print(f"⚠️ Streaming thread taking longer to stop, giving more time...")
+                            # Try one more time with longer wait
+                            if not thread.wait(2000):  # Additional 2 seconds
+                                print(f"⚠️ Force terminating unresponsive streaming thread")
+                                thread.terminate()
+                                thread.wait(1000)  # Wait for termination
+                            else:
+                                print(f"✓ Streaming thread stopped gracefully (delayed)")
+                        else:
+                            print(f"✓ Streaming thread stopped gracefully")
                     
                     # Remove from list
                     if thread in self.streaming_threads:
@@ -4859,20 +4941,34 @@ class DownloadsPage(QWidget):
             
             if download_id:
                 print(f"🚫 Found streaming download ID: {download_id}")
-                # Cancel the download with remove=True to clean it up
-                success = await self.soulseek_client.cancel_download(download_id, username, remove=True)
+                # Cancel the download with remove=False (slskd won't allow remove=True for active downloads)
+                success = await self.soulseek_client.cancel_download(download_id, username, remove=False)
                 if success:
                     print(f"✓ Successfully cancelled streaming download: {os.path.basename(filename)}")
                 else:
                     print(f"⚠️ Failed to cancel streaming download: {os.path.basename(filename)}")
+                    # Try without remove flag as fallback
+                    try:
+                        success = await self.soulseek_client.cancel_download(download_id, username, remove=False)
+                        if success:
+                            print(f"✓ Cancelled streaming download with fallback method: {os.path.basename(filename)}")
+                    except Exception as fallback_e:
+                        print(f"⚠️ Fallback cancellation also failed: {fallback_e}")
             else:
                 print(f"⚠️ Could not find download ID for streaming download: {os.path.basename(filename)}")
                 
         except Exception as e:
             print(f"⚠️ Error cancelling streaming download: {e}")
+            # Continue with graceful fallback - don't let cancellation errors break streaming
+            print(f"🔄 Continuing with new stream despite cancellation error")
         finally:
-            # Clear tracking regardless of success
+            # Clean up any partial files from the cancelled streaming download
+            if hasattr(self, 'current_streaming_download') and self.current_streaming_download:
+                await self._cleanup_cancelled_streaming_files(self.current_streaming_download)
+            
+            # Clear tracking regardless of success to prevent stuck state
             self.current_streaming_download = None
+            print(f"🧹 Cleared streaming download tracking")
             
         # Also clean up any completed streaming downloads to prevent queue clogging
         await self._cleanup_completed_streaming_downloads()
@@ -4931,18 +5027,88 @@ class DownloadsPage(QWidget):
         except Exception as e:
             print(f"⚠️ Error during streaming download cleanup: {e}")
     
+    async def _cleanup_cancelled_streaming_files(self, download_info):
+        """Clean up partial files from cancelled streaming downloads"""
+        try:
+            username = download_info.get('username', '')
+            filename = download_info.get('filename', '')
+            
+            if not username or not filename:
+                return
+                
+            print(f"🧹 Cleaning up cancelled streaming files for: {os.path.basename(filename)}")
+            
+            # Get downloads directory from config
+            from config.settings import config_manager
+            downloads_config = config_manager.get_downloads_config()
+            download_path = downloads_config.get('path', './downloads')
+            
+            # Look for partial/completed files in downloads directory
+            filename_base = os.path.splitext(os.path.basename(filename))[0]
+            
+            # Search for files that might match this download
+            for root, dirs, files in os.walk(download_path):
+                for file in files:
+                    # Check if this file could be from our cancelled download
+                    if (filename_base.lower() in file.lower() or 
+                        os.path.basename(filename).lower() == file.lower()):
+                        
+                        file_path = os.path.join(root, file)
+                        try:
+                            print(f"🗑️ Removing cancelled streaming file: {file_path}")
+                            os.remove(file_path)
+                            
+                            # Clean up empty directories
+                            self._cleanup_empty_directories(download_path, file_path)
+                            
+                        except Exception as e:
+                            print(f"⚠️ Error removing file {file_path}: {e}")
+                            
+        except Exception as e:
+            print(f"⚠️ Error cleaning up cancelled streaming files: {e}")
+    
     def _cancel_current_streaming_download_sync(self):
         """Synchronous wrapper for cancelling current streaming download"""
         if hasattr(self, 'current_streaming_download') and self.current_streaming_download:
             # Use async event loop to run the cancellation
             import asyncio
+            import threading
+            
             try:
+                # Try to get existing event loop first
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        # If loop is running, we need to run in a thread
+                        def run_in_thread():
+                            new_loop = asyncio.new_event_loop()
+                            asyncio.set_event_loop(new_loop)
+                            try:
+                                new_loop.run_until_complete(self._cancel_current_streaming_download())
+                            finally:
+                                new_loop.close()
+                        
+                        thread = threading.Thread(target=run_in_thread)
+                        thread.start()
+                        thread.join(timeout=5.0)  # Wait max 5 seconds
+                        return
+                except RuntimeError:
+                    # No event loop in current thread
+                    pass
+                
+                # Create and use new event loop
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
-                loop.run_until_complete(self._cancel_current_streaming_download())
-                loop.close()
+                try:
+                    loop.run_until_complete(self._cancel_current_streaming_download())
+                finally:
+                    loop.close()
+                    
             except Exception as e:
                 print(f"⚠️ Error in sync streaming download cancellation: {e}")
+                print(f"🔄 Continuing with new stream despite sync cancellation error")
+                # Clear tracking as fallback to prevent stuck state
+                self.current_streaming_download = None
     
     def on_streaming_thread_finished(self, thread):
         """Clean up when streaming thread finishes"""
@@ -5168,36 +5334,154 @@ class DownloadsPage(QWidget):
         except Exception as e:
             print(f"Error cleaning up finished download thread: {e}")
     
+    def _run_async_operation(self, async_func, *args, success_callback=None, error_callback=None):
+        """Helper method to run async operations safely with proper event loop management"""
+        import asyncio
+        import threading
+        
+        def run_operation():
+            """Run the async operation in a separate thread with its own event loop"""
+            try:
+                # Create a fresh event loop for this thread
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+                # Run the async operation
+                result = loop.run_until_complete(async_func(*args))
+                
+                # Schedule success callback on main thread if provided
+                if success_callback:
+                    QTimer.singleShot(0, lambda: success_callback(result))
+                    
+                return result
+                
+            except Exception as e:
+                print(f"[ERROR] Exception in async operation: {e}")
+                import traceback
+                traceback.print_exc()
+                
+                # Schedule error callback on main thread if provided
+                if error_callback:
+                    # Capture the error in a closure to avoid lambda variable issues
+                    def call_error_callback(error=e):
+                        error_callback(error)
+                    QTimer.singleShot(0, call_error_callback)
+                    
+                return False
+                
+            finally:
+                # Always close the loop we created
+                try:
+                    loop.close()
+                except Exception as close_e:
+                    print(f"[WARNING] Error closing event loop: {close_e}")
+        
+        try:
+            # Run the operation in a separate thread
+            operation_thread = threading.Thread(target=run_operation, daemon=True)
+            operation_thread.start()
+            
+        except Exception as e:
+            print(f"[ERROR] Exception starting async operation thread: {e}")
+            import traceback
+            traceback.print_exc()
+
     def clear_completed_downloads(self):
         """Clear completed and cancelled downloads from both slskd backend and local queues"""
+        print("[DEBUG] DownloadsPage.clear_completed_downloads() method called!")
+        print(f"[DEBUG] Current download queue stats:")
+        print(f"[DEBUG] - Active queue: {len(self.download_queue.active_queue.download_items)} items")
+        print(f"[DEBUG] - Finished queue: {len(self.download_queue.finished_queue.download_items)} items")
+        
         if not self.soulseek_client:
             print("[ERROR] No soulseek client available for clearing downloads")
             return
         
-        # Run async clear operation
+        # Run async clear operation using threading to avoid event loop conflicts
         import asyncio
-        try:
-            # Get the current event loop or create a new one
+        import threading
+        
+        # Define UI update callback outside the thread (with proper self reference)
+        def update_ui_callback():
+            """UI update callback that runs on main thread"""
+            print("[DEBUG] *** UI CALLBACK EXECUTED *** - Starting UI clear operations...")
             try:
-                loop = asyncio.get_event_loop()
-            except RuntimeError:
+                # Step 1: Clear local queues
+                print("[DEBUG] Step 1: Calling clear_local_queues_only()...")
+                self.download_queue.clear_local_queues_only()
+                print("[DEBUG] Step 1 completed successfully")
+                
+                # Step 2: Update download status
+                print("[DEBUG] Step 2: Calling update_download_status()...")
+                self.update_download_status()
+                print("[DEBUG] Step 2 completed successfully")
+                
+                print("[DEBUG] *** UI CALLBACK COMPLETED *** - All UI clear operations finished")
+            except Exception as e:
+                print(f"[ERROR] Exception in UI callback: {e}")
+                import traceback
+                traceback.print_exc()
+                # Even if there's an error, try to update the display
+                try:
+                    print("[DEBUG] Attempting fallback queue update...")
+                    if hasattr(self, 'download_queue'):
+                        self.download_queue.update_tab_counts()
+                except Exception as fallback_e:
+                    print(f"[ERROR] Fallback update also failed: {fallback_e}")
+        
+        def run_clear_operation():
+            """Run the clear operation in a separate thread with its own event loop"""
+            success = False
+            try:
+                # Create a fresh event loop for this thread
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
-            
-            print("[DEBUG] 🗑️ Clearing all completed/cancelled downloads from slskd backend...")
-            success = loop.run_until_complete(self.soulseek_client.clear_all_completed_downloads())
-            
-            if success:
-                print("[DEBUG] ✅ Successfully cleared completed/cancelled downloads from backend")
-                # Also clear from local UI (both active and finished queues)
-                self.download_queue.clear_completed_downloads()
-                # Trigger immediate status update to refresh UI
-                self.update_download_status()
-            else:
-                print("[ERROR] ❌ Failed to clear completed/cancelled downloads from backend")
                 
+                print("[DEBUG] 🗑️ Clearing all completed/cancelled downloads from slskd backend...")
+                success = loop.run_until_complete(self.soulseek_client.clear_all_completed_downloads())
+                
+                if success:
+                    print("[DEBUG] ✅ Successfully cleared completed/cancelled downloads from backend")
+                else:
+                    print("[WARNING] ❌ Backend reported failure, but proceeding with UI clearing anyway")
+                    print("[WARNING] (Web UI may have cleared successfully despite backend failure report)")
+                    
+            except Exception as e:
+                print(f"[ERROR] Exception during clear completed downloads: {e}")
+                import traceback
+                traceback.print_exc()
+            finally:
+                # Always close the loop we created
+                try:
+                    loop.close()
+                except Exception as close_e:
+                    print(f"[WARNING] Error closing event loop: {close_e}")
+                
+                # CRITICAL: Use signal to communicate with main thread (thread-safe)
+                print("[DEBUG] Thread completed, emitting completion signal...")
+                self.clear_completed_finished.emit(success, update_ui_callback)
+        
+        try:
+            # Run the clear operation in a separate thread
+            clear_thread = threading.Thread(target=run_clear_operation, daemon=True)
+            clear_thread.start()
+            
         except Exception as e:
-            print(f"[ERROR] Exception during clear completed downloads: {e}")
+            print(f"[ERROR] Exception starting clear completed downloads thread: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _handle_clear_completion(self, backend_success, ui_callback):
+        """Handle completion of clear operation on main thread"""
+        print(f"[DEBUG] _handle_clear_completion called on main thread - backend_success: {backend_success}")
+        
+        # ALWAYS clear UI regardless of backend success/failure
+        # This ensures UI stays in sync even if backend reports false negatives
+        print("[DEBUG] Executing UI callback on main thread...")
+        try:
+            ui_callback()
+        except Exception as e:
+            print(f"[ERROR] Exception executing UI callback: {e}")
             import traceback
             traceback.print_exc()
     
@@ -5612,6 +5896,7 @@ class DownloadsPage(QWidget):
         # Clear completed button
         clear_btn = QPushButton("🗑️ Clear Completed")
         clear_btn.setFixedHeight(35)
+        clear_btn.clicked.connect(self.clear_completed_downloads)  # Connect to the clearing method
         clear_btn.setStyleSheet("""
             QPushButton {
                 background: transparent;
