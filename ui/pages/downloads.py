@@ -3246,7 +3246,7 @@ class DownloadsPage(QWidget):
         
         self.search_results_widget = QWidget()
         self.search_results_layout = QVBoxLayout(self.search_results_widget)
-        self.search_results_layout.setSpacing(16)  # Increased for better card separation and visual breathing room
+        self.search_results_layout.setSpacing(8)  # Reduced spacing for more compact search results
         self.search_results_layout.setContentsMargins(12, 12, 12, 12)  # Increased for better edge spacing
         
         # Add centered loading animation for search results area
@@ -3361,9 +3361,9 @@ class DownloadsPage(QWidget):
         return container
     
     def create_filter_controls(self):
-        """Create elegant filter controls for Albums vs Singles"""
+        """Create elegant filter controls for Albums vs Singles and File Formats"""
         container = QFrame()
-        container.setFixedHeight(55)
+        container.setFixedHeight(85)  # Increased height for two rows of filters
         container.setStyleSheet("""
             QFrame {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -3374,16 +3374,19 @@ class DownloadsPage(QWidget):
             }
         """)
         
-        layout = QHBoxLayout(container)
-        layout.setContentsMargins(16, 8, 16, 8)
-        layout.setSpacing(8)
+        main_layout = QVBoxLayout(container)
+        main_layout.setContentsMargins(16, 8, 16, 8)
+        main_layout.setSpacing(6)
         
-        # Filter label
-        filter_label = QLabel("Filter:")
-        filter_label.setStyleSheet("""
+        # First row: Type filters (Albums vs Singles)
+        type_row = QHBoxLayout()
+        type_row.setSpacing(8)
+        
+        type_label = QLabel("Type:")
+        type_label.setStyleSheet("""
             QLabel {
                 color: rgba(255, 255, 255, 0.8);
-                font-size: 12px;
+                font-size: 11px;
                 font-weight: 600;
                 font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
                 letter-spacing: 0.3px;
@@ -3392,35 +3395,95 @@ class DownloadsPage(QWidget):
         
         # Initialize filter state
         self.current_filter = "all"  # "all", "albums", "singles"
+        self.current_format_filter = "all"  # "all", "flac", "mp3", "ogg", "aac", "wma"
         
-        # Filter buttons with toggle behavior
+        # Type filter buttons
         self.filter_all_btn = QPushButton("All")
         self.filter_albums_btn = QPushButton("Albums")
         self.filter_singles_btn = QPushButton("Singles")
         
-        # Store buttons for easy access
+        # Store type buttons for easy access
         self.filter_buttons = {
             "all": self.filter_all_btn,
             "albums": self.filter_albums_btn,
             "singles": self.filter_singles_btn
         }
         
-        # Connect button signals
+        # Connect type button signals
         self.filter_all_btn.clicked.connect(lambda: self.set_filter("all"))
         self.filter_albums_btn.clicked.connect(lambda: self.set_filter("albums"))
         self.filter_singles_btn.clicked.connect(lambda: self.set_filter("singles"))
         
-        # Apply styling to all buttons
+        # Apply styling to type buttons
         for btn_key, btn in self.filter_buttons.items():
-            btn.setFixedHeight(32)
-            btn.setMinimumWidth(65)
-            self.update_filter_button_style(btn, btn_key == "all")  # "All" starts active
+            btn.setFixedHeight(28)
+            btn.setMinimumWidth(60)
+            self.update_filter_button_style(btn, btn_key == "all")
             
-        layout.addWidget(filter_label)
-        layout.addWidget(self.filter_all_btn)
-        layout.addWidget(self.filter_albums_btn)
-        layout.addWidget(self.filter_singles_btn)
-        layout.addStretch()
+        type_row.addWidget(type_label)
+        type_row.addWidget(self.filter_all_btn)
+        type_row.addWidget(self.filter_albums_btn)
+        type_row.addWidget(self.filter_singles_btn)
+        type_row.addStretch()
+        
+        # Second row: Format filters
+        format_row = QHBoxLayout()
+        format_row.setSpacing(8)
+        
+        format_label = QLabel("Format:")
+        format_label.setStyleSheet("""
+            QLabel {
+                color: rgba(255, 255, 255, 0.8);
+                font-size: 11px;
+                font-weight: 600;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                letter-spacing: 0.3px;
+            }
+        """)
+        
+        # Format filter buttons
+        self.format_all_btn = QPushButton("All")
+        self.format_flac_btn = QPushButton("FLAC")
+        self.format_mp3_btn = QPushButton("MP3")
+        self.format_ogg_btn = QPushButton("OGG")
+        self.format_aac_btn = QPushButton("AAC")
+        self.format_wma_btn = QPushButton("WMA")
+        
+        # Store format buttons for easy access
+        self.format_buttons = {
+            "all": self.format_all_btn,
+            "flac": self.format_flac_btn,
+            "mp3": self.format_mp3_btn,
+            "ogg": self.format_ogg_btn,
+            "aac": self.format_aac_btn,
+            "wma": self.format_wma_btn
+        }
+        
+        # Connect format button signals
+        self.format_all_btn.clicked.connect(lambda: self.set_format_filter("all"))
+        self.format_flac_btn.clicked.connect(lambda: self.set_format_filter("flac"))
+        self.format_mp3_btn.clicked.connect(lambda: self.set_format_filter("mp3"))
+        self.format_ogg_btn.clicked.connect(lambda: self.set_format_filter("ogg"))
+        self.format_aac_btn.clicked.connect(lambda: self.set_format_filter("aac"))
+        self.format_wma_btn.clicked.connect(lambda: self.set_format_filter("wma"))
+        
+        # Apply styling to format buttons
+        for btn_key, btn in self.format_buttons.items():
+            btn.setFixedHeight(28)
+            btn.setMinimumWidth(50)
+            self.update_filter_button_style(btn, btn_key == "all")
+            
+        format_row.addWidget(format_label)
+        format_row.addWidget(self.format_all_btn)
+        format_row.addWidget(self.format_flac_btn)
+        format_row.addWidget(self.format_mp3_btn)
+        format_row.addWidget(self.format_ogg_btn)
+        format_row.addWidget(self.format_aac_btn)
+        format_row.addWidget(self.format_wma_btn)
+        format_row.addStretch()
+        
+        main_layout.addLayout(type_row)
+        main_layout.addLayout(format_row)
         
         return container
     
@@ -3494,20 +3557,53 @@ class DownloadsPage(QWidget):
         # Apply the filter to current results
         self.apply_filter()
     
+    def set_format_filter(self, format_type):
+        """Set the current format filter and update button styles"""
+        self.current_format_filter = format_type
+        
+        # Update format button styles
+        for btn_key, btn in self.format_buttons.items():
+            self.update_filter_button_style(btn, btn_key == format_type)
+        
+        # Apply the filter to current results
+        self.apply_filter()
+    
     def apply_filter(self):
-        """Apply the current filter to search results"""
+        """Apply the current type and format filters to search results"""
         if not hasattr(self, '_temp_tracks') or not hasattr(self, '_temp_albums'):
             return
             
-        # Get the filtered results based on current filter
+        # First, filter by type (Albums vs Singles)
         if self.current_filter == "all":
-            filtered_results = self._temp_albums + self._temp_tracks
+            type_filtered = self._temp_albums + self._temp_tracks
         elif self.current_filter == "albums":
-            filtered_results = self._temp_albums
+            type_filtered = self._temp_albums
         elif self.current_filter == "singles":
-            filtered_results = self._temp_tracks
+            type_filtered = self._temp_tracks
         else:
-            filtered_results = self._temp_albums + self._temp_tracks
+            type_filtered = self._temp_albums + self._temp_tracks
+        
+        # Then, filter by format
+        if self.current_format_filter == "all":
+            filtered_results = type_filtered
+        else:
+            # Filter results by file format
+            filtered_results = []
+            for result in type_filtered:
+                # For albums, check if any tracks match the format
+                if hasattr(result, 'tracks') and result.tracks:
+                    # Album result - check if any tracks match format
+                    matching_tracks = [track for track in result.tracks 
+                                     if track.quality.lower() == self.current_format_filter.lower()]
+                    if matching_tracks:
+                        # Create a copy of the album with only matching tracks
+                        filtered_album = result
+                        filtered_album.tracks = matching_tracks
+                        filtered_results.append(filtered_album)
+                else:
+                    # Single track result - check format directly
+                    if hasattr(result, 'quality') and result.quality.lower() == self.current_format_filter.lower():
+                        filtered_results.append(result)
         
         # Update the filtered results cache for pagination
         self.current_filtered_results = filtered_results
