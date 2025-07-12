@@ -2081,8 +2081,8 @@ class CompactDownloadItem(QFrame):
     """Compact download item optimized for queue display"""
     def __init__(self, title: str, artist: str, status: str = "queued", 
                  progress: int = 0, file_size: int = 0, download_speed: int = 0, 
-                 file_path: str = "", download_id: str = "", soulseek_client=None, 
-                 queue_type: str = "active", parent=None):
+                 file_path: str = "", download_id: str = "", username: str = "", 
+                 soulseek_client=None, queue_type: str = "active", parent=None):
         super().__init__(parent)
         self.title = title
         self.artist = artist
@@ -2092,6 +2092,7 @@ class CompactDownloadItem(QFrame):
         self.download_speed = download_speed
         self.file_path = file_path
         self.download_id = download_id
+        self.username = username
         self.soulseek_client = soulseek_client
         self.queue_type = queue_type  # "active" or "finished"
         self.setup_ui()
@@ -2178,15 +2179,76 @@ class CompactDownloadItem(QFrame):
         progress_layout.addWidget(self.progress_bar)
         progress_layout.addWidget(self.status_label)
         
-        # Right section: Action button (fixed width)
-        self.action_btn = QPushButton()
-        self.action_btn.setFixedSize(70, 32)  # Smaller button
-        self.setup_action_button()
+        # Right section: Action button(s) (fixed width)
+        if self.queue_type == "finished":
+            # For finished downloads, create a container with two buttons
+            button_container = QWidget()
+            button_container.setFixedWidth(150)  # Wider to fit two buttons
+            button_layout = QHBoxLayout(button_container)
+            button_layout.setContentsMargins(0, 0, 0, 0)
+            button_layout.setSpacing(4)
+            
+            # Open button
+            self.open_btn = QPushButton("📂")
+            self.open_btn.setFixedSize(32, 32)
+            self.open_btn.setToolTip("Open download folder")
+            self.open_btn.clicked.connect(self.open_download_location)
+            self.open_btn.setStyleSheet("""
+                QPushButton {
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 rgba(40, 167, 69, 0.8),
+                        stop:1 rgba(40, 167, 69, 1.0));
+                    color: white;
+                    border: none;
+                    border-radius: 6px;
+                    font-weight: bold;
+                    font-size: 12px;
+                }
+                QPushButton:hover {
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 rgba(20, 147, 49, 0.9),
+                        stop:1 rgba(20, 147, 49, 1.0));
+                }
+            """)
+            
+            # Remove button
+            self.remove_btn = QPushButton("🗑️")
+            self.remove_btn.setFixedSize(32, 32)
+            self.remove_btn.setToolTip("Remove from downloads")
+            self.remove_btn.clicked.connect(self.remove_download)
+            self.remove_btn.setStyleSheet("""
+                QPushButton {
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 rgba(220, 53, 69, 0.8),
+                        stop:1 rgba(220, 53, 69, 1.0));
+                    color: white;
+                    border: none;
+                    border-radius: 6px;
+                    font-weight: bold;
+                    font-size: 12px;
+                }
+                QPushButton:hover {
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 rgba(200, 33, 49, 0.9),
+                        stop:1 rgba(200, 33, 49, 1.0));
+                }
+            """)
+            
+            button_layout.addWidget(self.open_btn)
+            button_layout.addWidget(self.remove_btn)
+            
+            action_widget = button_container
+        else:
+            # For active downloads, single action button
+            self.action_btn = QPushButton()
+            self.action_btn.setFixedSize(70, 32)  # Smaller button
+            self.setup_action_button()
+            action_widget = self.action_btn
         
         # Add everything to main layout
         layout.addLayout(left_section, 1)  # Flexible
         layout.addWidget(progress_widget)  # Fixed width
-        layout.addWidget(self.action_btn)  # Fixed width
+        layout.addWidget(action_widget)  # Fixed width
     
     def get_display_filename(self):
         """Extract just the filename with extension for display"""
@@ -2225,6 +2287,7 @@ class CompactDownloadItem(QFrame):
             if self.status.lower() in ["downloading", "queued"]:
                 self.action_btn.setText("Cancel")
                 self.action_btn.clicked.connect(self.cancel_download)
+                print(f"[DEBUG] Connected cancel button for: {self.title}")
                 self.action_btn.setStyleSheet("""
                     QPushButton {
                         background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -2279,6 +2342,7 @@ class CompactDownloadItem(QFrame):
             # Finished downloads: Always show Open button
             self.action_btn.setText("📂 Open")
             self.action_btn.clicked.connect(self.open_download_location)
+            print(f"[DEBUG] Connected open button for: {self.title} (path: {self.file_path})")
             self.action_btn.setStyleSheet("""
                 QPushButton {
                     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -2317,15 +2381,73 @@ class CompactDownloadItem(QFrame):
         # Update action button if needed
         self.setup_action_button()
     
+    def remove_download(self):
+        """Remove the download completely from transfer list"""
+        print(f"[DEBUG] Remove button clicked - download_id: {self.download_id}, username: {self.username}, title: {self.title}")
+        if self.soulseek_client and self.download_id:
+            print(f"🗑️ Removing download: {self.download_id}")
+            try:
+                import asyncio
+                
+                # Get or create event loop for async operation
+                try:
+                    loop = asyncio.get_event_loop()
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                
+                # Run the removal with remove=true
+                result = loop.run_until_complete(self.soulseek_client.cancel_download(self.download_id, self.username, remove=True))
+                print(f"[DEBUG] Remove result: {result}")
+                
+                if result:
+                    print(f"✅ Successfully removed download: {self.title}")
+                    print(f"[DEBUG] Download should be removed from slskd - waiting for next status update to reflect removal")
+                    # Force an immediate status update to check if it's been removed
+                    print(f"[DEBUG] Triggering immediate status poll to detect removal")
+                    # Find the downloads page and trigger status update
+                    downloads_page = self
+                    while downloads_page and not hasattr(downloads_page, 'update_download_status'):
+                        downloads_page = downloads_page.parent()
+                    if downloads_page:
+                        downloads_page.update_download_status()
+                else:
+                    print(f"❌ Failed to remove download: {self.title}")
+                    
+            except Exception as e:
+                print(f"❌ Failed to remove download: {e}")
+        else:
+            print(f"[DEBUG] Remove failed - soulseek_client: {self.soulseek_client}, download_id: {self.download_id}")
+
     def cancel_download(self):
         """Cancel the download using soulseek client"""
+        print(f"[DEBUG] Cancel button clicked - download_id: {self.download_id}, username: {self.username}, title: {self.title}")
         if self.soulseek_client and self.download_id:
             print(f"🚫 Cancelling download: {self.download_id}")
             try:
-                self.soulseek_client.cancel_download(self.download_id)
-                self.update_status("cancelled")
+                import asyncio
+                
+                # Get or create event loop for async operation
+                try:
+                    loop = asyncio.get_event_loop()
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                
+                # Run the cancellation with username
+                result = loop.run_until_complete(self.soulseek_client.cancel_download(self.download_id, self.username))
+                print(f"[DEBUG] Cancel result: {result}")
+                
+                if result:
+                    print(f"✅ Successfully cancelled download: {self.title}")
+                    self.update_status("cancelled")
+                else:
+                    print(f"❌ Failed to cancel download: {self.title}")
+                    
             except Exception as e:
                 print(f"❌ Failed to cancel download: {e}")
+        else:
+            print(f"[DEBUG] Cancel failed - soulseek_client: {self.soulseek_client}, download_id: {self.download_id}")
     
     def retry_download(self):
         """Retry a failed download"""
@@ -2340,13 +2462,35 @@ class CompactDownloadItem(QFrame):
         import platform
         from pathlib import Path
         
+        print(f"[DEBUG] Open button clicked - file_path: {self.file_path}, title: {self.title}")
+        
         if not self.file_path:
+            print(f"[DEBUG] No file_path set for download: {self.title}")
+            # Fallback to opening the general downloads folder
+            try:
+                from config.settings import config_manager
+                download_path = config_manager.get('soulseek.download_path', './downloads')
+                
+                system = platform.system()
+                if system == "Windows":
+                    os.startfile(download_path)
+                elif system == "Darwin":  # macOS
+                    os.system(f'open "{download_path}"')
+                else:  # Linux
+                    os.system(f'xdg-open "{download_path}"')
+                    
+                print(f"📂 Opened downloads folder: {download_path}")
+            except Exception as e:
+                print(f"❌ Failed to open downloads folder: {e}")
             return
             
         try:
             file_path = Path(self.file_path)
+            print(f"[DEBUG] Checking file existence: {file_path}")
+            
             if file_path.exists():
                 folder_path = file_path.parent
+                print(f"[DEBUG] Opening folder: {folder_path}")
                 
                 system = platform.system()
                 if system == "Windows":
@@ -2359,6 +2503,50 @@ class CompactDownloadItem(QFrame):
                 print(f"📂 Opened folder: {folder_path}")
             else:
                 print(f"❌ File not found: {file_path}")
+                # Try to find the file in the downloads directory using the filename
+                filename = os.path.basename(self.file_path)
+                print(f"[DEBUG] Searching for file: {filename}")
+                
+                from config.settings import config_manager
+                download_path = config_manager.get('soulseek.download_path', './downloads')
+                
+                # Search for the file in the downloads directory tree
+                found_file = None
+                for root, dirs, files in os.walk(download_path):
+                    for file in files:
+                        if file == filename:
+                            found_file = os.path.join(root, file)
+                            print(f"[DEBUG] Found file at: {found_file}")
+                            break
+                    if found_file:
+                        break
+                
+                if found_file:
+                    folder_path = os.path.dirname(found_file)
+                    print(f"[DEBUG] Opening found folder: {folder_path}")
+                    
+                    system = platform.system()
+                    if system == "Windows":
+                        os.startfile(folder_path)
+                    elif system == "Darwin":  # macOS
+                        os.system(f'open "{folder_path}"')
+                    else:  # Linux
+                        os.system(f'xdg-open "{folder_path}"')
+                        
+                    print(f"📂 Opened folder: {folder_path}")
+                else:
+                    print(f"❌ Could not find file {filename} in downloads directory")
+                    # Fallback to opening the downloads folder
+                    system = platform.system()
+                    if system == "Windows":
+                        os.startfile(download_path)
+                    elif system == "Darwin":  # macOS
+                        os.system(f'open "{download_path}"')
+                    else:  # Linux
+                        os.system(f'xdg-open "{download_path}"')
+                        
+                    print(f"📂 Opened downloads folder as fallback: {download_path}")
+                    
         except Exception as e:
             print(f"❌ Failed to open download location: {e}")
 
@@ -2453,14 +2641,15 @@ class DownloadQueue(QFrame):
     
     def add_download_item(self, title: str, artist: str, status: str = "queued", 
                          progress: int = 0, file_size: int = 0, download_speed: int = 0, 
-                         file_path: str = "", download_id: str = "", soulseek_client=None):
+                         file_path: str = "", download_id: str = "", username: str = "", 
+                         soulseek_client=None):
         """Add a new download item to the queue"""
         # Hide empty message if this is the first item
         if len(self.download_items) == 0:
             self.empty_message.hide()
         
-        # Create new compact download item with queue type
-        item = CompactDownloadItem(title, artist, status, progress, file_size, download_speed, file_path, download_id, soulseek_client, self.queue_type)
+        # Create new compact download item with queue type  
+        item = CompactDownloadItem(title, artist, status, progress, file_size, download_speed, file_path, download_id, username, soulseek_client, self.queue_type)
         self.download_items.append(item)
         
         # Insert before the stretch (which is always last)
@@ -2559,11 +2748,12 @@ class TabbedDownloadManager(QTabWidget):
     
     def add_download_item(self, title: str, artist: str, status: str = "queued", 
                          progress: int = 0, file_size: int = 0, download_speed: int = 0, 
-                         file_path: str = "", download_id: str = "", soulseek_client=None):
+                         file_path: str = "", download_id: str = "", username: str = "", 
+                         soulseek_client=None):
         """Add a new download item to the active queue"""
         item = self.active_queue.add_download_item(
             title, artist, status, progress, file_size, download_speed, 
-            file_path, download_id, soulseek_client
+            file_path, download_id, username, soulseek_client
         )
         self.update_tab_counts()
         return item
@@ -2590,6 +2780,7 @@ class TabbedDownloadManager(QTabWidget):
                 download_speed=download_item.download_speed,
                 file_path=download_item.file_path,
                 download_id=download_item.download_id,
+                username=download_item.username,
                 soulseek_client=download_item.soulseek_client
             )
             
@@ -2610,9 +2801,15 @@ class TabbedDownloadManager(QTabWidget):
             self.parent().update_download_manager_stats(active_count, finished_count)
     
     def clear_completed_downloads(self):
-        """Clear completed downloads from the finished queue"""
-        self.finished_queue.clear_completed_downloads()
-        self.update_tab_counts()
+        """Clear completed downloads from both slskd backend and local queues"""
+        # Delegate to parent (DownloadsPage) which has access to soulseek_client
+        if hasattr(self.parent(), 'clear_completed_downloads'):
+            self.parent().clear_completed_downloads()
+        else:
+            # Fallback to local clearing if parent method not available
+            print("[DEBUG] No parent clear method found, clearing locally only")
+            self.finished_queue.clear_completed_downloads()
+            self.update_tab_counts()
     
     @property
     def download_items(self):
@@ -3823,6 +4020,7 @@ class DownloadsPage(QWidget):
                 progress=0,
                 file_size=search_result.size,
                 download_id=download_id,
+                username=search_result.username,
                 file_path=full_filename,  # Store the full path for matching
                 soulseek_client=self.soulseek_client
             )
@@ -4259,8 +4457,37 @@ class DownloadsPage(QWidget):
             print(f"Error cleaning up finished download thread: {e}")
     
     def clear_completed_downloads(self):
-        """Clear completed downloads from the queue"""
-        self.download_queue.clear_completed_downloads()
+        """Clear completed downloads from both slskd backend and local queue"""
+        if not self.soulseek_client:
+            print("[ERROR] No soulseek client available for clearing downloads")
+            return
+        
+        # Run async clear operation
+        import asyncio
+        try:
+            # Get the current event loop or create a new one
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            
+            print("[DEBUG] 🗑️ Clearing all completed downloads from slskd backend...")
+            success = loop.run_until_complete(self.soulseek_client.clear_all_completed_downloads())
+            
+            if success:
+                print("[DEBUG] ✅ Successfully cleared completed downloads from backend")
+                # Also clear from local UI
+                self.download_queue.clear_completed_downloads()
+                # Trigger immediate status update to refresh UI
+                self.update_download_status()
+            else:
+                print("[ERROR] ❌ Failed to clear completed downloads from backend")
+                
+        except Exception as e:
+            print(f"[ERROR] Exception during clear completed downloads: {e}")
+            import traceback
+            traceback.print_exc()
     
     def update_download_status(self):
         """Poll slskd API for download status updates (QTimer callback) - FIXED VERSION"""
@@ -4410,12 +4637,22 @@ class DownloadsPage(QWidget):
                             new_status = 'downloading'
                         elif 'Completed' in state or 'Succeeded' in state:
                             new_status = 'completed'
+                            # Construct absolute file path for completed downloads
+                            api_filename = matching_transfer.get('filename', '')
+                            if api_filename and self.soulseek_client and self.soulseek_client.download_path:
+                                from pathlib import Path
+                                # Convert API filename to absolute path using configured download directory
+                                absolute_file_path = str(Path(self.soulseek_client.download_path) / api_filename)
+                                print(f"[DEBUG] Constructed absolute path: {absolute_file_path}")
+                            else:
+                                absolute_file_path = download_item.file_path
+                                
                             # Update the download item status and progress BEFORE moving
                             download_item.update_status(
                                 status=new_status,
                                 progress=100,  # Force 100% for completed downloads
                                 download_speed=int(avg_speed),
-                                file_path=matching_transfer.get('filename', download_item.file_path)
+                                file_path=absolute_file_path
                             )
                             # Move completed items to finished queue
                             print(f"[DEBUG] Moving completed download '{download_item.title}' to finished queue")
@@ -4471,7 +4708,18 @@ class DownloadsPage(QWidget):
                             print(f"[DEBUG] Updated download ID for '{download_item.title}': {download_item.download_id} -> {transfer_id}")
                             download_item.download_id = transfer_id
                     
-                    # (Matching transfer not found - debug message already printed above)
+                    # If no matching transfer found, the download might have been removed from slskd
+                    else:
+                        # Check if this download was in finished state and might have been removed
+                        if download_item in self.download_queue.finished_queue.download_items:
+                            print(f"[DEBUG] 🗑️ Download '{download_item.title}' not found in API - likely removed from slskd")
+                            print(f"[DEBUG] Removing '{download_item.title}' from finished downloads UI")
+                            # Remove from finished queue since it's no longer in slskd
+                            self.download_queue.finished_queue.remove_download_item(download_item)
+                            continue
+                
+                # After processing all download items, check for any that weren't found in the API
+                # This handles the case where downloads were removed from slskd externally
                 
             except Exception as e:
                 print(f"[ERROR] Error processing transfer status update: {e}")

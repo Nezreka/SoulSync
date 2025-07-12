@@ -254,7 +254,7 @@ class SoulseekClient:
                 logger.debug(f"Response status: {response.status}")
                 logger.debug(f"Response text: {response_text[:500]}...")  # First 500 chars
                 
-                if response.status in [200, 201]:  # Accept both 200 OK and 201 Created
+                if response.status in [200, 201, 204]:  # Accept 200 OK, 201 Created, and 204 No Content
                     try:
                         if response_text.strip():  # Only parse if there's content
                             return await response.json()
@@ -836,16 +836,70 @@ class SoulseekClient:
             logger.error(f"Error getting downloads: {e}")
             return []
     
-    async def cancel_download(self, download_id: str) -> bool:
+    async def cancel_download(self, download_id: str, username: str = None, remove: bool = False) -> bool:
         if not self.base_url:
             return False
         
+        # If username is not provided, try to extract it from stored transfer data
+        if not username:
+            logger.debug(f"No username provided for download_id {download_id}, attempting to find it")
+            try:
+                downloads = await self.get_all_downloads()
+                for download in downloads:
+                    if download.id == download_id:
+                        username = download.username
+                        logger.debug(f"Found username {username} for download_id {download_id}")
+                        break
+                
+                if not username:
+                    logger.error(f"Could not find username for download_id {download_id}")
+                    return False
+            except Exception as e:
+                logger.error(f"Error finding username for download: {e}")
+                return False
+        
         try:
-            response = await self._make_request('DELETE', f'transfers/downloads/{download_id}')
+            # Use correct slskd API format: DELETE /transfers/downloads/{username}/{download_id}?remove={true/false}
+            # remove=false: Cancel download but keep in transfer list
+            # remove=true: Remove download completely from transfer list
+            endpoint = f'transfers/downloads/{username}/{download_id}?remove={str(remove).lower()}'
+            action = "Removing" if remove else "Cancelling"
+            logger.debug(f"{action} download with endpoint: {endpoint}")
+            response = await self._make_request('DELETE', endpoint)
             return response is not None
             
         except Exception as e:
             logger.error(f"Error cancelling download: {e}")
+            return False
+    
+    async def clear_all_completed_downloads(self) -> bool:
+        """Clear all completed/finished downloads from slskd backend
+        
+        Uses the /api/v0/transfers/downloads/all/completed endpoint to remove
+        all downloads with completed, cancelled, or failed status from slskd.
+        
+        Returns:
+            bool: True if clearing was successful, False otherwise
+        """
+        if not self.base_url:
+            logger.error("Soulseek client not configured")
+            return False
+        
+        try:
+            endpoint = 'transfers/downloads/all/completed'
+            logger.debug(f"Clearing all completed downloads with endpoint: {endpoint}")
+            response = await self._make_request('DELETE', endpoint)
+            success = response is not None
+            
+            if success:
+                logger.info("Successfully cleared all completed downloads from slskd")
+            else:
+                logger.error("Failed to clear completed downloads from slskd")
+                
+            return success
+            
+        except Exception as e:
+            logger.error(f"Error clearing completed downloads: {e}")
             return False
     
     async def search_and_download_best(self, query: str, preferred_quality: str = 'flac') -> Optional[str]:
