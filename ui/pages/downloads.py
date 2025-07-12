@@ -644,6 +644,7 @@ class StreamingThread(QThread):
     streaming_finished = pyqtSignal(str, object)  # Message, search_result  
     streaming_failed = pyqtSignal(str, object)   # Error message, search_result
     streaming_progress = pyqtSignal(float, object)  # Progress percentage (0-100), search_result
+    streaming_queued = pyqtSignal(str, object)  # Queue message, search_result
     
     def __init__(self, soulseek_client, search_result):
         super().__init__()
@@ -699,31 +700,63 @@ class StreamingThread(QThread):
                     max_wait_time = 45  # Wait up to 45 seconds
                     poll_interval = 2   # Check every 2 seconds
                     
-                    # Track elapsed time for fallback progress estimation
-                    start_time = time.time()
-                    estimated_duration = 15.0  # Estimate 15 seconds for typical download
                     last_progress_sent = 0.0
                     found_file = None  # Initialize found_file outside the loop
+                    
+                    # Queue state tracking
+                    queue_start_time = None
+                    queue_timeout = 15.0  # 15 seconds max in queue
+                    last_download_state = None
+                    actively_downloading = False
                     
                     for wait_count in range(max_wait_time // poll_interval):
                         if self._stop_requested:
                             break
                             
-                        # Calculate fallback progress based on elapsed time
-                        elapsed_time = time.time() - start_time
-                        estimated_progress = min(95.0, (elapsed_time / estimated_duration) * 95.0)  # Cap at 95%
+                        # Only use real API progress data - no time-based estimation
                         
                         # Check download progress via slskd API
                         api_progress = None
+                        download_state = None
                         try:
-                            download_status = loop.run_until_complete(self._check_download_progress())
+                            # Use the same API call as download queue monitoring for consistency
+                            transfers_data = loop.run_until_complete(self.soulseek_client._make_request('GET', 'transfers/downloads'))
+                            download_status = self._find_streaming_download_in_transfers(transfers_data)
                             if download_status:
-                                api_progress = download_status.progress
-                                print(f"API Download progress: {api_progress:.1f}%")
+                                api_progress = download_status.get('percentComplete', 0)
+                                download_state = download_status.get('state', '').lower()
+                                print(f"API Download - State: {download_status.get('state')}, Progress: {api_progress:.1f}%")
+                                
+                                # Categorize download state (aligned with download queue logic)
+                                original_state = download_status.get('state', '')  # Keep original case for completion check
+                                is_queued = any(keyword in download_state for keyword in ['queued', 'initializing', 'remote'])
+                                is_downloading = 'inprogress' in download_state
+                                is_completed = ('Succeeded' in original_state or ('Completed' in original_state and 'Errored' not in original_state)) or api_progress >= 100
+                                
+                                # Track queue state timing
+                                if is_queued and queue_start_time is None:
+                                    queue_start_time = time.time()
+                                    print(f"📋 Download entered queue state: {original_state}")
+                                    self.streaming_queued.emit(f"Queuing with uploader...", self.search_result)
+                                elif is_downloading and not actively_downloading:
+                                    actively_downloading = True
+                                    queue_start_time = None  # Reset queue timer
+                                    print(f"🚀 Download started actively downloading: {original_state}")
+                                    # Emit a progress update to indicate downloading has started
+                                    if api_progress > 0:
+                                        self.streaming_progress.emit(api_progress, self.search_result)
+                                
+                                # Check for queue timeout
+                                if is_queued and queue_start_time:
+                                    queue_elapsed = time.time() - queue_start_time
+                                    if queue_elapsed > queue_timeout:
+                                        print(f"⏰ Queue timeout after {queue_elapsed:.1f}s - download stuck in queue")
+                                        self.streaming_failed.emit(f"Queue timeout - uploader not responding. Try another source.", self.search_result)
+                                        return
                                 
                                 # Check if download is complete
-                                if download_status.state.lower().startswith('completed') or api_progress >= 100:
-                                    print(f"✓ Download completed via API status: {download_status.state}")
+                                if is_completed:
+                                    print(f"✓ Download completed via API status: {original_state}")
                                     # Try to find the actual file - with retries for file system sync
                                     for retry_count in range(5):  # Try up to 5 times with delays
                                         found_file = self._find_downloaded_file(download_path)
@@ -735,18 +768,42 @@ class StreamingThread(QThread):
                                             time.sleep(1)  # Wait 1 second for file system to sync
                                     
                                     if found_file:
-                                        break  # Exit main polling loop
+                                        print(f"✓ Found downloaded file: {found_file}")
+                                        
+                                        # Move the file to Stream folder with original filename
+                                        original_filename = os.path.basename(found_file)
+                                        stream_path = os.path.join(stream_folder, original_filename)
+                                        
+                                        try:
+                                            # Move file to Stream folder
+                                            shutil.move(found_file, stream_path)
+                                            print(f"✓ Moved file to stream folder: {stream_path}")
+                                            
+                                            # Clean up empty directories left behind
+                                            self._cleanup_empty_directories(download_path, found_file)
+                                            
+                                            # Signal that streaming is ready (100% progress)
+                                            self.streaming_progress.emit(100.0, self.search_result)
+                                            self.streaming_finished.emit(f"Stream ready: {os.path.basename(found_file)}", self.search_result)
+                                            self.temp_file_path = stream_path
+                                            print(f"✓ Stream file ready for playback: {stream_path}")
+                                            break  # Exit main polling loop
+                                            
+                                        except Exception as e:
+                                            print(f"Error moving file to stream folder: {e}")
+                                            self.streaming_failed.emit(f"Failed to prepare stream file: {e}", self.search_result)
+                                            break
+                                else:
+                                    # Handle progress updates for active downloads
+                                    if is_downloading and actively_downloading and api_progress is not None and api_progress > 0:
+                                        if api_progress != last_progress_sent:
+                                            self.streaming_progress.emit(api_progress, self.search_result)
+                                            print(f"Progress update: {api_progress:.1f}% (Real API data)")
+                                            last_progress_sent = api_progress
                         except Exception as e:
                             print(f"Warning: Could not check download progress: {e}")
-                        
-                        # Use API progress if available, otherwise use estimated progress
-                        current_progress = api_progress if api_progress is not None and api_progress > 0 else estimated_progress
-                        
-                        # Only emit progress updates if there's a meaningful change (>5%)
-                        if current_progress - last_progress_sent >= 5.0:
-                            self.streaming_progress.emit(current_progress, self.search_result)
-                            print(f"Progress update: {current_progress:.1f}% (API: {api_progress}, Estimated: {estimated_progress:.1f}%)")
-                            last_progress_sent = current_progress
+                            # Continue to next iteration if API call fails
+                            continue
                         
                         # Search for the downloaded file in the downloads directory
                         found_file = self._find_downloaded_file(download_path)
@@ -785,37 +842,6 @@ class StreamingThread(QThread):
                         # Timed out waiting for file
                         print(f"❌ Polling loop completed, timeout reached. found_file = {found_file}")
                         self.streaming_failed.emit("Stream download timed out - file not found", self.search_result)
-                    
-                    # Post-polling file processing
-                    print(f"📋 After polling loop: found_file = {found_file}")
-                    if found_file:
-                        print(f"🎯 Processing found file: {found_file}")
-                        
-                        # Move the file to Stream folder with original filename
-                        original_filename = os.path.basename(found_file)
-                        stream_path = os.path.join(stream_folder, original_filename)
-                        
-                        try:
-                            # Move file to Stream folder
-                            print(f"📁 Moving file from {found_file} to {stream_path}")
-                            shutil.move(found_file, stream_path)
-                            print(f"✅ Successfully moved file to stream folder: {stream_path}")
-                            
-                            # Clean up empty directories left behind
-                            self._cleanup_empty_directories(download_path, found_file)
-                            
-                            # Signal that streaming is ready (100% progress)
-                            self.streaming_progress.emit(100.0, self.search_result)
-                            self.streaming_finished.emit(f"Stream ready: {os.path.basename(found_file)}", self.search_result)
-                            self.temp_file_path = stream_path
-                            print(f"🎵 Stream file ready for playback: {stream_path}")
-                            
-                        except Exception as e:
-                            print(f"❌ Error moving file to stream folder: {e}")
-                            self.streaming_failed.emit(f"Failed to prepare stream file: {e}", self.search_result)
-                    else:
-                        print(f"❌ No file found after polling loop completed")
-                        self.streaming_failed.emit("Stream download failed - file not found after completion", self.search_result)
                         
                 else:
                     self.streaming_failed.emit("Streaming failed to start", self.search_result)
@@ -839,31 +865,42 @@ class StreamingThread(QThread):
                 except Exception as e:
                     print(f"Error cleaning up streaming event loop: {e}")
     
-    async def _check_download_progress(self):
-        """Check download progress via slskd API for the current streaming download"""
+    def _find_streaming_download_in_transfers(self, transfers_data):
+        """Find streaming download in transfer data using same logic as download queue"""
         try:
-            # Get all current downloads and find ours by filename match
-            all_downloads = await self.soulseek_client.get_all_downloads()
-            print(f"🔍 Looking for download - Target: {self.search_result.username}:{os.path.basename(self.search_result.filename)}")
-            print(f"🔍 Found {len(all_downloads)} total downloads in API")
+            if not transfers_data:
+                return None
+                
+            # Flatten the transfers data structure (same as download queue logic)
+            all_transfers = []
+            for user_data in transfers_data:
+                if 'directories' in user_data:
+                    for directory in user_data['directories']:
+                        if 'files' in directory:
+                            all_transfers.extend(directory['files'])
             
             # Look for our specific file by filename and username
             target_filename = os.path.basename(self.search_result.filename)
             target_username = self.search_result.username
             
-            for i, download in enumerate(all_downloads):
-                download_filename = os.path.basename(download.filename)
-                print(f"📁 Download {i+1}: {download.username}:{download_filename} - State: {download.state} - Progress: {download.progress}%")
-                
-                if (download_filename == target_filename and 
-                    download.username == target_username):
-                    print(f"✅ Found matching download: {download.state} - {download.progress}%")
-                    return download
+            print(f"🔍 Looking for streaming download - Target: {target_username}:{target_filename}")
+            print(f"🔍 Found {len(all_transfers)} total transfers in API")
             
-            print(f"❌ No matching download found for {target_username}:{target_filename}")
+            for i, transfer in enumerate(all_transfers):
+                transfer_filename = os.path.basename(transfer.get('filename', ''))
+                transfer_username = transfer.get('username', '')
+                
+                print(f"📁 Transfer {i+1}: {transfer_username}:{transfer_filename} - State: {transfer.get('state')} - Progress: {transfer.get('percentComplete', 0):.1f}%")
+                
+                if (transfer_filename == target_filename and 
+                    transfer_username == target_username):
+                    print(f"✅ Found matching streaming download: {transfer.get('state')} - {transfer.get('percentComplete', 0):.1f}%")
+                    return transfer
+            
+            print(f"❌ No matching streaming download found for {target_username}:{target_filename}")
             return None
         except Exception as e:
-            print(f"Error checking download progress: {e}")
+            print(f"Error finding streaming download in transfers: {e}")
             return None
     
     def _find_downloaded_file(self, download_path):
@@ -1069,6 +1106,20 @@ class TrackItem(QFrame):
         """Set play button to loading state"""
         self.play_btn.setText("⏳")
         self.play_btn.setEnabled(False)
+    
+    def set_queue_state(self):
+        """Set play button to queue state"""
+        self.play_btn.setText("📋")
+        self.play_btn.setEnabled(False)
+        self.play_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(255, 165, 0, 0.2);
+                border: 1px solid rgba(255, 165, 0, 0.4);
+                border-radius: 18px;
+                color: rgba(255, 165, 0, 0.8);
+                font-size: 12px;
+            }
+        """)
     
     def set_download_queued_state(self):
         """Set download button to queued state (disabled, shows queued)"""
@@ -1926,6 +1977,20 @@ class SearchResultItem(QFrame):
         """Set button to loading state"""
         self.play_btn.setText("⌛")
         self.play_btn.setEnabled(False)
+    
+    def set_queue_state(self):
+        """Set play button to queue state"""
+        self.play_btn.setText("📋")
+        self.play_btn.setEnabled(False)
+        self.play_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(255, 165, 0, 0.2);
+                border: 1px solid rgba(255, 165, 0, 0.4);
+                border-radius: 18px;
+                color: rgba(255, 165, 0, 0.8);
+                font-size: 12px;
+            }
+        """)
     
     def reset_download_state(self):
         """Reset the download button state"""
@@ -2851,6 +2916,13 @@ class DownloadQueue(QFrame):
             self.queue_layout.removeWidget(item)
             item.deleteLater()
             self.update_queue_count()
+            
+            # Notify parent download manager to update tab counts
+            parent_widget = self.parent()
+            while parent_widget and not hasattr(parent_widget, 'update_tab_counts'):
+                parent_widget = parent_widget.parent()
+            if parent_widget and hasattr(parent_widget, 'update_tab_counts'):
+                parent_widget.update_tab_counts()
     
     def clear_completed_downloads(self):
         """Remove all completed and cancelled download items"""
@@ -4547,6 +4619,7 @@ class DownloadsPage(QWidget):
                 streaming_thread.streaming_started.connect(self.on_streaming_started, Qt.ConnectionType.QueuedConnection)
                 streaming_thread.streaming_finished.connect(self.on_streaming_finished, Qt.ConnectionType.QueuedConnection)
                 streaming_thread.streaming_progress.connect(self.on_streaming_progress, Qt.ConnectionType.QueuedConnection)
+                streaming_thread.streaming_queued.connect(self.on_streaming_queued, Qt.ConnectionType.QueuedConnection)
                 streaming_thread.streaming_failed.connect(self.on_streaming_failed, Qt.ConnectionType.QueuedConnection)
                 streaming_thread.finished.connect(
                     functools.partial(self.on_streaming_thread_finished, streaming_thread),
@@ -4675,6 +4748,27 @@ class DownloadsPage(QWidget):
                 self.track_loading_progress.emit(progress_percent, search_result)
             else:
                 print(f"🚫 Ignoring progress for old streaming result: {search_result.filename}")
+    
+    def on_streaming_queued(self, queue_msg, search_result):
+        """Handle streaming queue state updates"""
+        print(f"Queue status: {queue_msg} for {search_result.filename}")
+        
+        # Check if this queue status is for the currently requested track
+        if hasattr(self, 'current_track_result') and self.current_track_result:
+            current_track_id = f"{self.current_track_result.username}:{self.current_track_result.filename}"
+            queued_track_id = f"{search_result.username}:{search_result.filename}"
+            
+            if current_track_id == queued_track_id:
+                # Show queue status in button
+                if self.currently_playing_button:
+                    try:
+                        self.currently_playing_button.set_queue_state()
+                    except RuntimeError:
+                        # Button was deleted, ignore
+                        pass
+                print(f"📋 Showing queue status for current track")
+            else:
+                print(f"🚫 Ignoring queue status for old streaming result: {search_result.filename}")
     
     def on_streaming_failed(self, error_msg, search_result):
         """Handle streaming failure"""
@@ -5202,6 +5296,10 @@ class DownloadsPage(QWidget):
                 
                 # After processing all download items, check for any that weren't found in the API
                 # This handles the case where downloads were removed from slskd externally
+                
+                # Update download counters after processing all transfers
+                self.download_queue.update_tab_counts()
+                print(f"[DEBUG] Updated tab counts - Active: {len(self.download_queue.active_queue.download_items)}, Finished: {len(self.download_queue.finished_queue.download_items)}")
                 
             except Exception as e:
                 print(f"[ERROR] Error processing transfer status update: {e}")
