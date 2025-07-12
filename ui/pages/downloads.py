@@ -1409,8 +1409,8 @@ class SearchResultItem(QFrame):
         self.setup_ui()
     
     def setup_ui(self):
-        # Dynamic height based on state (compact: 75px, expanded: 200px for better visual breathing room)
-        self.compact_height = 75  # Increased from 60px for less cramped feeling
+        # Dynamic height based on state (compact: 85px, expanded: 200px for better visual breathing room)
+        self.compact_height = 85  # Increased from 75px to match Albums proportions
         self.expanded_height = 200  # Increased from 180px for more comfortable content layout
         self.setFixedHeight(self.compact_height)
         
@@ -1438,7 +1438,7 @@ class SearchResultItem(QFrame):
         """)
         
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(16, 12, 16, 12)  # More generous padding for better breathing room
+        layout.setContentsMargins(16, 16, 16, 16)  # Match Albums margins for consistency
         layout.setSpacing(16)  # Increased spacing for better visual separation
         
         # Left section: Music icon + filename
@@ -1468,8 +1468,8 @@ class SearchResultItem(QFrame):
         # Content area that will change based on expanded state
         self.content_widget = QWidget()
         self.content_layout = QVBoxLayout(self.content_widget)
-        self.content_layout.setContentsMargins(0, 2, 0, 2)  # Small vertical margins for better text positioning
-        self.content_layout.setSpacing(6)  # Increased from 3px for better readability
+        self.content_layout.setContentsMargins(0, 4, 0, 4)  # Increased vertical margins for better centering
+        self.content_layout.setSpacing(2)  # Reduced spacing to prevent text cut-off
         
         # Extract song info
         primary_info = self._extract_song_info()
@@ -1552,11 +1552,11 @@ class SearchResultItem(QFrame):
         """Create both compact and expanded content with visibility control"""
         # Title row (always visible) with character limit and ellipsis
         title_text = primary_info['title']
-        if len(title_text) > 50:  # Character limit for long titles
-            title_text = title_text[:47] + "..."
+        if len(title_text) > 55:  # Increased character limit since smaller font fits more text
+            title_text = title_text[:52] + "..."
         
         self.title_label = QLabel(title_text)
-        self.title_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))  # Increased from 11px to 14px for better readability
+        self.title_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))  # 12px matches Albums and prevents cut-off
         self.title_label.setStyleSheet("color: #ffffff; letter-spacing: 0.2px;")
         self.title_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         # Ensure text doesn't overflow the label and allow click-through
@@ -1571,7 +1571,7 @@ class SearchResultItem(QFrame):
         self.expand_indicator.setStyleSheet("""
             QLabel {
                 color: rgba(255, 255, 255, 0.7);
-                font-size: 14px;
+                font-size: 12px;
                 background: rgba(255, 255, 255, 0.1);
                 border-radius: 10px;
             }
@@ -1581,9 +1581,23 @@ class SearchResultItem(QFrame):
             }
         """)
         
-        # Quality badge (only visible when expanded)
+        # Quality badge (now visible in compact view)
         self.quality_badge = self._create_compact_quality_badge()
-        self.quality_badge.hide()  # Initially hidden
+        
+        # Create uploader info label for compact view
+        result = self.search_result[0] if isinstance(self.search_result, list) else self.search_result
+        uploader_text = f"by {result.username}"
+        size_mb = result.size // (1024*1024)
+        quality_text = result.quality.upper()
+        if result.bitrate:
+            quality_text += f" • {result.bitrate}kbps"
+        
+        secondary_info_text = f"{uploader_text} • {quality_text} • {size_mb}MB"
+        self.secondary_info = QLabel(secondary_info_text)
+        self.secondary_info.setFont(QFont("Arial", 9, QFont.Weight.Normal))
+        self.secondary_info.setStyleSheet("color: rgba(179, 179, 179, 0.8); letter-spacing: 0.1px;")
+        self.secondary_info.setWordWrap(False)
+        self.secondary_info.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
         
         title_row = QHBoxLayout()
         title_row.setContentsMargins(0, 0, 0, 0)
@@ -1591,59 +1605,51 @@ class SearchResultItem(QFrame):
         title_row.addWidget(self.quality_badge)
         title_row.addWidget(self.expand_indicator)
         
+        # Add secondary info row for compact view
+        secondary_row = QHBoxLayout()
+        secondary_row.setContentsMargins(0, 0, 0, 0)  # Remove margins to prevent cut-off
+        secondary_row.addWidget(self.secondary_info)
+        secondary_row.addStretch()  # Push text to left
+        
         # Expanded content (initially hidden)
         self.expanded_content = QWidget()
         expanded_layout = QVBoxLayout(self.expanded_content)
         expanded_layout.setContentsMargins(0, 4, 0, 4)  # Small margins for better text positioning
         expanded_layout.setSpacing(4)  # Increased from 1px to 4px for better readability
         
-        # Artist info
-        self.artist_info = QLabel(primary_info['artist'])
-        self.artist_info.setFont(QFont("Arial", 12, QFont.Weight.Normal))  # Increased from 10px to 12px for better readability
-        self.artist_info.setStyleSheet("color: rgba(179, 179, 179, 0.9); letter-spacing: 0.1px;")
-        
-        # File details
-        details = []
-        size_mb = self.search_result.size // (1024*1024)
-        details.append(f"{size_mb}MB")
-        
+        # Expanded content shows only unique information not in compact view
+        # Duration info (if available) - this is unique to expanded view
+        expanded_details = []
         if self.search_result.duration:
             duration_mins = self.search_result.duration // 60
             duration_secs = self.search_result.duration % 60
-            details.append(f"{duration_mins}:{duration_secs:02d}")
+            expanded_details.append(f"Duration: {duration_mins}:{duration_secs:02d}")
         
-        self.file_details = QLabel(" • ".join(details))
-        self.file_details.setFont(QFont("Arial", 10))  # Increased from 9px to 10px for better readability
-        self.file_details.setStyleSheet("color: rgba(136, 136, 136, 0.8); letter-spacing: 0.1px;")
+        # Full file path info (unique to expanded view)
+        result = self.search_result[0] if isinstance(self.search_result, list) else self.search_result
+        if hasattr(result, 'filename'):
+            expanded_details.append(f"File: {result.filename}")
         
-        # User info and quality score in one compact row
-        bottom_row = QHBoxLayout()
-        bottom_row.setContentsMargins(0, 2, 0, 2)  # Small margins for better spacing
-        bottom_row.setSpacing(12)  # Increased from 8px for better separation
+        if expanded_details:
+            self.expanded_details = QLabel(" • ".join(expanded_details))
+            self.expanded_details.setFont(QFont("Arial", 10))
+            self.expanded_details.setStyleSheet("color: rgba(136, 136, 136, 0.8); letter-spacing: 0.1px;")
+            self.expanded_details.setWordWrap(True)  # Allow wrapping for long filenames
+            expanded_layout.addWidget(self.expanded_details)
         
-        # Apply intelligent path truncation to username/file location
-        truncated_path = self._truncate_file_path(self.search_result.username, self.search_result.filename)
-        self.user_info = QLabel(f"👤 {truncated_path}")
-        self.user_info.setFont(QFont("Arial", 10, QFont.Weight.Medium))  # Increased from 9px to 10px
-        self.user_info.setStyleSheet("color: rgba(29, 185, 84, 0.8); letter-spacing: 0.1px;")
-        
+        # Speed indicator (unique to expanded view)
         self.speed_indicator = self._create_compact_speed_indicator()
-        
-        # Add widgets to bottom row (removed misleading star rating)
-        bottom_row.addWidget(self.user_info)
-        bottom_row.addWidget(self.speed_indicator)
-        bottom_row.addStretch()
-        
-        # Add all expanded content
-        expanded_layout.addWidget(self.artist_info)
-        expanded_layout.addWidget(self.file_details)
-        expanded_layout.addLayout(bottom_row)
+        speed_row = QHBoxLayout()
+        speed_row.addWidget(self.speed_indicator)
+        speed_row.addStretch()
+        expanded_layout.addLayout(speed_row)
         
         # Initially hide expanded content
         self.expanded_content.hide()
         
         # Add to main layout
         self.content_layout.addLayout(title_row)
+        self.content_layout.addLayout(secondary_row)  # Add secondary info row
         self.content_layout.addWidget(self.expanded_content)
     
     def update_expanded_state(self):
@@ -1658,7 +1664,6 @@ class SearchResultItem(QFrame):
                     border-radius: 10px;
                 }
             """)
-            self.quality_badge.show()
             self.expanded_content.show()
         else:
             self.expand_indicator.setText("⏵")
@@ -1674,8 +1679,9 @@ class SearchResultItem(QFrame):
                     background: rgba(29, 185, 84, 0.15);
                 }
             """)
-            self.quality_badge.hide()
             self.expanded_content.hide()
+        
+        # Quality badge is now always visible in compact view
     
     def mousePressEvent(self, event):
         """Handle mouse clicks to toggle expand/collapse"""
