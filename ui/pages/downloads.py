@@ -3349,7 +3349,7 @@ class DownloadsPage(QWidget):
         queue_layout = QVBoxLayout(queue_container)
         queue_layout.setContentsMargins(0, 0, 0, 0)
         
-        self.download_queue = TabbedDownloadManager()
+        self.download_queue = TabbedDownloadManager(self)
         queue_layout.addWidget(self.download_queue)
         layout.addWidget(queue_container)
         
@@ -4084,7 +4084,11 @@ class DownloadsPage(QWidget):
             # Different track - stop current and start new
             if self.currently_playing_button:
                 self.audio_player.stop_playback()
-                self.currently_playing_button.reset_play_state()
+                try:
+                    self.currently_playing_button.reset_play_state()
+                except RuntimeError:
+                    # Button was deleted, ignore
+                    pass
             
             # Track the new currently playing button and track
             self.currently_playing_button = result_item
@@ -4135,7 +4139,11 @@ class DownloadsPage(QWidget):
         print(f"Streaming started: {message}")
         # Set button to loading state while file is being prepared
         if self.currently_playing_button:
-            self.currently_playing_button.set_loading_state()
+            try:
+                self.currently_playing_button.set_loading_state()
+            except RuntimeError:
+                # Button was deleted, ignore
+                pass
     
     def on_streaming_finished(self, message, search_result):
         """Handle streaming completion - start actual audio playback"""
@@ -4164,7 +4172,11 @@ class DownloadsPage(QWidget):
                     print(f"🎵 Started audio playback: {os.path.basename(stream_file)}")
                     # Set button to playing state
                     if self.currently_playing_button:
-                        self.currently_playing_button.set_playing_state()
+                        try:
+                            self.currently_playing_button.set_playing_state()
+                        except RuntimeError:
+                            # Button was deleted, ignore
+                            pass
                     # Emit track started signal for sidebar media player
                     if hasattr(self, 'current_track_result') and self.current_track_result:
                         self.track_started.emit(self.current_track_result)
@@ -4172,20 +4184,32 @@ class DownloadsPage(QWidget):
                     print(f"❌ Failed to start audio playback")
                     # Reset button on failure
                     if self.currently_playing_button:
-                        self.currently_playing_button.reset_play_state()
+                        try:
+                            self.currently_playing_button.reset_play_state()
+                        except RuntimeError:
+                            # Button was deleted, ignore
+                            pass
                         self.currently_playing_button = None
             else:
                 print(f"❌ Stream file not found in {stream_folder}")
                 # Reset button on failure
                 if self.currently_playing_button:
-                    self.currently_playing_button.reset_play_state()
+                    try:
+                        self.currently_playing_button.reset_play_state()
+                    except RuntimeError:
+                        # Button was deleted, ignore
+                        pass
                     self.currently_playing_button = None
                 
         except Exception as e:
             print(f"❌ Error starting audio playback: {e}")
             # Reset button on error
             if self.currently_playing_button:
-                self.currently_playing_button.reset_play_state()
+                try:
+                    self.currently_playing_button.reset_play_state()
+                except RuntimeError:
+                    # Button was deleted, ignore
+                    pass
                 self.currently_playing_button = None
     
     def on_streaming_failed(self, error_msg, search_result):
@@ -4193,7 +4217,11 @@ class DownloadsPage(QWidget):
         print(f"Streaming failed: {error_msg}")
         # Reset any play button that might be waiting
         if self.currently_playing_button:
-            self.currently_playing_button.reset_play_state()
+            try:
+                self.currently_playing_button.reset_play_state()
+            except RuntimeError:
+                # Button was deleted, ignore
+                pass
             self.currently_playing_button = None
     
     def on_streaming_thread_finished(self, thread):
@@ -4227,7 +4255,11 @@ class DownloadsPage(QWidget):
         print("🎵 Audio playback completed")
         # Reset the play button to play state
         if self.currently_playing_button:
-            self.currently_playing_button.reset_play_state()
+            try:
+                self.currently_playing_button.reset_play_state()
+            except RuntimeError:
+                # Button was deleted, ignore
+                pass
             self.currently_playing_button = None
         
         # Emit track finished signal for sidebar media player
@@ -4245,7 +4277,11 @@ class DownloadsPage(QWidget):
         print(f"❌ Audio playback error: {error_msg}")
         # Reset the play button to play state
         if self.currently_playing_button:
-            self.currently_playing_button.reset_play_state()
+            try:
+                self.currently_playing_button.reset_play_state()
+            except RuntimeError:
+                # Button was deleted, ignore
+                pass
             self.currently_playing_button = None
         
         # Emit track stopped signal for sidebar media player
@@ -4272,7 +4308,11 @@ class DownloadsPage(QWidget):
             self.audio_player.pause()
             # is_playing will be set automatically by _on_playback_state_changed
             if self.currently_playing_button:
-                self.currently_playing_button.set_loading_state()  # Use as "paused" state
+                try:
+                    self.currently_playing_button.set_loading_state()  # Use as "paused" state
+                except RuntimeError:
+                    # Button was deleted, ignore
+                    pass
             self.track_paused.emit()
             print("⏸️ Paused from sidebar")
         else:
@@ -4280,7 +4320,11 @@ class DownloadsPage(QWidget):
             self.audio_player.play()
             # is_playing will be set automatically by _on_playback_state_changed
             if self.currently_playing_button:
-                self.currently_playing_button.set_playing_state()
+                try:
+                    self.currently_playing_button.set_playing_state()
+                except RuntimeError:
+                    # Button was deleted, ignore
+                    pass
             self.track_resumed.emit()
             print("🎵 Resumed from sidebar")
     
@@ -4288,7 +4332,11 @@ class DownloadsPage(QWidget):
         """Handle stop request from sidebar media player"""
         self.audio_player.stop_playback()
         if self.currently_playing_button:
-            self.currently_playing_button.reset_play_state()
+            try:
+                self.currently_playing_button.reset_play_state()
+            except RuntimeError:
+                # Button was deleted, ignore
+                pass
             self.currently_playing_button = None
         
         # Emit track stopped signal
