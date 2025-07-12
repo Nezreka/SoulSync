@@ -12330,3 +12330,669 @@
 2025-07-11 23:37:45 - newmusic.main - [92mINFO[0m - closeEvent:181 - Stopping status monitoring thread...
 2025-07-11 23:37:47 - newmusic.main - [92mINFO[0m - closeEvent:186 - Closing Soulseek client...
 2025-07-11 23:37:47 - newmusic.main - [92mINFO[0m - closeEvent:192 - Application closed successfully
+2025-07-11 23:39:01 - newmusic - [92mINFO[0m - setup_logging:57 - Logging initialized with level: DEBUG
+2025-07-11 23:39:01 - newmusic.main - [92mINFO[0m - main:206 - Starting NewMusic application
+2025-07-11 23:39:01 - newmusic.spotify_client - [92mINFO[0m - _setup_client:84 - Successfully authenticated with Spotify as broquethomas
+2025-07-11 23:39:01 - newmusic.plex_client - [92mINFO[0m - _find_music_library:98 - Found music library: Music
+2025-07-11 23:39:01 - newmusic.plex_client - [92mINFO[0m - _setup_client:84 - Successfully connected to Plex server: PLEX-MACHINE
+2025-07-11 23:39:01 - newmusic.soulseek_client - [92mINFO[0m - _setup_client:220 - Soulseek client configured with slskd at http://localhost:5030
+2025-07-11 23:39:02 - newmusic.main - [92mINFO[0m - change_page:158 - Changed to page: dashboard
+2025-07-11 23:39:02 - newmusic.main - [92mINFO[0m - setup_media_player_connections:145 - Media player connections established between sidebar and downloads page
+2025-07-11 23:39:02 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Aether
+2025-07-11 23:39:02 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Favorite Artists
+2025-07-11 23:39:05 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Brittnea
+2025-07-11 23:39:06 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Baleigh
+2025-07-11 23:39:06 - newmusic.main - [92mINFO[0m - change_page:158 - Changed to page: downloads
+2025-07-11 23:39:07 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Extra Music
+2025-07-11 23:39:08 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Maggi Main
+2025-07-11 23:39:12 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Broque Main
+2025-07-11 23:39:19 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:113 - Retrieved 7 playlists
+2025-07-11 23:39:21 - newmusic.soulseek_client - [92mINFO[0m - search:551 - Starting search for: 'queen flac'
+2025-07-11 23:39:21 - newmusic.soulseek_client - [94mDEBUG[0m - search:561 - Search data: {'searchText': 'queen flac', 'timeout': 30000, 'filterResponses': True, 'minimumResponseFileCount': 1, 'minimumPeerUploadSpeed': 0}
+2025-07-11 23:39:21 - newmusic.soulseek_client - [94mDEBUG[0m - search:562 - Making POST request to: http://localhost:5030/api/v0/searches
+2025-07-11 23:39:21 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/searches
+2025-07-11 23:39:21 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 23:39:21 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: {'searchText': 'queen flac', 'timeout': 30000, 'filterResponses': True, 'minimumResponseFileCount': 1, 'minimumPeerUploadSpeed': 0}
+2025-07-11 23:39:21 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 23:39:21 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: {"fileCount":0,"id":"e001b91b-f828-40b3-8da2-4b6c920e29bb","isComplete":false,"lockedFileCount":0,"responseCount":0,"responses":[],"searchText":"queen flac","startedAt":"2025-07-12T06:39:21.4046187Z","state":"InProgress","token":1662}...
+2025-07-11 23:39:21 - newmusic.soulseek_client - [92mINFO[0m - search:575 - Search initiated with ID: e001b91b-f828-40b3-8da2-4b6c920e29bb
+2025-07-11 23:39:21 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 1/20) - elapsed: 0.0s
+2025-07-11 23:39:21 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/e001b91b-f828-40b3-8da2-4b6c920e29bb/responses
+2025-07-11 23:39:21 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 23:39:21 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 23:39:21 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 2/20) - elapsed: 1.5s
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/e001b91b-f828-40b3-8da2-4b6c920e29bb/responses
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":1,"files":[{"bitDepth":16,"code":1,"extension":"","filename":"@@kiriv\\complete\\Abba Gold- FLAC\\01. Dancing Queen.flac","length":231,"sampleRate":44100,"size":28445352,"isLocked":false}],"hasFreeUploadSlot":true,"lockedFileCount":0,"lockedFiles":[],"queueLength":0,"token":1662,"uploadSpeed":0,"username":"snoscot"},{"fileCount":306,"files":[{"bitDepth":16,"code":1,"extension":"","filename":"@@htzbi\\Music\\-=Classical=-\\The History Of Classical Music in 100 CDs\\Part 1\\[07] Purc...
+2025-07-11 23:39:23 - newmusic.soulseek_client - [92mINFO[0m - search:597 - Found 250 new responses (250 total) at 1.5s
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:345 - Processing 250 user responses
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User snoscot has 1 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User skittleguy has 306 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User purelyillusive-up-only has 1 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Ruby has 7 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User zethrus has 2 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Orbis-de-Marzipan has 1 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User sleeplike has 7 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User cogentco has 7 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User lilprincess_uwu has 2 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User AtomHeartBrick has 3 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User I Am Secretly An Important Man has 3 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User ar2 has 4 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User dreamer has 4 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User BigDiscNRG<3 has 3 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User goodcomputer234 has 7 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User soulseekiest has 7 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User gaast has 2 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Lil Intro Vert has 1 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User C0unt_Zer0 has 18 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Agit666 has 5 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User jamesdavid666 has 1 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Kirakitty has 2 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User djeurotraxx has 46 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User M3H9X has 242 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User mumkee has 2 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User polop148 has 6 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User activon has 300 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User vinoak has 17 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User slutpup has 62 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User twink has 15 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User digimotong has 58 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User PantomimeBulk has 1 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User hannahwantstodie has 3 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Surging5254 has 15 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Blackbird986 has 1 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User wetfeet2000 has 22 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User 30feet has 1 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User plasticardigan has 1 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User bootsofglory has 74 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User bswslskd has 35 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Belcerebon has 933 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User smage has 150 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User tieguanyin has 3 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User ositolector1 has 28 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User big_mama_srv has 19 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User algernon has 497 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User StaticDist0rtion has 4 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User owen.stone97@gmail.com has 1 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User bobbyt420 has 552 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User fenris8 has 6 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User truckermudflaps has 101 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User togenashitogeari has 1 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User systemdip has 7 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User aroah has 4 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User InstantRepeater has 29 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User transgenderpdfreader has 36 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User dcfly has 63 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Bulginess0853 has 1 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User superphunk2 has 0 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User forgiven obscenity has 13 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User spartantime has 185 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User RSIZZLE has 41 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User arteephact has 8 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User textchunk has 64 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User GradingFlat has 42 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User JeanTheBaptist has 4 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User nipsy has 1 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Nokya has 1 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Blackshirt72 has 1 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Dearento has 24 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User jonanzzy10 has 1 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Sildenafil has 1 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Uller has 18 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User midknight has 2 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User urstrulilly has 22 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User magnetophonique has 1 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User yukosan666 has 82 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User wiggler-sheetz has 4 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User fileformatpng has 14 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Shishun has 296 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User wibuthos111 has 28 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User antonio9663 has 65 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User 10010 has 4 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Rolex has 25 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User krazykarl has 1 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User snep.lol has 2 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User patihmura has 1 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User owosenpai has 1 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Dunderhead has 2 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Hazardlife has 8 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User eggy has 38 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User thegreengiant has 42 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User iaman00b has 74 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Kooadu has 20 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Psydra has 48 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User anuki has 54 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User keuss_gbf has 23 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User kaijusludge has 1 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User aramdia has 0 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User emrefidan has 263 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User dropfish has 1 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User MdotSpooks has 10 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Tindalos has 1 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User disfigured_corpse has 1 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User ilikedmyoldname has 11 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User FishBoundIdiot has 22 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User TheBlackPearl has 4 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Kingtubbs has 2 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Nyder has 24 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User alderaanic has 0 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User queenmonkey has 42 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Dukesnyda has 1 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User mistert has 59 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User PADOS333 has 46 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User frame1324 has 3 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User gnoomer has 1 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Manzza_Alt has 0 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Photoman69 has 4 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User wiam has 1 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User vundava has 150 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User William Woollard has 23 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User FindingFinder has 12 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User OFERMOD has 41 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User telamon-void has 44 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User GlitchGirl has 1 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User ou812isee has 69 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User batman91 has 2 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User MoralityKingpin660 has 13 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User jediprince has 54 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User tso55 has 10 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User chupacabra has 5 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User flashy2000 has 24 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User busterreece has 9 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User kaossphear has 3 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User various has 12 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Pheeel has 23 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User CirkuitShane has 76 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Matasu has 1 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Sm3bul0ck has 5 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User latent has 2 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User type_elements has 0 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User ShockedOtter has 2 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User emayess has 150 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User djokernole has 8 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User hannom has 3 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User nateblind has 6 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User daydrinker has 2 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Pijaam has 3 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User drsapo has 13 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User tortoiseandlasso has 65 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User garbagebrain has 50 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User foorjee has 4 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Ultravod has 150 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User gustave1984 has 150 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User previousslayer has 1 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User one_is_many has 11 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User psychonaut25 has 26 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Arnas5x has 2 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Therza93 has 28 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User sn0z has 1 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User kbeau303 has 3 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User johnny.megaton has 0 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User da_ooz has 1 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User a-pasta-sea has 253 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Neravarium has 12 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User SoulHunterWolf has 30 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User w9068 has 3 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User tommyslskd has 2 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Rock5 has 1 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User NeoDude has 6 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User ewintr has 3 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User ketacat has 0 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Dax_THP has 6 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User kb4 has 36 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User kirkaug has 67 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User tantrist_new has 302 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User enomiya has 1 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User meatrocket88 has 32 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User timthetoolman has 1 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User elliotfox has 0 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User arrowsmasher has 3 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User mwicklund has 89 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User greendot has 94 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User kzadm155 has 269 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User M0j0 has 15 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User phaseeeeee has 5 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Geoffrey Thorpe has 124 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User domtoms has 51 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User air45 has 1 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User lithium has 233 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User ndcj2999 has 15 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User galin3 has 23 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User harrigermany has 22 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User silabuser has 8 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User jdsank has 1 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User snowman has 1 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User akasiek has 16 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User pstoker has 175 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User lrgcorgi has 542 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User El_NooNz has 72 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User autoiue_zeb has 150 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User joechristmas has 5 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User spoiledbun has 233 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User macupullo has 1 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User DarkPassenger has 1 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User stereoanthony has 18 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User ..::DjM::.. has 41 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User fxxt89 has 2 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Davidless has 44 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User lupiss has 1 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User ssintercept has 3 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Machinelf has 2 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User orangeflavoredjuice has 1 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User guglovich has 133 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User SoulLouis has 25 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User grpwd67 has 893 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User -JudasGoat- has 4 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User isama92 has 150 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User dethiscoming has 14 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User BuckTheThird has 2 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User andheresjohnny has 341 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User melchor629 has 5 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User malope20 has 9 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Shadiness9250 has 3 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Hertog666 has 15 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User slipdisk has 4 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User NationalCube has 3 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User ultrariva has 0 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User uraserg has 8 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User deadim32 has 5 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User thinkibettergo has 55 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User satanicumtenebrae has 88 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User brehmlife has 12 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User beanMan9000 has 3 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User scultrik has 88 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User enip has 5 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User sephiroth_neo has 8 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User borisk has 226 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User KimaroSLSKD has 18 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User mon5termatt-dc has 1343 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Ehot has 53 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Arunia has 6 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User chemetic has 80 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User char35 has 66 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User messyanne has 31 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User snap_fantasy has 31 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User hyntwn has 2 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User trianglejump0 has 73 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User TGAPJ has 2 files
+2025-07-11 23:39:23 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User BrightBlue has 2 files
+2025-07-11 23:39:24 - newmusic.soulseek_client - [92mINFO[0m - _process_search_responses:399 - Found 3062 individual tracks and 1032 albums
+2025-07-11 23:39:24 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:400 - Album detection details: 4092 potential albums processed
+2025-07-11 23:39:24 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:402 - Album: snoscot/@@kiriv/complete/Abba Gold- FLAC -> 1 tracks
+2025-07-11 23:39:24 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:402 - Album: skittleguy/@@htzbi/Music/-=Classical=-/The History Of Classical Music in 100 CDs/Part 1/[07] Purcell - Dido And Aeneas; The Fairy Queen -> 17 tracks
+2025-07-11 23:39:24 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:402 - Album: skittleguy/@@htzbi/Music/-=Classical=-/The History Of Classical Music in 100 CDs/Part 1/[16] Handel - Royal Fireworks Music, etc -> 1 tracks
+2025-07-11 23:39:24 - newmusic.soulseek_client - [92mINFO[0m - search:617 - Processed results: 3062 tracks, 1032 albums
+2025-07-11 23:39:24 - newmusic.soulseek_client - [92mINFO[0m - search:621 - Early termination: Found 250 responses, stopping search
+2025-07-11 23:39:24 - newmusic.soulseek_client - [92mINFO[0m - search:632 - Search completed. Final results: 3062 tracks and 1032 albums for query: queen flac
+2025-07-11 23:39:32 - newmusic.soulseek_client - [94mDEBUG[0m - download:645 - Attempting to download: @@kiriv\complete\Abba Gold- FLAC\01. Dancing Queen.flac from snoscot (size: 28445352)
+2025-07-11 23:39:32 - newmusic.soulseek_client - [94mDEBUG[0m - download:658 - Using web interface API format: [{'filename': '@@kiriv\\complete\\Abba Gold- FLAC\\01. Dancing Queen.flac', 'size': 28445352, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-11 23:39:32 - newmusic.soulseek_client - [94mDEBUG[0m - download:662 - Trying web interface endpoint: transfers/downloads/snoscot
+2025-07-11 23:39:32 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/transfers/downloads/snoscot
+2025-07-11 23:39:32 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 23:39:32 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: [{'filename': '@@kiriv\\complete\\Abba Gold- FLAC\\01. Dancing Queen.flac', 'size': 28445352, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-11 23:39:32 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 201
+2025-07-11 23:39:32 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: ...
+2025-07-11 23:39:32 - newmusic.soulseek_client - [92mINFO[0m - download:667 - [SUCCESS] Started download: @@kiriv\complete\Abba Gold- FLAC\01. Dancing Queen.flac from snoscot
+2025-07-11 23:39:32 - newmusic.soulseek_client - [94mDEBUG[0m - download:677 - No ID in response, using filename as fallback: {}
+2025-07-11 23:40:02 - newmusic.soulseek_client - [94mDEBUG[0m - clear_all_completed_downloads:890 - Clearing all completed downloads with endpoint: transfers/downloads/all/completed
+2025-07-11 23:40:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making DELETE request to: http://localhost:5030/api/v0/transfers/downloads/all/completed
+2025-07-11 23:40:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 23:40:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 204
+2025-07-11 23:40:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: ...
+2025-07-11 23:40:02 - newmusic.soulseek_client - [92mINFO[0m - clear_all_completed_downloads:895 - Successfully cleared all completed downloads from slskd
+2025-07-11 23:40:08 - newmusic.soulseek_client - [94mDEBUG[0m - download:645 - Attempting to download: @@kiriv\complete\Abba Gold- FLAC\01. Dancing Queen.flac from snoscot (size: 28445352)
+2025-07-11 23:40:08 - newmusic.soulseek_client - [94mDEBUG[0m - download:658 - Using web interface API format: [{'filename': '@@kiriv\\complete\\Abba Gold- FLAC\\01. Dancing Queen.flac', 'size': 28445352, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-11 23:40:08 - newmusic.soulseek_client - [94mDEBUG[0m - download:662 - Trying web interface endpoint: transfers/downloads/snoscot
+2025-07-11 23:40:08 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/transfers/downloads/snoscot
+2025-07-11 23:40:08 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 23:40:08 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: [{'filename': '@@kiriv\\complete\\Abba Gold- FLAC\\01. Dancing Queen.flac', 'size': 28445352, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-11 23:40:08 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 201
+2025-07-11 23:40:08 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: ...
+2025-07-11 23:40:08 - newmusic.soulseek_client - [92mINFO[0m - download:667 - [SUCCESS] Started download: @@kiriv\complete\Abba Gold- FLAC\01. Dancing Queen.flac from snoscot
+2025-07-11 23:40:08 - newmusic.soulseek_client - [94mDEBUG[0m - download:677 - No ID in response, using filename as fallback: {}
+2025-07-11 23:40:09 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-11 23:40:09 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 23:40:09 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 23:40:09 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"username":"snoscot","directories":[{"directory":"@@kiriv\\complete\\Abba Gold- FLAC","fileCount":1,"files":[{"id":"3e076bb7-d941-4f89-9748-cd25b089e9d7","username":"snoscot","direction":"Download","filename":"@@kiriv\\complete\\Abba Gold- FLAC\\01. Dancing Queen.flac","size":28445352,"startOffset":0,"state":"InProgress","stateDescription":"InProgress","requestedAt":"2025-07-12T06:40:08.8521225","enqueuedAt":"2025-07-12T06:40:08.9699318","startedAt":"2025-07-12T06:40:09.1179978Z","bytesTransfe...
+2025-07-11 23:40:11 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-11 23:40:11 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 23:40:11 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 23:40:11 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"username":"snoscot","directories":[{"directory":"@@kiriv\\complete\\Abba Gold- FLAC","fileCount":1,"files":[{"id":"3e076bb7-d941-4f89-9748-cd25b089e9d7","username":"snoscot","direction":"Download","filename":"@@kiriv\\complete\\Abba Gold- FLAC\\01. Dancing Queen.flac","size":28445352,"startOffset":0,"state":"InProgress","stateDescription":"InProgress","requestedAt":"2025-07-12T06:40:08.8521225","enqueuedAt":"2025-07-12T06:40:08.9699318","startedAt":"2025-07-12T06:40:09.1179978Z","bytesTransfe...
+2025-07-11 23:40:13 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-11 23:40:13 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 23:40:13 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 23:40:13 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"username":"snoscot","directories":[{"directory":"@@kiriv\\complete\\Abba Gold- FLAC","fileCount":1,"files":[{"id":"3e076bb7-d941-4f89-9748-cd25b089e9d7","username":"snoscot","direction":"Download","filename":"@@kiriv\\complete\\Abba Gold- FLAC\\01. Dancing Queen.flac","size":28445352,"startOffset":0,"state":"InProgress","stateDescription":"InProgress","requestedAt":"2025-07-12T06:40:08.8521225","enqueuedAt":"2025-07-12T06:40:08.9699318","startedAt":"2025-07-12T06:40:09.1179978Z","bytesTransfe...
+2025-07-11 23:40:15 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-11 23:40:15 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 23:40:15 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 23:40:15 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"username":"snoscot","directories":[{"directory":"@@kiriv\\complete\\Abba Gold- FLAC","fileCount":1,"files":[{"id":"3e076bb7-d941-4f89-9748-cd25b089e9d7","username":"snoscot","direction":"Download","filename":"@@kiriv\\complete\\Abba Gold- FLAC\\01. Dancing Queen.flac","size":28445352,"startOffset":0,"state":"InProgress","stateDescription":"InProgress","requestedAt":"2025-07-12T06:40:08.8521225","enqueuedAt":"2025-07-12T06:40:08.9699318","startedAt":"2025-07-12T06:40:09.1179978Z","bytesTransfe...
+2025-07-11 23:40:17 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-11 23:40:17 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 23:40:17 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 23:40:17 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"username":"snoscot","directories":[{"directory":"@@kiriv\\complete\\Abba Gold- FLAC","fileCount":1,"files":[{"id":"3e076bb7-d941-4f89-9748-cd25b089e9d7","username":"snoscot","direction":"Download","filename":"@@kiriv\\complete\\Abba Gold- FLAC\\01. Dancing Queen.flac","size":28445352,"startOffset":0,"state":"InProgress","stateDescription":"InProgress","requestedAt":"2025-07-12T06:40:08.8521225","enqueuedAt":"2025-07-12T06:40:08.9699318","startedAt":"2025-07-12T06:40:09.1179978Z","bytesTransfe...
+2025-07-11 23:40:19 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-11 23:40:19 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 23:40:19 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 23:40:19 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"username":"snoscot","directories":[{"directory":"@@kiriv\\complete\\Abba Gold- FLAC","fileCount":1,"files":[{"id":"3e076bb7-d941-4f89-9748-cd25b089e9d7","username":"snoscot","direction":"Download","filename":"@@kiriv\\complete\\Abba Gold- FLAC\\01. Dancing Queen.flac","size":28445352,"startOffset":0,"state":"InProgress","stateDescription":"InProgress","requestedAt":"2025-07-12T06:40:08.8521225","enqueuedAt":"2025-07-12T06:40:08.9699318","startedAt":"2025-07-12T06:40:09.1179978Z","bytesTransfe...
+2025-07-11 23:40:21 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-11 23:40:21 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 23:40:21 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 23:40:21 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"username":"snoscot","directories":[{"directory":"@@kiriv\\complete\\Abba Gold- FLAC","fileCount":1,"files":[{"id":"3e076bb7-d941-4f89-9748-cd25b089e9d7","username":"snoscot","direction":"Download","filename":"@@kiriv\\complete\\Abba Gold- FLAC\\01. Dancing Queen.flac","size":28445352,"startOffset":0,"state":"InProgress","stateDescription":"InProgress","requestedAt":"2025-07-12T06:40:08.8521225","enqueuedAt":"2025-07-12T06:40:08.9699318","startedAt":"2025-07-12T06:40:09.1179978Z","bytesTransfe...
+2025-07-11 23:40:23 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-11 23:40:23 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 23:40:23 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 23:40:23 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"username":"snoscot","directories":[{"directory":"@@kiriv\\complete\\Abba Gold- FLAC","fileCount":1,"files":[{"id":"3e076bb7-d941-4f89-9748-cd25b089e9d7","username":"snoscot","direction":"Download","filename":"@@kiriv\\complete\\Abba Gold- FLAC\\01. Dancing Queen.flac","size":28445352,"startOffset":0,"state":"InProgress","stateDescription":"InProgress","requestedAt":"2025-07-12T06:40:08.8521225","enqueuedAt":"2025-07-12T06:40:08.9699318","startedAt":"2025-07-12T06:40:09.1179978Z","bytesTransfe...
+2025-07-11 23:40:25 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-11 23:40:25 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 23:40:25 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 23:40:25 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"username":"snoscot","directories":[{"directory":"@@kiriv\\complete\\Abba Gold- FLAC","fileCount":1,"files":[{"id":"3e076bb7-d941-4f89-9748-cd25b089e9d7","username":"snoscot","direction":"Download","filename":"@@kiriv\\complete\\Abba Gold- FLAC\\01. Dancing Queen.flac","size":28445352,"startOffset":0,"state":"Completed, Succeeded","stateDescription":"Completed, Succeeded","requestedAt":"2025-07-12T06:40:08.8521225","enqueuedAt":"2025-07-12T06:40:08.9699318","startedAt":"2025-07-12T06:40:09.117...
+2025-07-11 23:40:33 - newmusic.soulseek_client - [94mDEBUG[0m - clear_all_completed_downloads:890 - Clearing all completed downloads with endpoint: transfers/downloads/all/completed
+2025-07-11 23:40:33 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making DELETE request to: http://localhost:5030/api/v0/transfers/downloads/all/completed
+2025-07-11 23:40:33 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 23:40:33 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 204
+2025-07-11 23:40:33 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: ...
+2025-07-11 23:40:33 - newmusic.soulseek_client - [92mINFO[0m - clear_all_completed_downloads:895 - Successfully cleared all completed downloads from slskd
+2025-07-11 23:43:57 - newmusic.main - [92mINFO[0m - closeEvent:171 - Closing application...
+2025-07-11 23:43:57 - newmusic.main - [92mINFO[0m - closeEvent:176 - Cleaning up Downloads page threads...
+2025-07-11 23:43:57 - newmusic.main - [92mINFO[0m - closeEvent:181 - Stopping status monitoring thread...
+2025-07-11 23:44:00 - newmusic.main - [92mINFO[0m - closeEvent:186 - Closing Soulseek client...
+2025-07-11 23:44:00 - newmusic.main - [92mINFO[0m - closeEvent:192 - Application closed successfully
+2025-07-11 23:44:46 - newmusic - [92mINFO[0m - setup_logging:57 - Logging initialized with level: DEBUG
+2025-07-11 23:44:46 - newmusic.main - [92mINFO[0m - main:206 - Starting NewMusic application
+2025-07-11 23:44:46 - newmusic.spotify_client - [92mINFO[0m - _setup_client:84 - Successfully authenticated with Spotify as broquethomas
+2025-07-11 23:44:46 - newmusic.plex_client - [92mINFO[0m - _find_music_library:98 - Found music library: Music
+2025-07-11 23:44:46 - newmusic.plex_client - [92mINFO[0m - _setup_client:84 - Successfully connected to Plex server: PLEX-MACHINE
+2025-07-11 23:44:46 - newmusic.soulseek_client - [92mINFO[0m - _setup_client:220 - Soulseek client configured with slskd at http://localhost:5030
+2025-07-11 23:44:47 - newmusic.main - [92mINFO[0m - change_page:158 - Changed to page: dashboard
+2025-07-11 23:44:47 - newmusic.main - [92mINFO[0m - setup_media_player_connections:145 - Media player connections established between sidebar and downloads page
+2025-07-11 23:44:47 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Aether
+2025-07-11 23:44:47 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Favorite Artists
+2025-07-11 23:44:48 - newmusic.main - [92mINFO[0m - change_page:158 - Changed to page: sync
+2025-07-11 23:44:48 - newmusic.main - [92mINFO[0m - change_page:158 - Changed to page: downloads
+2025-07-11 23:44:50 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Brittnea
+2025-07-11 23:44:51 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Baleigh
+2025-07-11 23:44:52 - newmusic.soulseek_client - [92mINFO[0m - search:551 - Starting search for: 'kendrick album'
+2025-07-11 23:44:52 - newmusic.soulseek_client - [94mDEBUG[0m - search:561 - Search data: {'searchText': 'kendrick album', 'timeout': 30000, 'filterResponses': True, 'minimumResponseFileCount': 1, 'minimumPeerUploadSpeed': 0}
+2025-07-11 23:44:52 - newmusic.soulseek_client - [94mDEBUG[0m - search:562 - Making POST request to: http://localhost:5030/api/v0/searches
+2025-07-11 23:44:52 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/searches
+2025-07-11 23:44:52 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 23:44:52 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: {'searchText': 'kendrick album', 'timeout': 30000, 'filterResponses': True, 'minimumResponseFileCount': 1, 'minimumPeerUploadSpeed': 0}
+2025-07-11 23:44:52 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 23:44:52 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: {"fileCount":0,"id":"3e79db93-65e5-4cae-b536-5bb177849d0e","isComplete":false,"lockedFileCount":0,"responseCount":0,"responses":[],"searchText":"kendrick album","startedAt":"2025-07-12T06:44:52.6795694Z","state":"InProgress","token":1672}...
+2025-07-11 23:44:52 - newmusic.soulseek_client - [92mINFO[0m - search:575 - Search initiated with ID: 3e79db93-65e5-4cae-b536-5bb177849d0e
+2025-07-11 23:44:52 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 1/20) - elapsed: 0.0s
+2025-07-11 23:44:52 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/3e79db93-65e5-4cae-b536-5bb177849d0e/responses
+2025-07-11 23:44:52 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 23:44:52 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 23:44:52 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-11 23:44:53 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Extra Music
+2025-07-11 23:44:53 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Maggi Main
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 2/20) - elapsed: 1.5s
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/3e79db93-65e5-4cae-b536-5bb177849d0e/responses
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":1,"files":[{"bitRate":320,"code":1,"extension":"","filename":"@@itaam\\Music\\Lonely Island, The\\The Wack Album\\YOLO (Feat. Adam Lecine & Kendrick Lamar).mp3","length":184,"size":8078537,"isLocked":false}],"hasFreeUploadSlot":false,"lockedFileCount":0,"lockedFiles":[],"queueLength":159,"token":1672,"uploadSpeed":1205092,"username":"batmaster"},{"fileCount":19,"files":[{"bitDepth":16,"code":1,"extension":"","filename":"@@tskqn\\MUSIC\\Kendrick Lamar - Discography (2009 - 2022) [FL...
+2025-07-11 23:44:54 - newmusic.soulseek_client - [92mINFO[0m - search:597 - Found 250 new responses (250 total) at 1.5s
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:345 - Processing 250 user responses
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User batmaster has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User unwelcomed has 19 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User churchofozzy1 has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User dubs. has 4 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User z161314885664123 has 19 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User AfterlinePerformed has 7 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User gdtek has 21 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User macro has 58 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User technosux has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User winivb has 15 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User ssb497 has 86 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User DraculaGottfried has 2 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User reemo4250 has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User XY0 has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User sheikhyerbootai has 2 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Tor_McCool has 0 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User TheFakeRws has 32 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User rtroavngr has 11 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User oldschooltd has 0 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User monsterpco has 3 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Lava_Lamp918 has 2 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User emayess has 14 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User claireblain has 15 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User catpunx has 5 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User musica101 has 19 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User SoulHunterWolf has 5 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User catawawa has 14 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User ill equipped has 3 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User blankface88 has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User kfs1986 has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Ozwaht has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User iaman00b has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User cy1der has 14 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User itmustbeacamel has 15 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User The Locutus has 14 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User AntStark has 2 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User michaelwave has 14 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User TerryDavis has 10 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User ilikedmyoldname has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User brihar22 has 0 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User stinkyrat has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User doodledrip has 18 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User potlood has 0 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User fourthgear has 2 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Chicken_Biscuit has 20 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User harrypothed has 22 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User skinnytie has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User rutilantetechnicolor has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User ParadiseLost has 16 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User legodano has 14 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User begets has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User _kyle_1 has 14 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User BoinkBonk has 18 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User SunbeamShine has 3 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User nixgoat has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User deadim32 has 15 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User djjeremy has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User LordFerite has 35 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User floralbeat has 17 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User dreem has 6 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Borkus McJorkus has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User alitamachine has 17 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User 3030 has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User nofear has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User afronaut has 8 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User bigkahuna30267 has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User sumb0dy has 22 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Unstoppable5378 has 2 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User dunce has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User gandr003 has 26 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User rrrrrrryttttttj has 2 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Sauce.Pout has 0 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User dracbf has 17 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User breakone9r has 9 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User erasethesanity has 0 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User elipsedeclipse has 5 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User greenandredandlil has 14 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User hotchair has 76 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User geraldo876 has 14 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User turbochamp has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User relaxedcrab has 2 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User thampy has 14 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User bajolo has 2 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User isaacsw has 2 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User thlayli_x has 28 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User RockCartel has 4 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Reemerge6193 has 15 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User pulpbank has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User dekachin has 3 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User BurakkuKami has 17 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User ta_face_esti has 27 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User FAUST has 5 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User DoctorLove has 0 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User helicopterOutside has 150 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User davesv has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User MacchiaLux has 3 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User itmightbemikey has 5 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Lac3rat3d has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User severedxties has 6 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User JTE1817 has 16 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User FileGod has 2 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User guineahorn has 14 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User nightmare_dronemk12 has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User tehfuture has 15 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Biffs_Media has 13 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User vfoxm has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User superluminaire has 14 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User sevenarts has 15 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User loko11 has 3 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User AwesomeAustn has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User 88STARSTUCK has 42 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User intamin has 5 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User DigidocTN has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User KingGomi has 2 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Basiv has 5 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User theoddhermit has 15 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User h23234 has 10 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Grapeman69 has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User stormcynk has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User iiprisma has 6 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User campee has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Audio_Dope2 has 10 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User conyeezy has 15 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User wrabbit has 15 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User save20families has 12 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User MYCELIUM_BUDDY has 15 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User darkling23 has 3 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User rooooool has 24 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User togapepperashi has 16 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User SonicRings has 5 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Foe4 has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User trek7008 has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User messiah165 has 300 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User hyntwn has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User gombers04 has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User web-graffiti has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User axnxa has 0 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User wwad has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Lord_Anakyn has 37 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User petejwhizz has 19 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User assaub has 7 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User boogo_steel has 50 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Handbanana has 0 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Shadiness9250 has 30 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Datasmurf has 8 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User kerobaros has 217 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User TurtleMasterVIIX has 15 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User minimum has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User feff.rosenstock has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Dovelas has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Deadbolt1209 has 15 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User lpma has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User filfilfil has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User LordCreamykins has 3 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User kino_ has 17 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User xcixxorx has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User TitanX420 has 2 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Davidless has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Pauper1722 has 236 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User MusicLarry has 14 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User jimtybobert has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Marxist has 30 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Satani-Vitales has 12 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User MECHANICALANIMAL has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User islandczar has 3 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User dwtn81 has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Zeonic89 has 2 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User richmilnix has 14 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User murdercitydevil has 4 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User von_ubelmann has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User zinnac has 19 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User tbdbitl1 has 18 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User hardkorr has 75 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User lossless1024 has 2 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User wallywubox has 13 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User FlowerSunRain has 5 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User dedkid has 15 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User eazy4me has 14 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User imagines2014 has 7 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User miniblock has 7 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User dressa1112 has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User BeatscapeLounge has 5 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User crint has 3 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User TravelingWilburys1980 has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User alilstinky has 15 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User nexuszeero has 15 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User pugacioff has 5 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Shar_E has 23 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User guppies16 has 3 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User takeourcarsnow has 5 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User OPOC has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User waddaw has 2 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Searcher1975! has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User formerbusboy has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User +-+ has 3 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User leitunggeist has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User tonerone has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User GetFixedBoi has 26 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User wingler has 5 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User oblama has 150 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User tsubasa has 30 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User lckdscl has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User aa_anima has 15 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User amd90 has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User gradylives3 has 18 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User itsBaljeet has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User visions has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User OPIOM has 0 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User lightandcoffee has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User IMregoR has 0 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User msg123456 has 52 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User coolasbreeze has 46 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User _tyrese_ has 0 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User gala_vs has 16 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User MyMindIsBlowing has 0 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User rat5150 has 6 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User cktc has 50 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Sam-jam has 14 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User tom275bo has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User msafir has 5 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User fern911 has 4 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User ValdikSS2 has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User ricardoastley has 4 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User v1r2l2k has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User stiffuper has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User rblotnicky has 20 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User sataNathan has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User SlowDay has 2 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User bigFlyingFan has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User sanitry has 17 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User leylinerr has 7 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User delightful has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Me&MyDemons has 2 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Reflection has 0 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Snow~ has 6 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User alexherrero has 2 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User denali83 has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User aRandomFurOnSlsk has 2 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User rikki has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User korusse has 72 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Luigi151 has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User FreeStuffNotVirus has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User lascar972 has 5 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User JDogHere has 2 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User marx2k has 12 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User FourTwenty has 18 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User m00nl1ght98 has 4 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User casio-official has 4 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User beatner has 0 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User SupStu has 1 files
+2025-07-11 23:44:54 - newmusic.soulseek_client - [92mINFO[0m - _process_search_responses:399 - Found 132 individual tracks and 188 albums
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:400 - Album detection details: 320 potential albums processed
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:402 - Album: batmaster/@@itaam/Music/Lonely Island, The/The Wack Album -> 1 tracks
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:402 - Album: unwelcomed/@@tskqn/MUSIC/Kendrick Lamar - Discography (2009 - 2022) [FLAC] vtwin88cube/2018 - Black Panther The Album [Music From And Inspired By] -> 14 tracks
+2025-07-11 23:44:54 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:402 - Album: churchofozzy1/C:/Users/Public/Music/Skeletonwitch - 2009 - Live in Louisville, Ky 20.04.09/The Wack Album -> 1 tracks
+2025-07-11 23:44:54 - newmusic.soulseek_client - [92mINFO[0m - search:617 - Processed results: 132 tracks, 188 albums
+2025-07-11 23:44:54 - newmusic.soulseek_client - [92mINFO[0m - search:621 - Early termination: Found 250 responses, stopping search
+2025-07-11 23:44:54 - newmusic.soulseek_client - [92mINFO[0m - search:632 - Search completed. Final results: 132 tracks and 188 albums for query: kendrick album
+2025-07-11 23:44:58 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:106 - Fetching tracks for playlist: Broque Main
+2025-07-11 23:45:06 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:113 - Retrieved 7 playlists
