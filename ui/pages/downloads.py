@@ -3674,7 +3674,8 @@ class DownloadsPage(QWidget):
         # Initialize filter and sort state
         self.current_filter = "all"  # "all", "albums", "singles"
         self.current_format_filter = "all"  # "all", "flac", "mp3", "ogg", "aac", "wma"
-        self.current_sort = "quality"  # "quality", "size", "name", "uploader", "bitrate", "duration", "availability", "speed"
+        self.current_sort = "relevance"  # "relevance", "quality", "size", "name", "uploader", "bitrate", "duration", "availability", "speed"
+        self.current_search_query = ""  # Store search query for relevance calculation
         
         # Type filter buttons
         self.filter_all_btn = QPushButton("All")
@@ -3777,6 +3778,7 @@ class DownloadsPage(QWidget):
         """)
         
         # Sort buttons
+        self.sort_relevance_btn = QPushButton("Relevance")
         self.sort_quality_btn = QPushButton("Quality")
         self.sort_size_btn = QPushButton("Size")
         self.sort_name_btn = QPushButton("Name")
@@ -3788,6 +3790,7 @@ class DownloadsPage(QWidget):
         
         # Store sort buttons for easy access
         self.sort_buttons = {
+            "relevance": self.sort_relevance_btn,
             "quality": self.sort_quality_btn,
             "size": self.sort_size_btn,
             "name": self.sort_name_btn,
@@ -3799,6 +3802,7 @@ class DownloadsPage(QWidget):
         }
         
         # Connect sort button signals
+        self.sort_relevance_btn.clicked.connect(lambda: self.set_sort("relevance"))
         self.sort_quality_btn.clicked.connect(lambda: self.set_sort("quality"))
         self.sort_size_btn.clicked.connect(lambda: self.set_sort("size"))
         self.sort_name_btn.clicked.connect(lambda: self.set_sort("name"))
@@ -3812,9 +3816,10 @@ class DownloadsPage(QWidget):
         for btn_key, btn in self.sort_buttons.items():
             btn.setFixedHeight(28)
             btn.setMinimumWidth(55)
-            self.update_filter_button_style(btn, btn_key == "quality")
+            self.update_filter_button_style(btn, btn_key == "relevance")
             
         sort_row.addWidget(sort_label)
+        sort_row.addWidget(self.sort_relevance_btn)
         sort_row.addWidget(self.sort_quality_btn)
         sort_row.addWidget(self.sort_size_btn)
         sort_row.addWidget(self.sort_name_btn)
@@ -3954,7 +3959,9 @@ class DownloadsPage(QWidget):
         
         print(f"DEBUG: Sorting {len(results)} results by {self.current_sort}")
         
-        if self.current_sort == "quality":
+        if self.current_sort == "relevance":
+            sorted_results = sorted(results, key=self._sort_by_relevance, reverse=True)
+        elif self.current_sort == "quality":
             sorted_results = sorted(results, key=self._sort_by_quality, reverse=True)
         elif self.current_sort == "size":
             sorted_results = sorted(results, key=self._sort_by_size, reverse=True)
@@ -3986,6 +3993,171 @@ class DownloadsPage(QWidget):
             print(f"DEBUG: First result after sorting: {sort_value}")
         
         return sorted_results
+    
+    def _sort_by_relevance(self, result):
+        """Sort by relevance score combining search matching, quality, completeness, and availability"""
+        if not hasattr(self, 'current_search_query') or not self.current_search_query:
+            # Fallback to quality score if no search query
+            return self._sort_by_quality(result)
+        
+        score = 0.0
+        query_terms = self.current_search_query.lower().split()
+        
+        # 1. Search Term Matching (40% weight - 0.4 max)
+        search_score = self._calculate_search_match_score(result, query_terms)
+        score += search_score * 0.4
+        
+        # 2. Quality Score (25% weight - 0.25 max)
+        quality_score = self._sort_by_quality(result)
+        score += quality_score * 0.25
+        
+        # 3. File Completeness (20% weight - 0.2 max)
+        completeness_score = self._calculate_completeness_score(result)
+        score += completeness_score * 0.2
+        
+        # 4. User Reliability (10% weight - 0.1 max)
+        reliability_score = self._calculate_reliability_score(result)
+        score += reliability_score * 0.1
+        
+        # 5. File Freshness (5% weight - 0.05 max)
+        freshness_score = self._calculate_freshness_score(result)
+        score += freshness_score * 0.05
+        
+        print(f"DEBUG: Relevance score for {getattr(result, 'filename', getattr(result, 'album_title', 'Unknown'))}: {score:.3f}")
+        return score
+    
+    def _calculate_search_match_score(self, result, query_terms):
+        """Calculate search term matching score (0.0 to 1.0)"""
+        if not query_terms:
+            return 0.0
+        
+        # Get searchable text
+        searchable_text = ""
+        if hasattr(result, 'album_title'):  # AlbumResult
+            searchable_text = f"{result.album_title} {result.artist or ''}"
+        elif hasattr(result, 'filename'):  # TrackResult
+            searchable_text = f"{result.filename} {result.artist or ''} {result.title or ''} {result.album or ''}"
+        
+        searchable_text = searchable_text.lower()
+        full_query = self.current_search_query.lower()
+        
+        score = 0.0
+        
+        # Exact match bonus (1.0 points)
+        if full_query in searchable_text:
+            score += 1.0
+        
+        # Individual term matches (0.5 points each)
+        term_matches = 0
+        for term in query_terms:
+            if term in searchable_text:
+                term_matches += 1
+        score += (term_matches / len(query_terms)) * 0.5
+        
+        # Position bonus (0.3 points if terms appear early)
+        position_bonus = 0.0
+        for term in query_terms:
+            pos = searchable_text.find(term)
+            if pos >= 0:
+                # Earlier positions get higher bonus
+                position_bonus += max(0, (50 - pos) / 50) * 0.3
+        score += position_bonus / len(query_terms)
+        
+        return min(score, 1.0)
+    
+    def _calculate_completeness_score(self, result):
+        """Calculate file completeness score (0.0 to 1.0)"""
+        score = 0.0
+        
+        if hasattr(result, 'tracks'):  # AlbumResult
+            # Complete albums bonus
+            track_count = len(result.tracks)
+            if 8 <= track_count <= 20:
+                score += 0.8
+            elif 5 <= track_count <= 25:
+                score += 0.6
+            elif track_count > 25:
+                score += 0.4
+            else:
+                score += 0.2
+                
+            # Album metadata bonus
+            if result.artist and result.album_title:
+                score += 0.2
+        else:  # TrackResult
+            # Popular song length bonus
+            if hasattr(result, 'duration') and result.duration:
+                if 180 <= result.duration <= 300:  # 3-5 minutes
+                    score += 0.6
+                elif 120 <= result.duration <= 360:  # 2-6 minutes
+                    score += 0.4
+                else:
+                    score += 0.2
+            else:
+                score += 0.3  # Default if no duration
+                
+            # Track metadata bonus
+            if result.artist and result.title:
+                score += 0.4
+            elif result.artist or result.title:
+                score += 0.2
+        
+        return min(score, 1.0)
+    
+    def _calculate_reliability_score(self, result):
+        """Calculate user reliability score (0.0 to 1.0)"""
+        score = 0.0
+        
+        # High upload speed bonus
+        if hasattr(result, 'upload_speed'):
+            if result.upload_speed > 500:
+                score += 0.3
+            elif result.upload_speed > 200:
+                score += 0.2
+            elif result.upload_speed > 100:
+                score += 0.1
+        
+        # Available slots bonus
+        if hasattr(result, 'free_upload_slots') and result.free_upload_slots > 0:
+            score += 0.2
+        
+        # Low queue bonus
+        if hasattr(result, 'queue_length'):
+            if result.queue_length < 5:
+                score += 0.1
+            elif result.queue_length > 20:
+                score -= 0.1
+        
+        return max(0.0, min(score, 1.0))
+    
+    def _calculate_freshness_score(self, result):
+        """Calculate file freshness/naming quality score (0.0 to 1.0)"""
+        score = 0.0
+        
+        filename = ""
+        if hasattr(result, 'album_title'):  # AlbumResult
+            filename = result.album_title
+        elif hasattr(result, 'filename'):  # TrackResult
+            filename = result.filename
+        
+        if filename:
+            # Proper naming patterns bonus
+            if any(pattern in filename.lower() for pattern in [' - ', '_', ' / ', ' & ']):
+                score += 0.2
+            
+            # Standard format bonus
+            if any(ext in filename.lower() for ext in ['.flac', '.mp3', '.ogg', '.aac']):
+                score += 0.1
+            
+            # Avoid weird characters penalty
+            if any(char in filename for char in ['@', '#', '$', '%', '!', '?']):
+                score -= 0.1
+                
+            # Length bonus (not too short, not too long)
+            if 10 <= len(filename) <= 100:
+                score += 0.1
+        
+        return max(0.0, min(score, 1.0))
     
     def _sort_by_quality(self, result):
         """Sort by quality score (higher is better)"""
@@ -4441,9 +4613,10 @@ class DownloadsPage(QWidget):
         self.is_loading_more = False
         self.currently_expanded_item = None  # Reset expanded state
         
-        # Reset filter to "all" and sort to "quality", hide filter controls
+        # Reset filter to "all" and sort to "relevance", hide filter controls
         self.current_filter = "all"
-        self.current_sort = "quality"
+        self.current_sort = "relevance"
+        self.current_search_query = query  # Store search query for relevance calculation
         if hasattr(self, 'filter_buttons'):
             for btn_key, btn in self.filter_buttons.items():
                 self.update_filter_button_style(btn, btn_key == "all")
@@ -4452,7 +4625,7 @@ class DownloadsPage(QWidget):
                 self.update_filter_button_style(btn, btn_key == "all")
         if hasattr(self, 'sort_buttons'):
             for btn_key, btn in self.sort_buttons.items():
-                self.update_filter_button_style(btn, btn_key == "quality")
+                self.update_filter_button_style(btn, btn_key == "relevance")
         self.filter_container.setVisible(False)
         
         # Enhanced searching state with animation
