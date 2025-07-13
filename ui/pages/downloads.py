@@ -2522,7 +2522,9 @@ class CompactDownloadItem(QFrame):
         self.setup_ui()
     
     def setup_ui(self):
-        self.setFixedHeight(45)  # Compact height for efficient space usage
+        self.setMinimumHeight(70)  # Increased minimum to accommodate text properly
+        self.setMaximumHeight(120)  # Increased maximum for long track titles
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.setStyleSheet("""
             CompactDownloadItem {
                 background: rgba(45, 45, 45, 0.95);
@@ -2536,42 +2538,44 @@ class CompactDownloadItem(QFrame):
             }
         """)
         
-        # Main horizontal layout - compact and practical
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(8, 6, 8, 6)  # Compact margins
-        layout.setSpacing(8)  # Tight but adequate spacing
+        # Main vertical layout for better space utilization
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 10, 12, 10)  # Increased margins for better text spacing
+        layout.setSpacing(8)  # Increased spacing between filename and bottom row
         
-        # Section 1: Filename (flexible width with ellipsis)
+        # Top row: Filename with text wrapping
         filename_with_ext = self.get_display_filename()
         self.filename_label = QLabel(filename_with_ext)
-        self.filename_label.setFont(QFont("Segoe UI", 11, QFont.Weight.Medium))
+        self.filename_label.setFont(QFont("Segoe UI", 10, QFont.Weight.Medium))
         self.filename_label.setStyleSheet("color: #ffffff; background: transparent;")
-        self.filename_label.setWordWrap(False)
-        self.filename_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.filename_label.setToolTip(filename_with_ext)  # Full filename on hover
+        self.filename_label.setWordWrap(True)  # Enable text wrapping
+        self.filename_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        self.filename_label.setToolTip(filename_with_ext)
         
-        # Section 2: Uploader (fixed width with ellipsis)
-        uploader_width = 80 if self.queue_type == "active" else 90
+        # Bottom row: Uploader, Progress/Status, and Action button
+        bottom_layout = QHBoxLayout()
+        bottom_layout.setContentsMargins(0, 0, 0, 0)
+        bottom_layout.setSpacing(8)
+        
+        # Uploader info - remove fixed width constraint and allow text wrapping
         self.uploader_label = QLabel()
         self.uploader_label.setFont(QFont("Segoe UI", 9, QFont.Weight.Normal))
         self.uploader_label.setStyleSheet("color: #b8b8b8; background: transparent;")
-        self.uploader_label.setFixedWidth(uploader_width)
-        self.uploader_label.setWordWrap(False)
-        self.uploader_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.uploader_label.setWordWrap(True)  # Enable text wrapping
+        self.uploader_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.uploader_label.setToolTip(f"Uploader: {self.artist}")
-        # Set ellipsis text for uploader
-        self._set_ellipsis_text(self.uploader_label, self.artist, uploader_width)
+        self.uploader_label.setText(self.artist)  # Set text directly instead of using ellipsis function
         
-        # Conditional layout based on queue type
+        # Conditional layout based on queue type - PRESERVE ALL EXISTING BUTTON CODE
         if self.queue_type == "active":
-            # Section 3: Progress (90px width for active downloads only)
+            # Section 3: Progress (KEEP EXISTING PROGRESS WIDGET EXACTLY AS IS)
             progress_widget = QWidget()
             progress_widget.setFixedWidth(90)
             progress_layout = QVBoxLayout(progress_widget)
             progress_layout.setContentsMargins(0, 0, 0, 0)
             progress_layout.setSpacing(1)
             
-            # Compact progress bar
+            # Compact progress bar - COMPLETELY UNCHANGED
             self.progress_bar = QProgressBar()
             self.progress_bar.setFixedHeight(6)
             self.progress_bar.setValue(self.progress)
@@ -2587,7 +2591,7 @@ class CompactDownloadItem(QFrame):
                 }
             """)
             
-            # Progress percentage
+            # Progress percentage - COMPLETELY UNCHANGED
             self.progress_label = QLabel(f"{self.progress}%")
             self.progress_label.setFont(QFont("Segoe UI", 8))
             self.progress_label.setStyleSheet("color: #c0c0c0;")
@@ -2596,7 +2600,7 @@ class CompactDownloadItem(QFrame):
             progress_layout.addWidget(self.progress_bar)
             progress_layout.addWidget(self.progress_label)
             
-            # Section 4: Cancel button
+            # Section 4: Cancel button - PRESERVE EXACTLY AS IS, NO CHANGES
             self.cancel_btn = QPushButton("Cancel")
             self.cancel_btn.setFixedSize(60, 35)
             self.cancel_btn.clicked.connect(self.cancel_download)
@@ -2617,18 +2621,17 @@ class CompactDownloadItem(QFrame):
                 }
             """)
             
-            # Add to layout: filename + uploader + progress + cancel
-            layout.addWidget(self.filename_label, 1)
-            layout.addWidget(self.uploader_label)
-            layout.addWidget(progress_widget)
-            layout.addWidget(self.cancel_btn)
+            # Add to bottom layout
+            bottom_layout.addWidget(self.uploader_label, 1)
+            bottom_layout.addWidget(progress_widget)
+            bottom_layout.addWidget(self.cancel_btn)
             
         else:
-            # Finished downloads: filename + uploader + open (no progress section)
+            # Finished downloads - PRESERVE ALL EXISTING BUTTON CODE
             self.progress_bar = None
             self.progress_label = None
             
-            # Section 3: Open button (only button for finished downloads)
+            # Section 3: Open button - PRESERVE EXACTLY AS IS, NO CHANGES
             self.open_btn = QPushButton("Open")
             self.open_btn.setFixedSize(60, 35)
             self.open_btn.clicked.connect(self.open_download_location)
@@ -2649,10 +2652,13 @@ class CompactDownloadItem(QFrame):
                 }
             """)
             
-            # Add to layout: filename + uploader + open (no progress)
-            layout.addWidget(self.filename_label, 1)
-            layout.addWidget(self.uploader_label)
-            layout.addWidget(self.open_btn)
+            # Add to bottom layout
+            bottom_layout.addWidget(self.uploader_label, 1)
+            bottom_layout.addWidget(self.open_btn)
+        
+        # Add both sections to main layout
+        layout.addWidget(self.filename_label)
+        layout.addLayout(bottom_layout)
     
     def _set_ellipsis_text(self, label, text, max_width):
         """Set text with ellipsis if it's too long for the given width"""
