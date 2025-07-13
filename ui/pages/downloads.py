@@ -3943,7 +3943,6 @@ class DownloadsPage(QWidget):
     
     def set_sort(self, sort_type):
         """Set the current sort type and update button styles"""
-        print(f"DEBUG: Setting sort to {sort_type}")
         self.current_sort = sort_type
         
         # Update sort button styles
@@ -3957,8 +3956,6 @@ class DownloadsPage(QWidget):
         """Sort search results based on current sort type"""
         if not results or not hasattr(self, 'current_sort'):
             return results
-        
-        print(f"DEBUG: Sorting {len(results)} results by {self.current_sort}")
         
         if self.current_sort == "relevance":
             sorted_results = sorted(results, key=self._sort_by_relevance, reverse=True)
@@ -3980,18 +3977,6 @@ class DownloadsPage(QWidget):
             sorted_results = sorted(results, key=self._sort_by_speed, reverse=True)
         else:
             sorted_results = results
-        
-        # Debug: Show first few results to verify sorting
-        if len(sorted_results) > 0:
-            first_result = sorted_results[0]
-            sort_value = None
-            if self.current_sort == "quality":
-                sort_value = self._sort_by_quality(first_result)
-            elif self.current_sort == "size":
-                sort_value = self._sort_by_size(first_result)
-            elif self.current_sort == "name":
-                sort_value = self._sort_by_name(first_result)
-            print(f"DEBUG: First result after sorting: {sort_value}")
         
         return sorted_results
     
@@ -4024,7 +4009,6 @@ class DownloadsPage(QWidget):
         freshness_score = self._calculate_freshness_score(result)
         score += freshness_score * 0.05
         
-        print(f"DEBUG: Relevance score for {getattr(result, 'filename', getattr(result, 'album_title', 'Unknown'))}: {score:.3f}")
         return score
     
     def _calculate_search_match_score(self, result, query_terms):
@@ -4173,7 +4157,6 @@ class DownloadsPage(QWidget):
             size = result.total_size
         elif hasattr(result, 'size'):  # TrackResult
             size = result.size
-        print(f"DEBUG: Size sort - {getattr(result, 'filename', getattr(result, 'album_title', 'Unknown'))}: {size}")
         return size
     
     def _sort_by_name(self, result):
@@ -4183,7 +4166,6 @@ class DownloadsPage(QWidget):
             name = result.album_title.lower()
         elif hasattr(result, 'filename'):  # TrackResult
             name = result.filename.lower()
-        print(f"DEBUG: Name sort - {name}")
         return name
     
     def _sort_by_uploader(self, result):
@@ -4260,14 +4242,13 @@ class DownloadsPage(QWidget):
         
         # Apply sorting to filtered results
         sorted_results = self.sort_results(filtered_results)
-        print(f"DEBUG: Filtered {len(filtered_results)} -> Sorted {len(sorted_results)} results")
-        
         # Update the filtered results cache for pagination
         self.current_filtered_results = sorted_results
         
         # Clear current display
         self.clear_search_results()
         self.displayed_results = 0
+        self.currently_expanded_item = None  # Reset expanded state when applying filters
         
         # Show sorted results (respecting pagination)
         remaining_slots = self.results_per_page
@@ -4964,7 +4945,11 @@ class DownloadsPage(QWidget):
         """Handle accordion-style expansion where only one item can be expanded at a time"""
         # If there's a currently expanded item and it's not the requesting item, collapse it
         if self.currently_expanded_item and self.currently_expanded_item != requesting_item:
-            self.currently_expanded_item.set_expanded(False, animate=True)
+            try:
+                self.currently_expanded_item.set_expanded(False, animate=True)
+            except RuntimeError:
+                # Widget has been deleted, just clear the reference
+                self.currently_expanded_item = None
         
         # Toggle the requesting item
         new_expanded_state = not requesting_item.is_expanded
