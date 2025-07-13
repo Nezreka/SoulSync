@@ -1292,6 +1292,11 @@ class AlbumResultItem(QFrame):
         if self.album_result.year:
             details.append(f"({self.album_result.year})")
         
+        # Add speed information
+        speed_info = self._get_album_speed_display()
+        if speed_info:
+            details.append(speed_info)
+        
         details_text = " • ".join(details)
         album_details = QLabel(details_text)
         album_details.setFont(QFont("Arial", 10))
@@ -1395,6 +1400,32 @@ class AlbumResultItem(QFrame):
         """Handle stream request from a track item, passing the correct button reference"""
         # Emit the stream request with the track item that contains the button
         self.track_stream_requested.emit(track_result, track_item)
+    
+    def _get_album_speed_display(self):
+        """Get formatted speed display for album cards"""
+        # Get speed data from album result
+        speed = getattr(self.album_result, 'upload_speed', None) or 0
+        slots = getattr(self.album_result, 'free_upload_slots', None) or 0
+        
+        if speed > 0:
+            # Use same logic as Singles but return text only (no icons for inline display)
+            if speed > 200:
+                icon = "🚀"
+            elif speed > 100:
+                icon = "🚀" if slots > 0 else "⚡"
+            elif speed > 50:
+                icon = "⚡"
+            else:
+                icon = "🐌"
+            
+            # Convert to MB/s and format
+            speed_mb = speed / 1024
+            if speed_mb >= 1:
+                return f"{icon} {speed_mb:.1f}MB/s"
+            else:
+                return f"{icon} {speed}KB/s"
+        
+        return None  # No speed data
 
 class SearchResultItem(QFrame):
     download_requested = pyqtSignal(object)  # SearchResult object
