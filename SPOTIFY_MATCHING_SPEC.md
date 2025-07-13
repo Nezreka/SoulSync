@@ -38,9 +38,15 @@ Transfer/
 
 All accurate title information and cover art for albums, tracks, artists can be found with the matched artist via spotify api. this information is used to for renaming tracks and folders. That way we know tracks and albums will end up together with albums and artists having the exact same name. After we determine if the track is part of an album or not we can begin copying the download to the 'transfer' folder and creating the appropriate folder structure from above and rename the track as needed. After the folder structure is setup correctly we will begin updating the metadata within the actual track file based on the data pulled from spotify. Things like title, track number, genres, album, contributing artists and anything else spotify api provides. once folder structure is done and metadata data for all tracks is done, then delete the original download in the downloads folder and run 'clear completed' buttons function. now with everything cleaned up we can move on to the next matched download.
 
-Now we need to incorporate this functionality into full album downloads by adding a 'matched album download' button beside the 'download album' button. this will essentially do the exact same process as singles but its a big batch added to the queue. we can't assume what we are downloading is an actual 'album' by an artist but could instead be a folder of a users favorite songs. but our app would download those songs and put them in the correct artist folder with correct metadata. how does this sound so far?
+Now we need to incorporate this functionality into full album downloads by adding a 'matched album download' button beside the 'download album' button. this will essentially do the exact same process as singles but its a big batch added to the queue. we can't assume what we are downloading is an actual 'album' by an artist but could instead be a folder of a users favorite songs. but our app would download those songs and put them in the correct artist folder with correct metadata. if you think im missing intuitive or critical please add it in.
+
+If we fail to match an artist in the modal, treat the download as a normal downoad without any matching and keep it in the downloads folder. Also any matched downloads need to update the 'download queue' the same way a normal download would. The cancel button should remain functional on a matched download in the queue and clicking it should behave exaclty the same. a finished matched download should transfer to finished downloads as expected.
+
 
 ---
+
+## VERY IMPORTANT! DO NOT BREAK ANYTHING
+
 
 
 ## 🏗️ System Architecture Overview
