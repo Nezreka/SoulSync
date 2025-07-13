@@ -2,8 +2,8 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                            QFrame, QPushButton, QProgressBar, QListWidget,
                            QListWidgetItem, QComboBox, QLineEdit, QScrollArea, QMessageBox,
                            QSplitter, QSizePolicy, QSpacerItem, QTabWidget)
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QUrl, QPropertyAnimation, QEasingCurve, QSequentialAnimationGroup, QParallelAnimationGroup, QFileSystemWatcher
-from PyQt6.QtGui import QFont, QPainter, QPen
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QUrl, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup, QFileSystemWatcher, pyqtProperty
+from PyQt6.QtGui import QFont, QPainter, QPen, QColor
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 import functools  # For fixing lambda memory leaks
 import os
@@ -18,45 +18,41 @@ class BouncingDotsWidget(QWidget):
         super().__init__(parent)
         self.setFixedSize(60, 20)
         self.dots = ['●', '●', '●']
-        self.current_dot = 0
+        self._current_dot = 0
         
         # Animation setup
-        self.animation_group = QSequentialAnimationGroup()
         self.setup_animation()
         
     def setup_animation(self):
         """Set up the bouncing animation sequence"""
-        # Create animation for each dot bouncing
-        for i in range(3):
-            animation = QPropertyAnimation(self, b"current_dot")
-            animation.setDuration(200)
-            animation.setStartValue(i)
-            animation.setEndValue(i)
-            animation.finished.connect(self.update)
-            self.animation_group.addAnimation(animation)
-        
-        # Loop the animation
-        self.animation_group.setLoopCount(-1)  # Infinite loop
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.update_dots)
         
     def start_animation(self):
         """Start the bouncing animation"""
-        self.animation_group.start()
-        self.timer = QTimer()
-        self.timer.timeout.connect(self.update_dots)
-        self.timer.start(300)  # Update every 300ms
+        self.timer.start(400)  # Update every 400ms for smoother bouncing
         
     def stop_animation(self):
         """Stop the bouncing animation"""
-        self.animation_group.stop()
         if hasattr(self, 'timer'):
             self.timer.stop()
-        self.current_dot = 0
+        self._current_dot = 0
         self.update()
         
     def update_dots(self):
         """Update which dot is bouncing"""
-        self.current_dot = (self.current_dot + 1) % 3
+        self._current_dot = (self._current_dot + 1) % 3
         self.update()
+        
+    def get_current_dot(self):
+        return self._current_dot
+        
+    def set_current_dot(self, value):
+        self._current_dot = value
+        self.update()
+        
+    # Create the Qt property for animation system
+    current_dot = pyqtProperty(int, get_current_dot, set_current_dot)
         
     def paintEvent(self, event):
         """Custom paint event to draw the bouncing dots"""
@@ -73,10 +69,10 @@ class BouncingDotsWidget(QWidget):
         dot_width = 20
         for i in range(3):
             x = i * dot_width
-            y = 15 if i == self.current_dot else 10  # Bounce effect
+            y = 15 if i == self._current_dot else 10  # Bounce effect
             
             # Make current dot larger and brighter
-            if i == self.current_dot:
+            if i == self._current_dot:
                 painter.setPen(QPen(Qt.GlobalColor.green, 3))
             else:
                 painter.setPen(QPen(Qt.GlobalColor.gray, 2))
@@ -116,7 +112,7 @@ class SpinningCircleWidget(QWidget):
         self._angle = angle
         self.update()
         
-    rotation_angle = property(get_rotation_angle, set_rotation_angle)
+    rotation_angle = pyqtProperty(float, get_rotation_angle, set_rotation_angle)
         
     def paintEvent(self, event):
         """Custom paint event to draw the spinning circle"""
@@ -151,8 +147,9 @@ class SpinningCircleWidget(QWidget):
             distance = abs(i - (self._angle / 45)) % 8
             opacity = max(0.2, 1.0 - distance * 0.15)
             
-            # Set color with opacity
-            color = Qt.GlobalColor.green
+            # Set color with proper opacity using QColor and alpha channel
+            color = QColor(29, 185, 84)  # App's green theme color
+            color.setAlpha(int(opacity * 255))  # Apply calculated opacity
             pen.setColor(color)
             painter.setPen(pen)
             
