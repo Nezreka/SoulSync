@@ -1027,14 +1027,14 @@ class TrackItem(QFrame):
         title.setFont(QFont("Arial", 11, QFont.Weight.Bold))
         title.setStyleSheet("color: #ffffff;")
         
-        # Track details - enhanced with more information
+        # Track details - enhanced with more information including prominent artist display
         details = []
         if self.track_result.track_number:
             details.append(f"#{self.track_result.track_number:02d}")
         
-        # Add artist if different from album artist
+        # Always show artist information prominently for tracks within albums
         if self.track_result.artist:
-            details.append(f"by {self.track_result.artist}")
+            details.append(f"🎤 {self.track_result.artist}")
         
         details.append(self.track_result.quality.upper())
         if self.track_result.bitrate:
@@ -1294,10 +1294,13 @@ class AlbumResultItem(QFrame):
         album_title.setFont(QFont("Arial", 12, QFont.Weight.Bold))
         album_title.setStyleSheet("color: #ffffff;")
         
-        # Artist and details
+        # Artist and details - with prominent artist display
         details = []
+        
+        # Make artist more prominent by placing it first and with better formatting
         if self.album_result.artist:
-            details.append(self.album_result.artist)
+            details.append(f"🎤 {self.album_result.artist}")
+        
         details.append(f"{self.album_result.track_count} tracks")
         details.append(f"{self.album_result.size_mb}MB")
         details.append(self.album_result.dominant_quality.upper())
@@ -1627,20 +1630,39 @@ class SearchResultItem(QFrame):
         # Quality badge (now visible in compact view)
         self.quality_badge = self._create_compact_quality_badge()
         
-        # Create uploader info label for compact view
+        # Create uploader info label for compact view with artist information
         result = self.search_result[0] if isinstance(self.search_result, list) else self.search_result
-        uploader_text = f"by {result.username}"
-        size_mb = result.size // (1024*1024)
+        
+        # Build secondary info with artist prominently displayed (excluding uploader)
+        info_parts = []
+        
+        # Add artist information if available
+        if hasattr(result, 'artist') and result.artist:
+            info_parts.append(f"🎤 {result.artist}")
+        
+        # Add quality info
         quality_text = result.quality.upper()
         if result.bitrate:
             quality_text += f" • {result.bitrate}kbps"
+        info_parts.append(quality_text)
         
-        secondary_info_text = f"{uploader_text} • {quality_text} • {size_mb}MB"
+        # Add size info
+        size_mb = result.size // (1024*1024)
+        info_parts.append(f"{size_mb}MB")
+        
+        secondary_info_text = " • ".join(info_parts)
         self.secondary_info = QLabel(secondary_info_text)
         self.secondary_info.setFont(QFont("Arial", 9, QFont.Weight.Normal))
         self.secondary_info.setStyleSheet("color: rgba(179, 179, 179, 0.8); letter-spacing: 0.1px;")
         self.secondary_info.setWordWrap(False)
         self.secondary_info.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+        
+        # Create separate uploader info with green styling like albums
+        self.uploader_info = QLabel(f"👤 {result.username}")
+        self.uploader_info.setFont(QFont("Arial", 9))
+        self.uploader_info.setStyleSheet("color: rgba(29, 185, 84, 0.8);")
+        self.uploader_info.setWordWrap(False)
+        self.uploader_info.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
         
         title_row = QHBoxLayout()
         title_row.setContentsMargins(0, 0, 0, 0)
@@ -1648,11 +1670,12 @@ class SearchResultItem(QFrame):
         title_row.addWidget(self.quality_badge)
         title_row.addWidget(self.expand_indicator)
         
-        # Add secondary info row for compact view
+        # Add secondary info row for compact view with uploader info
         secondary_row = QHBoxLayout()
         secondary_row.setContentsMargins(0, 0, 0, 0)  # Remove margins to prevent cut-off
         secondary_row.addWidget(self.secondary_info)
         secondary_row.addStretch()  # Push text to left
+        secondary_row.addWidget(self.uploader_info)  # Add green uploader info on the right
         
         # Expanded content (initially hidden)
         self.expanded_content = QWidget()
