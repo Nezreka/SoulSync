@@ -3699,6 +3699,7 @@ class DownloadsPage(QWidget):
         self.current_filter = "all"  # "all", "albums", "singles"
         self.current_format_filter = "all"  # "all", "flac", "mp3", "ogg", "aac", "wma"
         self.current_sort = "relevance"  # "relevance", "quality", "size", "name", "uploader", "bitrate", "duration", "availability", "speed"
+        self.reverse_order = False  # False = normal order, True = reverse order
         self.current_search_query = ""  # Store search query for relevance calculation
         
         # Type filter buttons
@@ -3801,6 +3802,12 @@ class DownloadsPage(QWidget):
             }
         """)
         
+        # Reverse order toggle button - simple arrows
+        self.reverse_order_btn = QPushButton("↓")
+        self.reverse_order_btn.setFixedSize(28, 28)  # Square button
+        self.reverse_order_btn.clicked.connect(self.toggle_reverse_order)
+        self.update_filter_button_style(self.reverse_order_btn, False)  # Start inactive
+        
         # Sort buttons
         self.sort_relevance_btn = QPushButton("Relevance")
         self.sort_quality_btn = QPushButton("Quality")
@@ -3843,6 +3850,7 @@ class DownloadsPage(QWidget):
             self.update_filter_button_style(btn, btn_key == "relevance")
             
         sort_row.addWidget(sort_label)
+        sort_row.addWidget(self.reverse_order_btn)
         sort_row.addWidget(self.sort_relevance_btn)
         sort_row.addWidget(self.sort_quality_btn)
         sort_row.addWidget(self.sort_size_btn)
@@ -3975,29 +3983,65 @@ class DownloadsPage(QWidget):
         # Apply the sort to current results
         self.apply_filter()
     
+    def toggle_reverse_order(self):
+        """Toggle the reverse order setting and update button styles"""
+        self.reverse_order = not self.reverse_order
+        
+        # Update arrow direction and button style
+        if self.reverse_order:
+            self.reverse_order_btn.setText("↑")  # Up arrow for reverse order
+        else:
+            self.reverse_order_btn.setText("↓")  # Down arrow for normal order
+        
+        self.update_filter_button_style(self.reverse_order_btn, self.reverse_order)
+        
+        # Apply the new sort order to current results
+        self.apply_filter()
+    
     def sort_results(self, results):
-        """Sort search results based on current sort type"""
+        """Sort search results based on current sort type and reverse order setting"""
         if not results or not hasattr(self, 'current_sort'):
             return results
         
+        # Define default reverse logic for each sort type (normal behavior)
+        default_reverse_logic = {
+            "relevance": True,      # High relevance first
+            "quality": True,        # High quality first  
+            "size": True,           # Large files first
+            "name": False,          # A-Z alphabetical
+            "uploader": False,      # A-Z alphabetical
+            "bitrate": True,        # High bitrate first
+            "duration": True,       # Long duration first
+            "availability": True,   # More available first
+            "speed": True           # Fast speed first
+        }
+        
+        # Get the default reverse setting for current sort type
+        default_reverse = default_reverse_logic.get(self.current_sort, False)
+        
+        # Apply user's reverse order toggle (XOR logic)
+        # If reverse_order is True, flip the default behavior
+        final_reverse = default_reverse if not self.reverse_order else not default_reverse
+        
+        # Apply the appropriate sorting
         if self.current_sort == "relevance":
-            sorted_results = sorted(results, key=self._sort_by_relevance, reverse=True)
+            sorted_results = sorted(results, key=self._sort_by_relevance, reverse=final_reverse)
         elif self.current_sort == "quality":
-            sorted_results = sorted(results, key=self._sort_by_quality, reverse=True)
+            sorted_results = sorted(results, key=self._sort_by_quality, reverse=final_reverse)
         elif self.current_sort == "size":
-            sorted_results = sorted(results, key=self._sort_by_size, reverse=True)
+            sorted_results = sorted(results, key=self._sort_by_size, reverse=final_reverse)
         elif self.current_sort == "name":
-            sorted_results = sorted(results, key=self._sort_by_name)
+            sorted_results = sorted(results, key=self._sort_by_name, reverse=final_reverse)
         elif self.current_sort == "uploader":
-            sorted_results = sorted(results, key=self._sort_by_uploader)
+            sorted_results = sorted(results, key=self._sort_by_uploader, reverse=final_reverse)
         elif self.current_sort == "bitrate":
-            sorted_results = sorted(results, key=self._sort_by_bitrate, reverse=True)
+            sorted_results = sorted(results, key=self._sort_by_bitrate, reverse=final_reverse)
         elif self.current_sort == "duration":
-            sorted_results = sorted(results, key=self._sort_by_duration, reverse=True)
+            sorted_results = sorted(results, key=self._sort_by_duration, reverse=final_reverse)
         elif self.current_sort == "availability":
-            sorted_results = sorted(results, key=self._sort_by_availability, reverse=True)
+            sorted_results = sorted(results, key=self._sort_by_availability, reverse=final_reverse)
         elif self.current_sort == "speed":
-            sorted_results = sorted(results, key=self._sort_by_speed, reverse=True)
+            sorted_results = sorted(results, key=self._sort_by_speed, reverse=final_reverse)
         else:
             sorted_results = results
         
@@ -4621,6 +4665,7 @@ class DownloadsPage(QWidget):
         # Reset filter to "all" and sort to "relevance", hide filter controls
         self.current_filter = "all"
         self.current_sort = "relevance"
+        self.reverse_order = False  # Reset reverse order to normal
         self.current_search_query = query  # Store search query for relevance calculation
         if hasattr(self, 'filter_buttons'):
             for btn_key, btn in self.filter_buttons.items():
@@ -4631,6 +4676,9 @@ class DownloadsPage(QWidget):
         if hasattr(self, 'sort_buttons'):
             for btn_key, btn in self.sort_buttons.items():
                 self.update_filter_button_style(btn, btn_key == "relevance")
+        if hasattr(self, 'reverse_order_btn'):
+            self.reverse_order_btn.setText("↓")  # Reset to down arrow
+            self.update_filter_button_style(self.reverse_order_btn, False)  # Reset to inactive
         self.filter_container.setVisible(False)
         
         # Enhanced searching state with animation
