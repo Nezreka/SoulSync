@@ -2953,20 +2953,33 @@ class DownloadQueue(QFrame):
             QScrollArea {
                 border: none;
                 background: transparent;
+                padding: 0px;
+                margin: 0px;
+            }
+            QScrollArea > QWidget > QWidget {
+                background: transparent;
             }
             QScrollBar:vertical {
                 background: #404040;
                 width: 8px;
                 border-radius: 4px;
+                margin: 0px;
             }
             QScrollBar::handle:vertical {
                 background: #1db954;
                 border-radius: 4px;
+                margin: 0px;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                border: none;
+                background: none;
+                height: 0px;
             }
         """)
         
         queue_widget = QWidget()
         queue_layout = QVBoxLayout(queue_widget)
+        queue_layout.setContentsMargins(0, 0, 0, 0)  # Remove any internal margins
         queue_layout.setSpacing(4)  # Reduced from 8 to fit more compact items
         
         # Dynamic download items - initially empty
@@ -3101,6 +3114,8 @@ class TabbedDownloadManager(QTabWidget):
                 border: 1px solid #404040;
                 border-radius: 8px;
                 background: #282828;
+                padding: 0px;
+                margin: 0px;
             }
             QTabWidget::tab-bar {
                 alignment: center;
