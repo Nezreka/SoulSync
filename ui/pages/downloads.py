@@ -1886,23 +1886,52 @@ class SearchResultItem(QFrame):
         # Handle list case defensively
         result = self.search_result[0] if isinstance(self.search_result, list) else self.search_result
         
-        speed = result.upload_speed
-        slots = result.free_upload_slots
+        # Get speed and slots data with fallback handling
+        speed = getattr(result, 'upload_speed', None) or 0
+        slots = getattr(result, 'free_upload_slots', None) or 0
         
-        if slots > 0 and speed > 100:
+        # Debug: Print actual values to see what we're getting
+        print(f"[DEBUG] Speed indicator - speed: {speed}, slots: {slots}, user: {getattr(result, 'username', 'unknown')}")
+        
+        # Speed-focused logic (slots as bonus, not requirement)
+        if speed > 200:
             indicator_color = "#1db954"
-            speed_text = "🚀"
-        elif slots > 0:
+            icon = "🚀"
+            tooltip = f"Very Fast: {speed} KB/s" + (f", {slots} slots" if slots > 0 else "")
+        elif speed > 100:
+            indicator_color = "#1db954" if slots > 0 else "#4CAF50"
+            icon = "🚀" if slots > 0 else "⚡"
+            tooltip = f"Fast: {speed} KB/s" + (f", {slots} slots" if slots > 0 else "")
+        elif speed > 50:
             indicator_color = "#ffa500"
-            speed_text = "⚡"
+            icon = "⚡"
+            tooltip = f"Good: {speed} KB/s" + (f", {slots} slots" if slots > 0 else "")
+        elif speed > 0:
+            indicator_color = "#ffaa00"
+            icon = "🐌"
+            tooltip = f"Slow: {speed} KB/s" + (f", {slots} slots" if slots > 0 else "")
         else:
             indicator_color = "#e22134"
-            speed_text = "⏳"
+            icon = "⏳"
+            tooltip = "No speed data available"
+        
+        # Convert KB/s to MB/s and format nicely
+        if speed > 0:
+            speed_mb = speed / 1024  # Convert KB to MB
+            if speed_mb >= 1:
+                speed_display = f"{speed_mb:.1f}MB/s"
+            else:
+                speed_display = f"{speed}KB/s"
+            speed_text = f"{icon} {speed_display}"
+        else:
+            speed_text = icon
         
         indicator = QLabel(speed_text)
-        indicator.setFont(QFont("Arial", 10))
+        indicator.setFont(QFont("Arial", 9))  # Slightly smaller to fit text
         indicator.setStyleSheet(f"color: {indicator_color};")
-        indicator.setFixedSize(16, 16)
+        indicator.setToolTip(tooltip)  # Add tooltip for debugging
+        indicator.setMinimumWidth(60)  # Allow space for icon + speed text
+        indicator.setFixedHeight(16)
         
         return indicator
     
