@@ -1,9 +1,47 @@
 # Spotify Matched Download System - Technical Specification
 
 ## 📋 Document Purpose
-This document provides comprehensive technical specifications for implementing the Spotify Matched Download System. It addresses the complexity of music metadata matching, file organization, and user interface design based on real-world challenges and requirements.
+This document provides comprehensive technical specifications for implementing the Spotify Matched Download System. It addresses the complexity of music metadata matching, file organization, and user interface design based on real-world challenges and requirements. I have attempted this feature previously with no success. so please give it your best shot to produce your best work. 
+
+## Expected Use Case for a single(mostly the same for album?)
+User clicks 'matched download' button on a 'single'  and an elegant modal expands into view that offers two options: the top half (spotify auto matching with a list or slideshow or top 5 likely artists), the bottom half(manual use search on spotify to match the track to an artist). the app will use spotify metadata to update the track name and create the folder structure I detailed. so lets talk about the top half of the modal first. It will automatically populate the top 5 most likely artists to match the track with. each likely artist will display, if possible, the artist image, artist name, and percentage likelihood of match. clicking the artist will select that artist as the matched artist and the download will begin. now the bottom half:  it will be a simple but elegant search bar for the user to search for an artist and it will display a list of 5 results similar to the top half but these results are user searched. it will display the same content, artist picture, artist name, percentage liklihood of match. clicking the artist will select that artist as the matched artist and the download will begin. So now that the user has decided which artist the track belongs to the track has begun downloading as normal to the download folder. the track and its parent folder will then appear in the downloads folder once complete. but while the track is downloading the app should attempt to gather additional information about the artist / album / track. specifically we will need to see if the track we downloaded was part of an album and if it is, make sure we create the correct folder structure. if a track is a single. it is layed out like this:
+```
+Transfer/
+├── EXAMPLE ARTIST/
+│   ├── EXAMPLE ARTIST - EXAMPLE SINGLE/
+    ├── EXAMPLE SINGLE.flac
+    ├── cover.png/jpg
+```
+if we determine a track we downloaded is part of an album by the matched artist it would be setup like this:
+
+```
+Transfer/
+├── EXAMPLE ARTIST/
+│   ├── EXAMPLE ARTIST - EXAMPLE ALBUM/
+        ├── TRACK# EXAMPLE SINGLE.flac
+        ├── cover.png/jpg
+```
+
+If we happen to download multiple tracks from the same album they should all end up with the same folder structure and in the same location.
+
+```
+Transfer/
+├── EXAMPLE ARTIST/
+│   ├── EXAMPLE ARTIST - EXAMPLE ALBUM/
+        ├── TRACK# EXAMPLE SINGLE.flac
+        ├── TRACK# EXAMPLE SINGLE.flac
+        ├── TRACK# EXAMPLE SINGLE.flac
+        ├── cover.png/jpg
+        ├── ...
+    
+```
+
+All accurate title information and cover art for albums, tracks, artists can be found with the matched artist via spotify api. this information is used to for renaming tracks and folders. That way we know tracks and albums will end up together with albums and artists having the exact same name. After we determine if the track is part of an album or not we can begin copying the download to the 'transfer' folder and creating the appropriate folder structure from above and rename the track as needed. After the folder structure is setup correctly we will begin updating the metadata within the actual track file based on the data pulled from spotify. Things like title, track number, genres, album, contributing artists and anything else spotify api provides. once folder structure is done and metadata data for all tracks is done, then delete the original download in the downloads folder and run 'clear completed' buttons function. now with everything cleaned up we can move on to the next matched download.
+
+Now we need to incorporate this functionality into full album downloads by adding a 'matched album download' button beside the 'download album' button. this will essentially do the exact same process as singles but its a big batch added to the queue. we can't assume what we are downloading is an actual 'album' by an artist but could instead be a folder of a users favorite songs. but our app would download those songs and put them in the correct artist folder with correct metadata. how does this sound so far?
 
 ---
+
 
 ## 🏗️ System Architecture Overview
 
@@ -887,10 +925,10 @@ class TestEndToEndWorkflow:
 ## 🎯 Implementation Priorities
 
 ### Phase 1: Core Foundation
-1. ✅ Enhanced metadata extraction system
-2. ✅ Basic matching algorithms
-3. ✅ File organization framework
-4. ✅ Professional UI architecture
+1. Enhanced metadata extraction system
+2. Basic matching algorithms
+3. File organization framework
+4. Professional UI architecture
 
 ### Phase 2: Advanced Features
 1. Remix detection and handling

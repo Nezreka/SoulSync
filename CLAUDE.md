@@ -91,19 +91,19 @@ The application will use a central `config.json` file to store:
 Transfer/
 ├── Taylor Swift/
 │   ├── Taylor Swift - 1989 (Taylor's Version)/
-│   │   ├── Taylor Swift - Shake It Off (Taylor's Version).flac
-│   │   ├── Taylor Swift - Blank Space (Taylor's Version).flac
+│   │   ├── Shake It Off (Taylor's Version).flac
+│   │   ├── Blank Space (Taylor's Version).flac
 │   │   └── ...
 │   └── Taylor Swift - Folklore/
 │       ├── Taylor Swift - Cardigan.flac
 │       └── ...
 ├── Daft Punk/
-│   └── Daft Punk - Random Access Memories/
-│       ├── Daft Punk - Get Lucky (feat. Pharrell Williams).flac
+│   └── Random Access Memories/
+│       ├── Get Lucky (feat. Pharrell Williams).flac
 │       └── ...
 └── Various Artists/
     └── Various Artists - Now That's What I Call Music 50/
-        ├── Britney Spears - Toxic.flac
+        ├── Toxic.flac
         └── ...
 ```
 
