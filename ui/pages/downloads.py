@@ -1027,13 +1027,25 @@ class TrackItem(QFrame):
         title.setFont(QFont("Arial", 11, QFont.Weight.Bold))
         title.setStyleSheet("color: #ffffff;")
         
-        # Track details
+        # Track details - enhanced with more information
         details = []
         if self.track_result.track_number:
             details.append(f"#{self.track_result.track_number:02d}")
+        
+        # Add artist if different from album artist
+        if self.track_result.artist:
+            details.append(f"by {self.track_result.artist}")
+        
         details.append(self.track_result.quality.upper())
         if self.track_result.bitrate:
             details.append(f"{self.track_result.bitrate}kbps")
+        
+        # Add duration if available
+        if self.track_result.duration:
+            duration_mins = self.track_result.duration // 60
+            duration_secs = self.track_result.duration % 60
+            details.append(f"{duration_mins}:{duration_secs:02d}")
+        
         details.append(f"{self.track_result.size // (1024*1024)}MB")
         
         details_text = " • ".join(details)
