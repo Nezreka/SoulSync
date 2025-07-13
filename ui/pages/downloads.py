@@ -3624,11 +3624,11 @@ class DownloadsPage(QWidget):
         self.filter_toggle_btn.setStyleSheet("""
             QPushButton {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #1ed760,
-                    stop:1 #1db954);
-                border: none;
+                    stop:0 rgba(80, 80, 80, 0.9),
+                    stop:1 rgba(70, 70, 70, 0.95));
+                border: 1px solid rgba(100, 100, 100, 0.3);
                 border-radius: 6px;
-                color: white;
+                color: rgba(255, 255, 255, 0.8);
                 font-size: 11px;
                 font-weight: 600;
                 font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -3636,13 +3636,14 @@ class DownloadsPage(QWidget):
             }
             QPushButton:hover {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #1fdd63,
-                    stop:1 #1ed760);
+                    stop:0 rgba(90, 90, 90, 0.9),
+                    stop:1 rgba(80, 80, 80, 0.95));
+                color: rgba(255, 255, 255, 0.9);
             }
             QPushButton:pressed {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #1ab84c,
-                    stop:1 #18a144);
+                    stop:0 rgba(60, 60, 60, 0.9),
+                    stop:1 rgba(50, 50, 50, 0.95));
             }
         """)
         
