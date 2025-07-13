@@ -3594,9 +3594,8 @@ class DownloadsPage(QWidget):
         return container
     
     def create_filter_controls(self):
-        """Create elegant filter controls for Albums vs Singles and File Formats"""
+        """Create elegant collapsible filter controls for Albums vs Singles, File Formats, and Sorting"""
         container = QFrame()
-        container.setFixedHeight(85)  # Increased height for two rows of filters
         container.setStyleSheet("""
             QFrame {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -3610,6 +3609,52 @@ class DownloadsPage(QWidget):
         main_layout = QVBoxLayout(container)
         main_layout.setContentsMargins(16, 8, 16, 8)
         main_layout.setSpacing(6)
+        
+        # Initialize collapse state
+        self.filters_collapsed = True
+        
+        # Toggle button row
+        toggle_row = QHBoxLayout()
+        toggle_row.setSpacing(8)
+        
+        self.filter_toggle_btn = QPushButton("⏷ Filters")
+        self.filter_toggle_btn.setFixedHeight(32)
+        self.filter_toggle_btn.setMinimumWidth(100)
+        self.filter_toggle_btn.clicked.connect(self.toggle_filter_panel)
+        self.filter_toggle_btn.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #1ed760,
+                    stop:1 #1db954);
+                border: none;
+                border-radius: 6px;
+                color: white;
+                font-size: 11px;
+                font-weight: 600;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                letter-spacing: 0.3px;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #1fdd63,
+                    stop:1 #1ed760);
+            }
+            QPushButton:pressed {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #1ab84c,
+                    stop:1 #18a144);
+            }
+        """)
+        
+        toggle_row.addWidget(self.filter_toggle_btn)
+        toggle_row.addStretch()
+        main_layout.addLayout(toggle_row)
+        
+        # Collapsible content container
+        self.filter_content = QWidget()
+        self.filter_content_layout = QVBoxLayout(self.filter_content)
+        self.filter_content_layout.setContentsMargins(0, 0, 0, 0)
+        self.filter_content_layout.setSpacing(6)
         
         # First row: Type filters (Albums vs Singles)
         type_row = QHBoxLayout()
@@ -3626,9 +3671,10 @@ class DownloadsPage(QWidget):
             }
         """)
         
-        # Initialize filter state
+        # Initialize filter and sort state
         self.current_filter = "all"  # "all", "albums", "singles"
         self.current_format_filter = "all"  # "all", "flac", "mp3", "ogg", "aac", "wma"
+        self.current_sort = "quality"  # "quality", "size", "name", "uploader", "bitrate", "duration", "availability", "speed"
         
         # Type filter buttons
         self.filter_all_btn = QPushButton("All")
@@ -3715,10 +3761,98 @@ class DownloadsPage(QWidget):
         format_row.addWidget(self.format_wma_btn)
         format_row.addStretch()
         
-        main_layout.addLayout(type_row)
-        main_layout.addLayout(format_row)
+        # Third row: Sorting controls
+        sort_row = QHBoxLayout()
+        sort_row.setSpacing(8)
+        
+        sort_label = QLabel("Sort by:")
+        sort_label.setStyleSheet("""
+            QLabel {
+                color: rgba(255, 255, 255, 0.8);
+                font-size: 11px;
+                font-weight: 600;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                letter-spacing: 0.3px;
+            }
+        """)
+        
+        # Sort buttons
+        self.sort_quality_btn = QPushButton("Quality")
+        self.sort_size_btn = QPushButton("Size")
+        self.sort_name_btn = QPushButton("Name")
+        self.sort_uploader_btn = QPushButton("Uploader")
+        self.sort_bitrate_btn = QPushButton("Bitrate")
+        self.sort_duration_btn = QPushButton("Duration")
+        self.sort_availability_btn = QPushButton("Available")
+        self.sort_speed_btn = QPushButton("Speed")
+        
+        # Store sort buttons for easy access
+        self.sort_buttons = {
+            "quality": self.sort_quality_btn,
+            "size": self.sort_size_btn,
+            "name": self.sort_name_btn,
+            "uploader": self.sort_uploader_btn,
+            "bitrate": self.sort_bitrate_btn,
+            "duration": self.sort_duration_btn,
+            "availability": self.sort_availability_btn,
+            "speed": self.sort_speed_btn
+        }
+        
+        # Connect sort button signals
+        self.sort_quality_btn.clicked.connect(lambda: self.set_sort("quality"))
+        self.sort_size_btn.clicked.connect(lambda: self.set_sort("size"))
+        self.sort_name_btn.clicked.connect(lambda: self.set_sort("name"))
+        self.sort_uploader_btn.clicked.connect(lambda: self.set_sort("uploader"))
+        self.sort_bitrate_btn.clicked.connect(lambda: self.set_sort("bitrate"))
+        self.sort_duration_btn.clicked.connect(lambda: self.set_sort("duration"))
+        self.sort_availability_btn.clicked.connect(lambda: self.set_sort("availability"))
+        self.sort_speed_btn.clicked.connect(lambda: self.set_sort("speed"))
+        
+        # Apply styling to sort buttons
+        for btn_key, btn in self.sort_buttons.items():
+            btn.setFixedHeight(28)
+            btn.setMinimumWidth(55)
+            self.update_filter_button_style(btn, btn_key == "quality")
+            
+        sort_row.addWidget(sort_label)
+        sort_row.addWidget(self.sort_quality_btn)
+        sort_row.addWidget(self.sort_size_btn)
+        sort_row.addWidget(self.sort_name_btn)
+        sort_row.addWidget(self.sort_uploader_btn)
+        sort_row.addWidget(self.sort_bitrate_btn)
+        sort_row.addWidget(self.sort_duration_btn)
+        sort_row.addWidget(self.sort_availability_btn)
+        sort_row.addWidget(self.sort_speed_btn)
+        sort_row.addStretch()
+        
+        # Add all filter rows to the collapsible content
+        self.filter_content_layout.addLayout(type_row)
+        self.filter_content_layout.addLayout(format_row)
+        self.filter_content_layout.addLayout(sort_row)
+        
+        # Add collapsible content to main layout
+        main_layout.addWidget(self.filter_content)
+        
+        # Start collapsed
+        self.filter_content.setVisible(False)
+        container.setFixedHeight(50)  # Height for toggle button only
         
         return container
+    
+    def toggle_filter_panel(self):
+        """Toggle the filter panel between collapsed and expanded states"""
+        self.filters_collapsed = not self.filters_collapsed
+        
+        if self.filters_collapsed:
+            # Collapse
+            self.filter_content.setVisible(False)
+            self.filter_toggle_btn.setText("⏷ Filters")
+            self.filter_container.setFixedHeight(50)
+        else:
+            # Expand
+            self.filter_content.setVisible(True)
+            self.filter_toggle_btn.setText("⏶ Filters")
+            self.filter_container.setFixedHeight(175)  # Height for all content
     
     def update_filter_button_style(self, button, is_active):
         """Update the visual style of filter buttons based on active state"""
@@ -3801,6 +3935,119 @@ class DownloadsPage(QWidget):
         # Apply the filter to current results
         self.apply_filter()
     
+    def set_sort(self, sort_type):
+        """Set the current sort type and update button styles"""
+        print(f"DEBUG: Setting sort to {sort_type}")
+        self.current_sort = sort_type
+        
+        # Update sort button styles
+        for btn_key, btn in self.sort_buttons.items():
+            self.update_filter_button_style(btn, btn_key == sort_type)
+        
+        # Apply the sort to current results
+        self.apply_filter()
+    
+    def sort_results(self, results):
+        """Sort search results based on current sort type"""
+        if not results or not hasattr(self, 'current_sort'):
+            return results
+        
+        print(f"DEBUG: Sorting {len(results)} results by {self.current_sort}")
+        
+        if self.current_sort == "quality":
+            sorted_results = sorted(results, key=self._sort_by_quality, reverse=True)
+        elif self.current_sort == "size":
+            sorted_results = sorted(results, key=self._sort_by_size, reverse=True)
+        elif self.current_sort == "name":
+            sorted_results = sorted(results, key=self._sort_by_name)
+        elif self.current_sort == "uploader":
+            sorted_results = sorted(results, key=self._sort_by_uploader)
+        elif self.current_sort == "bitrate":
+            sorted_results = sorted(results, key=self._sort_by_bitrate, reverse=True)
+        elif self.current_sort == "duration":
+            sorted_results = sorted(results, key=self._sort_by_duration, reverse=True)
+        elif self.current_sort == "availability":
+            sorted_results = sorted(results, key=self._sort_by_availability, reverse=True)
+        elif self.current_sort == "speed":
+            sorted_results = sorted(results, key=self._sort_by_speed, reverse=True)
+        else:
+            sorted_results = results
+        
+        # Debug: Show first few results to verify sorting
+        if len(sorted_results) > 0:
+            first_result = sorted_results[0]
+            sort_value = None
+            if self.current_sort == "quality":
+                sort_value = self._sort_by_quality(first_result)
+            elif self.current_sort == "size":
+                sort_value = self._sort_by_size(first_result)
+            elif self.current_sort == "name":
+                sort_value = self._sort_by_name(first_result)
+            print(f"DEBUG: First result after sorting: {sort_value}")
+        
+        return sorted_results
+    
+    def _sort_by_quality(self, result):
+        """Sort by quality score (higher is better)"""
+        if hasattr(result, 'quality_score'):
+            return result.quality_score
+        return 0
+    
+    def _sort_by_size(self, result):
+        """Sort by file/album size (larger first)"""
+        size = 0
+        if hasattr(result, 'total_size'):  # AlbumResult
+            size = result.total_size
+        elif hasattr(result, 'size'):  # TrackResult
+            size = result.size
+        print(f"DEBUG: Size sort - {getattr(result, 'filename', getattr(result, 'album_title', 'Unknown'))}: {size}")
+        return size
+    
+    def _sort_by_name(self, result):
+        """Sort alphabetically by filename/album title"""
+        name = ""
+        if hasattr(result, 'album_title'):  # AlbumResult
+            name = result.album_title.lower()
+        elif hasattr(result, 'filename'):  # TrackResult
+            name = result.filename.lower()
+        print(f"DEBUG: Name sort - {name}")
+        return name
+    
+    def _sort_by_uploader(self, result):
+        """Sort alphabetically by username"""
+        return result.username.lower() if hasattr(result, 'username') else ""
+    
+    def _sort_by_bitrate(self, result):
+        """Sort by bitrate (higher first)"""
+        if hasattr(result, 'bitrate') and result.bitrate:
+            return result.bitrate
+        # For albums, get average bitrate from tracks
+        elif hasattr(result, 'tracks') and result.tracks:
+            bitrates = [track.bitrate for track in result.tracks if track.bitrate]
+            return sum(bitrates) / len(bitrates) if bitrates else 0
+        return 0
+    
+    def _sort_by_duration(self, result):
+        """Sort by duration (longer first)"""
+        if hasattr(result, 'duration') and result.duration:
+            return result.duration
+        # For albums, sum all track durations
+        elif hasattr(result, 'tracks') and result.tracks:
+            durations = [track.duration for track in result.tracks if track.duration]
+            return sum(durations) if durations else 0
+        return 0
+    
+    def _sort_by_availability(self, result):
+        """Sort by availability (free slots high, queue length low is better)"""
+        free_slots = result.free_upload_slots if hasattr(result, 'free_upload_slots') else 0
+        queue_length = result.queue_length if hasattr(result, 'queue_length') else 0
+        # Higher free slots and lower queue length = more available
+        return free_slots - (queue_length * 0.1)
+    
+    def _sort_by_speed(self, result):
+        """Sort by upload speed (faster first)"""
+        return result.upload_speed if hasattr(result, 'upload_speed') else 0
+    
     def apply_filter(self):
         """Apply the current type and format filters to search results"""
         if not hasattr(self, '_temp_tracks') or not hasattr(self, '_temp_albums'):
@@ -3838,16 +4085,20 @@ class DownloadsPage(QWidget):
                     if hasattr(result, 'quality') and result.quality.lower() == self.current_format_filter.lower():
                         filtered_results.append(result)
         
+        # Apply sorting to filtered results
+        sorted_results = self.sort_results(filtered_results)
+        print(f"DEBUG: Filtered {len(filtered_results)} -> Sorted {len(sorted_results)} results")
+        
         # Update the filtered results cache for pagination
-        self.current_filtered_results = filtered_results
+        self.current_filtered_results = sorted_results
         
         # Clear current display
         self.clear_search_results()
         self.displayed_results = 0
         
-        # Show filtered results (respecting pagination)
+        # Show sorted results (respecting pagination)
         remaining_slots = self.results_per_page
-        results_to_show = filtered_results[:remaining_slots]
+        results_to_show = sorted_results[:remaining_slots]
         
         # Temporarily disable layout updates for smoother batch loading
         self.search_results_widget.setUpdatesEnabled(False)
@@ -3878,7 +4129,7 @@ class DownloadsPage(QWidget):
         # Update status to show filter results
         total_albums = len(self._temp_albums)
         total_tracks = len(self._temp_tracks)
-        total_filtered = len(filtered_results)
+        total_filtered = len(sorted_results)
         
         if self.current_filter == "all":
             filter_status = f"Showing all {total_filtered} results"
@@ -4190,11 +4441,18 @@ class DownloadsPage(QWidget):
         self.is_loading_more = False
         self.currently_expanded_item = None  # Reset expanded state
         
-        # Reset filter to "all" and hide filter controls
+        # Reset filter to "all" and sort to "quality", hide filter controls
         self.current_filter = "all"
+        self.current_sort = "quality"
         if hasattr(self, 'filter_buttons'):
             for btn_key, btn in self.filter_buttons.items():
                 self.update_filter_button_style(btn, btn_key == "all")
+        if hasattr(self, 'format_buttons'):
+            for btn_key, btn in self.format_buttons.items():
+                self.update_filter_button_style(btn, btn_key == "all")
+        if hasattr(self, 'sort_buttons'):
+            for btn_key, btn in self.sort_buttons.items():
+                self.update_filter_button_style(btn, btn_key == "quality")
         self.filter_container.setVisible(False)
         
         # Enhanced searching state with animation
@@ -4295,18 +4553,21 @@ class DownloadsPage(QWidget):
         self._temp_albums = albums.copy()  # Replace with full updated list
         self._temp_search_results = combined_results.copy()
         
-        # Update filtered results cache to match current filter
+        # Update filtered results cache to match current filter and apply sorting
         if hasattr(self, 'current_filter'):
             if self.current_filter == "all":
-                self.current_filtered_results = combined_results.copy()
+                filtered_results = combined_results.copy()
             elif self.current_filter == "albums":
-                self.current_filtered_results = albums.copy()
+                filtered_results = albums.copy()
             elif self.current_filter == "singles":
-                self.current_filtered_results = tracks.copy()
+                filtered_results = tracks.copy()
             else:
-                self.current_filtered_results = combined_results.copy()
+                filtered_results = combined_results.copy()
         else:
-            self.current_filtered_results = combined_results.copy()
+            filtered_results = combined_results.copy()
+        
+        # Apply sorting to filtered results
+        self.current_filtered_results = self.sort_results(filtered_results)
         
         # Clear existing results and display the updated complete set
         # This ensures proper sorting and no duplicates
@@ -4388,7 +4649,7 @@ class DownloadsPage(QWidget):
         
         # Store final results
         self.search_results = combined_results
-        self.current_filtered_results = combined_results  # Initialize with all results
+        self.current_filtered_results = self.sort_results(combined_results)  # Initialize with sorted results
         self.track_results = tracks
         self.album_results = albums
         
