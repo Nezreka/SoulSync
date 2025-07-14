@@ -6072,7 +6072,7 @@ class DownloadsPage(QWidget):
                 # Create track filename with number (just track number + title, NO artist)
                 file_ext = os.path.splitext(original_file_path)[1]
                 track_number = album_info.get('track_number', 1)
-                track_filename = f"{track_number:02d} {self._sanitize_filename(download_item.title)}{file_ext}"
+                track_filename = f"{track_number:02d} - {self._sanitize_filename(download_item.title)}{file_ext}"
                 new_file_path = os.path.join(album_dir, track_filename)
                 
                 print(f"📁 Album folder created: '{album_folder_name}'")
