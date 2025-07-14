@@ -3054,7 +3054,9 @@ class CompactDownloadItem(QFrame):
     def __init__(self, title: str, artist: str, status: str = "queued", 
                  progress: int = 0, file_size: int = 0, download_speed: int = 0, 
                  file_path: str = "", download_id: str = "", username: str = "", 
-                 soulseek_client=None, queue_type: str = "active", parent=None):
+                 soulseek_client=None, queue_type: str = "active", 
+                 album: str = None, track_number: int = None,
+                 parent=None):
         super().__init__(parent)
         self.title = title
         self.artist = artist
@@ -3067,6 +3069,11 @@ class CompactDownloadItem(QFrame):
         self.username = username
         self.soulseek_client = soulseek_client
         self.queue_type = queue_type  # "active" or "finished"
+        
+        # Album metadata for matched downloads
+        self.album = album
+        self.track_number = track_number
+        
         self.setup_ui()
     
     def setup_ui(self):
@@ -3557,14 +3564,16 @@ class DownloadQueue(QFrame):
     def add_download_item(self, title: str, artist: str, status: str = "queued", 
                          progress: int = 0, file_size: int = 0, download_speed: int = 0, 
                          file_path: str = "", download_id: str = "", username: str = "", 
-                         soulseek_client=None):
+                         soulseek_client=None, album: str = None, track_number: int = None):
         """Add a new download item to the queue"""
         # Hide empty message if this is the first item
         if len(self.download_items) == 0:
             self.empty_message.hide()
         
         # Create new compact download item with queue type  
-        item = CompactDownloadItem(title, artist, status, progress, file_size, download_speed, file_path, download_id, username, soulseek_client, self.queue_type)
+        item = CompactDownloadItem(title, artist, status, progress, file_size, download_speed, 
+                                 file_path, download_id, username, soulseek_client, self.queue_type,
+                                 album, track_number)
         self.download_items.append(item)
         
         # Insert before the stretch (which is always last)
@@ -3714,11 +3723,11 @@ class TabbedDownloadManager(QTabWidget):
     def add_download_item(self, title: str, artist: str, status: str = "queued", 
                          progress: int = 0, file_size: int = 0, download_speed: int = 0, 
                          file_path: str = "", download_id: str = "", username: str = "", 
-                         soulseek_client=None):
+                         soulseek_client=None, album: str = None, track_number: int = None):
         """Add a new download item to the active queue"""
         item = self.active_queue.add_download_item(
             title, artist, status, progress, file_size, download_speed, 
-            file_path, download_id, username, soulseek_client
+            file_path, download_id, username, soulseek_client, album, track_number
         )
         self.update_tab_counts()
         return item
@@ -5630,45 +5639,85 @@ class DownloadsPage(QWidget):
             import os
             filename = os.path.basename(full_filename)
             
-            # Parse the filename to extract artist and title
-            # First, remove file extension
-            name_without_ext = filename
-            if '.' in name_without_ext:
-                name_without_ext = '.'.join(name_without_ext.split('.')[:-1])
-            
-            # Check for track number prefix (e.g., "01. ", "28. ", etc.)
-            import re
-            track_number_match = re.match(r'^(\d+)\.\s*(.+)', name_without_ext)
-            if track_number_match:
-                track_number = track_number_match.group(1)
-                name_without_track_num = track_number_match.group(2)
-                print(f"[DEBUG] Detected album track: #{track_number} - '{name_without_track_num}'")
+            # Use TrackResult's parsed metadata if available, otherwise parse filename
+            if hasattr(search_result, 'title') and search_result.title:
+                title = search_result.title
+                print(f"[DEBUG] Using TrackResult title: '{title}'")
             else:
-                name_without_track_num = name_without_ext
+                # Fallback: Parse title from filename 
+                name_without_ext = filename
+                if '.' in name_without_ext:
+                    name_without_ext = '.'.join(name_without_ext.split('.')[:-1])
+                
+                # Check for track number prefix and remove it
+                import re
+                track_number_match = re.match(r'^(\d+)\.\s*(.+)', name_without_ext)
+                if track_number_match:
+                    name_without_track_num = track_number_match.group(2)
+                else:
+                    name_without_track_num = name_without_ext
+                
+                # Extract just the title (remove artist if present)
+                parts = name_without_track_num.split(' - ')
+                if len(parts) >= 2:
+                    title = ' - '.join(parts[1:]).strip()  # Everything after first " - "
+                else:
+                    title = name_without_track_num.strip()
+                
+                print(f"[DEBUG] Parsed title from filename: '{title}'")
             
-            # Now parse artist and title from the cleaned filename
-            parts = name_without_track_num.split(' - ')
-            if len(parts) >= 2:
-                artist = parts[0].strip()
-                title = ' - '.join(parts[1:]).strip()
+            # Use TrackResult's artist if available, otherwise parse or use username
+            if hasattr(search_result, 'artist') and search_result.artist:
+                artist = search_result.artist
+                print(f"[DEBUG] Using TrackResult artist: '{artist}'")
             else:
-                # If no ' - ' separator, use the cleaned filename as title
-                title = name_without_track_num.strip()
-                artist = search_result.username
+                # Fallback: Parse artist from filename or use uploader
+                name_without_ext = filename
+                if '.' in name_without_ext:
+                    name_without_ext = '.'.join(name_without_ext.split('.')[:-1])
+                
+                # Remove track number prefix
+                import re
+                track_number_match = re.match(r'^(\d+)\.\s*(.+)', name_without_ext)
+                if track_number_match:
+                    name_without_track_num = track_number_match.group(2)
+                else:
+                    name_without_track_num = name_without_ext
+                
+                # Extract artist (first part before " - ")
+                parts = name_without_track_num.split(' - ')
+                if len(parts) >= 2:
+                    artist = parts[0].strip()
+                else:
+                    artist = search_result.username
+                
+                print(f"[DEBUG] Parsed artist from filename: '{artist}'")
             
             # Final cleanup - ensure we have meaningful values
             if not title or title == '':
-                title = name_without_ext  # Fallback to full filename without extension
+                title = filename  # Ultimate fallback
             if not artist or artist == '':
-                artist = search_result.username  # Fallback to uploader
+                artist = search_result.username  # Ultimate fallback
             
             print(f"[DEBUG] Extracted title info from '{full_filename}' -> title: '{title}', artist: '{artist}'")
+            
+            # Extract album context from search_result if available (for matched album downloads)
+            album_name = None
+            track_number = None
+            
+            if hasattr(search_result, 'album') and search_result.album:
+                album_name = search_result.album
+                print(f"[DEBUG] Found album context: '{album_name}'")
+            
+            if hasattr(search_result, 'track_number') and search_result.track_number:
+                track_number = search_result.track_number
+                print(f"[DEBUG] Found track number: {track_number}")
             
             # Generate a unique download ID for tracking and cancellation  
             import time
             download_id = f"{search_result.username}_{filename}_{int(time.time())}"
             
-            # Add to download queue immediately as "downloading"
+            # Add to download queue immediately as "downloading" with album context
             download_item = self.download_queue.add_download_item(
                 title=title,
                 artist=artist,
@@ -5678,8 +5727,12 @@ class DownloadsPage(QWidget):
                 download_id=download_id,
                 username=search_result.username,
                 file_path=full_filename,  # Store the full path for matching
-                soulseek_client=self.soulseek_client
+                soulseek_client=self.soulseek_client,
+                album=album_name,
+                track_number=track_number
             )
+            
+            print(f"[DEBUG] Created download item with album context: album='{album_name}', track_number={track_number}")
             
             # Create and start download thread
             download_thread = DownloadThread(self.soulseek_client, search_result, download_item)
@@ -5760,7 +5813,7 @@ class DownloadsPage(QWidget):
             self.start_download(search_result)
     
     def start_matched_album_download(self, album_result):
-        """Start a matched album download with Spotify integration"""
+        """Start a matched album download with Spotify integration - ask for artist ONCE"""
         try:
             # Check if Spotify client is authenticated
             if not self.spotify_client.is_authenticated():
@@ -5773,11 +5826,26 @@ class DownloadsPage(QWidget):
             # Disable album track buttons first
             self.disable_album_track_buttons(album_result)
             
-            # Process each track individually with Spotify matching
-            for track in album_result.tracks:
-                self.start_matched_download(track)
-            
-            print(f"✓ Queued {len(album_result.tracks)} tracks for matched download from album: {album_result.album_title}")
+            # Show modal ONCE for the album using the first track as reference
+            if album_result.tracks:
+                first_track = album_result.tracks[0]
+                modal = SpotifyMatchingModal(first_track, self.spotify_client, self.matching_engine, self)
+                modal.setWindowTitle(f"Select Artist for Album: {album_result.album_title}")
+                
+                # Connect to album-specific handler
+                modal.artist_selected.connect(lambda artist: self._handle_matched_album_download(album_result, artist))
+                
+                # Show modal and handle result
+                if modal.exec() == QDialog.DialogCode.Accepted:
+                    # Artist was selected, download will be handled by signal
+                    print(f"✓ Artist selected for album download")
+                else:
+                    # User cancelled or skipped matching, proceed with normal album download
+                    print("🔄 Album matching cancelled, proceeding with normal album download")
+                    self.start_album_download(album_result)
+            else:
+                print("❌ No tracks found in album")
+                self.start_album_download(album_result)
             
         except Exception as e:
             print(f"❌ Failed to start matched album download: {str(e)}")
@@ -5807,15 +5875,162 @@ class DownloadsPage(QWidget):
     def _assign_matched_artist_to_download_item(self, search_result, artist: Artist):
         """Assign matched artist to the corresponding download item"""
         try:
+            print(f"🔍 Looking for download item matching: '{search_result.title}' by '{search_result.artist}'")
+            print(f"📋 Current download items: {len(self.download_queue.download_items)}")
+            
+            matched = False
             # Find the download item for this search result
-            for download_item in self.download_queue.download_items:
+            for i, download_item in enumerate(self.download_queue.download_items):
+                print(f"    Item {i}: '{getattr(download_item, 'title', 'NO_TITLE')}' by '{getattr(download_item, 'artist', 'NO_ARTIST')}'")
+                
                 if (hasattr(download_item, 'title') and download_item.title == search_result.title and
                     hasattr(download_item, 'artist') and download_item.artist == search_result.artist):
                     download_item.matched_artist = artist
                     print(f"✅ Assigned matched artist '{artist.name}' to download item '{download_item.title}'")
+                    matched = True
                     break
+            
+            if not matched:
+                print(f"❌ Could not find matching download item for '{search_result.title}' by '{search_result.artist}'")
+                # Try a more lenient search
+                for i, download_item in enumerate(self.download_queue.download_items):
+                    if (hasattr(download_item, 'title') and 
+                        self.matching_engine.normalize_string(download_item.title) == self.matching_engine.normalize_string(search_result.title)):
+                        download_item.matched_artist = artist
+                        print(f"✅ Assigned matched artist '{artist.name}' to download item '{download_item.title}' (lenient match)")
+                        matched = True
+                        break
+                
+                if not matched:
+                    print(f"❌ Still could not find matching download item - assignment failed")
+                        
         except Exception as e:
             print(f"❌ Error assigning matched artist to download item: {e}")
+    
+    def _handle_matched_album_download(self, album_result, artist: Artist):
+        """Handle the album download after artist selection from modal"""
+        try:
+            print(f"🎯 Starting matched album download for '{album_result.album_title}' by '{artist.name}'")
+            print(f"📀 Processing {len(album_result.tracks)} tracks with matched artist")
+            
+            # Store the selected artist metadata and album context with each track
+            print(f"🔍 Album context being set:")
+            print(f"    Album result title: '{album_result.album_title}'")
+            print(f"    Matched artist: '{artist.name}'")
+            
+            # Clean up the album title - remove "Album - Artist -" prefix if present
+            clean_album_title = self._clean_album_title(album_result.album_title, artist.name)
+            print(f"    Cleaned album title: '{clean_album_title}'")
+            
+            for track_index, track in enumerate(album_result.tracks, 1):
+                track.matched_artist = artist
+                
+                # Preserve album context - this is CRITICAL for proper album detection
+                track.album = clean_album_title  # Use cleaned album title
+                track.track_number = track_index  # Use existing dataclass field instead of custom attribute
+                
+                # Clean up track title - remove artist prefix if present
+                clean_track_title = self._clean_track_title(track.title, artist.name)
+                track.title = clean_track_title
+                
+                print(f"   🎵 Track {track_index}: '{clean_track_title}' -> Artist: '{artist.name}', Album: '{clean_album_title}', Track#: {track_index}")
+            
+            # Start downloading all tracks with normal process but enhanced with Spotify metadata
+            for track_index, track in enumerate(album_result.tracks, 1):
+                print(f"🎬 Starting download {track_index}/{len(album_result.tracks)}: {track.title}")
+                self.start_download(track)
+                # Add a small delay between downloads to avoid overwhelming the system
+                QTimer.singleShot(200, lambda: None)  # 200ms delay
+            
+            # Assign matched artist to download items after they're created
+            QTimer.singleShot(500, lambda: self._assign_matched_artist_to_album_downloads(album_result, artist))
+            
+            print(f"✓ Queued {len(album_result.tracks)} tracks for matched download from album: {album_result.album_title}")
+            print(f"🎯 All tracks have album context preserved: '{album_result.album_title}'")
+            
+        except Exception as e:
+            print(f"❌ Error handling matched album download: {e}")
+            # Fallback to normal album download
+            self.start_album_download(album_result)
+    
+    def _assign_matched_artist_to_album_downloads(self, album_result, artist: Artist):
+        """Assign matched artist to all download items for an album"""
+        try:
+            print(f"📋 Assigning matched artist '{artist.name}' to all album download items")
+            print(f"📀 Album has {len(album_result.tracks)} tracks")
+            print(f"📋 Current download queue has {len(self.download_queue.download_items)} items")
+            
+            assigned_count = 0
+            
+            # Find download items for all tracks in this album
+            for track_idx, track in enumerate(album_result.tracks):
+                print(f"🔍 Looking for track {track_idx + 1}: '{track.title}' by '{track.artist}'")
+                
+                matched = False
+                for download_item in self.download_queue.download_items:
+                    if (hasattr(download_item, 'title') and download_item.title == track.title and
+                        hasattr(download_item, 'artist') and download_item.artist == track.artist):
+                        download_item.matched_artist = artist
+                        assigned_count += 1
+                        print(f"   ✅ Assigned to: {download_item.title}")
+                        matched = True
+                        break
+                
+                if not matched:
+                    print(f"   ❌ Could not find download item for: {track.title}")
+                    # Try a more lenient search
+                    for download_item in self.download_queue.download_items:
+                        if (hasattr(download_item, 'title') and 
+                            self.matching_engine.normalize_string(download_item.title) == self.matching_engine.normalize_string(track.title)):
+                            download_item.matched_artist = artist
+                            assigned_count += 1
+                            print(f"   ✅ Assigned to: {download_item.title} (lenient match)")
+                            matched = True
+                            break
+                    
+                    if not matched:
+                        print(f"   ❌ Still could not find download item for: {track.title}")
+            
+            print(f"✅ Successfully assigned matched artist to {assigned_count}/{len(album_result.tracks)} album tracks")
+            
+            # If we didn't assign to all tracks, let's try again with a longer delay
+            if assigned_count < len(album_result.tracks):
+                print(f"⏰ Some assignments failed, will retry in 1 second...")
+                QTimer.singleShot(1000, lambda: self._retry_album_assignment(album_result, artist, assigned_count))
+            
+        except Exception as e:
+            print(f"❌ Error assigning matched artist to album download items: {e}")
+    
+    def _retry_album_assignment(self, album_result, artist: Artist, previous_count: int):
+        """Retry assignment for album tracks that failed the first time"""
+        try:
+            print(f"🔄 Retrying album assignment for remaining tracks...")
+            new_assigned = 0
+            
+            for track in album_result.tracks:
+                # Only try to assign if not already assigned
+                found_assigned = False
+                for download_item in self.download_queue.download_items:
+                    if (hasattr(download_item, 'title') and download_item.title == track.title and
+                        hasattr(download_item, 'matched_artist') and download_item.matched_artist):
+                        found_assigned = True
+                        break
+                
+                if not found_assigned:
+                    # Try to find and assign
+                    for download_item in self.download_queue.download_items:
+                        if (hasattr(download_item, 'title') and 
+                            self.matching_engine.normalize_string(download_item.title) == self.matching_engine.normalize_string(track.title)):
+                            download_item.matched_artist = artist
+                            new_assigned += 1
+                            print(f"   ✅ Retry assigned to: {download_item.title}")
+                            break
+            
+            total_assigned = previous_count + new_assigned
+            print(f"🔄 Retry complete: {total_assigned}/{len(album_result.tracks)} tracks now assigned")
+            
+        except Exception as e:
+            print(f"❌ Error in retry assignment: {e}")
     
     def _organize_matched_download(self, download_item, original_file_path: str) -> Optional[str]:
         """Organize a matched download into the Transfer folder structure"""
@@ -5845,17 +6060,23 @@ class DownloadsPage(QWidget):
             
             if album_info and album_info['is_album']:
                 # Album track structure: Transfer/ARTIST/ARTIST - ALBUM/TRACK# TRACK.ext
+                print(f"🔍 Creating album folder:")
+                print(f"    Artist name: '{artist.name}'")
+                print(f"    Album name from album_info: '{album_info['album_name']}'")
+                print(f"    Download item title: '{download_item.title}'")
+                
                 album_folder_name = f"{self._sanitize_filename(artist.name)} - {self._sanitize_filename(album_info['album_name'])}"
                 album_dir = os.path.join(artist_dir, album_folder_name)
                 os.makedirs(album_dir, exist_ok=True)
                 
-                # Create track filename with number
+                # Create track filename with number (just track number + title, NO artist)
                 file_ext = os.path.splitext(original_file_path)[1]
                 track_number = album_info.get('track_number', 1)
                 track_filename = f"{track_number:02d} {self._sanitize_filename(download_item.title)}{file_ext}"
                 new_file_path = os.path.join(album_dir, track_filename)
                 
-                print(f"📁 Album track: {album_folder_name}/{track_filename}")
+                print(f"📁 Album folder created: '{album_folder_name}'")
+                print(f"🎵 Track filename: '{track_filename}'")
                 
             else:
                 # Single track structure: Transfer/ARTIST/ARTIST - SINGLE/SINGLE.ext
@@ -5917,16 +6138,81 @@ class DownloadsPage(QWidget):
         # Limit length to avoid filesystem issues
         return sanitized[:200] if len(sanitized) > 200 else sanitized
     
+    def _clean_album_title(self, album_title: str, artist_name: str) -> str:
+        """Clean up album title by removing common prefixes and artist redundancy"""
+        import re
+        
+        # Start with the original title
+        cleaned = album_title.strip()
+        
+        # Remove "Album - " prefix
+        cleaned = re.sub(r'^Album\s*-\s*', '', cleaned, flags=re.IGNORECASE)
+        
+        # Remove artist name prefix if it appears at the beginning
+        # This handles cases like "Kendrick Lamar - good kid, m.A.A.d city"
+        artist_pattern = re.escape(artist_name) + r'\s*-\s*'
+        cleaned = re.sub(f'^{artist_pattern}', '', cleaned, flags=re.IGNORECASE)
+        
+        # Clean up any remaining extra spaces or dashes at the start
+        cleaned = re.sub(r'^[-\s]+', '', cleaned).strip()
+        
+        return cleaned if cleaned else album_title  # Fallback to original if cleaning removes everything
+    
+    def _clean_track_title(self, track_title: str, artist_name: str) -> str:
+        """Clean up track title by removing artist prefix"""
+        import re
+        
+        # Start with the original title
+        cleaned = track_title.strip()
+        
+        # Remove artist name prefix if it appears at the beginning
+        # This handles cases like "Kendrick Lamar - Track Name"
+        artist_pattern = re.escape(artist_name) + r'\s*-\s*'
+        cleaned = re.sub(f'^{artist_pattern}', '', cleaned, flags=re.IGNORECASE)
+        
+        # Clean up any remaining extra spaces or dashes at the start
+        cleaned = re.sub(r'^[-\s]+', '', cleaned).strip()
+        
+        return cleaned if cleaned else track_title  # Fallback to original if cleaning removes everything
+    
     def _detect_album_info(self, download_item, artist: Artist) -> Optional[dict]:
         """Detect if track is part of an album using Spotify API"""
         try:
+            print(f"🔍 Album detection for '{download_item.title}' by '{artist.name}':")
+            print(f"    Has album attr: {hasattr(download_item, 'album')}")
+            if hasattr(download_item, 'album'):
+                print(f"    Album value: '{download_item.album}'")
+            
+            # PRIORITY 1: Check if this download item came from an album result (has album context)
+            # This should ALWAYS take precedence over Spotify detection
+            if hasattr(download_item, 'album') and download_item.album and download_item.album != "Unknown Album":
+                print(f"✅ Track has album context: '{download_item.album}' - treating as album track")
+                # Get proper track number from metadata or filename
+                track_num = self._extract_track_number(download_item)
+                print(f"📊 Detected track number: {track_num}")
+                return {
+                    'is_album': True,
+                    'album_name': download_item.album,
+                    'track_number': track_num,
+                    'spotify_track': None
+                }
+            
+            # PRIORITY 2: If no album context, use Spotify API for detection
+            print(f"🔍 No album context found, searching Spotify for track info...")
+            
             # Search for the track by artist and title
             query = f"artist:{artist.name} track:{download_item.title}"
             tracks = self.spotify_client.search_tracks(query, limit=5)
             
             if not tracks:
-                print(f"🔍 No Spotify tracks found for: {query}")
-                return None
+                print(f"❌ No Spotify tracks found for: {query}")
+                print(f"🎯 Defaulting to single track structure")
+                return {
+                    'is_album': False,
+                    'album_name': download_item.title,  # Use track name as single name
+                    'track_number': 1,
+                    'spotify_track': None
+                }
             
             # Find the best matching track
             best_match = None
@@ -5950,29 +6236,89 @@ class DownloadsPage(QWidget):
                     best_confidence = combined_confidence
             
             if not best_match:
-                print(f"🔍 No high-confidence track match found")
-                return None
+                print(f"❌ No high-confidence track match found (best confidence: {best_confidence:.2f})")
+                print(f"🎯 Defaulting to single track structure")
+                return {
+                    'is_album': False,
+                    'album_name': download_item.title,  # Use track name as single name
+                    'track_number': 1,
+                    'spotify_track': None
+                }
             
-            print(f"🎵 Found matching track: {best_match.name} - {best_match.album}")
+            print(f"✅ Found matching Spotify track: '{best_match.name}' - Album: '{best_match.album}' (confidence: {best_confidence:.2f})")
             
-            # Determine if this is a single or album
-            # Albums typically have multiple tracks, singles typically don't
-            # We can also check track count in the album via additional API call if needed
-            album_name = best_match.album
+            # Get detailed track information using Spotify's track API
+            detailed_track = None
+            if hasattr(best_match, 'id') and best_match.id:
+                print(f"🔍 Getting detailed track info from Spotify API for track ID: {best_match.id}")
+                detailed_track = self.spotify_client.get_track_details(best_match.id)
             
-            # For now, assume it's an album if the album name is different from track name
-            is_album = self.matching_engine.normalize_string(album_name) != self.matching_engine.normalize_string(best_match.name)
+            # Use detailed track data if available, otherwise fall back to basic search data
+            if detailed_track:
+                print(f"✅ Got detailed track data from Spotify API")
+                album_name = detailed_track['album']['name']
+                album_type = detailed_track['album'].get('album_type', 'album')
+                total_tracks = detailed_track['album'].get('total_tracks', 1)
+                spotify_track_number = detailed_track.get('track_number', 1)
+                
+                print(f"📀 Spotify album info: '{album_name}' (type: {album_type}, total_tracks: {total_tracks}, track#: {spotify_track_number})")
+                
+                # Enhanced album detection using detailed API data
+                is_album = (
+                    # Album type is 'album' (not 'single')
+                    album_type == 'album' and
+                    # Album has multiple tracks
+                    total_tracks > 1 and
+                    # Album name different from track name
+                    self.matching_engine.normalize_string(album_name) != self.matching_engine.normalize_string(best_match.name) and
+                    # Album name is not just the artist name
+                    self.matching_engine.normalize_string(album_name) != self.matching_engine.normalize_string(artist.name)
+                )
+                
+                # Use Spotify's track number as the preferred source
+                track_num = spotify_track_number
+                print(f"🎯 Using Spotify track number: {track_num}")
+                
+            else:
+                print(f"⚠️ Could not get detailed track data, using basic Spotify search data")
+                album_name = best_match.album
+                
+                # Fallback album detection logic
+                is_album = (
+                    # Album name different from track name (indicates multi-track album)
+                    self.matching_engine.normalize_string(album_name) != self.matching_engine.normalize_string(best_match.name) and
+                    # Album name doesn't contain "single" or similar terms
+                    not any(term in album_name.lower() for term in ['single', 'ep']) and
+                    # Album name is not just the artist name
+                    self.matching_engine.normalize_string(album_name) != self.matching_engine.normalize_string(artist.name)
+                )
+                
+                # Get track number from metadata or filename
+                track_num = self._extract_track_number(download_item, best_match)
+            
+            if is_album:
+                print(f"🎯 Spotify detection: Album track - '{album_name}'")
+            else:
+                print(f"🎯 Spotify detection: Single track - using track name")
+                album_name = download_item.title  # Use track name for single structure
+                track_num = 1  # Singles are always track 1
             
             return {
                 'is_album': is_album,
                 'album_name': album_name,
-                'track_number': 1,  # Could be enhanced with additional API calls
+                'track_number': track_num,
                 'spotify_track': best_match
             }
             
         except Exception as e:
             print(f"❌ Error detecting album info: {e}")
-            return None
+            # Fallback to single structure
+            return {
+                'is_album': False,
+                'album_name': download_item.title,
+                'track_number': 1,
+                'spotify_track': None
+            }
     
     def _download_cover_art(self, artist: Artist, album_info: dict, target_dir: str):
         """Download cover art for the album"""
@@ -6004,6 +6350,67 @@ class DownloadsPage(QWidget):
             
         except Exception as e:
             print(f"❌ Error downloading cover art: {e}")
+    
+    def _extract_track_number(self, download_item, spotify_track=None) -> int:
+        """Extract track number from various sources"""
+        try:
+            print(f"🔢 Extracting track number for: '{download_item.title}'")
+            
+            # Method 1: Check if download_item has track_number attribute (explicit metadata)
+            if hasattr(download_item, 'track_number') and download_item.track_number:
+                track_num = int(download_item.track_number)
+                print(f"    ✅ Found track_number attribute: {track_num}")
+                return track_num
+            
+            # Method 2: Parse from filename (e.g., "01. Track Name.mp3", "01 - Track Name.flac")
+            if hasattr(download_item, 'title'):
+                import re
+                # Look for patterns like "01. ", "01 ", "01-", "1. ", etc.
+                patterns = [
+                    r'^(\d{1,2})[\.\s\-]+',  # "01. " or "01 " or "01-"
+                    r'(\d{1,2})\s*[\.\-]\s*',  # "01." or "01-" with optional spaces
+                ]
+                
+                for pattern in patterns:
+                    match = re.match(pattern, download_item.title.strip())
+                    if match:
+                        track_num = int(match.group(1))
+                        print(f"    ✅ Parsed from title pattern '{pattern}': {track_num}")
+                        return track_num
+            
+            # Method 3: Parse from filename if available
+            if hasattr(download_item, 'filename'):
+                import re
+                import os
+                # Get just the filename without extension and path
+                base_name = os.path.splitext(os.path.basename(download_item.filename))[0]
+                
+                patterns = [
+                    r'^(\d{1,2})[\.\s\-]+',  # "01. " or "01 " or "01-"
+                    r'(\d{1,2})\s*[\.\-]\s*',  # "01." or "01-" with optional spaces
+                ]
+                
+                for pattern in patterns:
+                    match = re.match(pattern, base_name.strip())
+                    if match:
+                        track_num = int(match.group(1))
+                        print(f"    ✅ Parsed from filename pattern '{pattern}': {track_num}")
+                        return track_num
+            
+            # Method 4: Get from Spotify track data (would need album API call)
+            if spotify_track:
+                # This would require additional Spotify API call to get full album
+                # For now, we'll skip this but could be enhanced later
+                print(f"    ⏭️ Spotify track data available but not implemented yet")
+                pass
+            
+            # Default to 1 if no track number found
+            print(f"    ⚠️ No track number found, defaulting to 1")
+            return 1
+            
+        except Exception as e:
+            print(f"❌ Error extracting track number: {e}")
+            return 1
     
     def _find_downloaded_file(self, original_file_path: str, download_item) -> Optional[str]:
         """Try to find the downloaded file using various methods"""
@@ -7148,20 +7555,29 @@ class DownloadsPage(QWidget):
                                 absolute_file_path = download_item.file_path
                             
                             # Check if this is a matched download and process accordingly
-                            if hasattr(download_item, 'matched_artist') and download_item.matched_artist:
-                                print(f"🎯 Processing matched download for '{download_item.title}' by '{download_item.matched_artist.name}'")
-                                try:
-                                    # Add a small delay to ensure file is fully written
-                                    import time
-                                    time.sleep(1)
-                                    
-                                    # Organize the file into Transfer folder structure
-                                    organized_path = self._organize_matched_download(download_item, absolute_file_path)
-                                    if organized_path:
-                                        absolute_file_path = organized_path
-                                except Exception as e:
-                                    print(f"❌ Error organizing matched download: {e}")
-                                    # Continue with normal process if organization fails
+                            print(f"🔍 Checking download item '{download_item.title}' for matched artist...")
+                            if hasattr(download_item, 'matched_artist'):
+                                print(f"    ✅ Has matched_artist attribute: {download_item.matched_artist}")
+                                if download_item.matched_artist:
+                                    print(f"🎯 Processing matched download for '{download_item.title}' by '{download_item.matched_artist.name}'")
+                                    try:
+                                        # Add a small delay to ensure file is fully written
+                                        import time
+                                        time.sleep(1)
+                                        
+                                        # Organize the file into Transfer folder structure
+                                        organized_path = self._organize_matched_download(download_item, absolute_file_path)
+                                        if organized_path:
+                                            absolute_file_path = organized_path
+                                    except Exception as e:
+                                        print(f"❌ Error organizing matched download: {e}")
+                                        # Continue with normal process if organization fails
+                                else:
+                                    print(f"    ⚠️ matched_artist is None or empty")
+                            else:
+                                print(f"    ❌ No matched_artist attribute found")
+                                # Let's also check all attributes of the download item for debugging
+                                print(f"    📋 Download item attributes: {[attr for attr in dir(download_item) if not attr.startswith('_')]}")
                                 
                             # Update the download item status and progress BEFORE moving
                             download_item.update_status(

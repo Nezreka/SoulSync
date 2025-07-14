@@ -217,6 +217,19 @@ class SpotifyClient:
             logger.error(f"Error searching artists: {e}")
             return []
     
+    def get_track_details(self, track_id: str) -> Optional[Dict[str, Any]]:
+        """Get detailed track information including album data and track number"""
+        if not self.is_authenticated():
+            return None
+        
+        try:
+            track_data = self.sp.track(track_id)
+            return track_data
+            
+        except Exception as e:
+            logger.error(f"Error fetching track details: {e}")
+            return None
+    
     def get_track_features(self, track_id: str) -> Optional[Dict[str, Any]]:
         if not self.is_authenticated():
             return None
