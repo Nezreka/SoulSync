@@ -33,6 +33,33 @@ class Track:
         )
 
 @dataclass
+class Artist:
+    id: str
+    name: str
+    popularity: int
+    genres: List[str]
+    followers: int
+    image_url: Optional[str] = None
+    external_urls: Optional[Dict[str, str]] = None
+    
+    @classmethod
+    def from_spotify_artist(cls, artist_data: Dict[str, Any]) -> 'Artist':
+        # Get the largest image URL if available
+        image_url = None
+        if artist_data.get('images') and len(artist_data['images']) > 0:
+            image_url = artist_data['images'][0]['url']
+        
+        return cls(
+            id=artist_data['id'],
+            name=artist_data['name'],
+            popularity=artist_data.get('popularity', 0),
+            genres=artist_data.get('genres', []),
+            followers=artist_data.get('followers', {}).get('total', 0),
+            image_url=image_url,
+            external_urls=artist_data.get('external_urls')
+        )
+
+@dataclass
 class Playlist:
     id: str
     name: str
@@ -169,6 +196,25 @@ class SpotifyClient:
             
         except Exception as e:
             logger.error(f"Error searching tracks: {e}")
+            return []
+    
+    def search_artists(self, query: str, limit: int = 20) -> List[Artist]:
+        """Search for artists using Spotify API"""
+        if not self.is_authenticated():
+            return []
+        
+        try:
+            results = self.sp.search(q=query, type='artist', limit=limit)
+            artists = []
+            
+            for artist_data in results['artists']['items']:
+                artist = Artist.from_spotify_artist(artist_data)
+                artists.append(artist)
+            
+            return artists
+            
+        except Exception as e:
+            logger.error(f"Error searching artists: {e}")
             return []
     
     def get_track_features(self, track_id: str) -> Optional[Dict[str, Any]]:

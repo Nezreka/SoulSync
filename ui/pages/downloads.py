@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                            QFrame, QPushButton, QProgressBar, QListWidget,
                            QListWidgetItem, QComboBox, QLineEdit, QScrollArea, QMessageBox,
-                           QSplitter, QSizePolicy, QSpacerItem, QTabWidget)
+                           QSplitter, QSizePolicy, QSpacerItem, QTabWidget, QDialog, QGridLayout)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QUrl, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup, QFileSystemWatcher, pyqtProperty
 from PyQt6.QtGui import QFont, QPainter, QPen, QColor
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
@@ -10,6 +10,446 @@ import os
 
 # Import the new search result classes
 from core.soulseek_client import TrackResult, AlbumResult
+from core.spotify_client import SpotifyClient, Artist
+from core.matching_engine import MusicMatchingEngine
+import requests
+from typing import List, Optional
+from dataclasses import dataclass
+
+@dataclass
+class ArtistMatch:
+    """Represents an artist match with confidence score"""
+    artist: Artist
+    confidence: float
+    match_reason: str = ""
+
+class SpotifyMatchingModal(QDialog):
+    """Modal for selecting Spotify artist match before download"""
+    
+    artist_selected = pyqtSignal(Artist)  # Emitted when user selects an artist
+    
+    def __init__(self, track_result: TrackResult, spotify_client: SpotifyClient, matching_engine: MusicMatchingEngine, parent=None):
+        super().__init__(parent)
+        self.track_result = track_result
+        self.spotify_client = spotify_client
+        self.matching_engine = matching_engine
+        self.selected_artist = None
+        
+        self.setWindowTitle("Select Artist Match")
+        self.setModal(True)
+        self.setFixedSize(600, 700)
+        
+        # Style the dialog
+        self.setStyleSheet("""
+            QDialog {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #2a2a2a, stop:1 #1a1a1a);
+                border: 2px solid #333;
+                border-radius: 15px;
+            }
+            QLabel {
+                color: white;
+                font-weight: bold;
+            }
+            QPushButton {
+                background: rgba(64, 64, 64, 0.8);
+                border: 1px solid rgba(29, 185, 84, 0.6);
+                border-radius: 8px;
+                color: white;
+                padding: 8px 16px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: rgba(29, 185, 84, 0.3);
+                border: 1px solid #1db954;
+            }
+            QLineEdit {
+                background: rgba(64, 64, 64, 0.8);
+                border: 1px solid #333;
+                border-radius: 6px;
+                color: white;
+                padding: 8px;
+                font-size: 14px;
+            }
+            QScrollArea {
+                border: 1px solid #333;
+                border-radius: 8px;
+                background: rgba(32, 32, 32, 0.8);
+            }
+        """)
+        
+        self.setup_ui()
+        self.generate_auto_suggestions()
+    
+    def setup_ui(self):
+        """Setup the modal UI with auto-matching and manual search sections"""
+        main_layout = QVBoxLayout(self)
+        main_layout.setSpacing(20)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Header
+        header_label = QLabel(f"Match Artist for: {self.track_result.title}")
+        header_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        header_label.setStyleSheet("font-size: 18px; color: #1db954; margin-bottom: 10px;")
+        main_layout.addWidget(header_label)
+        
+        # Track info
+        track_info = QLabel(f"Artist: {self.track_result.artist}\nAlbum: {self.track_result.album}")
+        track_info.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        track_info.setStyleSheet("font-size: 12px; color: #ccc; margin-bottom: 15px;")
+        main_layout.addWidget(track_info)
+        
+        # Auto-matching section
+        auto_section = QLabel("🎯 Auto-Matched Suggestions")
+        auto_section.setStyleSheet("font-size: 16px; color: #1db954; margin-top: 10px;")
+        main_layout.addWidget(auto_section)
+        
+        # Auto suggestions scroll area
+        self.auto_scroll = QScrollArea()
+        self.auto_scroll.setFixedHeight(200)
+        self.auto_scroll.setWidgetResizable(True)
+        self.auto_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        
+        auto_widget = QWidget()
+        self.auto_layout = QVBoxLayout(auto_widget)
+        self.auto_layout.setSpacing(5)
+        self.auto_scroll.setWidget(auto_widget)
+        main_layout.addWidget(self.auto_scroll)
+        
+        # Manual search section
+        manual_section = QLabel("🔍 Manual Artist Search")
+        manual_section.setStyleSheet("font-size: 16px; color: #1db954; margin-top: 20px;")
+        main_layout.addWidget(manual_section)
+        
+        # Search input
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Type artist name to search...")
+        self.search_input.textChanged.connect(self.on_search_text_changed)
+        main_layout.addWidget(self.search_input)
+        
+        # Manual search results scroll area
+        self.search_scroll = QScrollArea()
+        self.search_scroll.setFixedHeight(180)
+        self.search_scroll.setWidgetResizable(True)
+        self.search_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        
+        search_widget = QWidget()
+        self.search_layout = QVBoxLayout(search_widget)
+        self.search_layout.setSpacing(5)
+        self.search_scroll.setWidget(search_widget)
+        main_layout.addWidget(self.search_scroll)
+        
+        # Bottom buttons
+        button_layout = QHBoxLayout()
+        
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        button_layout.addWidget(cancel_btn)
+        
+        skip_btn = QPushButton("Skip Matching")
+        skip_btn.clicked.connect(self.skip_matching)
+        skip_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(64, 64, 64, 0.8);
+                border: 1px solid #666;
+                color: #ccc;
+            }
+            QPushButton:hover {
+                background: rgba(100, 100, 100, 0.8);
+            }
+        """)
+        button_layout.addWidget(skip_btn)
+        
+        main_layout.addLayout(button_layout)
+        
+        # Search timer for debouncing
+        self.search_timer = QTimer()
+        self.search_timer.setSingleShot(True)
+        self.search_timer.timeout.connect(self.perform_search)
+    
+    def generate_auto_suggestions(self):
+        """Generate automatic artist suggestions based on track metadata"""
+        # Clear existing suggestions
+        self.clear_layout(self.auto_layout)
+        
+        # Add loading indicator
+        loading_label = QLabel("🔄 Generating suggestions...")
+        loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        loading_label.setStyleSheet("color: #ccc; padding: 20px;")
+        self.auto_layout.addWidget(loading_label)
+        
+        # Start suggestion generation in background
+        self.suggestion_thread = ArtistSuggestionThread(self.track_result, self.spotify_client, self.matching_engine)
+        self.suggestion_thread.suggestions_ready.connect(self.display_auto_suggestions)
+        self.suggestion_thread.start()
+    
+    def display_auto_suggestions(self, suggestions: List[ArtistMatch]):
+        """Display the generated auto suggestions"""
+        self.clear_layout(self.auto_layout)
+        
+        if not suggestions:
+            no_results = QLabel("No automatic matches found")
+            no_results.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            no_results.setStyleSheet("color: #666; padding: 20px;")
+            self.auto_layout.addWidget(no_results)
+            return
+        
+        for suggestion in suggestions[:5]:  # Show top 5
+            artist_item = self.create_artist_item(suggestion.artist, suggestion.confidence, suggestion.match_reason)
+            self.auto_layout.addWidget(artist_item)
+    
+    def on_search_text_changed(self):
+        """Handle search text changes with debouncing"""
+        self.search_timer.stop()
+        if len(self.search_input.text().strip()) >= 2:
+            self.search_timer.start(500)  # 500ms delay
+        else:
+            self.clear_layout(self.search_layout)
+    
+    def perform_search(self):
+        """Perform manual artist search"""
+        query = self.search_input.text().strip()
+        if not query:
+            return
+        
+        self.clear_layout(self.search_layout)
+        
+        # Add loading indicator
+        loading_label = QLabel("🔄 Searching...")
+        loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        loading_label.setStyleSheet("color: #ccc; padding: 10px;")
+        self.search_layout.addWidget(loading_label)
+        
+        # Start search in background
+        self.search_thread = ArtistSearchThread(query, self.spotify_client, self.matching_engine, self.track_result)
+        self.search_thread.search_results.connect(self.display_search_results)
+        self.search_thread.start()
+    
+    def display_search_results(self, results: List[ArtistMatch]):
+        """Display manual search results"""
+        self.clear_layout(self.search_layout)
+        
+        if not results:
+            no_results = QLabel("No artists found")
+            no_results.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            no_results.setStyleSheet("color: #666; padding: 20px;")
+            self.search_layout.addWidget(no_results)
+            return
+        
+        for result in results[:5]:  # Show top 5
+            artist_item = self.create_artist_item(result.artist, result.confidence, result.match_reason)
+            self.search_layout.addWidget(artist_item)
+    
+    def create_artist_item(self, artist: Artist, confidence: float, reason: str = "") -> QWidget:
+        """Create a selectable artist item widget"""
+        item_frame = QFrame()
+        item_frame.setFixedHeight(80)
+        item_frame.setStyleSheet("""
+            QFrame {
+                background: rgba(48, 48, 48, 0.8);
+                border: 1px solid #333;
+                border-radius: 8px;
+                margin: 2px;
+            }
+            QFrame:hover {
+                background: rgba(64, 64, 64, 0.9);
+                border: 1px solid #1db954;
+                cursor: pointer;
+            }
+        """)
+        
+        layout = QHBoxLayout(item_frame)
+        layout.setSpacing(15)
+        layout.setContentsMargins(10, 5, 10, 5)
+        
+        # Artist image placeholder (will be enhanced later with actual images)
+        image_label = QLabel("🎤")
+        image_label.setFixedSize(60, 60)
+        image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        image_label.setStyleSheet("""
+            QLabel {
+                background: rgba(64, 64, 64, 0.8);
+                border: 1px solid #444;
+                border-radius: 30px;
+                font-size: 24px;
+            }
+        """)
+        layout.addWidget(image_label)
+        
+        # Artist info
+        info_layout = QVBoxLayout()
+        info_layout.setSpacing(2)
+        
+        name_label = QLabel(artist.name)
+        name_label.setStyleSheet("font-size: 14px; font-weight: bold; color: white;")
+        info_layout.addWidget(name_label)
+        
+        confidence_label = QLabel(f"Match: {confidence:.0%}")
+        confidence_color = "#1db954" if confidence >= 0.8 else "#ffa500" if confidence >= 0.6 else "#ff4444"
+        confidence_label.setStyleSheet(f"font-size: 12px; color: {confidence_color};")
+        info_layout.addWidget(confidence_label)
+        
+        if reason:
+            reason_label = QLabel(reason)
+            reason_label.setStyleSheet("font-size: 10px; color: #999;")
+            info_layout.addWidget(reason_label)
+        
+        layout.addLayout(info_layout, 1)
+        
+        # Select button
+        select_btn = QPushButton("Select")
+        select_btn.setFixedSize(80, 30)
+        select_btn.clicked.connect(lambda: self.select_artist(artist))
+        layout.addWidget(select_btn)
+        
+        return item_frame
+    
+    def select_artist(self, artist: Artist):
+        """Select an artist and close the modal"""
+        self.selected_artist = artist
+        self.artist_selected.emit(artist)
+        self.accept()
+    
+    def skip_matching(self):
+        """Skip matching and proceed with normal download"""
+        self.selected_artist = None
+        self.reject()
+    
+    def clear_layout(self, layout):
+        """Clear all widgets from a layout"""
+        while layout.count():
+            child = layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+
+class ArtistSuggestionThread(QThread):
+    """Background thread for generating artist suggestions"""
+    
+    suggestions_ready = pyqtSignal(list)
+    
+    def __init__(self, track_result: TrackResult, spotify_client: SpotifyClient, matching_engine: MusicMatchingEngine):
+        super().__init__()
+        self.track_result = track_result
+        self.spotify_client = spotify_client
+        self.matching_engine = matching_engine
+    
+    def run(self):
+        """Generate artist suggestions"""
+        try:
+            suggestions = self.generate_artist_suggestions()
+            self.suggestions_ready.emit(suggestions)
+        except Exception as e:
+            print(f"Error generating suggestions: {e}")
+            self.suggestions_ready.emit([])
+    
+    def generate_artist_suggestions(self) -> List[ArtistMatch]:
+        """Generate artist suggestions using multiple strategies"""
+        suggestions = []
+        
+        # Strategy 1: Search for the artist name directly
+        if self.track_result.artist and self.track_result.artist != "Unknown Artist":
+            artist_query = self.matching_engine.normalize_string(self.track_result.artist)
+            artists = self.spotify_client.search_artists(artist_query, limit=10)
+            
+            for artist in artists:
+                confidence = self.matching_engine.similarity_score(
+                    self.matching_engine.normalize_string(self.track_result.artist),
+                    self.matching_engine.normalize_string(artist.name)
+                )
+                
+                if confidence >= 0.3:  # Minimum threshold
+                    suggestions.append(ArtistMatch(
+                        artist=artist,
+                        confidence=confidence,
+                        match_reason="Artist name match"
+                    ))
+        
+        # Strategy 2: Search for "artist - title" combination
+        if self.track_result.artist and self.track_result.title:
+            combined_query = f"{self.track_result.artist} {self.track_result.title}"
+            tracks = self.spotify_client.search_tracks(combined_query, limit=10)
+            
+            for track in tracks:
+                for artist_name in track.artists:
+                    # Find matching artist
+                    artist_matches = self.spotify_client.search_artists(artist_name, limit=1)
+                    if artist_matches:
+                        artist = artist_matches[0]
+                        
+                        # Calculate combined confidence based on artist and title match
+                        artist_confidence = self.matching_engine.similarity_score(
+                            self.matching_engine.normalize_string(self.track_result.artist),
+                            self.matching_engine.normalize_string(artist.name)
+                        )
+                        title_confidence = self.matching_engine.similarity_score(
+                            self.matching_engine.normalize_string(self.track_result.title),
+                            self.matching_engine.normalize_string(track.name)
+                        )
+                        
+                        combined_confidence = (artist_confidence * 0.7 + title_confidence * 0.3)
+                        
+                        if combined_confidence >= 0.4:
+                            suggestions.append(ArtistMatch(
+                                artist=artist,
+                                confidence=combined_confidence,
+                                match_reason="Track match"
+                            ))
+        
+        # Remove duplicates and sort by confidence
+        unique_suggestions = {}
+        for suggestion in suggestions:
+            if suggestion.artist.id not in unique_suggestions or unique_suggestions[suggestion.artist.id].confidence < suggestion.confidence:
+                unique_suggestions[suggestion.artist.id] = suggestion
+        
+        final_suggestions = sorted(unique_suggestions.values(), key=lambda x: x.confidence, reverse=True)
+        return final_suggestions[:5]
+
+class ArtistSearchThread(QThread):
+    """Background thread for manual artist search"""
+    
+    search_results = pyqtSignal(list)
+    
+    def __init__(self, query: str, spotify_client: SpotifyClient, matching_engine: MusicMatchingEngine, track_result: TrackResult):
+        super().__init__()
+        self.query = query
+        self.spotify_client = spotify_client
+        self.matching_engine = matching_engine
+        self.track_result = track_result
+    
+    def run(self):
+        """Perform artist search"""
+        try:
+            artists = self.spotify_client.search_artists(self.query, limit=10)
+            results = []
+            
+            for artist in artists:
+                # Calculate confidence based on search query match
+                confidence = self.matching_engine.similarity_score(
+                    self.matching_engine.normalize_string(self.query),
+                    self.matching_engine.normalize_string(artist.name)
+                )
+                
+                # Boost confidence if it also matches the original track artist
+                if self.track_result.artist:
+                    original_match = self.matching_engine.similarity_score(
+                        self.matching_engine.normalize_string(self.track_result.artist),
+                        self.matching_engine.normalize_string(artist.name)
+                    )
+                    confidence = max(confidence, original_match)
+                
+                results.append(ArtistMatch(
+                    artist=artist,
+                    confidence=confidence,
+                    match_reason="Search result"
+                ))
+            
+            # Sort by confidence
+            results.sort(key=lambda x: x.confidence, reverse=True)
+            self.search_results.emit(results)
+            
+        except Exception as e:
+            print(f"Error searching artists: {e}")
+            self.search_results.emit([])
 
 class BouncingDotsWidget(QWidget):
     """Animated bouncing dots loading indicator"""
@@ -1092,12 +1532,32 @@ class TrackItem(QFrame):
             }
         """)
         
+        # Matched Download button
+        matched_download_btn = QPushButton("📱")
+        matched_download_btn.setFixedSize(32, 32)
+        matched_download_btn.clicked.connect(self.request_matched_download)
+        matched_download_btn.setToolTip("Download with Spotify Matching")
+        matched_download_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(64, 64, 64, 0.8);
+                border: 1px solid rgba(147, 51, 234, 0.6);
+                border-radius: 16px;
+                color: #9333ea;
+                font-size: 10px;
+            }
+            QPushButton:hover {
+                background: rgba(147, 51, 234, 0.2);
+            }
+        """)
+        
         button_layout.addWidget(play_btn)
         button_layout.addWidget(download_btn)
+        button_layout.addWidget(matched_download_btn)
         
         # Store button references for state management
         self.play_btn = play_btn
         self.download_btn = download_btn
+        self.matched_download_btn = matched_download_btn
         
         # Assembly
         layout.addLayout(track_info, 1)
@@ -1110,6 +1570,22 @@ class TrackItem(QFrame):
     def request_download(self):
         """Request download of this track"""
         self.track_download_requested.emit(self.track_result)
+    
+    def request_matched_download(self):
+        """Request a matched download with Spotify integration"""
+        # Get reference to the DownloadsPage to handle matched download
+        downloads_page = self.get_downloads_page()
+        if downloads_page:
+            downloads_page.start_matched_download(self.track_result)
+    
+    def get_downloads_page(self):
+        """Get reference to the parent DownloadsPage"""
+        parent = self.parent()
+        while parent:
+            if hasattr(parent, 'audio_player'):  # DownloadsPage has audio_player
+                return parent
+            parent = parent.parent()
+        return None
     
     def set_loading_state(self):
         """Set play button to loading state"""
@@ -1202,6 +1678,7 @@ class TrackItem(QFrame):
 class AlbumResultItem(QFrame):
     """Expandable UI component for displaying album search results"""
     album_download_requested = pyqtSignal(object)  # AlbumResult object
+    matched_album_download_requested = pyqtSignal(object)  # AlbumResult object for matched download
     track_download_requested = pyqtSignal(object)  # TrackResult object  
     track_stream_requested = pyqtSignal(object, object)  # TrackResult object, TrackItem object
     
@@ -1323,9 +1800,13 @@ class AlbumResultItem(QFrame):
         info_section.addWidget(album_details)
         info_section.addWidget(user_info)
         
+        # Download buttons layout
+        download_buttons_layout = QVBoxLayout()
+        download_buttons_layout.setSpacing(4)
+        
         # Download button
         self.download_btn = QPushButton("⬇️ Download Album")
-        self.download_btn.setFixedSize(150, 36)
+        self.download_btn.setFixedSize(150, 32)
         self.download_btn.clicked.connect(self.request_album_download)
         self.download_btn.setStyleSheet("""
             QPushButton {
@@ -1333,11 +1814,11 @@ class AlbumResultItem(QFrame):
                     stop:0 rgba(29, 185, 84, 0.9),
                     stop:1 rgba(24, 156, 71, 0.9));
                 border: none;
-                border-radius: 18px;
+                border-radius: 16px;
                 color: #000000;
-                font-size: 12px;
+                font-size: 11px;
                 font-weight: bold;
-                padding: 8px 12px;
+                padding: 6px 10px;
             }
             QPushButton:hover {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -1346,13 +1827,40 @@ class AlbumResultItem(QFrame):
             }
         """)
         
+        # Matched Download button
+        self.matched_download_btn = QPushButton("📱 Matched Album")
+        self.matched_download_btn.setFixedSize(150, 32)
+        self.matched_download_btn.clicked.connect(self.request_matched_album_download)
+        self.matched_download_btn.setToolTip("Download Album with Spotify Matching")
+        self.matched_download_btn.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(147, 51, 234, 0.9),
+                    stop:1 rgba(124, 43, 200, 0.9));
+                border: none;
+                border-radius: 16px;
+                color: #000000;
+                font-size: 11px;
+                font-weight: bold;
+                padding: 6px 10px;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(167, 71, 254, 1.0),
+                    stop:1 rgba(144, 63, 220, 1.0));
+            }
+        """)
+        
+        download_buttons_layout.addWidget(self.download_btn)
+        download_buttons_layout.addWidget(self.matched_download_btn)
+        
         # Set minimum width to ensure buttons always visible
-        self.setMinimumWidth(350)  # Ensure minimum space for content + download button
+        self.setMinimumWidth(380)  # Increased to accommodate both buttons
         
         # Assembly header
         header_layout.addLayout(icon_container)
         header_layout.addLayout(info_section, 1)  # Flexible content area
-        header_layout.addWidget(self.download_btn, 0)  # Fixed button area, always visible
+        header_layout.addLayout(download_buttons_layout, 0)  # Fixed button area, always visible
         
         # Tracks container (hidden by default)
         self.tracks_container = QWidget()
@@ -1384,6 +1892,12 @@ class AlbumResultItem(QFrame):
         self.download_btn.setText("⏳")
         self.download_btn.setEnabled(False)
         self.album_download_requested.emit(self.album_result)
+    
+    def request_matched_album_download(self):
+        """Request matched download of the entire album with Spotify integration"""
+        self.matched_download_btn.setText("⏳")
+        self.matched_download_btn.setEnabled(False)
+        self.matched_album_download_requested.emit(self.album_result)
     
     def toggle_expansion(self, event):
         """Toggle album expansion to show/hide tracks"""
@@ -1578,12 +2092,41 @@ class SearchResultItem(QFrame):
             }
         """)
         
+        # Matched Download button
+        self.matched_download_btn = QPushButton("📱")
+        self.matched_download_btn.setFixedSize(42, 42)
+        self.matched_download_btn.clicked.connect(self.request_matched_download)
+        self.matched_download_btn.setToolTip("Download with Spotify Matching")
+        self.matched_download_btn.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(147, 51, 234, 0.9),
+                    stop:1 rgba(124, 43, 200, 0.9));
+                border: none;
+                border-radius: 21px;
+                color: #000000;
+                font-size: 16px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(167, 71, 254, 1.0),
+                    stop:1 rgba(144, 63, 220, 1.0));
+            }
+            QPushButton:pressed {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(124, 43, 200, 1.0),
+                    stop:1 rgba(104, 33, 180, 1.0));
+            }
+        """)
+        
         # Assemble the layout
         left_section.addWidget(music_icon)
         left_section.addWidget(self.content_widget, 1)
         
         buttons_layout.addWidget(self.play_btn)
         buttons_layout.addWidget(self.download_btn)
+        buttons_layout.addWidget(self.matched_download_btn)
         
         # Set minimum width to ensure buttons always visible
         self.setMinimumWidth(300)  # Ensure minimum space for content + buttons
@@ -2012,6 +2555,14 @@ class SearchResultItem(QFrame):
             self.download_btn.setText("⏳")
             self.download_btn.setEnabled(False)
             self.download_requested.emit(self.search_result)
+    
+    def request_matched_download(self):
+        """Request a matched download with Spotify integration"""
+        if not self.is_downloading:
+            # Get reference to the DownloadsPage to handle matched download
+            downloads_page = self.get_downloads_page()
+            if downloads_page:
+                downloads_page.start_matched_download(self.search_result)
     
     def request_stream(self):
         """Request streaming of this audio file"""
@@ -3292,6 +3843,10 @@ class DownloadsPage(QWidget):
         self.results_per_page = 15  # Show 15 results at a time
         self.is_loading_more = False  # Prevent multiple simultaneous loads
         
+        # Initialize Spotify client and matching engine for matched downloads
+        self.spotify_client = SpotifyClient()
+        self.matching_engine = MusicMatchingEngine()
+        
         # Initialize audio player for streaming
         self.audio_player = AudioPlayer(self)
         self.audio_player.playback_finished.connect(self.on_audio_playback_finished)
@@ -4347,6 +4902,7 @@ class DownloadsPage(QWidget):
                 # Create expandable album result item
                 result_item = AlbumResultItem(result)
                 result_item.album_download_requested.connect(self.start_album_download)
+                result_item.matched_album_download_requested.connect(self.start_matched_album_download)
                 result_item.track_download_requested.connect(self.start_download)
                 result_item.track_stream_requested.connect(lambda search_result, track_item: self.start_stream(search_result, track_item))
             else:
@@ -4830,6 +5386,7 @@ class DownloadsPage(QWidget):
                 # Create expandable album result item
                 result_item = AlbumResultItem(result)
                 result_item.album_download_requested.connect(self.start_album_download)
+                result_item.matched_album_download_requested.connect(self.start_matched_album_download)
                 result_item.track_download_requested.connect(self.start_download)  # Individual track downloads
                 result_item.track_stream_requested.connect(lambda search_result, track_item: self.start_stream(search_result, track_item))  # Individual track streaming
             else:
@@ -4982,6 +5539,7 @@ class DownloadsPage(QWidget):
                 # Create expandable album result item
                 result_item = AlbumResultItem(result)
                 result_item.album_download_requested.connect(self.start_album_download)
+                result_item.matched_album_download_requested.connect(self.start_matched_album_download)
                 result_item.track_download_requested.connect(self.start_download)  # Individual track downloads
                 result_item.track_stream_requested.connect(lambda search_result, track_item: self.start_stream(search_result, track_item))  # Individual track streaming
             else:
@@ -5173,6 +5731,365 @@ class DownloadsPage(QWidget):
                     track_item.set_download_queued_state()
                 print(f"[DEBUG] Disabled {len(album_item.track_items)} track download buttons for album: {album_result.album_title}")
                 break
+    
+    def start_matched_download(self, search_result):
+        """Start a matched download with Spotify integration"""
+        try:
+            # Check if Spotify client is authenticated
+            if not self.spotify_client.is_authenticated():
+                print("❌ Spotify not authenticated. Using normal download.")
+                self.start_download(search_result)
+                return
+            
+            # Create and show the Spotify matching modal
+            modal = SpotifyMatchingModal(search_result, self.spotify_client, self.matching_engine, self)
+            modal.artist_selected.connect(lambda artist: self._handle_matched_download(search_result, artist))
+            
+            # Show modal and handle result
+            if modal.exec() == QDialog.DialogCode.Accepted:
+                # Artist was selected, download will be handled by signal
+                pass
+            else:
+                # User cancelled or skipped matching, proceed with normal download
+                print("🔄 Spotify matching cancelled, proceeding with normal download")
+                self.start_download(search_result)
+                
+        except Exception as e:
+            print(f"❌ Error in matched download: {e}")
+            # Fallback to normal download
+            self.start_download(search_result)
+    
+    def start_matched_album_download(self, album_result):
+        """Start a matched album download with Spotify integration"""
+        try:
+            # Check if Spotify client is authenticated
+            if not self.spotify_client.is_authenticated():
+                print("❌ Spotify not authenticated. Using normal album download.")
+                self.start_album_download(album_result)
+                return
+            
+            print(f"🎵 Starting matched album download: {album_result.album_title} by {album_result.artist}")
+            
+            # Disable album track buttons first
+            self.disable_album_track_buttons(album_result)
+            
+            # Process each track individually with Spotify matching
+            for track in album_result.tracks:
+                self.start_matched_download(track)
+            
+            print(f"✓ Queued {len(album_result.tracks)} tracks for matched download from album: {album_result.album_title}")
+            
+        except Exception as e:
+            print(f"❌ Failed to start matched album download: {str(e)}")
+            # Fallback to normal album download
+            self.start_album_download(album_result)
+    
+    def _handle_matched_download(self, search_result, artist: Artist):
+        """Handle the download after artist selection from modal"""
+        try:
+            print(f"🎯 Starting matched download for '{search_result.title}' by '{artist.name}'")
+            
+            # Store the selected artist metadata with the search result
+            search_result.matched_artist = artist
+            
+            # Start the download with normal process but enhanced with Spotify metadata
+            self.start_download(search_result)
+            
+            # Find the download item that was just created and add the matched artist info
+            # We need to do this after the download is started so the download item exists
+            QTimer.singleShot(100, lambda: self._assign_matched_artist_to_download_item(search_result, artist))
+            
+        except Exception as e:
+            print(f"❌ Error handling matched download: {e}")
+            # Fallback to normal download
+            self.start_download(search_result)
+    
+    def _assign_matched_artist_to_download_item(self, search_result, artist: Artist):
+        """Assign matched artist to the corresponding download item"""
+        try:
+            # Find the download item for this search result
+            for download_item in self.download_queue.download_items:
+                if (hasattr(download_item, 'title') and download_item.title == search_result.title and
+                    hasattr(download_item, 'artist') and download_item.artist == search_result.artist):
+                    download_item.matched_artist = artist
+                    print(f"✅ Assigned matched artist '{artist.name}' to download item '{download_item.title}'")
+                    break
+        except Exception as e:
+            print(f"❌ Error assigning matched artist to download item: {e}")
+    
+    def _organize_matched_download(self, download_item, original_file_path: str) -> Optional[str]:
+        """Organize a matched download into the Transfer folder structure"""
+        try:
+            import os
+            import shutil
+            from pathlib import Path
+            
+            if not hasattr(download_item, 'matched_artist'):
+                print("❌ No matched artist information found")
+                return None
+            
+            artist = download_item.matched_artist
+            print(f"🎯 Organizing download for artist: {artist.name}")
+            
+            # Create Transfer directory
+            project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))  # Go up from ui/pages/
+            transfer_dir = os.path.join(project_root, 'Transfer')
+            os.makedirs(transfer_dir, exist_ok=True)
+            
+            # Create artist directory
+            artist_dir = os.path.join(transfer_dir, self._sanitize_filename(artist.name))
+            os.makedirs(artist_dir, exist_ok=True)
+            
+            # Determine if this is a single or album track
+            album_info = self._detect_album_info(download_item, artist)
+            
+            if album_info and album_info['is_album']:
+                # Album track structure: Transfer/ARTIST/ARTIST - ALBUM/TRACK# TRACK.ext
+                album_folder_name = f"{self._sanitize_filename(artist.name)} - {self._sanitize_filename(album_info['album_name'])}"
+                album_dir = os.path.join(artist_dir, album_folder_name)
+                os.makedirs(album_dir, exist_ok=True)
+                
+                # Create track filename with number
+                file_ext = os.path.splitext(original_file_path)[1]
+                track_number = album_info.get('track_number', 1)
+                track_filename = f"{track_number:02d} {self._sanitize_filename(download_item.title)}{file_ext}"
+                new_file_path = os.path.join(album_dir, track_filename)
+                
+                print(f"📁 Album track: {album_folder_name}/{track_filename}")
+                
+            else:
+                # Single track structure: Transfer/ARTIST/ARTIST - SINGLE/SINGLE.ext
+                single_folder_name = f"{self._sanitize_filename(artist.name)} - {self._sanitize_filename(download_item.title)}"
+                single_dir = os.path.join(artist_dir, single_folder_name)
+                os.makedirs(single_dir, exist_ok=True)
+                
+                # Create single filename
+                file_ext = os.path.splitext(original_file_path)[1]
+                single_filename = f"{self._sanitize_filename(download_item.title)}{file_ext}"
+                new_file_path = os.path.join(single_dir, single_filename)
+                
+                print(f"📁 Single track: {single_folder_name}/{single_filename}")
+            
+            # Check if source file exists, and try to find it if not
+            if not os.path.exists(original_file_path):
+                print(f"❌ Source file not found: {original_file_path}")
+                
+                # Try to find the file using different methods
+                found_file = self._find_downloaded_file(original_file_path, download_item)
+                if found_file:
+                    print(f"✅ Found file at: {found_file}")
+                    original_file_path = found_file
+                else:
+                    print(f"❌ Could not locate downloaded file anywhere")
+                    return None
+            
+            # Copy the file to the new location
+            if os.path.exists(new_file_path):
+                print(f"⚠️ File already exists at destination: {new_file_path}")
+                # Add counter to avoid conflicts
+                base, ext = os.path.splitext(new_file_path)
+                counter = 1
+                while os.path.exists(f"{base} ({counter}){ext}"):
+                    counter += 1
+                new_file_path = f"{base} ({counter}){ext}"
+            
+            print(f"📂 Copying file to: {new_file_path}")
+            shutil.copy2(original_file_path, new_file_path)
+            
+            # Download cover art if in album mode
+            if album_info and album_info['is_album']:
+                self._download_cover_art(artist, album_info, os.path.dirname(new_file_path))
+            
+            print(f"✅ Successfully organized matched download: {new_file_path}")
+            return new_file_path
+            
+        except Exception as e:
+            print(f"❌ Error organizing matched download: {e}")
+            return None
+    
+    def _sanitize_filename(self, filename: str) -> str:
+        """Sanitize filename for file system compatibility"""
+        import re
+        # Replace invalid characters with underscores
+        sanitized = re.sub(r'[<>:"/\\|?*]', '_', filename)
+        # Remove multiple spaces and trim
+        sanitized = re.sub(r'\s+', ' ', sanitized).strip()
+        # Limit length to avoid filesystem issues
+        return sanitized[:200] if len(sanitized) > 200 else sanitized
+    
+    def _detect_album_info(self, download_item, artist: Artist) -> Optional[dict]:
+        """Detect if track is part of an album using Spotify API"""
+        try:
+            # Search for the track by artist and title
+            query = f"artist:{artist.name} track:{download_item.title}"
+            tracks = self.spotify_client.search_tracks(query, limit=5)
+            
+            if not tracks:
+                print(f"🔍 No Spotify tracks found for: {query}")
+                return None
+            
+            # Find the best matching track
+            best_match = None
+            best_confidence = 0
+            
+            for track in tracks:
+                # Calculate confidence based on artist and title similarity
+                artist_confidence = self.matching_engine.similarity_score(
+                    self.matching_engine.normalize_string(artist.name),
+                    self.matching_engine.normalize_string(track.artists[0])
+                )
+                title_confidence = self.matching_engine.similarity_score(
+                    self.matching_engine.normalize_string(download_item.title),
+                    self.matching_engine.normalize_string(track.name)
+                )
+                
+                combined_confidence = (artist_confidence * 0.6 + title_confidence * 0.4)
+                
+                if combined_confidence > best_confidence and combined_confidence > 0.7:
+                    best_match = track
+                    best_confidence = combined_confidence
+            
+            if not best_match:
+                print(f"🔍 No high-confidence track match found")
+                return None
+            
+            print(f"🎵 Found matching track: {best_match.name} - {best_match.album}")
+            
+            # Determine if this is a single or album
+            # Albums typically have multiple tracks, singles typically don't
+            # We can also check track count in the album via additional API call if needed
+            album_name = best_match.album
+            
+            # For now, assume it's an album if the album name is different from track name
+            is_album = self.matching_engine.normalize_string(album_name) != self.matching_engine.normalize_string(best_match.name)
+            
+            return {
+                'is_album': is_album,
+                'album_name': album_name,
+                'track_number': 1,  # Could be enhanced with additional API calls
+                'spotify_track': best_match
+            }
+            
+        except Exception as e:
+            print(f"❌ Error detecting album info: {e}")
+            return None
+    
+    def _download_cover_art(self, artist: Artist, album_info: dict, target_dir: str):
+        """Download cover art for the album"""
+        try:
+            import requests
+            import os
+            
+            # Use artist image as fallback for now
+            # Could be enhanced to get actual album artwork
+            if not artist.image_url:
+                print("📷 No artist image available for cover art")
+                return
+            
+            cover_path = os.path.join(target_dir, "cover.jpg")
+            
+            # Skip if cover already exists
+            if os.path.exists(cover_path):
+                print("📷 Cover art already exists")
+                return
+            
+            print(f"📷 Downloading cover art from: {artist.image_url}")
+            response = requests.get(artist.image_url, timeout=10)
+            response.raise_for_status()
+            
+            with open(cover_path, 'wb') as f:
+                f.write(response.content)
+            
+            print(f"✅ Cover art downloaded: {cover_path}")
+            
+        except Exception as e:
+            print(f"❌ Error downloading cover art: {e}")
+    
+    def _find_downloaded_file(self, original_file_path: str, download_item) -> Optional[str]:
+        """Try to find the downloaded file using various methods"""
+        try:
+            import os
+            import glob
+            from pathlib import Path
+            
+            print(f"🔍 Searching for downloaded file...")
+            print(f"    Original path: {original_file_path}")
+            
+            # Get the download directory
+            download_dir = self.soulseek_client.download_path if self.soulseek_client else './downloads'
+            print(f"    Download directory: {download_dir}")
+            
+            # Normalize path separators (convert Windows \\ to /)
+            normalized_path = original_file_path.replace('\\', '/')
+            
+            # Extract filename from the API path
+            api_filename = os.path.basename(normalized_path)
+            print(f"    Looking for filename: {api_filename}")
+            
+            # Method 1: Try the exact path first (but normalized)
+            if os.path.exists(original_file_path):
+                print(f"    ✅ Found exact path: {original_file_path}")
+                return original_file_path
+            
+            # Method 2: Search in the download directory recursively
+            search_patterns = [
+                os.path.join(download_dir, "**", api_filename),
+                os.path.join(download_dir, "**", f"*{download_item.title}*"),
+                os.path.join(download_dir, "**", f"*{download_item.artist}*")
+            ]
+            
+            for pattern in search_patterns:
+                print(f"    Searching pattern: {pattern}")
+                matches = glob.glob(pattern, recursive=True)
+                if matches:
+                    # Filter for audio files
+                    audio_extensions = {'.mp3', '.flac', '.ogg', '.aac', '.wma', '.wav', '.m4a'}
+                    audio_matches = [f for f in matches if os.path.splitext(f)[1].lower() in audio_extensions]
+                    
+                    if audio_matches:
+                        # Return the first match that exists and has reasonable size
+                        for match in audio_matches:
+                            if os.path.exists(match) and os.path.getsize(match) > 1024:  # At least 1KB
+                                print(f"    ✅ Found match: {match}")
+                                return match
+            
+            # Method 3: Look for recently modified files in download directory
+            print(f"    Searching for recent files in download directory...")
+            recent_files = []
+            audio_extensions = {'.mp3', '.flac', '.ogg', '.aac', '.wma', '.wav', '.m4a'}
+            
+            # Debug: List all files in download directory
+            print(f"    📂 Files in download directory:")
+            for root, dirs, files in os.walk(download_dir):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    rel_path = os.path.relpath(file_path, download_dir)
+                    file_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0
+                    print(f"        {rel_path} ({file_size} bytes)")
+                    
+                    if os.path.splitext(file)[1].lower() in audio_extensions:
+                        # Check if file was modified recently (within last 5 minutes)
+                        import time
+                        if time.time() - os.path.getmtime(file_path) < 300:  # 5 minutes
+                            recent_files.append((file_path, os.path.getmtime(file_path)))
+            
+            # Sort by modification time (most recent first)
+            recent_files.sort(key=lambda x: x[1], reverse=True)
+            
+            for file_path, _ in recent_files[:5]:  # Check top 5 most recent
+                print(f"    Checking recent file: {file_path}")
+                # Simple filename matching
+                if (download_item.title.lower() in os.path.basename(file_path).lower() or
+                    download_item.artist.lower() in os.path.basename(file_path).lower()):
+                    print(f"    ✅ Found recent match: {file_path}")
+                    return file_path
+            
+            print(f"    ❌ No matching files found")
+            return None
+            
+        except Exception as e:
+            print(f"❌ Error searching for downloaded file: {e}")
+            return None
     
     def update_album_track_button_states(self, download_item, status):
         """Update track download button states based on download progress"""
@@ -6229,6 +7146,22 @@ class DownloadsPage(QWidget):
                                 print(f"[DEBUG] Constructed absolute path: {absolute_file_path}")
                             else:
                                 absolute_file_path = download_item.file_path
+                            
+                            # Check if this is a matched download and process accordingly
+                            if hasattr(download_item, 'matched_artist') and download_item.matched_artist:
+                                print(f"🎯 Processing matched download for '{download_item.title}' by '{download_item.matched_artist.name}'")
+                                try:
+                                    # Add a small delay to ensure file is fully written
+                                    import time
+                                    time.sleep(1)
+                                    
+                                    # Organize the file into Transfer folder structure
+                                    organized_path = self._organize_matched_download(download_item, absolute_file_path)
+                                    if organized_path:
+                                        absolute_file_path = organized_path
+                                except Exception as e:
+                                    print(f"❌ Error organizing matched download: {e}")
+                                    # Continue with normal process if organization fails
                                 
                             # Update the download item status and progress BEFORE moving
                             download_item.update_status(
