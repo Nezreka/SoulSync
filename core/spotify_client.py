@@ -2,11 +2,50 @@ import spotipy
 from spotipy.oauth2 import SpotifyOAuth, SpotifyClientCredentials
 from typing import Dict, List, Optional, Any
 import time
+import threading
+from functools import wraps
 from dataclasses import dataclass
 from utils.logging_config import get_logger
 from config.settings import config_manager
 
 logger = get_logger("spotify_client")
+
+# Global rate limiting variables
+_last_api_call_time = 0
+_api_call_lock = threading.Lock()
+MIN_API_INTERVAL = 0.1  # 100ms between API calls
+
+# Request queuing for burst handling
+import queue
+_request_queue = queue.Queue()
+_queue_processor_running = False
+
+def rate_limited(func):
+    """Decorator to enforce rate limiting on Spotify API calls"""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        global _last_api_call_time
+        
+        with _api_call_lock:
+            current_time = time.time()
+            time_since_last_call = current_time - _last_api_call_time
+            
+            if time_since_last_call < MIN_API_INTERVAL:
+                sleep_time = MIN_API_INTERVAL - time_since_last_call
+                time.sleep(sleep_time)
+            
+            _last_api_call_time = time.time()
+            
+        try:
+            result = func(*args, **kwargs)
+            return result
+        except Exception as e:
+            # Implement exponential backoff for API errors
+            if "rate limit" in str(e).lower() or "429" in str(e):
+                logger.warning(f"Rate limit hit, backing off: {e}")
+                time.sleep(1.0)  # Wait 1 second before retrying
+            raise e
+    return wrapper
 
 @dataclass
 class Track:
@@ -180,6 +219,7 @@ class SpotifyClient:
             logger.error(f"Error fetching playlist {playlist_id}: {e}")
             return None
     
+    @rate_limited
     def search_tracks(self, query: str, limit: int = 20) -> List[Track]:
         if not self.is_authenticated():
             return []
@@ -198,6 +238,7 @@ class SpotifyClient:
             logger.error(f"Error searching tracks: {e}")
             return []
     
+    @rate_limited
     def search_artists(self, query: str, limit: int = 20) -> List[Artist]:
         """Search for artists using Spotify API"""
         if not self.is_authenticated():
@@ -217,6 +258,7 @@ class SpotifyClient:
             logger.error(f"Error searching artists: {e}")
             return []
     
+    @rate_limited
     def get_track_details(self, track_id: str) -> Optional[Dict[str, Any]]:
         """Get detailed track information including album data and track number"""
         if not self.is_authenticated():

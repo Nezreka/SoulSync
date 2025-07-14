@@ -178,10 +178,36 @@ class SpotifyMatchingModal(QDialog):
         loading_label.setStyleSheet("color: #ccc; padding: 20px;")
         self.auto_layout.addWidget(loading_label)
         
-        # Start suggestion generation in background
-        self.suggestion_thread = ArtistSuggestionThread(self.track_result, self.spotify_client, self.matching_engine)
-        self.suggestion_thread.suggestions_ready.connect(self.display_auto_suggestions)
-        self.suggestion_thread.start()
+        # Use thread pool instead of creating new thread
+        if hasattr(self.parent(), 'api_thread_pool'):
+            future = self.parent().api_thread_pool.submit(self._generate_suggestions_worker)
+            future.add_done_callback(self._on_suggestions_ready)
+        else:
+            # Fallback to original thread approach
+            self.suggestion_thread = ArtistSuggestionThread(self.track_result, self.spotify_client, self.matching_engine)
+            self.suggestion_thread.suggestions_ready.connect(self.display_auto_suggestions)
+            self.suggestion_thread.start()
+    
+    def _generate_suggestions_worker(self):
+        """Worker function for generating suggestions in thread pool"""
+        try:
+            # Create suggestion thread instance for logic reuse
+            thread = ArtistSuggestionThread(self.track_result, self.spotify_client, self.matching_engine)
+            suggestions = thread.generate_artist_suggestions()
+            return suggestions
+        except Exception as e:
+            print(f"❌ Error generating suggestions: {e}")
+            return []
+    
+    def _on_suggestions_ready(self, future):
+        """Callback when suggestions are ready from thread pool"""
+        try:
+            suggestions = future.result()
+            # Use QTimer to safely update UI from worker thread
+            QTimer.singleShot(0, lambda: self.display_auto_suggestions(suggestions))
+        except Exception as e:
+            print(f"❌ Error in suggestion callback: {e}")
+            QTimer.singleShot(0, lambda: self.display_auto_suggestions([]))
     
     def display_auto_suggestions(self, suggestions: List[ArtistMatch]):
         """Display the generated auto suggestions"""
@@ -3857,9 +3883,17 @@ class DownloadsPage(QWidget):
         self.matching_engine = MusicMatchingEngine()
         
         # Album grouping system to ensure tracks from same album go to same folder
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+        self.album_cache_lock = threading.Lock()
         self.album_groups = {}  # Maps original album name -> resolved clean album name
         self.album_artists = {}  # Maps original album name -> artist for consistency
         self.album_editions = {}  # Maps original album name -> edition level ("standard", "deluxe")
+        self.album_name_cache = {}  # Pre-calculated consistent album names for batch downloads
+        
+        # Thread pool for API requests to prevent excessive thread creation
+        self.api_thread_pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="SpotifyAPI")
+        self.active_suggestion_threads = set()  # Track active threads for cleanup
         
         # Initialize audio player for streaming
         self.audio_player = AudioPlayer(self)
@@ -5866,16 +5900,144 @@ class DownloadsPage(QWidget):
             search_result.matched_artist = artist
             
             # Start the download with normal process but enhanced with Spotify metadata
-            self.start_download(search_result)
+            download_item = self._start_download_with_artist(search_result, artist)
             
-            # Find the download item that was just created and add the matched artist info
-            # We need to do this after the download is started so the download item exists
-            QTimer.singleShot(100, lambda: self._assign_matched_artist_to_download_item(search_result, artist))
+            if download_item:
+                print(f"✅ Successfully created matched download for '{download_item.title}'")
+            else:
+                print(f"❌ Failed to create matched download, falling back to normal download")
+                self.start_download(search_result)
             
         except Exception as e:
             print(f"❌ Error handling matched download: {e}")
             # Fallback to normal download
             self.start_download(search_result)
+    
+    def _start_download_with_artist(self, search_result, artist: Artist):
+        """Start download and immediately assign matched artist - no race conditions"""
+        try:
+            # Extract track info for queue display (same as start_download)
+            full_filename = search_result.filename
+            import os
+            filename = os.path.basename(full_filename)
+            
+            # Use TrackResult's parsed metadata if available, otherwise parse filename
+            if hasattr(search_result, 'title') and search_result.title:
+                title = search_result.title
+            else:
+                # Fallback parsing logic (copied from start_download)
+                name_without_ext = filename
+                if '.' in name_without_ext:
+                    name_without_ext = '.'.join(name_without_ext.split('.')[:-1])
+                
+                import re
+                track_number_match = re.match(r'^(\d+)\.\s*(.+)', name_without_ext)
+                if track_number_match:
+                    name_without_track_num = track_number_match.group(2)
+                else:
+                    name_without_track_num = name_without_ext
+                
+                parts = name_without_track_num.split(' - ')
+                if len(parts) >= 2:
+                    title = ' - '.join(parts[1:]).strip()
+                else:
+                    title = name_without_track_num.strip()
+            
+            # Use TrackResult's artist if available, otherwise parse or use username
+            if hasattr(search_result, 'artist') and search_result.artist:
+                original_artist = search_result.artist
+            else:
+                # Same fallback logic as start_download
+                name_without_ext = filename
+                if '.' in name_without_ext:
+                    name_without_ext = '.'.join(name_without_ext.split('.')[:-1])
+                
+                import re
+                track_number_match = re.match(r'^(\d+)\.\s*(.+)', name_without_ext)
+                if track_number_match:
+                    name_without_track_num = track_number_match.group(2)
+                else:
+                    name_without_track_num = name_without_ext
+                
+                parts = name_without_track_num.split(' - ')
+                if len(parts) >= 2:
+                    original_artist = parts[0].strip()
+                else:
+                    original_artist = search_result.username
+            
+            # Final cleanup
+            if not title or title == '':
+                title = filename
+            if not original_artist or original_artist == '':
+                original_artist = search_result.username
+            
+            # Extract album context
+            album_name = getattr(search_result, 'album', None)
+            track_number = getattr(search_result, 'track_number', None)
+            
+            # Generate download ID
+            import time
+            download_id = f"{search_result.username}_{filename}_{int(time.time())}"
+            
+            # Create download item with matched artist immediately
+            download_item = self.download_queue.add_download_item(
+                title=title,
+                artist=original_artist,
+                status="downloading",
+                progress=0,
+                file_size=search_result.size,
+                download_id=download_id,
+                username=search_result.username,
+                file_path=full_filename,
+                soulseek_client=self.soulseek_client,
+                album=album_name,
+                track_number=track_number
+            )
+            
+            # Immediately assign the matched artist - no timing delays
+            if download_item:
+                download_item.matched_artist = artist
+                print(f"✅ Matched artist '{artist.name}' assigned to download item '{download_item.title}'")
+            
+            # Start the download thread
+            download_thread = DownloadThread(self.soulseek_client, search_result, download_item)
+            download_thread.download_completed.connect(self.on_download_completed, Qt.ConnectionType.QueuedConnection)
+            download_thread.download_failed.connect(self.on_download_failed, Qt.ConnectionType.QueuedConnection)
+            download_thread.download_progress.connect(self.on_download_progress, Qt.ConnectionType.QueuedConnection)
+            download_thread.finished.connect(
+                functools.partial(self.on_download_thread_finished, download_thread), 
+                Qt.ConnectionType.QueuedConnection
+            )
+            
+            self.download_threads.append(download_thread)
+            download_thread.start()
+            
+            return download_item
+            
+        except Exception as e:
+            print(f"❌ Failed to start download with artist: {str(e)}")
+            return None
+    
+    def _ensure_album_consistency(self, download_items, artist: Artist, album_name: str):
+        """Ensure all download items have consistent album naming for proper grouping"""
+        try:
+            with self.album_cache_lock:
+                # Create cache key for this album
+                album_key = f"{artist.name}::{album_name}"
+                
+                # Store the definitive album name
+                self.album_name_cache[album_key] = album_name
+                
+                print(f"🔒 Cached album name: '{album_name}' for key: '{album_key}'")
+                
+                # Ensure all download items use the same album name
+                for download_item in download_items:
+                    if hasattr(download_item, 'album'):
+                        download_item.album = album_name
+                        print(f"   ✅ Set album name for '{download_item.title}': '{album_name}'")
+                
+        except Exception as e:
+            print(f"❌ Error ensuring album consistency: {e}")
     
     def _assign_matched_artist_to_download_item(self, search_result, artist: Artist):
         """Assign matched artist to the corresponding download item"""
@@ -5940,15 +6102,22 @@ class DownloadsPage(QWidget):
                 
                 print(f"   🎵 Track {track_index}: '{clean_track_title}' -> Artist: '{artist.name}', Album: '{clean_album_title}', Track#: {track_index}")
             
-            # Start downloading all tracks with normal process but enhanced with Spotify metadata
+            # Start downloading all tracks with matched artist immediately
+            import time
+            download_items = []
             for track_index, track in enumerate(album_result.tracks, 1):
                 print(f"🎬 Starting download {track_index}/{len(album_result.tracks)}: {track.title}")
-                self.start_download(track)
-                # Add a small delay between downloads to avoid overwhelming the system
-                QTimer.singleShot(200, lambda: None)  # 200ms delay
+                download_item = self._start_download_with_artist(track, artist)
+                if download_item:
+                    download_items.append(download_item)
+                    # Small delay between downloads to avoid overwhelming Soulseek
+                    time.sleep(0.1)
             
-            # Assign matched artist to download items after they're created
-            QTimer.singleShot(500, lambda: self._assign_matched_artist_to_album_downloads(album_result, artist))
+            print(f"✅ Successfully queued {len(download_items)}/{len(album_result.tracks)} tracks with matched artist")
+            
+            # Pre-calculate and cache the album name to ensure consistency
+            if download_items:
+                self._ensure_album_consistency(download_items, artist, clean_album_title)
             
             print(f"✓ Queued {len(album_result.tracks)} tracks for matched download from album: {album_result.album_title}")
             print(f"🎯 All tracks have album context preserved: '{album_result.album_title}'")
@@ -6302,58 +6471,66 @@ class DownloadsPage(QWidget):
         This ensures all tracks from the same album get the same folder name.
         """
         try:
-            # Get the original album name from the download item (if it has one)
-            original_album = getattr(download_item, 'album', None)
-            detected_album = album_info.get('album_name', '')
-            
-            # Extract base album name (without edition indicators)
-            if album_info.get('spotify_track'):
-                # Use Spotify album name for base
-                base_album = self._get_base_album_name(detected_album)
-            elif original_album:
-                # Clean the original Soulseek album name 
-                cleaned_original = self._clean_album_title(original_album, artist.name)
-                base_album = self._get_base_album_name(cleaned_original)
-            else:
-                base_album = self._get_base_album_name(detected_album)
-            
-            # Normalize the base name (handle case variations, etc.)
-            base_album = self._normalize_base_album_name(base_album, artist.name)
-            
-            # Create a key for this album group (artist + base album)
-            album_key = f"{artist.name}::{base_album}"
-            
-            print(f"🔍 Album grouping - Key: '{album_key}', Detected: '{detected_album}'")
-            
-            # Check if this track indicates a deluxe edition
-            is_deluxe_track = False
-            if album_info.get('spotify_track'):
-                is_deluxe_track = self._detect_deluxe_edition(detected_album)
-            elif original_album:
-                is_deluxe_track = self._detect_deluxe_edition(original_album)
-            
-            # Get current edition level for this album group (default to standard)
-            current_edition = self.album_editions.get(album_key, "standard")
-            
-            # SMART ALGORITHM: Upgrade to deluxe if this track is deluxe
-            if is_deluxe_track and current_edition == "standard":
-                print(f"🎯 UPGRADE: Album '{base_album}' upgraded from standard to deluxe!")
-                self.album_editions[album_key] = "deluxe"
-                current_edition = "deluxe"
-            
-            # Build final album name based on edition level
-            if current_edition == "deluxe":
-                final_album_name = f"{base_album} (Deluxe Edition)"
-            else:
-                final_album_name = base_album
-            
-            # Store the resolution
-            self.album_groups[album_key] = final_album_name
-            self.album_artists[album_key] = artist.name
-            
-            print(f"🔗 Album resolution: '{detected_album}' -> '{final_album_name}' (edition: {current_edition})")
-            
-            return final_album_name
+            with self.album_cache_lock:
+                # Get the original album name from the download item (if it has one)
+                original_album = getattr(download_item, 'album', None)
+                detected_album = album_info.get('album_name', '')
+                
+                # Extract base album name (without edition indicators)
+                if album_info.get('spotify_track'):
+                    # Use Spotify album name for base
+                    base_album = self._get_base_album_name(detected_album)
+                elif original_album:
+                    # Clean the original Soulseek album name 
+                    cleaned_original = self._clean_album_title(original_album, artist.name)
+                    base_album = self._get_base_album_name(cleaned_original)
+                else:
+                    base_album = self._get_base_album_name(detected_album)
+                
+                # Normalize the base name (handle case variations, etc.)
+                base_album = self._normalize_base_album_name(base_album, artist.name)
+                
+                # Create a key for this album group (artist + base album)
+                album_key = f"{artist.name}::{base_album}"
+                
+                # Check if we already have a cached result for this album
+                if album_key in self.album_name_cache:
+                    cached_name = self.album_name_cache[album_key]
+                    print(f"🔍 Using cached album name for '{album_key}': '{cached_name}'")
+                    return cached_name
+                
+                print(f"🔍 Album grouping - Key: '{album_key}', Detected: '{detected_album}'")
+                
+                # Check if this track indicates a deluxe edition
+                is_deluxe_track = False
+                if album_info.get('spotify_track'):
+                    is_deluxe_track = self._detect_deluxe_edition(detected_album)
+                elif original_album:
+                    is_deluxe_track = self._detect_deluxe_edition(original_album)
+                
+                # Get current edition level for this album group (default to standard)
+                current_edition = self.album_editions.get(album_key, "standard")
+                
+                # SMART ALGORITHM: Upgrade to deluxe if this track is deluxe
+                if is_deluxe_track and current_edition == "standard":
+                    print(f"🎯 UPGRADE: Album '{base_album}' upgraded from standard to deluxe!")
+                    self.album_editions[album_key] = "deluxe"
+                    current_edition = "deluxe"
+                
+                # Build final album name based on edition level
+                if current_edition == "deluxe":
+                    final_album_name = f"{base_album} (Deluxe Edition)"
+                else:
+                    final_album_name = base_album
+                
+                # Store the resolution in both caches
+                self.album_groups[album_key] = final_album_name
+                self.album_name_cache[album_key] = final_album_name
+                self.album_artists[album_key] = artist.name
+                
+                print(f"🔗 Album resolution: '{detected_album}' -> '{final_album_name}' (edition: {current_edition})")
+                
+                return final_album_name
             
         except Exception as e:
             print(f"❌ Error resolving album group: {e}")
@@ -8393,3 +8570,13 @@ class DownloadsPage(QWidget):
         layout.addWidget(download_btn)
         
         return item
+    
+    def cleanup_resources(self):
+        """Clean up resources when page is destroyed"""
+        try:
+            # Shutdown thread pool
+            if hasattr(self, 'api_thread_pool'):
+                self.api_thread_pool.shutdown(wait=False)
+                print("🧹 API thread pool shutdown")
+        except Exception as e:
+            print(f"❌ Error during resource cleanup: {e}")
