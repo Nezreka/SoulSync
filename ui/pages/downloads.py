@@ -5975,6 +5975,14 @@ class DownloadsPage(QWidget):
             album_name = getattr(search_result, 'album', None)
             track_number = getattr(search_result, 'track_number', None)
             
+            # If no track number found, try to extract from filename
+            if not track_number:
+                track_number = self._extract_track_number_from_filename(filename, title)
+                if track_number:
+                    print(f"✅ Extracted track number from filename: {track_number}")
+                else:
+                    print(f"❌ Could not extract track number from filename: '{filename}'")
+            
             # Generate download ID
             import time
             download_id = f"{search_result.username}_{filename}_{int(time.time())}"
@@ -6094,13 +6102,29 @@ class DownloadsPage(QWidget):
                 
                 # Preserve album context - this is CRITICAL for proper album detection
                 track.album = clean_album_title  # Use cleaned album title
-                track.track_number = track_index  # Use existing dataclass field instead of custom attribute
+                
+                # Extract original track number from filename instead of using sequential index
+                if hasattr(track, 'filename'):
+                    import os
+                    filename = os.path.basename(track.filename)
+                    original_track_num = self._extract_track_number_from_filename(filename, track.title)
+                    if original_track_num:
+                        track.track_number = original_track_num
+                        print(f"   🎵 Preserved original track number: {original_track_num}")
+                    else:
+                        # Only use sequential as fallback if no original number found
+                        track.track_number = track_index
+                        print(f"   ⚠️ Using fallback sequential track number: {track_index}")
+                else:
+                    # Fallback to sequential numbering if no filename available
+                    track.track_number = track_index
+                    print(f"   ⚠️ Using fallback sequential track number (no filename): {track_index}")
                 
                 # Clean up track title - remove artist prefix if present
                 clean_track_title = self._clean_track_title(track.title, artist.name)
                 track.title = clean_track_title
                 
-                print(f"   🎵 Track {track_index}: '{clean_track_title}' -> Artist: '{artist.name}', Album: '{clean_album_title}', Track#: {track_index}")
+                print(f"   🎵 Track {track_index}: '{clean_track_title}' -> Artist: '{artist.name}', Album: '{clean_album_title}', Track#: {track.track_number}")
             
             # Start downloading all tracks with matched artist immediately
             import time
@@ -8570,6 +8594,58 @@ class DownloadsPage(QWidget):
         layout.addWidget(download_btn)
         
         return item
+    
+    def _extract_track_number_from_filename(self, filename: str, title: str = None) -> Optional[int]:
+        """Extract track number from filename or title"""
+        try:
+            import re
+            import os
+            
+            # Try extracting from title first if available
+            if title:
+                patterns = [
+                    r'^(\d{1,2})[\.\s\-_]+',  # "01. " or "01 " or "01-" or "01_"
+                    r'^(\d{1,2})\s*[\.\-_]\s*',  # "01." or "01-" or "01_" with optional spaces
+                    r'^(\d{1,2})\s+',  # "01 " (space only)
+                    r'^(\d{1,2})[\)\]\}]\s*',  # "01) " or "01] " or "01} "
+                    r'^\[(\d{1,2})\]',  # "[01]" bracket format
+                    r'^\((\d{1,2})\)',  # "(01)" parenthesis format
+                ]
+                
+                for pattern in patterns:
+                    match = re.match(pattern, title.strip())
+                    if match:
+                        track_num = int(match.group(1))
+                        print(f"    🎵 Found track number in title '{title}': {track_num}")
+                        return track_num
+            
+            # Try extracting from filename
+            base_name = os.path.splitext(filename)[0]  # Remove extension
+            
+            patterns = [
+                r'^(\d{1,2})[\.\s\-_]+',  # "01. " or "01 " or "01-" or "01_"
+                r'^(\d{1,2})\s*[\.\-_]\s*',  # "01." or "01-" or "01_" with optional spaces
+                r'^(\d{1,2})\s+',  # "01 " (space only)
+                r'^(\d{1,2})[\)\]\}]\s*',  # "01) " or "01] " or "01} "
+                r'^\[(\d{1,2})\]',  # "[01]" bracket format
+                r'^\((\d{1,2})\)',  # "(01)" parenthesis format
+                r'^Track\s*(\d{1,2})',  # "Track 01" or "Track01"
+                r'^T(\d{1,2})',  # "T01" format
+            ]
+            
+            for pattern in patterns:
+                match = re.match(pattern, base_name.strip())
+                if match:
+                    track_num = int(match.group(1))
+                    print(f"    🎵 Found track number in filename '{filename}': {track_num}")
+                    return track_num
+            
+            print(f"    ❌ No track number found in filename: '{filename}'")
+            return None
+            
+        except Exception as e:
+            print(f"❌ Error extracting track number from filename: {e}")
+            return None
     
     def cleanup_resources(self):
         """Clean up resources when page is destroyed"""
