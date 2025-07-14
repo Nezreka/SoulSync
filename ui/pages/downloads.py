@@ -3856,6 +3856,11 @@ class DownloadsPage(QWidget):
         self.spotify_client = SpotifyClient()
         self.matching_engine = MusicMatchingEngine()
         
+        # Album grouping system to ensure tracks from same album go to same folder
+        self.album_groups = {}  # Maps original album name -> resolved clean album name
+        self.album_artists = {}  # Maps original album name -> artist for consistency
+        self.album_editions = {}  # Maps original album name -> edition level ("standard", "deluxe")
+        
         # Initialize audio player for streaming
         self.audio_player = AudioPlayer(self)
         self.audio_player.playback_finished.connect(self.on_audio_playback_finished)
@@ -6058,6 +6063,18 @@ class DownloadsPage(QWidget):
             # Determine if this is a single or album track
             album_info = self._detect_album_info(download_item, artist)
             
+            # Resolve consistent album name for grouping tracks from same album
+            if album_info and album_info['is_album']:
+                print(f"\n🎯 SMART ALBUM GROUPING for track: '{download_item.title}'")
+                print(f"   Original album: '{getattr(download_item, 'album', 'None')}'")
+                print(f"   Detected album: '{album_info.get('album_name', 'None')}'")
+                
+                consistent_album_name = self._resolve_album_group(download_item, artist, album_info)
+                album_info['album_name'] = consistent_album_name
+                
+                print(f"   Final album name: '{consistent_album_name}'")
+                print(f"🔗 ✅ Album grouping complete!\n")
+            
             if album_info and album_info['is_album']:
                 # Album track structure: Transfer/ARTIST/ARTIST - ALBUM/TRACK# TRACK.ext
                 print(f"🔍 Creating album folder:")
@@ -6189,7 +6206,7 @@ class DownloadsPage(QWidget):
         for pattern in quality_patterns:
             cleaned = re.sub(pattern, ' ', cleaned, flags=re.IGNORECASE)
         
-        # Remove source/torrent indicators
+        # Remove source/torrent indicators  
         source_patterns = [
             r'\s*[\[\(]album[\]\)]\s*',
             r'\s*[\[\(]itunes[\]\)]\s*',
@@ -6200,7 +6217,10 @@ class DownloadsPage(QWidget):
             r'\s*[\[\(]bonus\s*tracks?[\]\)]\s*',
             r'\s*[\[\(]remaster(ed)?[\]\)]\s*',
             r'\s*[\[\(]clean[\]\)]\s*',
-            r'\s*[\[\(]explicit[\]\)]\s*'
+            r'\s*[\[\(]explicit[\]\)]\s*',
+            r'\s*[\[\(]album\+itunes\+bonus\s*tracks?[\]\)]\s*',  # [Album+iTunes+Bonus Tracks]
+            r'\s*[\[\(]itunes\+bonus[\]\)]\s*',
+            r'\s*[\[\(]bonus[\]\)]\s*'
         ]
         for pattern in source_patterns:
             cleaned = re.sub(pattern, ' ', cleaned, flags=re.IGNORECASE)
@@ -6275,6 +6295,193 @@ class DownloadsPage(QWidget):
         
         print(f"🧹 Track Title Result: '{original}' -> '{cleaned}'")
         return cleaned
+    
+    def _resolve_album_group(self, download_item, artist: Artist, album_info: dict) -> str:
+        """
+        Smart album grouping: Start with standard, upgrade to deluxe if ANY track is deluxe.
+        This ensures all tracks from the same album get the same folder name.
+        """
+        try:
+            # Get the original album name from the download item (if it has one)
+            original_album = getattr(download_item, 'album', None)
+            detected_album = album_info.get('album_name', '')
+            
+            # Extract base album name (without edition indicators)
+            if album_info.get('spotify_track'):
+                # Use Spotify album name for base
+                base_album = self._get_base_album_name(detected_album)
+            elif original_album:
+                # Clean the original Soulseek album name 
+                cleaned_original = self._clean_album_title(original_album, artist.name)
+                base_album = self._get_base_album_name(cleaned_original)
+            else:
+                base_album = self._get_base_album_name(detected_album)
+            
+            # Normalize the base name (handle case variations, etc.)
+            base_album = self._normalize_base_album_name(base_album, artist.name)
+            
+            # Create a key for this album group (artist + base album)
+            album_key = f"{artist.name}::{base_album}"
+            
+            print(f"🔍 Album grouping - Key: '{album_key}', Detected: '{detected_album}'")
+            
+            # Check if this track indicates a deluxe edition
+            is_deluxe_track = False
+            if album_info.get('spotify_track'):
+                is_deluxe_track = self._detect_deluxe_edition(detected_album)
+            elif original_album:
+                is_deluxe_track = self._detect_deluxe_edition(original_album)
+            
+            # Get current edition level for this album group (default to standard)
+            current_edition = self.album_editions.get(album_key, "standard")
+            
+            # SMART ALGORITHM: Upgrade to deluxe if this track is deluxe
+            if is_deluxe_track and current_edition == "standard":
+                print(f"🎯 UPGRADE: Album '{base_album}' upgraded from standard to deluxe!")
+                self.album_editions[album_key] = "deluxe"
+                current_edition = "deluxe"
+            
+            # Build final album name based on edition level
+            if current_edition == "deluxe":
+                final_album_name = f"{base_album} (Deluxe Edition)"
+            else:
+                final_album_name = base_album
+            
+            # Store the resolution
+            self.album_groups[album_key] = final_album_name
+            self.album_artists[album_key] = artist.name
+            
+            print(f"🔗 Album resolution: '{detected_album}' -> '{final_album_name}' (edition: {current_edition})")
+            
+            return final_album_name
+            
+        except Exception as e:
+            print(f"❌ Error resolving album group: {e}")
+            return album_info.get('album_name', download_item.title)
+    
+    def _normalize_base_album_name(self, base_album: str, artist_name: str) -> str:
+        """
+        Normalize the base album name to handle case variations and known corrections.
+        """
+        import re
+        
+        # Apply known album corrections for consistent naming
+        normalized_lower = base_album.lower().strip()
+        
+        known_corrections = {
+            'good kid maad city': 'good kid, m.A.A.d city',
+            'good kid m.a.a.d city': 'good kid, m.A.A.d city',
+            'good kid m.a.a.d. city': 'good kid, m.A.A.d city',
+            'good kid m a a d city': 'good kid, m.A.A.d city',
+            'good kid m.a.a.d city': 'good kid, m.A.A.d city'
+        }
+        
+        for key, correction in known_corrections.items():
+            if key == normalized_lower:
+                print(f"📝 Base album correction: '{base_album}' -> '{correction}'")
+                return correction
+        
+        # If no specific correction, return cleaned version
+        return base_album.strip()
+    
+    def _normalize_spotify_album_variants(self, album_name: str, artist_name: str) -> str:
+        """
+        Normalize different Spotify album variants to a consistent name.
+        E.g., 'good kid, m.A.A.d city' and 'good kid, m.A.A.d city (Deluxe)' 
+        should both resolve to 'good kid, m.A.A.d city (Deluxe Edition)'
+        """
+        import re
+        
+        normalized = album_name.strip()
+        
+        # Convert various deluxe indicators to standard format
+        deluxe_patterns = [
+            (r'\s*\(deluxe\)\s*$', ' (Deluxe Edition)'),
+            (r'\s*\[deluxe\]\s*$', ' (Deluxe Edition)'),
+            (r'\s*deluxe\s*$', ' (Deluxe Edition)'),
+            (r'\s*\(deluxe\s+edition\)\s*$', ' (Deluxe Edition)'),
+            (r'\s*\[deluxe\s+edition\]\s*$', ' (Deluxe Edition)')
+        ]
+        
+        for pattern, replacement in deluxe_patterns:
+            if re.search(pattern, normalized, re.IGNORECASE):
+                normalized = re.sub(pattern, replacement, normalized, flags=re.IGNORECASE)
+                break
+        
+        # Normalize case inconsistencies for known albums
+        # This handles cases like "good kid, m.A.A.d city" vs "Good Kid M.A.A.D City"
+        known_album_corrections = {
+            'good kid maad city': 'good kid, m.A.A.d city',
+            'good kid m.a.a.d city': 'good kid, m.A.A.d city',
+            'good kid m.a.a.d. city': 'good kid, m.A.A.d city',
+            'good kid m.a.a.d city': 'good kid, m.A.A.d city',
+            'good kid m a a d city': 'good kid, m.A.A.d city'
+        }
+        
+        normalized_lower = normalized.lower()
+        for key, correction in known_album_corrections.items():
+            if key in normalized_lower:
+                # Preserve any edition suffix
+                suffix = ''
+                if '(deluxe edition)' in normalized_lower:
+                    suffix = ' (Deluxe Edition)'
+                elif '(deluxe)' in normalized_lower:
+                    suffix = ' (Deluxe Edition)'
+                    
+                normalized = correction + suffix
+                break
+        
+        print(f"📀 Album variant normalization: '{album_name}' -> '{normalized}'")
+        return normalized
+    
+    def _detect_deluxe_edition(self, album_name: str) -> bool:
+        """
+        Detect if an album name indicates a deluxe/special edition.
+        Returns True if it's a deluxe variant, False for standard.
+        """
+        if not album_name:
+            return False
+        
+        album_lower = album_name.lower()
+        
+        # Check for deluxe indicators
+        deluxe_indicators = [
+            'deluxe',
+            'deluxe edition', 
+            'special edition',
+            'expanded edition',
+            'extended edition',
+            'bonus',
+            'remastered',
+            'anniversary',
+            'collectors edition',
+            'limited edition'
+        ]
+        
+        for indicator in deluxe_indicators:
+            if indicator in album_lower:
+                print(f"🎯 Detected deluxe edition: '{album_name}' contains '{indicator}'")
+                return True
+        
+        return False
+    
+    def _get_base_album_name(self, album_name: str) -> str:
+        """
+        Extract the base album name without edition indicators.
+        E.g., 'good kid, m.A.A.d city (Deluxe Edition)' -> 'good kid, m.A.A.d city'
+        """
+        import re
+        
+        # Remove common edition suffixes
+        base_name = album_name
+        
+        # Remove edition indicators in parentheses or brackets
+        base_name = re.sub(r'\s*[\[\(](deluxe|special|expanded|extended|bonus|remastered|anniversary|collectors?|limited).*?[\]\)]\s*$', '', base_name, flags=re.IGNORECASE)
+        
+        # Remove standalone edition words at the end
+        base_name = re.sub(r'\s+(deluxe|special|expanded|extended|bonus|remastered|anniversary|collectors?|limited)\s*(edition)?\s*$', '', base_name, flags=re.IGNORECASE)
+        
+        return base_name.strip()
     
     def _detect_album_info(self, download_item, artist: Artist) -> Optional[dict]:
         """Detect if track is part of an album using Spotify API as primary source"""
