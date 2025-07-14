@@ -1692,7 +1692,7 @@ class AlbumResultItem(QFrame):
     
     def setup_ui(self):
         # Dynamic height based on expansion state with better proportions
-        self.collapsed_height = 90  # Increased from 80px for better breathing room
+        self.collapsed_height = 110  # Increased from 80px for better breathing room
         self.setFixedHeight(self.collapsed_height)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         
@@ -1828,7 +1828,7 @@ class AlbumResultItem(QFrame):
         """)
         
         # Matched Download button
-        self.matched_download_btn = QPushButton("📱 Matched Album")
+        self.matched_download_btn = QPushButton("📱 Matched Album DL")
         self.matched_download_btn.setFixedSize(150, 32)
         self.matched_download_btn.clicked.connect(self.request_matched_album_download)
         self.matched_download_btn.setToolTip("Download Album with Spotify Matching")
