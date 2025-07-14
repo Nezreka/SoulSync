@@ -224,6 +224,30 @@ class SpotifyClient:
         
         try:
             track_data = self.sp.track(track_id)
+            
+            # Enhance with additional useful metadata for our purposes
+            if track_data:
+                enhanced_data = {
+                    'id': track_data['id'],
+                    'name': track_data['name'],
+                    'track_number': track_data['track_number'],
+                    'disc_number': track_data['disc_number'],
+                    'duration_ms': track_data['duration_ms'],
+                    'explicit': track_data['explicit'],
+                    'artists': [artist['name'] for artist in track_data['artists']],
+                    'primary_artist': track_data['artists'][0]['name'] if track_data['artists'] else None,
+                    'album': {
+                        'id': track_data['album']['id'],
+                        'name': track_data['album']['name'],
+                        'total_tracks': track_data['album']['total_tracks'],
+                        'release_date': track_data['album']['release_date'],
+                        'album_type': track_data['album']['album_type'],
+                        'artists': [artist['name'] for artist in track_data['album']['artists']]
+                    },
+                    'is_album_track': track_data['album']['total_tracks'] > 1,
+                    'raw_data': track_data  # Keep original for fallback
+                }
+                return enhanced_data
             return track_data
             
         except Exception as e:
@@ -242,6 +266,32 @@ class SpotifyClient:
             logger.error(f"Error fetching track features: {e}")
             return None
     
+    def get_album(self, album_id: str) -> Optional[Dict[str, Any]]:
+        """Get album information including tracks"""
+        if not self.is_authenticated():
+            return None
+        
+        try:
+            album_data = self.sp.album(album_id)
+            return album_data
+            
+        except Exception as e:
+            logger.error(f"Error fetching album: {e}")
+            return None
+    
+    def get_album_tracks(self, album_id: str) -> Optional[Dict[str, Any]]:
+        """Get album tracks"""
+        if not self.is_authenticated():
+            return None
+        
+        try:
+            tracks_data = self.sp.album_tracks(album_id)
+            return tracks_data
+            
+        except Exception as e:
+            logger.error(f"Error fetching album tracks: {e}")
+            return None
+
     def get_user_info(self) -> Optional[Dict[str, Any]]:
         if not self.is_authenticated():
             return None
