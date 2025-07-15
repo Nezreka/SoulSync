@@ -6244,7 +6244,10 @@ class DownloadsPage(QWidget):
             
             # Generate a unique download ID for tracking and cancellation  
             import time
-            download_id = f"{search_result.username}_{filename}_{int(time.time())}"
+            import uuid
+            timestamp = time.time()
+            unique_suffix = str(uuid.uuid4())[:8]  # Short unique identifier
+            download_id = f"{search_result.username}_{filename}_{int(timestamp)}_{unique_suffix}"
             
             # Add to download queue immediately as "downloading" with album context
             download_item = self.download_queue.add_download_item(
@@ -6484,7 +6487,10 @@ class DownloadsPage(QWidget):
             
             # Generate download ID
             import time
-            download_id = f"{search_result.username}_{filename}_{int(time.time())}"
+            import uuid
+            timestamp = time.time()
+            unique_suffix = str(uuid.uuid4())[:8]  # Short unique identifier
+            download_id = f"{search_result.username}_{filename}_{int(timestamp)}_{unique_suffix}"
             
             # Create download item with matched artist immediately
             download_item = self.download_queue.add_download_item(
@@ -8580,6 +8586,9 @@ class DownloadsPage(QWidget):
                 
                 print(f"[DEBUG] Processing {len(all_transfers)} active transfers from API")
                 
+                # Track which transfers have been matched to prevent duplicate assignments
+                matched_transfer_ids = set()
+                
                 # Update download items based on transfer data
                 for download_item in self.download_queue.download_items.copy():  # Use copy to avoid modification during iteration
                     if download_item.status.lower() in ['completed', 'finished', 'cancelled', 'failed']:
@@ -8592,15 +8601,22 @@ class DownloadsPage(QWidget):
                     
                     if hasattr(download_item, 'download_id') and download_item.download_id:
                         for transfer in all_transfers:
-                            if transfer.get('id') == download_item.download_id:
+                            transfer_id = transfer.get('id')
+                            if transfer_id == download_item.download_id and transfer_id not in matched_transfer_ids:
                                 matching_transfer = transfer
-                                print(f"[DEBUG] ✅ Found ID match: {transfer.get('id')} -> {transfer.get('filename', 'Unknown')}")
+                                matched_transfer_ids.add(transfer_id)
+                                print(f"[DEBUG] ✅ Found ID match: {transfer_id} -> {transfer.get('filename', 'Unknown')}")
                                 break
                     
                     # If no ID match, try improved filename matching as fallback
                     if not matching_transfer:
                         print(f"[DEBUG] No ID match found, trying filename matching...")
                         for transfer in all_transfers:
+                            transfer_id = transfer.get('id')
+                            # Skip transfers that are already matched to other download items
+                            if transfer_id in matched_transfer_ids:
+                                continue
+                                
                             full_filename = transfer.get('filename', '')
                             transfer_filename = full_filename.lower()
                             
@@ -8616,15 +8632,27 @@ class DownloadsPage(QWidget):
                             matches = False
                             match_reason = ""
                             
+                            # Get file extensions for comparison
+                            download_ext = ""
+                            if download_item.file_path:
+                                download_ext = os.path.splitext(download_item.file_path)[1].lower()
+                            transfer_ext = os.path.splitext(basename)[1].lower()
+                            
+                            print(f"[DEBUG] Comparing extensions: download='{download_ext}' vs transfer='{transfer_ext}' for '{basename}'")
+                            
                             # Strategy 1: Direct filename match (most reliable)
                             if basename_lower == download_title_lower + '.mp3' or basename_lower == download_title_lower + '.flac':
-                                matches = True
-                                match_reason = f"direct filename match '{download_title_lower}' == '{basename_lower}'"
+                                # Additional check: file extensions should match if we have the download item's file path
+                                if not download_ext or download_ext == transfer_ext:
+                                    matches = True
+                                    match_reason = f"direct filename match '{download_title_lower}' == '{basename_lower}'"
                             
                             # Strategy 2: Match track title in the actual filename
                             elif download_title_lower in basename_lower:
-                                matches = True
-                                match_reason = f"track title '{download_title_lower}' in filename '{basename_lower}'"
+                                # Additional check: file extensions should match if we have the download item's file path
+                                if not download_ext or download_ext == transfer_ext:
+                                    matches = True
+                                    match_reason = f"track title '{download_title_lower}' in filename '{basename_lower}'"
                             
                             # Strategy 3: For album tracks, try to match by removing common prefixes
                             elif ' - ' in download_item.title:
@@ -8633,8 +8661,10 @@ class DownloadsPage(QWidget):
                                 if len(title_parts) >= 3:  # Format: "Album - TrackNum - Title"
                                     song_title = title_parts[-1].strip().lower()
                                     if song_title in basename_lower and len(song_title) > 2:  # Avoid matching very short titles
-                                        matches = True
-                                        match_reason = f"extracted song title '{song_title}' in filename '{basename_lower}'"
+                                        # Additional check: file extensions should match if we have the download item's file path
+                                        if not download_ext or download_ext == transfer_ext:
+                                            matches = True
+                                            match_reason = f"extracted song title '{song_title}' in filename '{basename_lower}'"
                             
                             # Strategy 3.5: Core track name matching (remove parenthetical content)
                             elif '(' in download_item.title and ')' in download_item.title:
@@ -8651,8 +8681,10 @@ class DownloadsPage(QWidget):
                                     if core_words:
                                         matching_core_words = [w for w in core_words if w in basename_lower]
                                         if len(matching_core_words) >= min(2, len(core_words)):  # At least 2 unique words
-                                            matches = True
-                                            match_reason = f"core track name match: {matching_core_words} from '{core_title}' in '{basename_lower}'"
+                                            # Additional check: file extensions should match if we have the download item's file path
+                                            if not download_ext or download_ext == transfer_ext:
+                                                matches = True
+                                                match_reason = f"core track name match: {matching_core_words} from '{core_title}' in '{basename_lower}'"
                             
                             # Strategy 4: Improved word matching (exclude common music terms)
                             elif any(word.lower() in basename_lower for word in download_item.title.split() if len(word) >= 4):
@@ -8666,8 +8698,10 @@ class DownloadsPage(QWidget):
                                 
                                 # Require at least 3 unique meaningful words for a match (stricter than before)
                                 if len(matching_words) >= min(3, len(title_words)) and len(matching_words) >= 2:
-                                    matches = True
-                                    match_reason = f"meaningful words match: {matching_words} in '{basename_lower}' (excluded common terms)"
+                                    # Additional check: file extensions should match if we have the download item's file path
+                                    if not download_ext or download_ext == transfer_ext:
+                                        matches = True
+                                        match_reason = f"meaningful words match: {matching_words} in '{basename_lower}' (excluded common terms)"
                             
                             # Strategy 5: Match by download_item's stored file_path if available
                             elif download_item.file_path:
@@ -8678,6 +8712,7 @@ class DownloadsPage(QWidget):
                             
                             if matches:
                                 matching_transfer = transfer
+                                matched_transfer_ids.add(transfer_id)
                                 print(f"[DEBUG] ✅ Found filename match: {match_reason}")
                                 break
                             else:
