@@ -72,6 +72,7 @@ class SpotifyMatchingModal(QDialog):
     
     artist_selected = pyqtSignal(Artist)  # Emitted when user selects an artist
     album_selected = pyqtSignal(object)  # Emitted when user selects an album (for album workflow)
+    cancelled = pyqtSignal()  # Emitted when modal is cancelled or closed without selection
     
     def __init__(self, track_result: TrackResult, spotify_client: SpotifyClient, matching_engine: MusicMatchingEngine, parent=None, is_album=False):
         super().__init__(parent)
@@ -165,12 +166,17 @@ class SpotifyMatchingModal(QDialog):
                 background: rgba(255, 255, 255, 0.1);
                 border: none;
                 border-radius: 20px;
-                color: white;
+                color: #ffffff;
                 font-size: 18px;
                 font-weight: bold;
+                text-align: center;
             }
             QPushButton:hover {
                 background: rgba(255, 255, 255, 0.2);
+                color: #ffffff;
+            }
+            QPushButton:pressed {
+                background: rgba(255, 255, 255, 0.3);
             }
         """)
         close_layout.addWidget(close_btn)
@@ -190,7 +196,13 @@ class SpotifyMatchingModal(QDialog):
         separator.setStyleSheet("font-size: 14px; color: #666;")
         header_layout.addWidget(separator)
         
-        track_info = QLabel(f"{self.track_result.title} by {self.track_result.artist}")
+        # Display folder title for albums, track title for singles
+        if self.is_album and hasattr(self.track_result, 'album') and self.track_result.album:
+            display_text = f"{self.track_result.album} by {self.track_result.artist}"
+        else:
+            display_text = f"{self.track_result.title} by {self.track_result.artist}"
+        
+        track_info = QLabel(display_text)
         track_info.setStyleSheet("font-size: 14px; color: #aaa;")
         header_layout.addWidget(track_info)
         
@@ -716,6 +728,9 @@ class SpotifyMatchingModal(QDialog):
         """Override reject to distinguish cancel vs skip"""
         if not hasattr(self, 'skipped_matching'):
             self.skipped_matching = False  # This was a cancel, not a skip
+        
+        # Emit cancelled signal to re-enable buttons
+        self.cancelled.emit()
         super().reject()
     
     def clear_layout(self, layout):
@@ -6349,6 +6364,7 @@ class DownloadsPage(QWidget):
             # Create and show the Spotify matching modal
             modal = SpotifyMatchingModal(search_result, self.spotify_client, self.matching_engine, self, is_album=False)
             modal.artist_selected.connect(lambda artist: self._handle_matched_download(search_result, artist))
+            modal.cancelled.connect(lambda: self._handle_modal_cancelled(search_result))
             
             # Show modal and handle result
             result = modal.exec()
@@ -6391,6 +6407,7 @@ class DownloadsPage(QWidget):
                 # Connect to album-specific handlers
                 modal.artist_selected.connect(lambda artist: self._handle_matched_album_download(album_result, artist))
                 modal.album_selected.connect(lambda album: self._handle_matched_album_download_with_album(album_result, modal.selected_artist, album))
+                modal.cancelled.connect(lambda: self._handle_album_modal_cancelled(album_result))
                 
                 # Show modal and handle result
                 result = modal.exec()
@@ -6828,6 +6845,43 @@ class DownloadsPage(QWidget):
             
         except Exception as e:
             print(f"❌ Error in retry assignment: {e}")
+    
+    def _handle_modal_cancelled(self, search_result):
+        """Handle when modal is cancelled for single track downloads"""
+        print(f"🚫 Modal cancelled for track: {search_result.title}")
+        # Re-enable any disabled download buttons for this track
+        # Since track downloads don't disable buttons, this is mainly for consistency
+    
+    def _handle_album_modal_cancelled(self, album_result):
+        """Handle when modal is cancelled for album downloads - re-enable buttons"""
+        print(f"🚫 Album modal cancelled for: {album_result.album_title}")
+        
+        # Re-enable all track download buttons for this album
+        self._enable_album_track_buttons(album_result)
+    
+    def _enable_album_track_buttons(self, album_result):
+        """Re-enable all track download buttons for an album"""
+        try:
+            # Find the AlbumResultItem and re-enable its buttons
+            for i in range(self.search_results_layout.count()):
+                item = self.search_results_layout.itemAt(i)
+                if item and item.widget():
+                    widget = item.widget()
+                    if hasattr(widget, 'album_result') and widget.album_result == album_result:
+                        # Re-enable the matched download button
+                        if hasattr(widget, 'matched_download_btn'):
+                            widget.matched_download_btn.setText("🎯 Download w/ Matching")
+                            widget.matched_download_btn.setEnabled(True)
+                        
+                        # Re-enable the regular download button
+                        if hasattr(widget, 'download_btn'):
+                            widget.download_btn.setText("⬇️ Download Album")
+                            widget.download_btn.setEnabled(True)
+                        
+                        print(f"✅ Re-enabled buttons for album: {album_result.album_title}")
+                        break
+        except Exception as e:
+            print(f"❌ Error re-enabling album buttons: {e}")
     
     def _organize_matched_download(self, download_item, original_file_path: str) -> Optional[str]:
         """Organize a matched download into the Transfer folder structure"""
