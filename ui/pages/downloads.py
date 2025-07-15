@@ -320,7 +320,7 @@ class SpotifyMatchingModal(QDialog):
             
             # Temporarily force thread approach to debug UI issue
             print(f"🔄 [DEBUG] FORCING thread approach for debugging")
-            self.suggestion_thread = ArtistSuggestionThread(self.track_result, self.spotify_client, self.matching_engine)
+            self.suggestion_thread = ArtistSuggestionThread(self.track_result, self.spotify_client, self.matching_engine, self.is_album, self.album_result)
             self.suggestion_thread.suggestions_ready.connect(self.display_auto_suggestions)
             self.suggestion_thread.start()
         except Exception as e:
@@ -332,7 +332,7 @@ class SpotifyMatchingModal(QDialog):
         """Worker function for generating suggestions in thread pool"""
         try:
             # Create suggestion thread instance for logic reuse
-            thread = ArtistSuggestionThread(self.track_result, self.spotify_client, self.matching_engine)
+            thread = ArtistSuggestionThread(self.track_result, self.spotify_client, self.matching_engine, self.is_album, self.album_result)
             suggestions = thread.generate_artist_suggestions()
             return suggestions
         except Exception as e:
@@ -754,11 +754,13 @@ class ArtistSuggestionThread(QThread):
     
     suggestions_ready = pyqtSignal(list)
     
-    def __init__(self, track_result: TrackResult, spotify_client: SpotifyClient, matching_engine: MusicMatchingEngine):
+    def __init__(self, track_result: TrackResult, spotify_client: SpotifyClient, matching_engine: MusicMatchingEngine, is_album=False, album_result=None):
         super().__init__()
         self.track_result = track_result
         self.spotify_client = spotify_client
         self.matching_engine = matching_engine
+        self.is_album = is_album
+        self.album_result = album_result
     
     def run(self):
         """Generate artist suggestions"""
@@ -787,7 +789,125 @@ class ArtistSuggestionThread(QThread):
             print(f"    spotify_client.is_authenticated(): {self.spotify_client.is_authenticated()}")
         print(f"    track_result attributes: {[attr for attr in dir(self.track_result) if not attr.startswith('_')]}")
         
-        # Try to get artist name from different sources
+        # Special handling for albums - use album title to find artist instead of track data
+        if self.is_album and self.album_result and self.album_result.album_title:
+            print(f"🎵 [DEBUG] Album mode detected - using album title for artist search")
+            print(f"    album_title: '{self.album_result.album_title}'")
+            print(f"    album_artist: '{getattr(self.album_result, 'artist', 'NOT_FOUND')}'")
+            
+            # Clean album title for searching (remove year prefixes like "(2005)")
+            album_title = self.album_result.album_title
+            import re
+            clean_album_title = re.sub(r'^\(\d{4}\)\s*', '', album_title).strip()
+            print(f"    clean_album_title: '{clean_album_title}'")
+            
+            # Strategy: Search tracks using album title to find the artist
+            print(f"🔍 Album Strategy: Searching tracks for album '{clean_album_title}'")
+            tracks = self.spotify_client.search_tracks(clean_album_title, limit=20)
+            print(f"📊 Found {len(tracks)} tracks from album search")
+            
+            # Collect unique artist names and their associated tracks/albums first
+            unique_artists = {}  # artist_name -> list of (track, album) tuples
+            for track in tracks:
+                for artist_name in track.artists:
+                    if artist_name not in unique_artists:
+                        unique_artists[artist_name] = []
+                    unique_artists[artist_name].append((track, track.album))
+            
+            print(f"🚀 [PERF] Found {len(unique_artists)} unique artists to lookup (down from {sum(len(track.artists) for track in tracks)} total)")
+            
+            # Batch fetch artist objects using concurrent futures for speed
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            import time
+            
+            start_time = time.time()
+            artist_objects = {}  # artist_name -> Artist object
+            
+            def fetch_artist(artist_name):
+                """Fetch single artist with error handling"""
+                try:
+                    matches = self.spotify_client.search_artists(artist_name, limit=1)
+                    if matches:
+                        return artist_name, matches[0]
+                except Exception as e:
+                    print(f"⚠️ Error fetching artist '{artist_name}': {e}")
+                return artist_name, None
+            
+            # Use limited concurrency to respect rate limits while improving speed
+            with ThreadPoolExecutor(max_workers=3) as executor:
+                future_to_artist = {executor.submit(fetch_artist, name): name for name in unique_artists.keys()}
+                
+                for future in as_completed(future_to_artist):
+                    artist_name, artist_obj = future.result()
+                    if artist_obj:
+                        artist_objects[artist_name] = artist_obj
+            
+            fetch_time = time.time() - start_time
+            print(f"⚡ [PERF] Fetched {len(artist_objects)} artists in {fetch_time:.2f}s using concurrent API calls")
+            
+            # Now calculate confidence scores for each artist
+            artist_scores = {}
+            for artist_name, track_album_pairs in unique_artists.items():
+                if artist_name not in artist_objects:
+                    continue
+                    
+                artist = artist_objects[artist_name]
+                best_confidence = 0
+                best_album_match = ""
+                
+                # Find the best confidence score across all albums for this artist
+                for track, album in track_album_pairs:
+                    # Calculate confidence based on album title match
+                    confidence = self.matching_engine.similarity_score(
+                        self.matching_engine.normalize_string(clean_album_title),
+                        self.matching_engine.normalize_string(album)
+                    )
+                    
+                    # Boost confidence if album artist matches
+                    if hasattr(self.album_result, 'artist') and self.album_result.artist:
+                        artist_confidence = self.matching_engine.similarity_score(
+                            self.matching_engine.normalize_string(self.album_result.artist),
+                            self.matching_engine.normalize_string(artist.name)
+                        )
+                        confidence = max(confidence, artist_confidence)
+                    
+                    # Keep highest confidence for this artist
+                    if confidence > best_confidence:
+                        best_confidence = confidence
+                        best_album_match = album
+                
+                # Store the artist with their best confidence
+                artist_scores[artist.id] = {
+                    'artist': artist,
+                    'confidence': best_confidence,
+                    'album_match': best_album_match
+                }
+            
+            # Add high-confidence album artists to suggestions
+            for artist_data in artist_scores.values():
+                if artist_data['confidence'] >= 0.6:  # Higher threshold for album matches
+                    print(f"✅ Added album artist match: {artist_data['artist'].name} ({artist_data['confidence']:.2f}) via '{artist_data['album_match']}'")
+                    suggestions.append(ArtistMatch(
+                        artist=artist_data['artist'],
+                        confidence=artist_data['confidence'],
+                        match_reason=f"Album match via '{artist_data['album_match']}'"
+                    ))
+            
+            print(f"🎯 [DEBUG] Album strategy generated {len(suggestions)} suggestions")
+            
+            # If we found good album matches, return them (don't try track-based strategies)
+            if suggestions:
+                # Remove duplicates and sort by confidence
+                unique_suggestions = {}
+                for suggestion in suggestions:
+                    if suggestion.artist.id not in unique_suggestions or unique_suggestions[suggestion.artist.id].confidence < suggestion.confidence:
+                        unique_suggestions[suggestion.artist.id] = suggestion
+                
+                final_suggestions = sorted(unique_suggestions.values(), key=lambda x: x.confidence, reverse=True)
+                print(f"🎯 [DEBUG] Returning {len(final_suggestions)} album-based suggestions")
+                return final_suggestions[:5]
+        
+        # Try to get artist name from different sources (for singles or fallback)
         artist_name = None
         if self.track_result.artist and self.track_result.artist != "Unknown Artist":
             artist_name = self.track_result.artist
