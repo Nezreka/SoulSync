@@ -19307,3 +19307,499 @@
 2025-07-14 19:54:37 - newmusic.main - [92mINFO[0m - closeEvent:186 - Stopping status monitoring thread...
 2025-07-14 19:54:39 - newmusic.main - [92mINFO[0m - closeEvent:191 - Closing Soulseek client...
 2025-07-14 19:54:39 - newmusic.main - [92mINFO[0m - closeEvent:197 - Application closed successfully
+2025-07-14 20:05:15 - newmusic - [92mINFO[0m - setup_logging:57 - Logging initialized with level: DEBUG
+2025-07-14 20:05:15 - newmusic.main - [92mINFO[0m - main:211 - Starting NewMusic application
+2025-07-14 20:05:15 - newmusic.spotify_client - [92mINFO[0m - _setup_client:179 - Successfully authenticated with Spotify as broquethomas
+2025-07-14 20:05:15 - newmusic.plex_client - [92mINFO[0m - _find_music_library:98 - Found music library: Music
+2025-07-14 20:05:15 - newmusic.plex_client - [92mINFO[0m - _setup_client:84 - Successfully connected to Plex server: PLEX-MACHINE
+2025-07-14 20:05:15 - newmusic.soulseek_client - [92mINFO[0m - _setup_client:220 - Soulseek client configured with slskd at http://localhost:5030
+2025-07-14 20:05:15 - newmusic.spotify_client - [92mINFO[0m - _setup_client:179 - Successfully authenticated with Spotify as broquethomas
+2025-07-14 20:05:16 - newmusic.main - [92mINFO[0m - change_page:163 - Changed to page: dashboard
+2025-07-14 20:05:16 - newmusic.main - [92mINFO[0m - setup_media_player_connections:150 - Media player connections established between sidebar and downloads page
+2025-07-14 20:05:17 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:201 - Fetching tracks for playlist: Aether
+2025-07-14 20:05:17 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:201 - Fetching tracks for playlist: Favorite Artists
+2025-07-14 20:05:18 - newmusic.main - [92mINFO[0m - change_page:163 - Changed to page: downloads
+2025-07-14 20:05:19 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:201 - Fetching tracks for playlist: Brittnea
+2025-07-14 20:05:20 - newmusic.soulseek_client - [92mINFO[0m - search:551 - Starting search for: 'demon days'
+2025-07-14 20:05:20 - newmusic.soulseek_client - [94mDEBUG[0m - search:561 - Search data: {'searchText': 'demon days', 'timeout': 30000, 'filterResponses': True, 'minimumResponseFileCount': 1, 'minimumPeerUploadSpeed': 0}
+2025-07-14 20:05:20 - newmusic.soulseek_client - [94mDEBUG[0m - search:562 - Making POST request to: http://localhost:5030/api/v0/searches
+2025-07-14 20:05:20 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/searches
+2025-07-14 20:05:20 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-14 20:05:20 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: {'searchText': 'demon days', 'timeout': 30000, 'filterResponses': True, 'minimumResponseFileCount': 1, 'minimumPeerUploadSpeed': 0}
+2025-07-14 20:05:20 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-14 20:05:20 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: {"fileCount":0,"id":"0516bc58-4810-4075-a2fc-6c07f1e17a09","isComplete":false,"lockedFileCount":0,"responseCount":0,"responses":[],"searchText":"demon days","startedAt":"2025-07-15T03:05:20.4442868Z","state":"InProgress","token":9675}...
+2025-07-14 20:05:20 - newmusic.soulseek_client - [92mINFO[0m - search:575 - Search initiated with ID: 0516bc58-4810-4075-a2fc-6c07f1e17a09
+2025-07-14 20:05:20 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 1/20) - elapsed: 0.0s
+2025-07-14 20:05:20 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/0516bc58-4810-4075-a2fc-6c07f1e17a09/responses
+2025-07-14 20:05:20 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-14 20:05:20 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-14 20:05:20 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-14 20:05:21 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:201 - Fetching tracks for playlist: Baleigh
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 2/20) - elapsed: 1.5s
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/0516bc58-4810-4075-a2fc-6c07f1e17a09/responses
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":33,"files":[{"bitDepth":16,"code":1,"extension":"","filename":"@@ddptt\\Music\\G\\Gorillaz\\[2005] Gorillaz - Demon Days - [flac]\\01 - IntroAU - Demon Days.flac","length":63,"sampleRate":44100,"size":5807012,"isLocked":false},{"code":1,"extension":"","filename":"@@ddptt\\Music\\G\\Gorillaz\\[2005] Gorillaz - Demon Days - [flac]\\01 - IntroAU - Demon Days.lrc","size":594,"isLocked":false},{"bitDepth":16,"code":1,"extension":"","filename":"@@ddptt\\Music\\G\\Gorillaz\\[2005] Gorilla...
+2025-07-14 20:05:22 - newmusic.soulseek_client - [92mINFO[0m - search:597 - Found 250 new responses (250 total) at 1.5s
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:345 - Processing 250 user responses
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User TroubleMoth has 33 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User zaniel has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User bounceman has 7 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User opula has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User toyotaae86 has 21 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User sumb0dy has 36 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User mysticgarden has 17 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Jansten has 29 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Flimhumabber has 30 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Shootman2 has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Fuzy554 has 31 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User ElChano has 17 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User penicilling has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Yeenr has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User darbus has 17 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Styrene-7201 has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User stonecoldjaneausten has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User moleman has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User sebdot has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User TheActionIsGo... has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User M3H9X has 30 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Sonder has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User CmotDribbler has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User DeafWired has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Jookly has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User k_huntington has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User zerolexi_koshu has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User lilprincess_uwu has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User numian_vibration has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User bigfudge has 64 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User gibertron has 1 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User biygas1 has 17 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User thegreengiant has 17 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User AnorexicSnorlax has 1 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User okaygirly has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User TooMuchDog has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User adoghello has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User scruffalump has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Nedrept has 1 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User badbanker has 19 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User 111aaa222aaa333aaa has 1 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User t1nt1n1969 has 36 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User bingodv has 17 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User dvcky has 17 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Nick7777777 has 1 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User detroit dogs has 0 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User bertoxiv has 17 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User BurakkuKami has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User lexystardust has 30 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User ta_face_esti has 19 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User arin_akshun has 1 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User amwo has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Unwrapped3759 has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User switch32 has 17 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User not winter has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Sbonzo has 1 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Pavlov1955 has 17 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Reemerge6193 has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User jakeholmes has 1 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User WanderLemming has 17 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User jeffycool has 19 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User northbjorn has 20 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User XY0 has 30 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User xjbx has 0 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Datasmurf has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Godzilla1 has 1 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User hoodieninja has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User GruntusAromalog has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User gravematthews has 1 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User The Locutus has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User fearkills has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User justasillywolfy has 17 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User S.T.A.L.K.E.R has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User cloudosphere has 1 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User pukebrain has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Neitze has 31 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User catkickr has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User RuNe_N00b has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User chibiotaku has 22 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User reemo4250 has 31 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Nilo has 1 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Dorstlesser has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User darknessandfire has 13 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User tttetos has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User wrapt_in_plastik has 19 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User glint has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User ClobrWafls has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User poutchouli has 17 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Music_Is_Ok_I_Guess has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User devteamster has 17 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User mickstilwell has 17 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User eggy has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User downloader200 has 2 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User chewi105 has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User ChaosMerely has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User catawawa has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User jaxxthesynth has 13 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User heyheyfrapfrap has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User glitchedneopet has 1 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User p8757181 has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User noisedyke has 19 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User JackCloudie has 21 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Lao_Man_E has 72 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User TrevorBrooking has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User farmdestroyer has 1 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User xbreeddarby has 19 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User catpunx has 1 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User superlotek has 17 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User paulfunyun has 17 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User CirkuitShane has 25 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Shyft has 1 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User vellius has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Freddie Boyd has 1 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User cibaz has 3 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User EJW has 49 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User miko_mission has 20 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User velmen has 18 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User unsealed has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Svenir has 1 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User cyanmuskox has 17 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User bluecar5556 has 21 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User casualevils has 1 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User takoou has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User thep50 has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User TotallyNotLuna has 1 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User BigGuy38372 has 17 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User mazinkaiser has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User techllama has 25 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User xjshawx has 2 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User CosmicC has 2 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Matticus has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User ILL2DEF has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User mon5termatt-dc has 32 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User kb4 has 1 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User thisdogissomessedup has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Gkirin has 21 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User FornevermorE has 10 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User atlas_core has 46 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User bleebobreebo has 17 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User invartho has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User fudge has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User wingler has 18 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Ultravod has 27 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Whoregan's Heroes has 0 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User HenryDorsetCase has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User dunce has 30 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User rirics has 18 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User brihar22 has 0 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User dreamer has 18 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User povodesanto has 1 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User CherrySeed has 19 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User twiztor has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Shadiness9250 has 18 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User BarrelOBees has 1 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User OPOC has 17 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Ptet has 17 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Totally_Lame has 19 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Thylarox has 82 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User 22wetdogs has 1 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Belcerebon has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User HJ_ has 17 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Cherribi has 17 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User LeFaucon has 38 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Lil Intro Vert has 1 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User BlackSkies has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User quisps has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User chcoha has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User scmstr has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Knight_Bewion has 21 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User melancoliax has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User mewt has 22 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Infernal Love has 1 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User MOBIUS__DRIP has 17 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User top23breaks has 1 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User dethkube has 27 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User thatfunkymonkey has 18 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User gr1moire has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User maplethreetimes has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User ben1am has 3 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User montr0n has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User germinal-velocity has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User plusreed has 20 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User steelepdx has 2 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User varocker has 1 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User msq123 has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User PLAGUER has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User clownpatrol6666 has 1 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User thelogikalone has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User admin192205 has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User theoddhermit has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User SuperSushi has 31 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User t.e.shandy has 32 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User notbdz has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User 9thChevron has 40 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User polop148 has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User safire has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User godking has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User HomotopicCensorship has 4 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User dnbxxx has 0 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User theworldofmusic has 19 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Soul716 has 1 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Graffmark1977! has 18 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User ORA2J2 has 18 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User DonacDum has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User xtenda has 31 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Turd Ferg has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User GetFixedBoi has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User tonyzur has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User numSkull31 has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User etaylor86 has 1 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User slushie3008 has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User fern911 has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Goatzone has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Psybinary has 1 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User huion74 has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User goldiekat has 0 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User emohenestee has 30 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User musica101 has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User jojobungle has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User rogerhuxley has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User PoisonousSnout has 31 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User WithYouInRockland2 has 17 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User lemasterc has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Redemes has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User tso55 has 11 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User bennyliquid has 3 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User larsinio has 20 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User FishHelmetCopy has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User BillyStinkyPit911 has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User venividiveni has 19 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User catboybilly has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User dubs. has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User ./mkk has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User yauch701 has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Mr_Tooduloo has 20 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User SoulHunterWolf has 6 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User hrsart has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User sophvvvv has 20 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User fileformatpng has 1 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User karlmalone has 18 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User tempest.lich has 3 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Basiv has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Arkainnihx has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Milkshakes00 has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User helicopterOutside has 45 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User radd_shreddy has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User oneairmilepoint has 15 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User BANLOCKEDFILES has 0 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User rexdart has 36 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User dreem has 16 files
+2025-07-14 20:05:22 - newmusic.soulseek_client - [92mINFO[0m - _process_search_responses:399 - Found 94 individual tracks and 228 albums
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:400 - Album detection details: 307 potential albums processed
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:402 - Album: TroubleMoth/@@ddptt/Music/G/Gorillaz/[2005] Gorillaz - Demon Days - [flac] -> 15 tracks
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:402 - Album: zaniel/@@oitap/Music/Gorillaz/Demon Days -> 15 tracks
+2025-07-14 20:05:22 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:402 - Album: bounceman/@@nefob/Organized Tracks/Gorillaz/Demon Days -> 7 tracks
+2025-07-14 20:05:22 - newmusic.soulseek_client - [92mINFO[0m - search:617 - Processed results: 94 tracks, 228 albums
+2025-07-14 20:05:22 - newmusic.soulseek_client - [92mINFO[0m - search:621 - Early termination: Found 250 responses, stopping search
+2025-07-14 20:05:22 - newmusic.soulseek_client - [92mINFO[0m - search:632 - Search completed. Final results: 94 tracks and 228 albums for query: demon days
+2025-07-14 20:05:22 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:201 - Fetching tracks for playlist: Extra Music
+2025-07-14 20:05:23 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:201 - Fetching tracks for playlist: Maggi Main
+2025-07-14 20:05:28 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:201 - Fetching tracks for playlist: Broque Main
+2025-07-14 20:05:36 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists:208 - Retrieved 7 playlists
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:645 - Attempting to download: @@mfapl\Music (320)\Gorillaz\Demon Days\01 Intro.mp3 from M3H9X (size: 2592144)
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:658 - Using web interface API format: [{'filename': '@@mfapl\\Music (320)\\Gorillaz\\Demon Days\\01 Intro.mp3', 'size': 2592144, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:662 - Trying web interface endpoint: transfers/downloads/M3H9X
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/transfers/downloads/M3H9X
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: [{'filename': '@@mfapl\\Music (320)\\Gorillaz\\Demon Days\\01 Intro.mp3', 'size': 2592144, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:645 - Attempting to download: @@mfapl\Music (320)\Gorillaz\Demon Days\02 Last Living Souls.mp3 from M3H9X (size: 7681866)
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:658 - Using web interface API format: [{'filename': '@@mfapl\\Music (320)\\Gorillaz\\Demon Days\\02 Last Living Souls.mp3', 'size': 7681866, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:662 - Trying web interface endpoint: transfers/downloads/M3H9X
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/transfers/downloads/M3H9X
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: [{'filename': '@@mfapl\\Music (320)\\Gorillaz\\Demon Days\\02 Last Living Souls.mp3', 'size': 7681866, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:645 - Attempting to download: @@mfapl\Music (320)\Gorillaz\Demon Days\03 Kids With Guns.mp3 from M3H9X (size: 9099786)
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:658 - Using web interface API format: [{'filename': '@@mfapl\\Music (320)\\Gorillaz\\Demon Days\\03 Kids With Guns.mp3', 'size': 9099786, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:662 - Trying web interface endpoint: transfers/downloads/M3H9X
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/transfers/downloads/M3H9X
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: [{'filename': '@@mfapl\\Music (320)\\Gorillaz\\Demon Days\\03 Kids With Guns.mp3', 'size': 9099786, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:645 - Attempting to download: @@mfapl\Music (320)\Gorillaz\Demon Days\04 O Green World.mp3 from M3H9X (size: 10944029)
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:658 - Using web interface API format: [{'filename': '@@mfapl\\Music (320)\\Gorillaz\\Demon Days\\04 O Green World.mp3', 'size': 10944029, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:662 - Trying web interface endpoint: transfers/downloads/M3H9X
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/transfers/downloads/M3H9X
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: [{'filename': '@@mfapl\\Music (320)\\Gorillaz\\Demon Days\\04 O Green World.mp3', 'size': 10944029, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:645 - Attempting to download: @@mfapl\Music (320)\Gorillaz\Demon Days\05 Dirty Harry.mp3 from M3H9X (size: 9018278)
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:658 - Using web interface API format: [{'filename': '@@mfapl\\Music (320)\\Gorillaz\\Demon Days\\05 Dirty Harry.mp3', 'size': 9018278, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:662 - Trying web interface endpoint: transfers/downloads/M3H9X
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/transfers/downloads/M3H9X
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: [{'filename': '@@mfapl\\Music (320)\\Gorillaz\\Demon Days\\05 Dirty Harry.mp3', 'size': 9018278, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:645 - Attempting to download: @@mfapl\Music (320)\Gorillaz\Demon Days\06 Feel Good Inc..mp3 from M3H9X (size: 8912795)
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:658 - Using web interface API format: [{'filename': '@@mfapl\\Music (320)\\Gorillaz\\Demon Days\\06 Feel Good Inc..mp3', 'size': 8912795, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:662 - Trying web interface endpoint: transfers/downloads/M3H9X
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/transfers/downloads/M3H9X
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: [{'filename': '@@mfapl\\Music (320)\\Gorillaz\\Demon Days\\06 Feel Good Inc..mp3', 'size': 8912795, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:645 - Attempting to download: @@mfapl\Music (320)\Gorillaz\Demon Days\07 El Mañana.mp3 from M3H9X (size: 9267031)
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:658 - Using web interface API format: [{'filename': '@@mfapl\\Music (320)\\Gorillaz\\Demon Days\\07 El Mañana.mp3', 'size': 9267031, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:662 - Trying web interface endpoint: transfers/downloads/M3H9X
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/transfers/downloads/M3H9X
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: [{'filename': '@@mfapl\\Music (320)\\Gorillaz\\Demon Days\\07 El Mañana.mp3', 'size': 9267031, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:645 - Attempting to download: @@mfapl\Music (320)\Gorillaz\Demon Days\08 Every Planet We Reach Is Dead.mp3 from M3H9X (size: 11796769)
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:658 - Using web interface API format: [{'filename': '@@mfapl\\Music (320)\\Gorillaz\\Demon Days\\08 Every Planet We Reach Is Dead.mp3', 'size': 11796769, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:662 - Trying web interface endpoint: transfers/downloads/M3H9X
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/transfers/downloads/M3H9X
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: [{'filename': '@@mfapl\\Music (320)\\Gorillaz\\Demon Days\\08 Every Planet We Reach Is Dead.mp3', 'size': 11796769, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:645 - Attempting to download: @@mfapl\Music (320)\Gorillaz\Demon Days\09 November Has Come.mp3 from M3H9X (size: 6510580)
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:658 - Using web interface API format: [{'filename': '@@mfapl\\Music (320)\\Gorillaz\\Demon Days\\09 November Has Come.mp3', 'size': 6510580, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:662 - Trying web interface endpoint: transfers/downloads/M3H9X
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/transfers/downloads/M3H9X
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: [{'filename': '@@mfapl\\Music (320)\\Gorillaz\\Demon Days\\09 November Has Come.mp3', 'size': 6510580, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:645 - Attempting to download: @@mfapl\Music (320)\Gorillaz\Demon Days\10 All Alone.mp3 from M3H9X (size: 8468658)
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:658 - Using web interface API format: [{'filename': '@@mfapl\\Music (320)\\Gorillaz\\Demon Days\\10 All Alone.mp3', 'size': 8468658, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:662 - Trying web interface endpoint: transfers/downloads/M3H9X
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/transfers/downloads/M3H9X
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: [{'filename': '@@mfapl\\Music (320)\\Gorillaz\\Demon Days\\10 All Alone.mp3', 'size': 8468658, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:645 - Attempting to download: @@mfapl\Music (320)\Gorillaz\Demon Days\11 White Light.mp3 from M3H9X (size: 5203427)
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:658 - Using web interface API format: [{'filename': '@@mfapl\\Music (320)\\Gorillaz\\Demon Days\\11 White Light.mp3', 'size': 5203427, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:662 - Trying web interface endpoint: transfers/downloads/M3H9X
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/transfers/downloads/M3H9X
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: [{'filename': '@@mfapl\\Music (320)\\Gorillaz\\Demon Days\\11 White Light.mp3', 'size': 5203427, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:645 - Attempting to download: @@mfapl\Music (320)\Gorillaz\Demon Days\12 DARE.mp3 from M3H9X (size: 9838580)
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:658 - Using web interface API format: [{'filename': '@@mfapl\\Music (320)\\Gorillaz\\Demon Days\\12 DARE.mp3', 'size': 9838580, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:662 - Trying web interface endpoint: transfers/downloads/M3H9X
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/transfers/downloads/M3H9X
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: [{'filename': '@@mfapl\\Music (320)\\Gorillaz\\Demon Days\\12 DARE.mp3', 'size': 9838580, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:645 - Attempting to download: @@mfapl\Music (320)\Gorillaz\Demon Days\13 Fire Coming Out Of The Monkey's Head.mp3 from M3H9X (size: 7923346)
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:658 - Using web interface API format: [{'filename': "@@mfapl\\Music (320)\\Gorillaz\\Demon Days\\13 Fire Coming Out Of The Monkey's Head.mp3", 'size': 7923346, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:662 - Trying web interface endpoint: transfers/downloads/M3H9X
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/transfers/downloads/M3H9X
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: [{'filename': "@@mfapl\\Music (320)\\Gorillaz\\Demon Days\\13 Fire Coming Out Of The Monkey's Head.mp3", 'size': 7923346, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:645 - Attempting to download: @@mfapl\Music (320)\Gorillaz\Demon Days\14 Don't Get Lost In Heaven.mp3 from M3H9X (size: 4881553)
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:658 - Using web interface API format: [{'filename': "@@mfapl\\Music (320)\\Gorillaz\\Demon Days\\14 Don't Get Lost In Heaven.mp3", 'size': 4881553, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:662 - Trying web interface endpoint: transfers/downloads/M3H9X
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/transfers/downloads/M3H9X
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: [{'filename': "@@mfapl\\Music (320)\\Gorillaz\\Demon Days\\14 Don't Get Lost In Heaven.mp3", 'size': 4881553, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:645 - Attempting to download: @@mfapl\Music (320)\Gorillaz\Demon Days\15 Demon Days.mp3 from M3H9X (size: 10821770)
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:658 - Using web interface API format: [{'filename': '@@mfapl\\Music (320)\\Gorillaz\\Demon Days\\15 Demon Days.mp3', 'size': 10821770, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - download:662 - Trying web interface endpoint: transfers/downloads/M3H9X
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/transfers/downloads/M3H9X
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-14 20:08:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: [{'filename': '@@mfapl\\Music (320)\\Gorillaz\\Demon Days\\15 Demon Days.mp3', 'size': 10821770, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-14 20:08:43 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 201
+2025-07-14 20:08:43 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: ...
+2025-07-14 20:08:43 - newmusic.soulseek_client - [92mINFO[0m - download:667 - [SUCCESS] Started download: @@mfapl\Music (320)\Gorillaz\Demon Days\02 Last Living Souls.mp3 from M3H9X
+2025-07-14 20:08:43 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 201
+2025-07-14 20:08:43 - newmusic.soulseek_client - [94mDEBUG[0m - download:677 - No ID in response, using filename as fallback: {}
+2025-07-14 20:08:43 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: ...
+2025-07-14 20:08:43 - newmusic.soulseek_client - [92mINFO[0m - download:667 - [SUCCESS] Started download: @@mfapl\Music (320)\Gorillaz\Demon Days\09 November Has Come.mp3 from M3H9X
+2025-07-14 20:08:43 - newmusic.soulseek_client - [94mDEBUG[0m - download:677 - No ID in response, using filename as fallback: {}
+2025-07-14 20:08:43 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 201
+2025-07-14 20:08:43 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: ...
+2025-07-14 20:08:43 - newmusic.soulseek_client - [92mINFO[0m - download:667 - [SUCCESS] Started download: @@mfapl\Music (320)\Gorillaz\Demon Days\01 Intro.mp3 from M3H9X
+2025-07-14 20:08:43 - newmusic.soulseek_client - [94mDEBUG[0m - download:677 - No ID in response, using filename as fallback: {}
+2025-07-14 20:08:43 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 201
+2025-07-14 20:08:43 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: ...
+2025-07-14 20:08:43 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 201
+2025-07-14 20:08:43 - newmusic.soulseek_client - [92mINFO[0m - download:667 - [SUCCESS] Started download: @@mfapl\Music (320)\Gorillaz\Demon Days\14 Don't Get Lost In Heaven.mp3 from M3H9X
+2025-07-14 20:08:43 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: ...
+2025-07-14 20:08:43 - newmusic.soulseek_client - [94mDEBUG[0m - download:677 - No ID in response, using filename as fallback: {}
+2025-07-14 20:08:43 - newmusic.soulseek_client - [92mINFO[0m - download:667 - [SUCCESS] Started download: @@mfapl\Music (320)\Gorillaz\Demon Days\10 All Alone.mp3 from M3H9X
+2025-07-14 20:08:43 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 201
+2025-07-14 20:08:43 - newmusic.soulseek_client - [94mDEBUG[0m - download:677 - No ID in response, using filename as fallback: {}
+2025-07-14 20:08:43 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: ...
+2025-07-14 20:08:43 - newmusic.soulseek_client - [92mINFO[0m - download:667 - [SUCCESS] Started download: @@mfapl\Music (320)\Gorillaz\Demon Days\13 Fire Coming Out Of The Monkey's Head.mp3 from M3H9X
+2025-07-14 20:08:43 - newmusic.soulseek_client - [94mDEBUG[0m - download:677 - No ID in response, using filename as fallback: {}
+2025-07-14 20:08:43 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 201
+2025-07-14 20:08:43 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: ...
+2025-07-14 20:08:43 - newmusic.soulseek_client - [92mINFO[0m - download:667 - [SUCCESS] Started download: @@mfapl\Music (320)\Gorillaz\Demon Days\06 Feel Good Inc..mp3 from M3H9X
+2025-07-14 20:08:43 - newmusic.soulseek_client - [94mDEBUG[0m - download:677 - No ID in response, using filename as fallback: {}
+2025-07-14 20:08:43 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 201
+2025-07-14 20:08:43 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: ...
+2025-07-14 20:08:43 - newmusic.soulseek_client - [92mINFO[0m - download:667 - [SUCCESS] Started download: @@mfapl\Music (320)\Gorillaz\Demon Days\15 Demon Days.mp3 from M3H9X
+2025-07-14 20:08:43 - newmusic.soulseek_client - [94mDEBUG[0m - download:677 - No ID in response, using filename as fallback: {}
+2025-07-14 20:08:43 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 201
+2025-07-14 20:08:43 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: ...
+2025-07-14 20:08:43 - newmusic.soulseek_client - [92mINFO[0m - download:667 - [SUCCESS] Started download: @@mfapl\Music (320)\Gorillaz\Demon Days\12 DARE.mp3 from M3H9X
+2025-07-14 20:08:43 - newmusic.soulseek_client - [94mDEBUG[0m - download:677 - No ID in response, using filename as fallback: {}
+2025-07-14 20:08:43 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 201
+2025-07-14 20:08:43 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: ...
+2025-07-14 20:08:43 - newmusic.soulseek_client - [92mINFO[0m - download:667 - [SUCCESS] Started download: @@mfapl\Music (320)\Gorillaz\Demon Days\04 O Green World.mp3 from M3H9X
+2025-07-14 20:08:43 - newmusic.soulseek_client - [94mDEBUG[0m - download:677 - No ID in response, using filename as fallback: {}
+2025-07-14 20:08:43 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 201
+2025-07-14 20:08:43 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: ...
+2025-07-14 20:08:43 - newmusic.soulseek_client - [92mINFO[0m - download:667 - [SUCCESS] Started download: @@mfapl\Music (320)\Gorillaz\Demon Days\07 El Mañana.mp3 from M3H9X
+2025-07-14 20:08:43 - newmusic.soulseek_client - [94mDEBUG[0m - download:677 - No ID in response, using filename as fallback: {}
+2025-07-14 20:08:43 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 201
+2025-07-14 20:08:43 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: ...
+2025-07-14 20:08:43 - newmusic.soulseek_client - [92mINFO[0m - download:667 - [SUCCESS] Started download: @@mfapl\Music (320)\Gorillaz\Demon Days\08 Every Planet We Reach Is Dead.mp3 from M3H9X
+2025-07-14 20:08:43 - newmusic.soulseek_client - [94mDEBUG[0m - download:677 - No ID in response, using filename as fallback: {}
+2025-07-14 20:08:44 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 201
+2025-07-14 20:08:44 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: ...
+2025-07-14 20:08:44 - newmusic.soulseek_client - [92mINFO[0m - download:667 - [SUCCESS] Started download: @@mfapl\Music (320)\Gorillaz\Demon Days\05 Dirty Harry.mp3 from M3H9X
+2025-07-14 20:08:44 - newmusic.soulseek_client - [94mDEBUG[0m - download:677 - No ID in response, using filename as fallback: {}
+2025-07-14 20:08:44 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-14 20:08:44 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-14 20:08:44 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 201
+2025-07-14 20:08:44 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: ...
+2025-07-14 20:08:44 - newmusic.soulseek_client - [92mINFO[0m - download:667 - [SUCCESS] Started download: @@mfapl\Music (320)\Gorillaz\Demon Days\11 White Light.mp3 from M3H9X
+2025-07-14 20:08:44 - newmusic.soulseek_client - [94mDEBUG[0m - download:677 - No ID in response, using filename as fallback: {}
+2025-07-14 20:08:44 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 201
+2025-07-14 20:08:44 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: ...
+2025-07-14 20:08:44 - newmusic.soulseek_client - [92mINFO[0m - download:667 - [SUCCESS] Started download: @@mfapl\Music (320)\Gorillaz\Demon Days\03 Kids With Guns.mp3 from M3H9X
+2025-07-14 20:08:44 - newmusic.soulseek_client - [94mDEBUG[0m - download:677 - No ID in response, using filename as fallback: {}
+2025-07-14 20:08:44 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-14 20:08:44 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"username":"M3H9X","directories":[{"directory":"@@mfapl\\Music (320)\\Gorillaz\\Demon Days","fileCount":15,"files":[{"id":"245839e8-e44d-41e9-bb10-51d0daacb5f6","username":"M3H9X","direction":"Download","filename":"@@mfapl\\Music (320)\\Gorillaz\\Demon Days\\04 O Green World.mp3","size":10944029,"startOffset":0,"state":"Queued, Remotely","stateDescription":"Queued, Remotely","requestedAt":"2025-07-15T03:08:43.1893054","enqueuedAt":"2025-07-15T03:08:43.7677246","bytesTransferred":0,"averageSpee...
+2025-07-14 20:08:46 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-14 20:08:46 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-14 20:08:46 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-14 20:08:46 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"username":"M3H9X","directories":[{"directory":"@@mfapl\\Music (320)\\Gorillaz\\Demon Days","fileCount":15,"files":[{"id":"245839e8-e44d-41e9-bb10-51d0daacb5f6","username":"M3H9X","direction":"Download","filename":"@@mfapl\\Music (320)\\Gorillaz\\Demon Days\\04 O Green World.mp3","size":10944029,"startOffset":0,"state":"Initializing","stateDescription":"Initializing","requestedAt":"2025-07-15T03:08:43.1893054","enqueuedAt":"2025-07-15T03:08:46.1616635","bytesTransferred":0,"averageSpeed":0,"by...
+2025-07-14 20:08:48 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-14 20:08:48 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-14 20:08:48 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-14 20:08:48 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"username":"M3H9X","directories":[{"directory":"@@mfapl\\Music (320)\\Gorillaz\\Demon Days","fileCount":15,"files":[{"id":"245839e8-e44d-41e9-bb10-51d0daacb5f6","username":"M3H9X","direction":"Download","filename":"@@mfapl\\Music (320)\\Gorillaz\\Demon Days\\04 O Green World.mp3","size":10944029,"startOffset":0,"state":"Completed, Succeeded","stateDescription":"Completed, Succeeded","requestedAt":"2025-07-15T03:08:43.1893054","enqueuedAt":"2025-07-15T03:08:46.1616635","startedAt":"2025-07-15T0...
+2025-07-14 20:08:50 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-14 20:08:50 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-14 20:08:50 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-14 20:08:50 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"username":"M3H9X","directories":[{"directory":"@@mfapl\\Music (320)\\Gorillaz\\Demon Days","fileCount":15,"files":[{"id":"245839e8-e44d-41e9-bb10-51d0daacb5f6","username":"M3H9X","direction":"Download","filename":"@@mfapl\\Music (320)\\Gorillaz\\Demon Days\\04 O Green World.mp3","size":10944029,"startOffset":0,"state":"Completed, Succeeded","stateDescription":"Completed, Succeeded","requestedAt":"2025-07-15T03:08:43.1893054","enqueuedAt":"2025-07-15T03:08:46.1616635","startedAt":"2025-07-15T0...
+2025-07-14 20:08:52 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-14 20:08:52 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-14 20:08:52 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-14 20:08:52 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"username":"M3H9X","directories":[{"directory":"@@mfapl\\Music (320)\\Gorillaz\\Demon Days","fileCount":15,"files":[{"id":"245839e8-e44d-41e9-bb10-51d0daacb5f6","username":"M3H9X","direction":"Download","filename":"@@mfapl\\Music (320)\\Gorillaz\\Demon Days\\04 O Green World.mp3","size":10944029,"startOffset":0,"state":"Completed, Succeeded","stateDescription":"Completed, Succeeded","requestedAt":"2025-07-15T03:08:43.1893054","enqueuedAt":"2025-07-15T03:08:46.1616635","startedAt":"2025-07-15T0...
+2025-07-14 20:08:54 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-14 20:08:54 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-14 20:08:54 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-14 20:08:54 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"username":"M3H9X","directories":[{"directory":"@@mfapl\\Music (320)\\Gorillaz\\Demon Days","fileCount":15,"files":[{"id":"245839e8-e44d-41e9-bb10-51d0daacb5f6","username":"M3H9X","direction":"Download","filename":"@@mfapl\\Music (320)\\Gorillaz\\Demon Days\\04 O Green World.mp3","size":10944029,"startOffset":0,"state":"Completed, Succeeded","stateDescription":"Completed, Succeeded","requestedAt":"2025-07-15T03:08:43.1893054","enqueuedAt":"2025-07-15T03:08:46.1616635","startedAt":"2025-07-15T0...
+2025-07-14 20:08:56 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-14 20:08:56 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-14 20:08:56 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-14 20:08:56 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"username":"M3H9X","directories":[{"directory":"@@mfapl\\Music (320)\\Gorillaz\\Demon Days","fileCount":15,"files":[{"id":"245839e8-e44d-41e9-bb10-51d0daacb5f6","username":"M3H9X","direction":"Download","filename":"@@mfapl\\Music (320)\\Gorillaz\\Demon Days\\04 O Green World.mp3","size":10944029,"startOffset":0,"state":"Completed, Succeeded","stateDescription":"Completed, Succeeded","requestedAt":"2025-07-15T03:08:43.1893054","enqueuedAt":"2025-07-15T03:08:46.1616635","startedAt":"2025-07-15T0...
+2025-07-14 20:08:58 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-14 20:08:58 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-14 20:08:58 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-14 20:08:58 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"username":"M3H9X","directories":[{"directory":"@@mfapl\\Music (320)\\Gorillaz\\Demon Days","fileCount":15,"files":[{"id":"245839e8-e44d-41e9-bb10-51d0daacb5f6","username":"M3H9X","direction":"Download","filename":"@@mfapl\\Music (320)\\Gorillaz\\Demon Days\\04 O Green World.mp3","size":10944029,"startOffset":0,"state":"Completed, Succeeded","stateDescription":"Completed, Succeeded","requestedAt":"2025-07-15T03:08:43.1893054","enqueuedAt":"2025-07-15T03:08:46.1616635","startedAt":"2025-07-15T0...
+2025-07-14 20:09:00 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-14 20:09:00 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-14 20:09:00 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-14 20:09:00 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"username":"M3H9X","directories":[{"directory":"@@mfapl\\Music (320)\\Gorillaz\\Demon Days","fileCount":15,"files":[{"id":"245839e8-e44d-41e9-bb10-51d0daacb5f6","username":"M3H9X","direction":"Download","filename":"@@mfapl\\Music (320)\\Gorillaz\\Demon Days\\04 O Green World.mp3","size":10944029,"startOffset":0,"state":"Completed, Succeeded","stateDescription":"Completed, Succeeded","requestedAt":"2025-07-15T03:08:43.1893054","enqueuedAt":"2025-07-15T03:08:46.1616635","startedAt":"2025-07-15T0...
+2025-07-14 20:09:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-14 20:09:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-14 20:09:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-14 20:09:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"username":"M3H9X","directories":[{"directory":"@@mfapl\\Music (320)\\Gorillaz\\Demon Days","fileCount":15,"files":[{"id":"245839e8-e44d-41e9-bb10-51d0daacb5f6","username":"M3H9X","direction":"Download","filename":"@@mfapl\\Music (320)\\Gorillaz\\Demon Days\\04 O Green World.mp3","size":10944029,"startOffset":0,"state":"Completed, Succeeded","stateDescription":"Completed, Succeeded","requestedAt":"2025-07-15T03:08:43.1893054","enqueuedAt":"2025-07-15T03:08:46.1616635","startedAt":"2025-07-15T0...
+2025-07-14 20:09:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-14 20:09:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-14 20:09:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-14 20:09:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"username":"M3H9X","directories":[{"directory":"@@mfapl\\Music (320)\\Gorillaz\\Demon Days","fileCount":15,"files":[{"id":"245839e8-e44d-41e9-bb10-51d0daacb5f6","username":"M3H9X","direction":"Download","filename":"@@mfapl\\Music (320)\\Gorillaz\\Demon Days\\04 O Green World.mp3","size":10944029,"startOffset":0,"state":"Completed, Succeeded","stateDescription":"Completed, Succeeded","requestedAt":"2025-07-15T03:08:43.1893054","enqueuedAt":"2025-07-15T03:08:46.1616635","startedAt":"2025-07-15T0...
+2025-07-14 20:12:31 - newmusic.main - [92mINFO[0m - closeEvent:176 - Closing application...
+2025-07-14 20:12:31 - newmusic.main - [92mINFO[0m - closeEvent:181 - Cleaning up Downloads page threads...
+2025-07-14 20:12:31 - newmusic.main - [92mINFO[0m - closeEvent:186 - Stopping status monitoring thread...
+2025-07-14 20:12:33 - newmusic.main - [92mINFO[0m - closeEvent:191 - Closing Soulseek client...
+2025-07-14 20:12:33 - newmusic.main - [92mINFO[0m - closeEvent:197 - Application closed successfully
