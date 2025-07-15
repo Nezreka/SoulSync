@@ -99,6 +99,35 @@ class Artist:
         )
 
 @dataclass
+class Album:
+    id: str
+    name: str
+    artists: List[str]
+    release_date: str
+    total_tracks: int
+    album_type: str
+    image_url: Optional[str] = None
+    external_urls: Optional[Dict[str, str]] = None
+    
+    @classmethod
+    def from_spotify_album(cls, album_data: Dict[str, Any]) -> 'Album':
+        # Get the largest image URL if available
+        image_url = None
+        if album_data.get('images') and len(album_data['images']) > 0:
+            image_url = album_data['images'][0]['url']
+        
+        return cls(
+            id=album_data['id'],
+            name=album_data['name'],
+            artists=[artist['name'] for artist in album_data['artists']],
+            release_date=album_data.get('release_date', ''),
+            total_tracks=album_data.get('total_tracks', 0),
+            album_type=album_data.get('album_type', 'album'),
+            image_url=image_url,
+            external_urls=album_data.get('external_urls')
+        )
+
+@dataclass
 class Playlist:
     id: str
     name: str
@@ -256,6 +285,26 @@ class SpotifyClient:
             
         except Exception as e:
             logger.error(f"Error searching artists: {e}")
+            return []
+    
+    @rate_limited
+    def search_albums(self, query: str, limit: int = 20) -> List[Album]:
+        """Search for albums using Spotify API"""
+        if not self.is_authenticated():
+            return []
+        
+        try:
+            results = self.sp.search(q=query, type='album', limit=limit)
+            albums = []
+            
+            for album_data in results['albums']['items']:
+                album = Album.from_spotify_album(album_data)
+                albums.append(album)
+            
+            return albums
+            
+        except Exception as e:
+            logger.error(f"Error searching albums: {e}")
             return []
     
     @rate_limited
