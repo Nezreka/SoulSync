@@ -1867,6 +1867,29 @@ class StreamingThread(QThread):
                                             self.streaming_finished.emit(f"Stream ready: {os.path.basename(found_file)}", self.search_result)
                                             self.temp_file_path = stream_path
                                             print(f"✓ Stream file ready for playback: {stream_path}")
+                                            
+                                            # Signal API that download is complete
+                                            try:
+                                                download_id = transfer.get('id', '')
+                                                if download_id and target_username:
+                                                    import asyncio
+                                                    from services.service_manager import service_manager
+                                                    soulseek_client = service_manager.get_soulseek_client()
+                                                    if soulseek_client:
+                                                        # Run the async API call
+                                                        loop = asyncio.new_event_loop()
+                                                        asyncio.set_event_loop(loop)
+                                                        success = loop.run_until_complete(
+                                                            soulseek_client.signal_download_completion(download_id, target_username, remove=True)
+                                                        )
+                                                        loop.close()
+                                                        if success:
+                                                            print(f"✓ Successfully signaled completion for download {download_id}")
+                                                        else:
+                                                            print(f"⚠️ Failed to signal completion for download {download_id}")
+                                            except Exception as e:
+                                                print(f"⚠️ Error signaling download completion: {e}")
+                                            
                                             break  # Exit main polling loop
                                             
                                         except Exception as e:
@@ -4459,6 +4482,32 @@ class TabbedDownloadManager(QTabWidget):
                 soulseek_client=download_item.soulseek_client
             )
             print(f"[DEBUG] Finished queue now has {len(self.finished_queue.download_items)} items")
+            
+            # Signal API that download is complete (only for completed downloads)
+            # Note: Cancelled downloads already have their API signal sent by cancel_download()
+            try:
+                if (download_item.status == 'completed' and 
+                    download_item.download_id and download_item.username and download_item.soulseek_client):
+                    import asyncio
+                    
+                    # Run the async API call to signal completion
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    success = loop.run_until_complete(
+                        download_item.soulseek_client.signal_download_completion(
+                            download_item.download_id, 
+                            download_item.username, 
+                            remove=True  # Remove completed downloads from transfer list
+                        )
+                    )
+                    loop.close()
+                    
+                    if success:
+                        print(f"✓ Successfully signaled completion for download {download_item.download_id}")
+                    else:
+                        print(f"⚠️ Failed to signal completion for download {download_item.download_id}")
+            except Exception as e:
+                print(f"⚠️ Error signaling download completion: {e}")
             
             self.update_tab_counts()
             return finished_item
