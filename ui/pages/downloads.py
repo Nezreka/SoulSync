@@ -74,7 +74,7 @@ class SpotifyMatchingModal(QDialog):
     album_selected = pyqtSignal(object)  # Emitted when user selects an album (for album workflow)
     cancelled = pyqtSignal()  # Emitted when modal is cancelled or closed without selection
     
-    def __init__(self, track_result: TrackResult, spotify_client: SpotifyClient, matching_engine: MusicMatchingEngine, parent=None, is_album=False):
+    def __init__(self, track_result: TrackResult, spotify_client: SpotifyClient, matching_engine: MusicMatchingEngine, parent=None, is_album=False, album_result=None):
         super().__init__(parent)
         self.track_result = track_result
         self.spotify_client = spotify_client
@@ -82,6 +82,7 @@ class SpotifyMatchingModal(QDialog):
         self.selected_artist = None
         self.selected_album = None
         self.is_album = is_album
+        self.album_result = album_result  # Store album result for display
         self.artist_image_cache = {}  # Cache for artist images
         
         self.setWindowTitle("Select Artist Match" if not is_album else "Select Album Match")
@@ -196,11 +197,11 @@ class SpotifyMatchingModal(QDialog):
         separator.setStyleSheet("font-size: 14px; color: #666;")
         header_layout.addWidget(separator)
         
-        # Display folder title for albums, track title for singles
-        if self.is_album and hasattr(self.track_result, 'album') and self.track_result.album:
-            display_text = f"{self.track_result.album} by {self.track_result.artist}"
+        # Display album title for albums, track title for singles (without "by artist")
+        if self.is_album and self.album_result and self.album_result.album_title:
+            display_text = self.album_result.album_title
         else:
-            display_text = f"{self.track_result.title} by {self.track_result.artist}"
+            display_text = self.track_result.title
         
         track_info = QLabel(display_text)
         track_info.setStyleSheet("font-size: 14px; color: #aaa;")
@@ -6445,7 +6446,7 @@ class DownloadsPage(QWidget):
             # Show modal ONCE for the album using the first track as reference
             if album_result.tracks:
                 first_track = album_result.tracks[0]
-                modal = SpotifyMatchingModal(first_track, self.spotify_client, self.matching_engine, self, is_album=True)
+                modal = SpotifyMatchingModal(first_track, self.spotify_client, self.matching_engine, self, is_album=True, album_result=album_result)
                 modal.setWindowTitle(f"Select Artist for Album: {album_result.album_title}")
                 
                 # Connect to album-specific handlers
