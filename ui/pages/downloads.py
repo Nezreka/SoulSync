@@ -150,8 +150,8 @@ class SpotifyMatchingModal(QDialog):
     def setup_ui(self):
         """Setup the modal UI with full container size and spacious layout"""
         main_layout = QVBoxLayout(self)
-        main_layout.setSpacing(20)
-        main_layout.setContentsMargins(30, 20, 30, 30)
+        main_layout.setSpacing(15)
+        main_layout.setContentsMargins(20, 15, 20, 20)
         
         # Close button (X) in top right
         close_layout = QHBoxLayout()
@@ -176,82 +176,98 @@ class SpotifyMatchingModal(QDialog):
         close_layout.addWidget(close_btn)
         main_layout.addLayout(close_layout)
         
-        # Compact header section
-        header_layout = QVBoxLayout()
-        header_layout.setSpacing(8)
+        # Ultra-compact header section
+        header_layout = QHBoxLayout()
+        header_layout.setSpacing(15)
         
         title_text = "Select Artist Match" if self.current_stage == "artist" else "Select Album"
         self.header_label = QLabel(title_text)
-        self.header_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.header_label.setStyleSheet("font-size: 24px; color: #1ed760; font-weight: 600;")
+        self.header_label.setStyleSheet("font-size: 18px; color: #1ed760; font-weight: 600;")
         header_layout.addWidget(self.header_label)
         
-        track_info = QLabel(f"Track: {self.track_result.title} • Artist: {self.track_result.artist}")
-        track_info.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # Add separator
+        separator = QLabel("•")
+        separator.setStyleSheet("font-size: 14px; color: #666;")
+        header_layout.addWidget(separator)
+        
+        track_info = QLabel(f"{self.track_result.title} by {self.track_result.artist}")
         track_info.setStyleSheet("font-size: 14px; color: #aaa;")
         header_layout.addWidget(track_info)
         
-        main_layout.addLayout(header_layout)
+        header_layout.addStretch()
         
-        # Content area with proper spacing
+        # Create a container widget for the header to control its height
+        header_widget = QWidget()
+        header_widget.setFixedHeight(45)
+        header_widget.setLayout(header_layout)
+        main_layout.addWidget(header_widget)
+        
+        # Content area with optimized spacing - give more space to auto-matching
         content_layout = QVBoxLayout()
-        content_layout.setSpacing(25)
+        content_layout.setSpacing(15)
         
-        # Auto-matching section (top half)
+        # Auto-matching section (expanded - 65% of space)
         self.auto_section_widget = QWidget()
         auto_section_layout = QVBoxLayout(self.auto_section_widget)
-        auto_section_layout.setSpacing(20)
+        auto_section_layout.setSpacing(15)
+        auto_section_layout.setContentsMargins(0, 0, 0, 0)
         
         auto_title = QLabel("🎯 Auto-Matched Suggestions")
-        auto_title.setStyleSheet("font-size: 24px; color: #1ed760; font-weight: 600;")
+        auto_title.setStyleSheet("font-size: 20px; color: #1ed760; font-weight: 600;")
         auto_section_layout.addWidget(auto_title)
         
-        # Horizontal layout for top 3 artist cards
+        # Horizontal layout for top 3 artist cards with tighter spacing
         self.auto_artists_layout = QHBoxLayout()
-        self.auto_artists_layout.setSpacing(30)
+        self.auto_artists_layout.setSpacing(20)
         auto_section_layout.addLayout(self.auto_artists_layout)
         
-        content_layout.addWidget(self.auto_section_widget)
+        # Ensure auto section gets more space
+        self.auto_section_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        content_layout.addWidget(self.auto_section_widget, 65)  # 65% weight
         
-        # Manual search section (bottom half)
+        # Manual search section (compact - 35% of space)
         self.manual_section_widget = QWidget()
         manual_section_layout = QVBoxLayout(self.manual_section_widget)
-        manual_section_layout.setSpacing(20)
+        manual_section_layout.setSpacing(12)
+        manual_section_layout.setContentsMargins(0, 0, 0, 0)
         
         self.manual_title = QLabel("🔍 Manual Search")
-        self.manual_title.setStyleSheet("font-size: 24px; color: #1ed760; font-weight: 600;")
+        self.manual_title.setStyleSheet("font-size: 18px; color: #1ed760; font-weight: 600;")
         manual_section_layout.addWidget(self.manual_title)
         
-        # Search input
+        # Search input - more compact
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Type artist name to search..." if self.current_stage == "artist" else "Search for album...")
         self.search_input.textChanged.connect(self.on_search_text_changed)
-        self.search_input.setFixedHeight(60)
+        self.search_input.setFixedHeight(50)
         manual_section_layout.addWidget(self.search_input)
         
-        # Horizontal layout for manual search results
+        # Horizontal layout for manual search results with tighter spacing
         self.manual_results_layout = QHBoxLayout()
-        self.manual_results_layout.setSpacing(30)
+        self.manual_results_layout.setSpacing(20)
         manual_section_layout.addLayout(self.manual_results_layout)
         
-        content_layout.addWidget(self.manual_section_widget)
+        # Manual section gets less space
+        self.manual_section_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        content_layout.addWidget(self.manual_section_widget, 35)  # 35% weight
         
         main_layout.addLayout(content_layout)
         
+        # Streamlined button area - single row, compact
+        button_layout = QHBoxLayout()
+        button_layout.setSpacing(15)
+        button_layout.setContentsMargins(0, 10, 0, 0)
+        
         # Confirm button (initially hidden, shown when artist/album selected)
         self.confirm_btn = QPushButton("Confirm Selection")
-        self.confirm_btn.setFixedHeight(50)
+        self.confirm_btn.setFixedHeight(40)
         self.confirm_btn.clicked.connect(self.confirm_selection)
         self.confirm_btn.hide()
-        main_layout.addWidget(self.confirm_btn)
-        
-        # Bottom buttons
-        button_layout = QHBoxLayout()
-        button_layout.setSpacing(20)
+        button_layout.addWidget(self.confirm_btn)
         
         cancel_btn = QPushButton("Cancel")
         cancel_btn.setObjectName("cancel")
-        cancel_btn.setFixedHeight(50)
+        cancel_btn.setFixedHeight(40)
         cancel_btn.clicked.connect(self.reject)
         button_layout.addWidget(cancel_btn)
         
@@ -259,11 +275,15 @@ class SpotifyMatchingModal(QDialog):
         
         skip_btn = QPushButton("Skip Matching")
         skip_btn.setObjectName("skip")
-        skip_btn.setFixedHeight(50)
+        skip_btn.setFixedHeight(40)
         skip_btn.clicked.connect(self.skip_matching)
         button_layout.addWidget(skip_btn)
         
-        main_layout.addLayout(button_layout)
+        # Create a container for the button area to control its height
+        button_widget = QWidget()
+        button_widget.setFixedHeight(60)
+        button_widget.setLayout(button_layout)
+        main_layout.addWidget(button_widget)
         
         # Search timer for debouncing
         self.search_timer = QTimer()
@@ -436,7 +456,7 @@ class SpotifyMatchingModal(QDialog):
     def create_artist_card(self, artist: Artist, confidence: float, reason: str = "", is_auto: bool = False) -> QWidget:
         """Create a beautiful artist card with image background"""
         card = QFrame()
-        card.setFixedSize(300, 200)
+        card.setFixedSize(280, 180)
         card.setStyleSheet("""
             QFrame {
                 background: rgba(30, 30, 30, 0.9);
@@ -451,12 +471,12 @@ class SpotifyMatchingModal(QDialog):
         """)
         
         layout = QVBoxLayout(card)
-        layout.setSpacing(10)
-        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(8)
+        layout.setContentsMargins(15, 15, 15, 15)
         
         # Artist image (will be enhanced with actual images later)
         image_container = QFrame()
-        image_container.setFixedSize(100, 100)
+        image_container.setFixedSize(90, 90)
         image_container.setStyleSheet("""
             QFrame {
                 background: rgba(30, 215, 96, 0.2);
