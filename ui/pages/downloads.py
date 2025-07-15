@@ -6546,6 +6546,10 @@ class DownloadsPage(QWidget):
             print(f"    Selected album: '{selected_album.name}'")
             print(f"    🔒 ALL tracks will be forced into: '{selected_album.name}'")
             
+            # Fetch official track titles from Spotify album
+            print(f"🎵 Fetching official track titles from Spotify album...")
+            spotify_tracks = self._get_spotify_album_tracks(selected_album)
+            
             download_items = []
             
             # Process all tracks and FORCE them into the selected album
@@ -6566,7 +6570,16 @@ class DownloadsPage(QWidget):
                     else:
                         track.track_number = track_index
                 
-                print(f"   🎵 Track {track_index}: {track.title} -> FORCED into Album: {selected_album.name}")
+                # Match to Spotify track title if available
+                spotify_title = self._match_track_to_spotify_title(track, spotify_tracks)
+                if spotify_title:
+                    print(f"   🎵 Track {track_index}: '{track.title}' -> Spotify title: '{spotify_title}'")
+                    track._spotify_title = spotify_title  # Store the official Spotify title
+                    track._spotify_clean_title = spotify_title  # This will be used for file naming
+                else:
+                    print(f"   🎵 Track {track_index}: '{track.title}' -> No Spotify match found, using original")
+                
+                print(f"   🔒 FORCED into Album: {selected_album.name}")
                 
                 # Start individual track download with enhanced metadata
                 download_item = self._start_download_with_artist(track, artist)
@@ -6574,6 +6587,12 @@ class DownloadsPage(QWidget):
                     # Also apply the forced album to the download item
                     download_item._force_album_name = selected_album.name
                     download_item._force_album_mode = True
+                    
+                    # Apply Spotify title to download item if available
+                    if hasattr(track, '_spotify_clean_title'):
+                        download_item._spotify_clean_title = track._spotify_clean_title
+                        print(f"✅ Applied Spotify title to download item: '{track._spotify_clean_title}'")
+                    
                     download_items.append(download_item)
                     print(f"✓ Successfully queued track: {track.title}")
                 else:
@@ -9101,6 +9120,86 @@ class DownloadsPage(QWidget):
             
         except Exception as e:
             print(f"❌ Error extracting track number from filename: {e}")
+            return None
+    
+    def _get_spotify_album_tracks(self, selected_album: Album) -> List[dict]:
+        """Fetch all tracks from the selected Spotify album"""
+        try:
+            print(f"🎵 Fetching tracks from Spotify album: {selected_album.name}")
+            tracks_data = self.spotify_client.get_album_tracks(selected_album.id)
+            
+            if tracks_data and 'items' in tracks_data:
+                tracks = []
+                for track_data in tracks_data['items']:
+                    tracks.append({
+                        'name': track_data['name'],
+                        'track_number': track_data['track_number'],
+                        'duration_ms': track_data['duration_ms'],
+                        'id': track_data['id']
+                    })
+                print(f"✅ Found {len(tracks)} tracks in Spotify album")
+                return tracks
+            else:
+                print(f"❌ No tracks found in Spotify album")
+                return []
+                
+        except Exception as e:
+            print(f"❌ Error fetching Spotify album tracks: {e}")
+            return []
+    
+    def _match_track_to_spotify_title(self, track, spotify_tracks: List[dict]) -> Optional[str]:
+        """Match a downloaded track to a Spotify track title using similarity scoring"""
+        try:
+            if not spotify_tracks:
+                return None
+            
+            original_title = track.title
+            print(f"🔍 Matching track: '{original_title}'")
+            
+            # Clean the original title by removing track number prefixes
+            import re
+            cleaned_original = original_title
+            track_num_match = re.match(r'^(\d+)\s*[\.\-_]\s*(.+)', cleaned_original.strip())
+            if track_num_match:
+                cleaned_original = track_num_match.group(2).strip()
+                print(f"   🧹 Cleaned title (removed track number): '{cleaned_original}'")
+            
+            best_match = None
+            best_score = 0.0
+            
+            # Try matching by track number first (most reliable)
+            if hasattr(track, 'track_number') and track.track_number:
+                for spotify_track in spotify_tracks:
+                    if spotify_track['track_number'] == track.track_number:
+                        print(f"✅ Matched by track number {track.track_number}: '{spotify_track['name']}'")
+                        return spotify_track['name']
+            
+            # Fallback to title similarity matching using cleaned titles
+            for spotify_track in spotify_tracks:
+                # Normalize both titles for comparison (use cleaned original)
+                normalized_original = self.matching_engine.normalize_string(cleaned_original)
+                normalized_spotify = self.matching_engine.normalize_string(spotify_track['name'])
+                
+                print(f"   📊 Comparing: '{normalized_original}' vs '{normalized_spotify}'")
+                
+                # Calculate similarity score
+                score = self.matching_engine.similarity_score(normalized_original, normalized_spotify)
+                
+                if score > best_score:
+                    best_score = score
+                    best_match = spotify_track
+                    print(f"   ⬆️ New best match ({score:.2f}): '{spotify_track['name']}'")
+            
+            # Only return match if confidence is high enough
+            if best_match and best_score >= 0.6:  # 60% similarity threshold
+                print(f"✅ Matched by title similarity ({best_score:.2f}): '{best_match['name']}'")
+                return best_match['name']
+            else:
+                print(f"❌ No good title match found (best score: {best_score:.2f})")
+                return None
+                
+        except Exception as e:
+            print(f"❌ Error matching track to Spotify title: {e}")
             return None
     
     def cleanup_resources(self):
