@@ -4046,7 +4046,7 @@ class DownloadQueue(QFrame):
         # Queue list
         queue_scroll = QScrollArea()
         queue_scroll.setWidgetResizable(True)
-        queue_scroll.setFixedHeight(280)
+        queue_scroll.setMinimumHeight(200)
         queue_scroll.setStyleSheet("""
             QScrollArea {
                 border: none;
@@ -5631,8 +5631,6 @@ class DownloadsPage(QWidget):
         # Initialize stats display
         self.update_download_manager_stats(0, 0)
         
-        # Add stretch to push everything to top
-        layout.addStretch()
         
         return panel
     
