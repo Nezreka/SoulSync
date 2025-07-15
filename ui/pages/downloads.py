@@ -314,14 +314,14 @@ class SpotifyMatchingModal(QDialog):
         
         # Start background search
         try:
-            if hasattr(self.parent(), 'api_thread_pool') and self.parent().api_thread_pool:
-                future = self.parent().api_thread_pool.submit(self._generate_suggestions_worker)
-                future.add_done_callback(self._on_suggestions_ready)
-            else:
-                # Fallback to thread approach
-                self.suggestion_thread = ArtistSuggestionThread(self.track_result, self.spotify_client, self.matching_engine)
-                self.suggestion_thread.suggestions_ready.connect(self.display_auto_suggestions)
-                self.suggestion_thread.start()
+            has_thread_pool = hasattr(self.parent(), 'api_thread_pool') and self.parent().api_thread_pool
+            print(f"🔄 [DEBUG] Thread pool available: {has_thread_pool}")
+            
+            # Temporarily force thread approach to debug UI issue
+            print(f"🔄 [DEBUG] FORCING thread approach for debugging")
+            self.suggestion_thread = ArtistSuggestionThread(self.track_result, self.spotify_client, self.matching_engine)
+            self.suggestion_thread.suggestions_ready.connect(self.display_auto_suggestions)
+            self.suggestion_thread.start()
         except Exception as e:
             print(f"❌ Error starting auto suggestion search: {e}")
             # Show no results if search fails
@@ -342,6 +342,7 @@ class SpotifyMatchingModal(QDialog):
         """Callback when suggestions are ready from thread pool"""
         try:
             suggestions = future.result()
+            print(f"🔄 [DEBUG] _on_suggestions_ready called with {len(suggestions) if suggestions else 0} suggestions")
             # Use QTimer to safely update UI from worker thread
             QTimer.singleShot(0, lambda: self.display_auto_suggestions(suggestions))
         except Exception as e:
@@ -350,6 +351,11 @@ class SpotifyMatchingModal(QDialog):
     
     def display_auto_suggestions(self, suggestions: List[ArtistMatch]):
         """Display the top 3 auto suggestions horizontally"""
+        print(f"🎨 [DEBUG] display_auto_suggestions called with {len(suggestions) if suggestions else 0} suggestions")
+        if suggestions:
+            for i, suggestion in enumerate(suggestions[:3]):
+                print(f"    {i+1}. {suggestion.artist.name} ({suggestion.confidence:.2f})")
+        
         self.clear_layout(self.auto_artists_layout)
         
         if not suggestions:
@@ -361,8 +367,10 @@ class SpotifyMatchingModal(QDialog):
         
         # Show top 3 suggestions side by side
         for i, suggestion in enumerate(suggestions[:3]):
+            print(f"🎨 [DEBUG] Creating artist card for: {suggestion.artist.name}")
             artist_card = self.create_artist_card(suggestion.artist, suggestion.confidence, suggestion.match_reason, is_auto=True)
             self.auto_artists_layout.addWidget(artist_card)
+            print(f"🎨 [DEBUG] Added artist card to layout")
         
         # Add stretch to center the cards if less than 3
         if len(suggestions) < 3:
@@ -766,16 +774,44 @@ class ArtistSuggestionThread(QThread):
         """Generate artist suggestions using multiple strategies"""
         suggestions = []
         
-        # Strategy 1: Search for the artist name directly
+        # Debug logging
+        print(f"🔍 [DEBUG] Auto suggestion input data:")
+        print(f"    track_result.artist: '{getattr(self.track_result, 'artist', 'NOT_FOUND')}'")
+        print(f"    track_result.title: '{getattr(self.track_result, 'title', 'NOT_FOUND')}'")
+        print(f"    track_result.album: '{getattr(self.track_result, 'album', 'NOT_FOUND')}'")
+        print(f"    track_result type: {type(self.track_result)}")
+        print(f"    spotify_client available: {self.spotify_client is not None}")
+        print(f"    matching_engine available: {self.matching_engine is not None}")
+        if self.spotify_client:
+            print(f"    spotify_client.is_authenticated(): {self.spotify_client.is_authenticated()}")
+        print(f"    track_result attributes: {[attr for attr in dir(self.track_result) if not attr.startswith('_')]}")
+        
+        # Try to get artist name from different sources
+        artist_name = None
         if self.track_result.artist and self.track_result.artist != "Unknown Artist":
-            artist_query = self.matching_engine.normalize_string(self.track_result.artist)
+            artist_name = self.track_result.artist
+        elif hasattr(self.track_result, 'user') and self.track_result.user:
+            # Sometimes the artist might be in the user field
+            artist_name = self.track_result.user
+        elif hasattr(self.track_result, 'filename') and self.track_result.filename:
+            # Try to extract artist from filename
+            import os
+            filename = os.path.basename(self.track_result.filename)
+            if ' - ' in filename:
+                artist_name = filename.split(' - ')[0].strip()
+        
+        print(f"🎯 [DEBUG] Determined artist name: '{artist_name}'")
+        
+        # Strategy 1: Search for the artist name directly
+        if artist_name and artist_name != "Unknown Artist":
+            artist_query = self.matching_engine.normalize_string(artist_name)
             print(f"🔍 Strategy 1: Searching for artist '{artist_query}'")
             artists = self.spotify_client.search_artists(artist_query, limit=10)
             print(f"📊 Found {len(artists)} artists from Spotify")
             
             for artist in artists:
                 confidence = self.matching_engine.similarity_score(
-                    self.matching_engine.normalize_string(self.track_result.artist),
+                    self.matching_engine.normalize_string(artist_name),
                     self.matching_engine.normalize_string(artist.name)
                 )
                 
@@ -786,11 +822,15 @@ class ArtistSuggestionThread(QThread):
                         confidence=confidence,
                         match_reason="Artist name match"
                     ))
+        else:
+            print(f"❌ Strategy 1 skipped: artist_name='{artist_name}', original_artist='{getattr(self.track_result, 'artist', 'NO_ATTR')}'")
         
         # Strategy 2: Search for "artist - title" combination
-        if self.track_result.artist and self.track_result.title:
-            combined_query = f"{self.track_result.artist} {self.track_result.title}"
+        if artist_name and self.track_result.title:
+            combined_query = f"{artist_name} {self.track_result.title}"
+            print(f"🔍 Strategy 2: Searching for combined query '{combined_query}'")
             tracks = self.spotify_client.search_tracks(combined_query, limit=10)
+            print(f"📊 Found {len(tracks)} tracks from Spotify")
             
             for track in tracks:
                 for artist_name in track.artists:
@@ -801,7 +841,7 @@ class ArtistSuggestionThread(QThread):
                         
                         # Calculate combined confidence based on artist and title match
                         artist_confidence = self.matching_engine.similarity_score(
-                            self.matching_engine.normalize_string(self.track_result.artist),
+                            self.matching_engine.normalize_string(artist_name),
                             self.matching_engine.normalize_string(artist.name)
                         )
                         title_confidence = self.matching_engine.similarity_score(
@@ -825,6 +865,12 @@ class ArtistSuggestionThread(QThread):
                 unique_suggestions[suggestion.artist.id] = suggestion
         
         final_suggestions = sorted(unique_suggestions.values(), key=lambda x: x.confidence, reverse=True)
+        
+        # Debug final results
+        print(f"🎯 [DEBUG] Final suggestions count: {len(final_suggestions)}")
+        for i, suggestion in enumerate(final_suggestions[:5]):
+            print(f"    {i+1}. {suggestion.artist.name} ({suggestion.confidence:.2f}) - {suggestion.match_reason}")
+        
         return final_suggestions[:5]
 
 class ArtistSearchThread(QThread):
