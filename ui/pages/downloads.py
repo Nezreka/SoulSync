@@ -3715,46 +3715,59 @@ class CompactDownloadItem(QFrame):
             self.file_path = file_path
             # Update filename display if file_path changed
             if hasattr(self, 'filename_label') and self.filename_label:
-                filename_with_ext = self.get_display_filename()
-                self.filename_label.setText(filename_with_ext)
-                self.filename_label.setToolTip(filename_with_ext)
+                try:
+                    filename_with_ext = self.get_display_filename()
+                    self.filename_label.setText(filename_with_ext)
+                    self.filename_label.setToolTip(filename_with_ext)
+                except RuntimeError:
+                    # Qt object has been deleted, skip update
+                    pass
         
         # Update progress components for active downloads only
         if self.queue_type == "active":
             if hasattr(self, 'progress_bar') and self.progress_bar:
-                self.progress_bar.setValue(self.progress)
+                try:
+                    self.progress_bar.setValue(self.progress)
+                except RuntimeError:
+                    # Qt object has been deleted, skip update
+                    pass
             if hasattr(self, 'progress_label') and self.progress_label:
-                self.progress_label.setText(f"{self.progress}%")
+                try:
+                    self.progress_label.setText(f"{self.progress}%")
+                except RuntimeError:
+                    # Qt object has been deleted, skip update
+                    pass
             
             # Update cancel button state based on status
             if hasattr(self, 'cancel_btn') and self.cancel_btn:
-                if status.lower() in ['cancelled', 'canceled', 'failed']:
-                    # Disable button and update text for cancelled/failed downloads
-                    self.cancel_btn.setText("Cancelled")
-                    self.cancel_btn.setEnabled(False)
-                    self.cancel_btn.setStyleSheet("""
-                        QPushButton {
-                            background: rgba(100, 100, 100, 0.5);
-                            color: rgba(255, 255, 255, 0.6);
-                            border: 1px solid rgba(100, 100, 100, 0.4);
-                            border-radius: 4px;
-                            font-size: 9px;
-                            font-weight: 500;
-                        }
-                    """)
-                elif status.lower() in ['downloading', 'queued']:
-                    # Re-enable button for active downloads
-                    self.cancel_btn.setText("Cancel")
-                    self.cancel_btn.setEnabled(True)
-                    self.cancel_btn.setStyleSheet("""
-                        QPushButton {
-                            background: rgba(220, 53, 69, 0.9);
-                            color: white;
-                            border: 1px solid rgba(220, 53, 69, 0.6);
-                            border-radius: 4px;
-                            font-size: 9px;
-                            font-weight: 500;
-                        }
+                try:
+                    if status.lower() in ['cancelled', 'canceled', 'failed']:
+                        # Disable button and update text for cancelled/failed downloads
+                        self.cancel_btn.setText("Cancelled")
+                        self.cancel_btn.setEnabled(False)
+                        self.cancel_btn.setStyleSheet("""
+                            QPushButton {
+                                background: rgba(100, 100, 100, 0.5);
+                                color: rgba(255, 255, 255, 0.6);
+                                border: 1px solid rgba(100, 100, 100, 0.4);
+                                border-radius: 4px;
+                                font-size: 9px;
+                                font-weight: 500;
+                            }
+                        """)
+                    elif status.lower() in ['downloading', 'queued']:
+                        # Re-enable button for active downloads
+                        self.cancel_btn.setText("Cancel")
+                        self.cancel_btn.setEnabled(True)
+                        self.cancel_btn.setStyleSheet("""
+                            QPushButton {
+                                background: rgba(220, 53, 69, 0.9);
+                                color: white;
+                                border: 1px solid rgba(220, 53, 69, 0.6);
+                                border-radius: 4px;
+                                font-size: 9px;
+                                font-weight: 500;
+                            }
                         QPushButton:hover {
                             background: rgba(240, 73, 89, 1.0);
                         }
@@ -3762,6 +3775,9 @@ class CompactDownloadItem(QFrame):
                             background: rgba(200, 43, 58, 1.0);
                         }
                     """)
+                except RuntimeError:
+                    # Qt object has been deleted, skip update
+                    pass
     
     def cancel_download(self):
         """Cancel the download using soulseek client"""
@@ -4650,7 +4666,36 @@ class DownloadsPage(QWidget):
             }
         """)
         
+        # Cancel search button (initially hidden)
+        self.cancel_search_btn = QPushButton("✕ Cancel")
+        self.cancel_search_btn.setFixedSize(100, 40)
+        self.cancel_search_btn.clicked.connect(self.cancel_search)
+        self.cancel_search_btn.setVisible(False)  # Hidden by default
+        self.cancel_search_btn.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(220, 53, 69, 0.9),
+                    stop:1 rgba(200, 43, 58, 0.9));
+                border: none;
+                border-radius: 20px;
+                color: #ffffff;
+                font-size: 13px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(240, 73, 89, 1.0),
+                    stop:1 rgba(220, 63, 79, 1.0));
+            }
+            QPushButton:pressed {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(200, 43, 58, 1.0),
+                    stop:1 rgba(180, 33, 48, 1.0));
+            }
+        """)
+        
         layout.addWidget(self.search_input)
+        layout.addWidget(self.cancel_search_btn)
         layout.addWidget(self.search_btn)
         
         return container
@@ -5737,6 +5782,29 @@ class DownloadsPage(QWidget):
         self.search_thread.search_results_partial.connect(self.on_search_results_partial)
         self.search_thread.finished.connect(self.on_search_thread_finished)
         self.search_thread.start()
+        
+        # Show cancel button and hide search button during search
+        self.cancel_search_btn.setVisible(True)
+        self.search_btn.setVisible(False)
+    
+    def cancel_search(self):
+        """Cancel the current search operation"""
+        if self.search_thread and self.search_thread.isRunning():
+            # Stop the search thread
+            self.search_thread.stop()
+            self.search_thread.wait(1000)  # Wait up to 1 second
+            if self.search_thread.isRunning():
+                self.search_thread.terminate()
+        
+        # Reset UI state
+        self.search_btn.setText("🔍 Search")
+        self.search_btn.setEnabled(True)
+        self.search_btn.setVisible(True)
+        self.cancel_search_btn.setVisible(False)
+        
+        # Stop animations and update status
+        self.stop_search_animations()
+        self.update_search_status("Search cancelled", "#ffa500")
     
     def update_search_status(self, message, color="#ffffff"):
         """Update search status with enhanced styling"""
@@ -5895,6 +5963,8 @@ class DownloadsPage(QWidget):
     def on_search_completed(self, results):
         self.search_btn.setText("🔍 Search")
         self.search_btn.setEnabled(True)
+        self.search_btn.setVisible(True)
+        self.cancel_search_btn.setVisible(False)
         
         # Stop loading animations
         self.stop_search_animations()
@@ -6077,6 +6147,8 @@ class DownloadsPage(QWidget):
     def on_search_failed(self, error_msg):
         self.search_btn.setText("🔍 Search")
         self.search_btn.setEnabled(True)
+        self.search_btn.setVisible(True)
+        self.cancel_search_btn.setVisible(False)
         
         # Stop loading animations
         self.stop_search_animations()
