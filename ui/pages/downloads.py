@@ -4420,7 +4420,7 @@ class DownloadsPage(QWidget):
         # Download status polling timer
         self.download_status_timer = QTimer()
         self.download_status_timer.timeout.connect(self.update_download_status)
-        self.download_status_timer.start(2000)  # Poll every 2 seconds
+        self.download_status_timer.start(1000)  # Poll every 1 second
         
         # Connect clear completed signal for thread-safe communication
         self.clear_completed_finished.connect(self._handle_clear_completion)
