@@ -7,6 +7,7 @@ from PyQt6.QtGui import QFont, QPainter, QPen, QColor, QPixmap
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 import functools  # For fixing lambda memory leaks
 import os
+import threading
 
 # Import the new search result classes
 from core.soulseek_client import TrackResult, AlbumResult
@@ -3303,7 +3304,26 @@ class DownloadItem(QFrame):
         self.file_path = file_path
         self.download_id = download_id  # Track download ID for cancellation
         self.soulseek_client = soulseek_client  # For cancellation functionality
+        
+        # Add completion tracking to prevent duplicate processing
+        self._completion_processed = False
+        self._completion_lock = threading.Lock()
+        
         self.setup_ui()
+    
+    def mark_completion_processed(self) -> bool:
+        """Thread-safe method to mark download as completion-processed.
+        Returns True if this is the first time marking completion, False if already processed."""
+        with self._completion_lock:
+            if self._completion_processed:
+                return False  # Already processed
+            self._completion_processed = True
+            return True  # First time processing
+    
+    def is_completion_processed(self) -> bool:
+        """Check if completion has already been processed."""
+        with self._completion_lock:
+            return self._completion_processed
     
     def setup_ui(self):
         self.setFixedHeight(85)  # More generous height for better spacing
@@ -3716,7 +3736,25 @@ class CompactDownloadItem(QFrame):
         self.album = album
         self.track_number = track_number
         
+        # Add completion tracking to prevent duplicate processing
+        self._completion_processed = False
+        self._completion_lock = threading.Lock()
+        
         self.setup_ui()
+    
+    def mark_completion_processed(self) -> bool:
+        """Thread-safe method to mark download as completion-processed.
+        Returns True if this is the first time marking completion, False if already processed."""
+        with self._completion_lock:
+            if self._completion_processed:
+                return False  # Already processed
+            self._completion_processed = True
+            return True  # First time processing
+    
+    def is_completion_processed(self) -> bool:
+        """Check if completion has already been processed."""
+        with self._completion_lock:
+            return self._completion_processed
     
     def setup_ui(self):
         self.setMinimumHeight(70)  # Increased minimum to accommodate text properly
@@ -8993,6 +9031,11 @@ class DownloadsPage(QWidget):
                             # Check if this is a matched download and process accordingly
                             print(f"🔍 Checking download item '{download_item.title}' for matched artist...")
                             if hasattr(download_item, 'matched_artist') and download_item.matched_artist:
+                                # CRITICAL FIX: Check if completion was already processed to prevent duplicates
+                                if hasattr(download_item, 'mark_completion_processed') and not download_item.mark_completion_processed():
+                                    print(f"⚠️ Completion already processed for '{download_item.title}' - skipping to prevent duplicates")
+                                    continue
+                                
                                 print(f"🎯 Queuing background processing for matched download: '{download_item.title}' by '{download_item.matched_artist.name}'")
                                 
                                 # Create background worker to handle the heavy processing
@@ -9017,6 +9060,11 @@ class DownloadsPage(QWidget):
                                     print(f"    ⚠️ matched_artist is None or empty")
                                 else:
                                     print(f"    ❌ No matched_artist attribute found")
+                                
+                                # Check if completion was already processed (for consistency)
+                                if hasattr(download_item, 'mark_completion_processed') and not download_item.mark_completion_processed():
+                                    print(f"⚠️ Normal download completion already processed for '{download_item.title}' - skipping")
+                                    continue
                                     
                                 # Update the download item status and progress for normal downloads
                                 download_item.update_status(
