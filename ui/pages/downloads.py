@@ -5549,7 +5549,7 @@ class DownloadsPage(QWidget):
         """)
         
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(16, 14, 16, 16)  # Increased for better visual breathing room
+        layout.setContentsMargins(8, 14, 8, 16)  # Reduced side margins for wider download queue
         layout.setSpacing(14)  # Increased spacing for better section separation
         
         # Panel header
