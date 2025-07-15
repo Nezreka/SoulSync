@@ -2,7 +2,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                            QFrame, QPushButton, QProgressBar, QListWidget,
                            QListWidgetItem, QComboBox, QLineEdit, QScrollArea, QMessageBox,
                            QSplitter, QSizePolicy, QSpacerItem, QTabWidget, QDialog, QGridLayout)
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QUrl, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup, QFileSystemWatcher, pyqtProperty
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QUrl, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup, QFileSystemWatcher, pyqtProperty, QObject, QRunnable, QThreadPool
 from PyQt6.QtGui import QFont, QPainter, QPen, QColor, QPixmap
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 import functools  # For fixing lambda memory leaks
@@ -29,6 +29,43 @@ class AlbumMatch:
     album: Album
     confidence: float
     match_reason: str = ""
+
+class DownloadCompletionWorkerSignals(QObject):
+    """Signals for the download completion worker"""
+    completed = pyqtSignal(object, str)  # download_item, organized_path
+    error = pyqtSignal(object, str)  # download_item, error_message
+
+class DownloadCompletionWorker(QRunnable):
+    """Background worker to handle download completion processing without blocking UI"""
+    
+    def __init__(self, download_item, absolute_file_path, organize_func):
+        super().__init__()
+        self.download_item = download_item
+        self.absolute_file_path = absolute_file_path
+        self.organize_func = organize_func
+        self.signals = DownloadCompletionWorkerSignals()
+        
+    def run(self):
+        """Process download completion in background thread"""
+        try:
+            print(f"🧵 Background worker processing: '{self.download_item.title}' by '{self.download_item.matched_artist.name}'")
+            
+            # Add a small delay to ensure file is fully written
+            import time
+            time.sleep(1)
+            
+            # Organize the file into Transfer folder structure
+            organized_path = self.organize_func(self.download_item, self.absolute_file_path)
+            
+            # Emit completion signal
+            self.signals.completed.emit(self.download_item, organized_path or self.absolute_file_path)
+            
+        except Exception as e:
+            print(f"❌ Error in background worker: {e}")
+            import traceback
+            traceback.print_exc()
+            # Emit error signal
+            self.signals.error.emit(self.download_item, str(e))
 
 class SpotifyMatchingModal(QDialog):
     """Modal for selecting Spotify artist match before download - full app container size"""
@@ -4272,6 +4309,10 @@ class DownloadsPage(QWidget):
         self.api_thread_pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="SpotifyAPI")
         self.active_suggestion_threads = set()  # Track active threads for cleanup
         
+        # QThreadPool for download completion processing to prevent UI freezing
+        self.completion_thread_pool = QThreadPool()
+        self.completion_thread_pool.setMaxThreadCount(2)  # Limit concurrent completion processing
+        
         # Initialize audio player for streaming
         self.audio_player = AudioPlayer(self)
         self.audio_player.playback_finished.connect(self.on_audio_playback_finished)
@@ -8413,6 +8454,38 @@ class DownloadsPage(QWidget):
             import traceback
             traceback.print_exc()
     
+    def _on_download_completion_finished(self, download_item, organized_path):
+        """Handle successful completion of background download processing"""
+        print(f"✅ Background processing completed for '{download_item.title}' -> {organized_path}")
+        
+        # Update the download item status and progress on main thread
+        download_item.update_status(
+            status='completed',
+            progress=100,
+            download_speed=0,
+            file_path=organized_path
+        )
+        
+        # Move completed items to finished queue on main thread
+        print(f"[DEBUG] Moving completed download '{download_item.title}' to finished queue")
+        self.download_queue.move_to_finished(download_item)
+    
+    def _on_download_completion_error(self, download_item, error_message):
+        """Handle error in background download processing"""
+        print(f"❌ Background processing failed for '{download_item.title}': {error_message}")
+        
+        # Still mark as completed but with original path, move to finished queue
+        download_item.update_status(
+            status='completed',
+            progress=100,
+            download_speed=0,
+            file_path=download_item.file_path  # Keep original path on error
+        )
+        
+        # Move to finished queue even on error
+        print(f"[DEBUG] Moving download '{download_item.title}' to finished queue after error")
+        self.download_queue.move_to_finished(download_item)
+    
     def update_download_status(self):
         """Poll slskd API for download status updates (QTimer callback) - FIXED VERSION"""
         if not self.soulseek_client or not self.download_queue.download_items:
@@ -8573,40 +8646,43 @@ class DownloadsPage(QWidget):
                             
                             # Check if this is a matched download and process accordingly
                             print(f"🔍 Checking download item '{download_item.title}' for matched artist...")
-                            if hasattr(download_item, 'matched_artist'):
-                                print(f"    ✅ Has matched_artist attribute: {download_item.matched_artist}")
-                                if download_item.matched_artist:
-                                    print(f"🎯 Processing matched download for '{download_item.title}' by '{download_item.matched_artist.name}'")
-                                    try:
-                                        # Add a small delay to ensure file is fully written
-                                        import time
-                                        time.sleep(1)
-                                        
-                                        # Organize the file into Transfer folder structure
-                                        organized_path = self._organize_matched_download(download_item, absolute_file_path)
-                                        if organized_path:
-                                            absolute_file_path = organized_path
-                                    except Exception as e:
-                                        print(f"❌ Error organizing matched download: {e}")
-                                        # Continue with normal process if organization fails
-                                else:
-                                    print(f"    ⚠️ matched_artist is None or empty")
-                            else:
-                                print(f"    ❌ No matched_artist attribute found")
-                                # Let's also check all attributes of the download item for debugging
-                                print(f"    📋 Download item attributes: {[attr for attr in dir(download_item) if not attr.startswith('_')]}")
+                            if hasattr(download_item, 'matched_artist') and download_item.matched_artist:
+                                print(f"🎯 Queuing background processing for matched download: '{download_item.title}' by '{download_item.matched_artist.name}'")
                                 
-                            # Update the download item status and progress BEFORE moving
-                            download_item.update_status(
-                                status=new_status,
-                                progress=100,  # Force 100% for completed downloads
-                                download_speed=int(avg_speed),
-                                file_path=absolute_file_path
-                            )
-                            # Move completed items to finished queue
-                            print(f"[DEBUG] Moving completed download '{download_item.title}' to finished queue")
-                            self.download_queue.move_to_finished(download_item)
-                            continue
+                                # Create background worker to handle the heavy processing
+                                worker = DownloadCompletionWorker(
+                                    download_item=download_item,
+                                    absolute_file_path=absolute_file_path,
+                                    organize_func=self._organize_matched_download
+                                )
+                                
+                                # Connect worker signals to handlers
+                                worker.signals.completed.connect(self._on_download_completion_finished)
+                                worker.signals.error.connect(self._on_download_completion_error)
+                                
+                                # Submit to thread pool for background processing
+                                self.completion_thread_pool.start(worker)
+                                
+                                # Don't process further here - worker will handle completion
+                                continue
+                            else:
+                                # Non-matched download - process normally on main thread
+                                if hasattr(download_item, 'matched_artist'):
+                                    print(f"    ⚠️ matched_artist is None or empty")
+                                else:
+                                    print(f"    ❌ No matched_artist attribute found")
+                                    
+                                # Update the download item status and progress for normal downloads
+                                download_item.update_status(
+                                    status=new_status,
+                                    progress=100,  # Force 100% for completed downloads
+                                    download_speed=int(avg_speed),
+                                    file_path=absolute_file_path
+                                )
+                                # Move completed items to finished queue
+                                print(f"[DEBUG] Moving normal completed download '{download_item.title}' to finished queue")
+                                self.download_queue.move_to_finished(download_item)
+                                continue
                         elif 'Cancelled' in state or 'Canceled' in state:
                             new_status = 'cancelled'
                             # Update the download item status BEFORE moving
@@ -9205,9 +9281,13 @@ class DownloadsPage(QWidget):
     def cleanup_resources(self):
         """Clean up resources when page is destroyed"""
         try:
-            # Shutdown thread pool
+            # Shutdown thread pools
             if hasattr(self, 'api_thread_pool'):
                 self.api_thread_pool.shutdown(wait=False)
                 print("🧹 API thread pool shutdown")
+            
+            if hasattr(self, 'completion_thread_pool'):
+                self.completion_thread_pool.waitForDone(3000)  # Wait up to 3 seconds for completion
+                print("🧹 Completion thread pool shutdown")
         except Exception as e:
             print(f"❌ Error during resource cleanup: {e}")
