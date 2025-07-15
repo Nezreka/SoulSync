@@ -872,6 +872,41 @@ class SoulseekClient:
             logger.error(f"Error cancelling download: {e}")
             return False
     
+    async def signal_download_completion(self, download_id: str, username: str, remove: bool = True) -> bool:
+        """Signal the Soulseek API that a download has completed or been cancelled
+        
+        Args:
+            download_id: The ID of the download
+            username: The uploader username
+            remove: True to remove from transfer list (completion), False to just cancel
+            
+        Returns:
+            bool: True if signal was successful, False otherwise
+        """
+        if not self.base_url:
+            logger.error("Soulseek client not configured")
+            return False
+        
+        try:
+            # Use the API endpoint format: /transfers/downloads/{username}/{download_id}?remove={true/false}
+            endpoint = f'transfers/downloads/{username}/{download_id}?remove={str(remove).lower()}'
+            action = "Signaling completion" if remove else "Signaling cancellation"
+            logger.debug(f"{action} for download {download_id} from {username}")
+            
+            response = await self._make_request('DELETE', endpoint)
+            success = response is not None
+            
+            if success:
+                logger.info(f"Successfully signaled download {action.lower()}: {download_id}")
+            else:
+                logger.warning(f"Failed to signal download {action.lower()}: {download_id}")
+                
+            return success
+            
+        except Exception as e:
+            logger.error(f"Error signaling download completion: {e}")
+            return False
+    
     async def clear_all_completed_downloads(self) -> bool:
         """Clear all completed/finished downloads from slskd backend
         
