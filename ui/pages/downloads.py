@@ -9141,6 +9141,35 @@ class DownloadsPage(QWidget):
                                 download_speed=0,  # No speed for cancelled
                                 file_path=download_item.file_path
                             )
+                            
+                            # IMMEDIATE CLEANUP: Remove cancelled download from API immediately
+                            if download_item.download_id and download_item.username and download_item.soulseek_client:
+                                def cleanup_cancelled_download():
+                                    try:
+                                        import asyncio
+                                        loop = asyncio.new_event_loop()
+                                        asyncio.set_event_loop(loop)
+                                        success = loop.run_until_complete(
+                                            download_item.soulseek_client.cancel_download(
+                                                download_item.download_id, 
+                                                download_item.username, 
+                                                remove=True
+                                            )
+                                        )
+                                        loop.close()
+                                        
+                                        if success:
+                                            print(f"✓ Immediately cleaned up cancelled download {download_item.download_id}")
+                                        else:
+                                            print(f"⚠️ Failed to clean up cancelled download {download_item.download_id}")
+                                    except Exception as e:
+                                        print(f"⚠️ Error cleaning up cancelled download: {e}")
+                                
+                                # Run cleanup in background thread
+                                from concurrent.futures import ThreadPoolExecutor
+                                with ThreadPoolExecutor(max_workers=1) as executor:
+                                    executor.submit(cleanup_cancelled_download)
+                            
                             print(f"[DEBUG] Moving cancelled download '{download_item.title}' to finished queue")
                             self.download_queue.move_to_finished(download_item)
                             continue
