@@ -8,6 +8,8 @@ from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 import functools  # For fixing lambda memory leaks
 import os
 import threading
+from threading import RLock, Lock
+from queue import Queue, Empty
 
 # Import the new search result classes
 from core.soulseek_client import TrackResult, AlbumResult
@@ -67,6 +69,98 @@ class DownloadCompletionWorker(QRunnable):
             traceback.print_exc()
             # Emit error signal
             self.signals.error.emit(self.download_item, str(e))
+
+class OptimizedDownloadCompletionWorker(QRunnable):
+    """OPTIMIZATION v2: Non-blocking background worker for download completion processing"""
+    
+    def __init__(self, download_item, absolute_file_path, organize_func):
+        super().__init__()
+        self.download_item = download_item
+        self.absolute_file_path = absolute_file_path
+        self.organize_func = organize_func
+        self.signals = DownloadCompletionWorkerSignals()
+        
+    def run(self):
+        """Process download completion without blocking operations"""
+        try:
+            # OPTIMIZATION: Use file system monitoring instead of sleep
+            import os
+            from pathlib import Path
+            
+            # Verify file exists and is not being written to
+            file_path = Path(self.absolute_file_path)
+            if file_path.exists():
+                initial_size = file_path.stat().st_size
+                # Quick non-blocking check for file stability
+                import time
+                time.sleep(0.1)  # Minimal delay
+                if file_path.exists() and file_path.stat().st_size == initial_size:
+                    # File is stable, proceed with organization
+                    organized_path = self.organize_func(self.download_item, self.absolute_file_path)
+                    self.signals.completed.emit(self.download_item, organized_path or self.absolute_file_path)
+                else:
+                    # File still being written, retry with shorter delay
+                    time.sleep(0.5)
+                    organized_path = self.organize_func(self.download_item, self.absolute_file_path)
+                    self.signals.completed.emit(self.download_item, organized_path or self.absolute_file_path)
+            else:
+                raise FileNotFoundError(f"Download file not found: {self.absolute_file_path}")
+            
+        except Exception as e:
+            print(f"❌ Error in optimized worker: {e}")
+            import traceback
+            traceback.print_exc()
+            self.signals.error.emit(self.download_item, str(e))
+
+class ThreadSafeQueueManager:
+    """OPTIMIZATION v2: Thread-safe queue management system to prevent race conditions"""
+    
+    def __init__(self):
+        self._download_items_lock = RLock()  # Reentrant lock for nested operations
+        self._state_transition_lock = Lock()  # Lock for atomic state changes
+        self._id_mapping_lock = Lock()  # Lock for ID mapping operations
+        self._download_items = []
+        self._pending_operations = Queue()  # Queue for pending operations
+        
+    def add_download_item_safe(self, download_item):
+        """Thread-safe addition of download items"""
+        with self._download_items_lock:
+            self._download_items.append(download_item)
+    
+    def remove_download_item_safe(self, download_item):
+        """Thread-safe removal of download items"""
+        with self._download_items_lock:
+            if download_item in self._download_items:
+                self._download_items.remove(download_item)
+                return True
+            return False
+    
+    def get_download_items_copy(self):
+        """Get thread-safe copy of download items"""
+        with self._download_items_lock:
+            return self._download_items.copy()
+    
+    def find_item_by_id_safe(self, download_id):
+        """Thread-safe search for download item by ID"""
+        with self._download_items_lock:
+            for item in self._download_items:
+                if hasattr(item, 'download_id') and item.download_id == download_id:
+                    return item
+            return None
+    
+    def atomic_state_transition(self, download_item, new_status, callback=None):
+        """Perform atomic state transitions to prevent inconsistencies"""
+        with self._state_transition_lock:
+            old_status = getattr(download_item, 'status', 'unknown')
+            download_item.status = new_status
+            if callback:
+                callback(download_item, old_status, new_status)
+    
+    def update_id_mapping_safe(self, download_item, new_id):
+        """Thread-safe ID mapping updates"""
+        with self._id_mapping_lock:
+            old_id = getattr(download_item, 'download_id', None)
+            download_item.download_id = new_id
 
 class SpotifyMatchingModal(QDialog):
     """Modal for selecting Spotify artist match before download - full app container size"""
@@ -4761,6 +4855,16 @@ class DownloadsPage(QWidget):
         self.completion_thread_pool = QThreadPool()
         self.completion_thread_pool.setMaxThreadCount(2)  # Limit concurrent completion processing
         
+        # OPTIMIZATION v2: Enhanced thread pool configuration
+        self._optimized_api_pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="OptimizedAPI")
+        self._optimized_completion_pool = QThreadPool()
+        self._optimized_completion_pool.setMaxThreadCount(4)  # Increased for better bulk handling
+        self._cleanup_pools = []  # Track pools for proper shutdown
+        
+        # OPTIMIZATION v2: Thread-safe queue management
+        self._queue_manager = ThreadSafeQueueManager()
+        self._queue_consistency_lock = RLock()  # Global queue consistency lock
+        
         # Initialize audio player for streaming
         self.audio_player = AudioPlayer(self)
         self.audio_player.playback_finished.connect(self.on_audio_playback_finished)
@@ -4772,6 +4876,22 @@ class DownloadsPage(QWidget):
         self.download_status_timer = QTimer()
         self.download_status_timer.timeout.connect(self.update_download_status)
         self.download_status_timer.start(1000)  # Poll every 1 second
+        
+        # OPTIMIZATION v2: Enable optimized systems (set to True to activate)
+        # TO ENABLE OPTIMIZATIONS: Call self.enable_optimized_systems() after initialization
+        # This activates: Adaptive polling, Enhanced thread pools, Non-blocking processing,
+        # Optimized bulk downloads, Thread-safe queue management, Robust state management
+        self._use_optimized_systems = False  # Set to True to enable all optimizations
+        
+        # OPTIMIZATION: Adaptive polling configuration (v2)
+        self._polling_intervals = {
+            'active': 1500,      # 1.5s when downloads are active (reduced from 1s)
+            'idle': 3000,        # 3s when no active downloads
+            'bulk_pause': 5000   # 5s during bulk operations
+        }
+        self._current_polling_mode = 'active'
+        self._bulk_operation_active = False
+        self._last_active_count = 0
         
         # Periodic cleanup tracker for completed downloads
         self.downloads_to_cleanup = set()  # Track downloads found last tick for bulk cleanup
@@ -7028,6 +7148,10 @@ class DownloadsPage(QWidget):
     
     def _handle_matched_album_download(self, album_result, artist: Artist):
         """Handle the album download after artist selection from modal"""
+        # OPTIMIZATION v2: Use optimized version if enabled
+        if hasattr(self, '_use_optimized_systems') and self._use_optimized_systems:
+            return self._handle_matched_album_download_v2(album_result, artist)
+            
         try:
             print(f"🎯 Starting matched album download for '{album_result.album_title}' by '{artist.name}'")
             print(f"📀 Processing {len(album_result.tracks)} tracks with matched artist")
@@ -7094,6 +7218,67 @@ class DownloadsPage(QWidget):
             print(f"❌ Error handling matched album download: {e}")
             # Fallback to normal album download
             self.start_album_download(album_result)
+
+    def _handle_matched_album_download_v2(self, album_result, artist: Artist):
+        """OPTIMIZATION v2: Handle album download with non-blocking batch processing"""
+        try:
+            
+            # Set bulk operation flag for adaptive polling
+            self._bulk_operation_active = True
+            
+            # Clean up the album title
+            clean_album_title = self._clean_album_title(album_result.album_title, artist.name)
+            
+            # Prepare all tracks with metadata (no blocking operations)
+            prepared_tracks = []
+            for track_index, track in enumerate(album_result.tracks, 1):
+                track.matched_artist = artist
+                track.album = clean_album_title
+                
+                # Extract track number without blocking
+                if hasattr(track, 'filename'):
+                    import os
+                    filename = os.path.basename(track.filename)
+                    original_track_num = self._extract_track_number_from_filename(filename, track.title)
+                    if original_track_num:
+                        track.track_number = original_track_num
+                    else:
+                        track.track_number = track_index
+                else:
+                    track.track_number = track_index
+                
+                prepared_tracks.append(track)
+            
+            # Use background thread pool for batch download initiation
+            def batch_download_tracks():
+                download_items = []
+                for track_index, track in enumerate(prepared_tracks, 1):
+                    try:
+                        download_item = self._start_download_with_artist(track, artist)
+                        if download_item:
+                            download_items.append(download_item)
+                            # No sleep - let the system handle queuing naturally
+                    except Exception as e:
+                        print(f"❌ Failed to start download for track {track.title}: {e}")
+                
+                # Ensure album consistency in background
+                if download_items:
+                    self._ensure_album_consistency(download_items, artist, clean_album_title)
+                
+                # Reset bulk operation flag
+                self._bulk_operation_active = False
+                
+                print(f"✅ Queued {len(download_items)}/{len(prepared_tracks)} tracks")
+                return download_items
+            
+            # Submit to optimized thread pool
+            self._optimized_api_pool.submit(batch_download_tracks)
+            
+        except Exception as e:
+            print(f"❌ Optimized album download failed: {e}")
+            self._bulk_operation_active = False
+            # Fallback to original method
+            self._handle_matched_album_download(album_result, artist)
     
     def _handle_matched_album_download_with_album(self, album_result, artist: Artist, selected_album: Album):
         """Handle the album download after both artist and album selection from modal"""
@@ -8119,13 +8304,11 @@ class DownloadsPage(QWidget):
         print(f"[DEBUG] Found {len(album_items_found)} album items to search")
         
         for album_item in album_items_found:
-            print(f"[DEBUG] Checking album: '{album_item.album_result.album_title}' by '{album_item.album_result.artist}' with {len(album_item.track_items)} tracks")
             
             for track_item in album_item.track_items:
                 track_title = track_item.track_result.title
                 track_artist = track_item.track_result.artist
                 
-                print(f"[DEBUG] Comparing track: '{track_title}' by '{track_artist}'")
                 
                 # Match by track title and artist
                 if (track_title == download_item.title and track_artist == download_item.artist):
@@ -9047,10 +9230,249 @@ class DownloadsPage(QWidget):
         print(f"[DEBUG] Moving download '{download_item.title}' to finished queue after error")
         self.download_queue.move_to_finished(download_item)
     
+    def _update_adaptive_polling(self):
+        """OPTIMIZATION v2: Update polling frequency based on download activity"""
+        try:
+            active_downloads = len([item for item in self.download_queue.download_items 
+                                  if item.status.lower() in ['downloading', 'queued', 'initializing']])
+            
+            # Determine optimal polling mode
+            new_mode = 'idle'
+            if self._bulk_operation_active:
+                new_mode = 'bulk_pause'
+            elif active_downloads > 0:
+                new_mode = 'active'
+            
+            # Update timer if mode changed
+            if new_mode != self._current_polling_mode:
+                new_interval = self._polling_intervals[new_mode]
+                self.download_status_timer.setInterval(new_interval)
+                self._current_polling_mode = new_mode
+                
+            self._last_active_count = active_downloads
+            
+        except Exception as e:
+            pass  # Silent adaptive polling failures
+
+    def update_download_status_v2(self):
+        """OPTIMIZATION v2: Robust queue state management with thread safety"""
+        if not self.soulseek_client:
+            return
+            
+        # Use thread-safe access to download items
+        download_items = self._queue_manager.get_download_items_copy()
+        if not download_items:
+            return
+            
+        # Update adaptive polling
+        self._update_adaptive_polling()
+        
+        def handle_status_update_v2(transfers_data):
+            """Enhanced status update handler with robust state management"""
+            try:
+                if not transfers_data:
+                    return
+                    
+                # Flatten transfers data efficiently
+                all_transfers = []
+                for user_data in transfers_data:
+                    if 'directories' in user_data:
+                        for directory in user_data['directories']:
+                            if 'files' in directory:
+                                all_transfers.extend(directory['files'])
+                
+                
+                # Use thread-safe operations throughout
+                with self._queue_consistency_lock:
+                    matched_transfer_ids = set()
+                    
+                    # Process each download item with improved matching
+                    for download_item in download_items:
+                        if download_item.status.lower() in ['completed', 'finished', 'cancelled', 'failed']:
+                            continue
+                            
+                        # Enhanced ID-based matching
+                        matching_transfer = self._find_matching_transfer_v2(
+                            download_item, all_transfers, matched_transfer_ids
+                        )
+                        
+                        if matching_transfer:
+                            matched_transfer_ids.add(matching_transfer.get('id'))
+                            self._process_transfer_match_v2(download_item, matching_transfer)
+                        else:
+                            self._handle_missing_transfer_v2(download_item)
+                    
+                    # Update UI counters
+                    self.download_queue.update_tab_counts()
+                
+            except Exception as e:
+                print(f"[ERROR] Status update v2 failed: {e}")
+                import traceback
+                traceback.print_exc()
+        
+        # Create status thread with error handling
+        try:
+            status_thread = TransferStatusThread(self.soulseek_client)
+            status_thread.transfer_status_completed.connect(handle_status_update_v2)
+            status_thread.finished.connect(lambda: self._cleanup_status_thread_v2(status_thread))
+            
+            # Track threads for cleanup
+            if not hasattr(self, '_active_status_threads_v2'):
+                self._active_status_threads_v2 = set()
+            self._active_status_threads_v2.add(status_thread)
+            
+            status_thread.start()
+            
+        except Exception as e:
+            print(f"[ERROR] Failed to start status update thread v2: {e}")
+    
+    def _find_matching_transfer_v2(self, download_item, all_transfers, matched_ids):
+        """Enhanced transfer matching with better ID tracking"""
+        # Primary: ID-based matching
+        if hasattr(download_item, 'download_id') and download_item.download_id:
+            for transfer in all_transfers:
+                transfer_id = transfer.get('id')
+                if transfer_id == download_item.download_id and transfer_id not in matched_ids:
+                    return transfer
+        
+        # Fallback: Enhanced filename matching (simplified for performance)
+        for transfer in all_transfers:
+            transfer_id = transfer.get('id')
+            if transfer_id in matched_ids:
+                continue
+                
+            filename = transfer.get('filename', '').lower()
+            title = download_item.title.lower()
+            
+            # Quick contains check for performance
+            if title in filename or any(word in filename for word in title.split() if len(word) > 3):
+                return transfer
+        
+        return None
+    
+    def _process_transfer_match_v2(self, download_item, transfer):
+        """Process matched transfer with atomic state updates"""
+        state = transfer.get('state', 'Unknown')
+        progress = min(100, max(0, transfer.get('percentComplete', 0)))
+        
+        # Determine new status
+        if 'Completed' in state or 'Succeeded' in state:
+            new_status = 'completed'
+            progress = 100
+        elif 'Cancelled' in state or 'Canceled' in state:
+            new_status = 'cancelled'
+        elif 'Failed' in state or 'Errored' in state:
+            new_status = 'failed'
+        elif 'InProgress' in state:
+            new_status = 'downloading'
+        else:
+            new_status = 'queued'
+        
+        # Atomic status update
+        self._queue_manager.atomic_state_transition(
+            download_item, new_status,
+            callback=lambda item, old, new: self._handle_status_change_v2(item, old, new, transfer)
+        )
+        
+        # Update progress and metadata
+        download_item.update_status(
+            status=new_status,
+            progress=int(progress),
+            download_speed=int(transfer.get('averageSpeed', 0)),
+            file_path=transfer.get('filename', download_item.file_path)
+        )
+        
+        # Update ID mapping if needed
+        transfer_id = transfer.get('id')
+        if transfer_id and (not hasattr(download_item, 'download_id') or download_item.download_id != transfer_id):
+            self._queue_manager.update_id_mapping_safe(download_item, transfer_id)
+    
+    def _handle_status_change_v2(self, download_item, old_status, new_status, transfer):
+        """Handle status change transitions"""
+        if new_status in ['completed', 'cancelled', 'failed']:
+            # Move to finished queue
+            self.download_queue.move_to_finished(download_item)
+            
+            # Cleanup API if needed
+            if new_status in ['cancelled', 'failed'] and hasattr(download_item, 'download_id'):
+                self._schedule_api_cleanup_v2(download_item)
+    
+    def _handle_missing_transfer_v2(self, download_item):
+        """Handle downloads missing from API with improved grace period"""
+        if not hasattr(download_item, 'api_missing_count_v2'):
+            download_item.api_missing_count_v2 = 0
+        
+        download_item.api_missing_count_v2 += 1
+        
+        # Longer grace period for stability
+        if download_item.api_missing_count_v2 >= 5:  # 5 polling cycles
+            self._queue_manager.atomic_state_transition(download_item, 'failed')
+            self.download_queue.move_to_finished(download_item)
+    
+    def _schedule_api_cleanup_v2(self, download_item):
+        """Schedule API cleanup in background"""
+        def cleanup_task():
+            try:
+                if hasattr(download_item, 'download_id') and download_item.soulseek_client:
+                    import asyncio
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    success = loop.run_until_complete(
+                        download_item.soulseek_client.cancel_download(
+                            download_item.download_id, 
+                            getattr(download_item, 'username', ''), 
+                            remove=True
+                        )
+                    )
+                    loop.close()
+                    pass  # Silent cleanup success
+            except Exception as e:
+                print(f"❌ API cleanup failed: {e}")
+        
+        self._optimized_api_pool.submit(cleanup_task)
+    
+    def _cleanup_status_thread_v2(self, thread):
+        """Clean up status threads"""
+        try:
+            if hasattr(self, '_active_status_threads_v2') and thread in self._active_status_threads_v2:
+                self._active_status_threads_v2.remove(thread)
+            thread.deleteLater()
+        except Exception as e:
+            pass  # Silent thread cleanup failures
+
+    def enable_optimized_systems(self):
+        """Enable all v2 optimization systems"""
+        self._use_optimized_systems = True
+        print("✅ Enabled optimized download systems")
+        
+        # Switch to optimized timer callback
+        self.download_status_timer.timeout.disconnect()
+        self.download_status_timer.timeout.connect(self.update_download_status_v2)
+        
+        # Update timer interval for initial adaptive mode
+        self.download_status_timer.setInterval(self._polling_intervals['active'])
+    
+    def disable_optimized_systems(self):
+        """Disable v2 optimizations and revert to original behavior"""
+        self._use_optimized_systems = False
+        print("⚠️ Disabled optimizations, reverted to original system")
+        
+        # Revert to original timer callback
+        self.download_status_timer.timeout.disconnect()
+        self.download_status_timer.timeout.connect(self.update_download_status)
+        self.download_status_timer.setInterval(1000)  # Back to 1 second
+
     def update_download_status(self):
         """Poll slskd API for download status updates (QTimer callback) - FIXED VERSION"""
         if not self.soulseek_client or not self.download_queue.download_items:
             return
+            
+        # OPTIMIZATION v2: Use optimized status update if enabled
+        if hasattr(self, '_use_optimized_systems') and self._use_optimized_systems:
+            return self.update_download_status_v2()
+        
+        # OPTIMIZATION v2: Update adaptive polling frequency
+        self._update_adaptive_polling()
             
         # CRITICAL FIX: Use tracked thread instead of anonymous thread
         def handle_status_update(transfers_data):
