@@ -1870,8 +1870,8 @@ class StreamingThread(QThread):
                                             
                                             # Signal API that download is complete
                                             try:
-                                                download_id = transfer.get('id', '')
-                                                if download_id and target_username:
+                                                download_id = download_status.get('id', '')
+                                                if download_id and self.search_result.username:
                                                     import asyncio
                                                     from services.service_manager import service_manager
                                                     soulseek_client = service_manager.get_soulseek_client()
@@ -1880,7 +1880,7 @@ class StreamingThread(QThread):
                                                         loop = asyncio.new_event_loop()
                                                         asyncio.set_event_loop(loop)
                                                         success = loop.run_until_complete(
-                                                            soulseek_client.signal_download_completion(download_id, target_username, remove=True)
+                                                            soulseek_client.signal_download_completion(download_id, self.search_result.username, remove=True)
                                                         )
                                                         loop.close()
                                                         if success:
