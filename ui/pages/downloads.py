@@ -4630,6 +4630,10 @@ class DownloadsPage(QWidget):
         self.download_status_timer.timeout.connect(self.update_download_status)
         self.download_status_timer.start(1000)  # Poll every 1 second
         
+        # Periodic cleanup tracker for completed downloads
+        self.downloads_to_cleanup = set()  # Track downloads found last tick for bulk cleanup
+        self.individual_downloads_to_cleanup = []  # Track downloads needing individual removal
+        
         # Connect clear completed signal for thread-safe communication
         self.clear_completed_finished.connect(self._handle_clear_completion)
         
@@ -9224,6 +9228,150 @@ class DownloadsPage(QWidget):
             old_thread.deleteLater()
             
         status_thread.start()
+        
+        # Periodic cleanup for completed downloads in backend
+        self._periodic_cleanup_check()
+    
+    def _periodic_cleanup_check(self):
+        """Check for completed downloads and clean them up intelligently"""
+        if not self.soulseek_client:
+            return
+            
+        try:
+            # Clean up bulk downloads found in previous tick
+            if self.downloads_to_cleanup:
+                print(f"[CLEANUP] Bulk cleaning {len(self.downloads_to_cleanup)} completed downloads from backend")
+                self._cleanup_backend_downloads(self.downloads_to_cleanup)
+                self.downloads_to_cleanup.clear()
+            
+            # Clean up individual downloads found in previous tick (errored ones)
+            if self.individual_downloads_to_cleanup:
+                print(f"[CLEANUP] Individually cleaning {len(self.individual_downloads_to_cleanup)} errored downloads from backend")
+                self._cleanup_individual_downloads(self.individual_downloads_to_cleanup)
+                self.individual_downloads_to_cleanup.clear()
+            
+            # Find new completed downloads for next tick
+            self._find_completed_downloads_for_cleanup()
+            
+        except Exception as e:
+            print(f"[ERROR] Error in periodic cleanup: {e}")
+    
+    def _find_completed_downloads_for_cleanup(self):
+        """Find downloads that need cleanup in the next tick"""
+        try:
+            # Get current downloads from backend
+            def check_backend_downloads():
+                try:
+                    result = self.soulseek_client.get_all_downloads()
+                    if result:
+                        bulk_cleanup_states = {'Completed, Succeeded', 'Completed, Cancelled', 'Cancelled', 'Canceled'}
+                        individual_cleanup_states = {'Completed, Errored', 'Failed', 'Errored'}
+                        
+                        new_bulk_cleanup = set()
+                        new_individual_cleanup = []
+                        
+                        for download in result:
+                            if download.state in bulk_cleanup_states:
+                                # These can be cleared with bulk clear operation
+                                download_key = f"{download.username}:{download.id}"
+                                new_bulk_cleanup.add(download_key)
+                            elif download.state in individual_cleanup_states:
+                                # These need individual removal calls
+                                download_info = {
+                                    'username': download.username,
+                                    'id': download.id,
+                                    'state': download.state
+                                }
+                                new_individual_cleanup.append(download_info)
+                        
+                        if new_bulk_cleanup or new_individual_cleanup:
+                            print(f"[CLEANUP] Found {len(new_bulk_cleanup)} bulk + {len(new_individual_cleanup)} individual downloads needing cleanup")
+                            self.downloads_to_cleanup.update(new_bulk_cleanup)
+                            if new_individual_cleanup:
+                                # Store individual cleanup items separately
+                                if not hasattr(self, 'individual_downloads_to_cleanup'):
+                                    self.individual_downloads_to_cleanup = []
+                                self.individual_downloads_to_cleanup.extend(new_individual_cleanup)
+                except Exception as e:
+                    print(f"[ERROR] Error checking backend downloads: {e}")
+            
+            # Run in background to avoid blocking UI
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                executor.submit(check_backend_downloads)
+                
+        except Exception as e:
+            print(f"[ERROR] Error finding downloads for cleanup: {e}")
+    
+    def _cleanup_backend_downloads(self, download_keys):
+        """Clean up specific downloads from backend"""
+        try:
+            def do_cleanup():
+                try:
+                    # Use the existing clear all completed downloads method
+                    # This is simpler and more reliable than individual cleanup
+                    success = self.soulseek_client.clear_all_completed_downloads()
+                    if success:
+                        print(f"[CLEANUP] Successfully cleared completed downloads from backend")
+                    else:
+                        print(f"[CLEANUP] Failed to clear completed downloads from backend")
+                except Exception as e:
+                    print(f"[ERROR] Error during backend cleanup: {e}")
+            
+            # Run cleanup in background
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                executor.submit(do_cleanup)
+                
+        except Exception as e:
+            print(f"[ERROR] Error in cleanup backend downloads: {e}")
+    
+    def _cleanup_individual_downloads(self, download_infos):
+        """Clean up specific errored downloads individually using cancel_download with remove=True"""
+        try:
+            def do_individual_cleanup():
+                try:
+                    import asyncio
+                    
+                    async def cleanup_downloads():
+                        success_count = 0
+                        for download_info in download_infos:
+                            try:
+                                username = download_info['username']
+                                download_id = download_info['id']
+                                state = download_info['state']
+                                
+                                print(f"[CLEANUP] Removing {state} download: {username}/{download_id}")
+                                success = await self.soulseek_client.cancel_download(
+                                    download_id=download_id, 
+                                    username=username, 
+                                    remove=True
+                                )
+                                
+                                if success:
+                                    success_count += 1
+                                    print(f"[CLEANUP] ✅ Successfully removed {state} download: {username}/{download_id}")
+                                else:
+                                    print(f"[CLEANUP] ❌ Failed to remove {state} download: {username}/{download_id}")
+                                    
+                            except Exception as e:
+                                print(f"[ERROR] Error removing individual download {download_info}: {e}")
+                        
+                        print(f"[CLEANUP] Individual cleanup completed: {success_count}/{len(download_infos)} removed")
+                    
+                    # Run the async cleanup
+                    asyncio.run(cleanup_downloads())
+                    
+                except Exception as e:
+                    print(f"[ERROR] Error during individual cleanup: {e}")
+            
+            # Run cleanup in background
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                executor.submit(do_individual_cleanup)
+                
+        except Exception as e:
+            print(f"[ERROR] Error in cleanup individual downloads: {e}")
     
     
     def cleanup_all_threads(self):
