@@ -8297,11 +8297,9 @@ class DownloadsPage(QWidget):
     
     def update_album_track_button_states(self, download_item, status):
         """Update track download button states based on download progress"""
-        print(f"[DEBUG] 🔄 Searching for track button to update: '{download_item.title}' by '{download_item.artist}' with status '{status}'")
         
         # Find the track item that corresponds to this download
         album_items_found = self.findChildren(AlbumResultItem)
-        print(f"[DEBUG] Found {len(album_items_found)} album items to search")
         
         for album_item in album_items_found:
             
@@ -8334,7 +8332,6 @@ class DownloadsPage(QWidget):
                     print(f"[DEBUG] ✅ Successfully updated track button state for '{download_item.title}': {status}")
                     return
         
-        print(f"[DEBUG] ❌ NO MATCH FOUND for track '{download_item.title}' by '{download_item.artist}' - button state not updated")
     
     def start_stream(self, search_result, result_item=None):
         """Start streaming a search result using StreamingThread or toggle if same track"""
@@ -9510,7 +9507,6 @@ class DownloadsPage(QWidget):
                             if transfer_id == download_item.download_id and transfer_id not in matched_transfer_ids:
                                 matching_transfer = transfer
                                 matched_transfer_ids.add(transfer_id)
-                                print(f"[DEBUG] ✅ Found ID match: {transfer_id} -> {transfer.get('filename', 'Unknown')}")
                                 break
                     
                     # If no ID match, try improved filename matching as fallback
