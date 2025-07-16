@@ -4762,7 +4762,6 @@ class TabbedDownloadManager(QTabWidget):
         
         if parent_widget and hasattr(parent_widget, 'update_download_manager_stats'):
             parent_widget.update_download_manager_stats(active_count, finished_count)
-            print(f"[DEBUG] Batched update: download manager stats: Active={active_count}, Finished={finished_count}")
         else:
             print(f"[DEBUG] Could not find parent with update_download_manager_stats method")
     
@@ -8311,7 +8310,6 @@ class DownloadsPage(QWidget):
                 # Match by track title and artist
                 if (track_title == download_item.title and track_artist == download_item.artist):
                     
-                    print(f"[DEBUG] ✅ MATCH FOUND! Updating button state for '{track_title}' to '{status}'")
                     
                     # Update button state based on download status
                     if status == 'downloading':
@@ -8329,7 +8327,6 @@ class DownloadsPage(QWidget):
                     else:
                         print(f"[DEBUG] ⚠️ Unknown status '{status}' - no button update performed")
                     
-                    print(f"[DEBUG] ✅ Successfully updated track button state for '{download_item.title}': {status}")
                     return
         
     
@@ -9393,6 +9390,10 @@ class DownloadsPage(QWidget):
             # Cleanup API if needed
             if new_status in ['cancelled', 'failed'] and hasattr(download_item, 'download_id'):
                 self._schedule_api_cleanup_v2(download_item)
+                
+                # Schedule fallback cleanup check for errored downloads
+                if new_status == 'failed':
+                    self._schedule_fallback_cleanup_check()
     
     def _handle_missing_transfer_v2(self, download_item):
         """Handle downloads missing from API with improved grace period"""
@@ -9407,26 +9408,110 @@ class DownloadsPage(QWidget):
             self.download_queue.move_to_finished(download_item)
     
     def _schedule_api_cleanup_v2(self, download_item):
-        """Schedule API cleanup in background"""
-        def cleanup_task():
-            try:
-                if hasattr(download_item, 'download_id') and download_item.soulseek_client:
-                    import asyncio
+        """Schedule API cleanup with robust retry mechanism"""
+        def cleanup_task_with_retry():
+            import time
+            import asyncio
+            
+            max_retries = 3
+            retry_delays = [2, 5, 10]  # Progressive delays in seconds
+            
+            for attempt in range(max_retries):
+                try:
+                    if not (hasattr(download_item, 'download_id') and download_item.soulseek_client):
+                        return
+                    
+                    # Wait before cleanup to let API stabilize
+                    if attempt == 0:
+                        time.sleep(1)  # Initial delay for API stabilization
+                    else:
+                        time.sleep(retry_delays[attempt - 1])
+                    
                     loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(loop)
-                    success = loop.run_until_complete(
-                        download_item.soulseek_client.cancel_download(
-                            download_item.download_id, 
-                            getattr(download_item, 'username', ''), 
-                            remove=True
+                    
+                    try:
+                        success = loop.run_until_complete(
+                            download_item.soulseek_client.cancel_download(
+                                download_item.download_id, 
+                                getattr(download_item, 'username', ''), 
+                                remove=True
+                            )
                         )
+                        
+                        if success:
+                            return  # Success, exit retry loop
+                        else:
+                            if attempt == max_retries - 1:
+                                print(f"❌ API cleanup failed after {max_retries} attempts: {download_item.title}")
+                            
+                    finally:
+                        loop.close()
+                        
+                except Exception as e:
+                    if attempt == max_retries - 1:
+                        print(f"❌ API cleanup failed after {max_retries} attempts: {e}")
+                    # Continue to next retry
+                        
+        self._optimized_api_pool.submit(cleanup_task_with_retry)
+    
+    def _schedule_fallback_cleanup_check(self):
+        """Schedule a fallback cleanup check for persistent errored entries"""
+        def fallback_cleanup_task():
+            import time
+            import asyncio
+            
+            # Wait longer before fallback cleanup
+            time.sleep(30)  # 30 second delay
+            
+            try:
+                if not self.soulseek_client:
+                    return
+                
+                # Get current transfers to find persistent errored entries
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+                try:
+                    transfers_data = loop.run_until_complete(
+                        self.soulseek_client.get_all_downloads()
                     )
+                    
+                    if transfers_data:
+                        # Find errored entries that should have been cleaned up
+                        persistent_errors = []
+                        for user_data in transfers_data:
+                            if 'directories' in user_data:
+                                for directory in user_data['directories']:
+                                    if 'files' in directory:
+                                        for transfer in directory['files']:
+                                            state = transfer.get('state', '')
+                                            if any(error_state in state for error_state in ['Failed', 'Errored', 'Cancelled']):
+                                                persistent_errors.append(transfer)
+                        
+                        # Clean up persistent errors (max 5 at a time to be conservative)
+                        for transfer in persistent_errors[:5]:
+                            try:
+                                success = loop.run_until_complete(
+                                    self.soulseek_client.cancel_download(
+                                        transfer.get('id'), 
+                                        transfer.get('username', ''), 
+                                        remove=True
+                                    )
+                                )
+                                if success:
+                                    print(f"✅ Fallback cleanup successful for persistent error")
+                            except Exception as e:
+                                pass  # Silent fallback failures
+                                
+                finally:
                     loop.close()
-                    pass  # Silent cleanup success
+                    
             except Exception as e:
-                print(f"❌ API cleanup failed: {e}")
+                pass  # Silent fallback failures
         
-        self._optimized_api_pool.submit(cleanup_task)
+        # Schedule fallback cleanup
+        self._optimized_api_pool.submit(fallback_cleanup_task)
     
     def _cleanup_status_thread_v2(self, thread):
         """Clean up status threads"""
@@ -9486,7 +9571,6 @@ class DownloadsPage(QWidget):
                             if 'files' in directory:
                                 all_transfers.extend(directory['files'])
                 
-                print(f"[DEBUG] Processing {len(all_transfers)} active transfers from API")
                 
                 # Track which transfers have been matched to prevent duplicate assignments
                 matched_transfer_ids = set()
@@ -9496,7 +9580,6 @@ class DownloadsPage(QWidget):
                     if download_item.status.lower() in ['completed', 'finished', 'cancelled', 'failed']:
                         continue  # Skip completed items
                     
-                    print(f"[DEBUG] Looking for matches for download: '{download_item.title}' by '{download_item.artist}' (download_id: {getattr(download_item, 'download_id', 'None')})")
                         
                     # Try to match by download_id first (most reliable)
                     matching_transfer = None
@@ -9749,33 +9832,44 @@ class DownloadsPage(QWidget):
                                 file_path=download_item.file_path
                             )
                             
-                            # IMMEDIATE CLEANUP: Remove errored download from API immediately
+                            # IMPROVED CLEANUP: Remove errored download with retry mechanism
                             if download_item.download_id and download_item.username and download_item.soulseek_client:
-                                def cleanup_errored_download():
-                                    try:
-                                        import asyncio
-                                        loop = asyncio.new_event_loop()
-                                        asyncio.set_event_loop(loop)
-                                        success = loop.run_until_complete(
-                                            download_item.soulseek_client.cancel_download(
-                                                download_item.download_id, 
-                                                download_item.username, 
-                                                remove=True
+                                def cleanup_errored_download_with_retry():
+                                    import time
+                                    import asyncio
+                                    max_retries = 3
+                                    
+                                    for attempt in range(max_retries):
+                                        try:
+                                            # Add delay for API stabilization
+                                            if attempt == 0:
+                                                time.sleep(2)  # Initial delay for errored downloads
+                                            else:
+                                                time.sleep(5 * attempt)  # Progressive delay
+                                            
+                                            loop = asyncio.new_event_loop()
+                                            asyncio.set_event_loop(loop)
+                                            success = loop.run_until_complete(
+                                                download_item.soulseek_client.cancel_download(
+                                                    download_item.download_id, 
+                                                    download_item.username, 
+                                                    remove=True
+                                                )
                                             )
-                                        )
-                                        loop.close()
-                                        
-                                        if success:
-                                            print(f"✓ Immediately cleaned up errored download {download_item.download_id}")
-                                        else:
-                                            print(f"⚠️ Failed to clean up errored download {download_item.download_id}")
-                                    except Exception as e:
-                                        print(f"⚠️ Error cleaning up errored download: {e}")
+                                            loop.close()
+                                            
+                                            if success:
+                                                return  # Success, exit retry loop
+                                            elif attempt == max_retries - 1:
+                                                print(f"❌ Failed to clean up errored download after {max_retries} attempts: {download_item.title}")
+                                        except Exception as e:
+                                            if attempt == max_retries - 1:
+                                                print(f"❌ Error cleaning up errored download after {max_retries} attempts: {e}")
                                 
                                 # Run cleanup in background thread
                                 from concurrent.futures import ThreadPoolExecutor
                                 with ThreadPoolExecutor(max_workers=1) as executor:
-                                    executor.submit(cleanup_errored_download)
+                                    executor.submit(cleanup_errored_download_with_retry)
                             
                             print(f"[DEBUG] Moving failed download '{download_item.title}' to finished queue")
                             self.download_queue.move_to_finished(download_item)
