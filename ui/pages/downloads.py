@@ -4453,12 +4453,9 @@ class TabbedDownloadManager(QTabWidget):
     
     def move_to_finished(self, download_item):
         """Move a download item from active to finished queue"""
-        print(f"[DEBUG] move_to_finished() called for '{download_item.title}' with status '{download_item.status}'")
-        print(f"[DEBUG] Finished queue currently has {len(self.finished_queue.download_items)} items")
         
         if download_item in self.active_queue.download_items:
             # Remove from active queue
-            print(f"[DEBUG] Removing '{download_item.title}' from active queue...")
             self.active_queue.remove_download_item(download_item)
             
             # Ensure completed downloads have 100% progress
@@ -4468,7 +4465,6 @@ class TabbedDownloadManager(QTabWidget):
                 print(f"[DEBUG] Ensuring completed download '{download_item.title}' has 100% progress")
             
             # Add to finished queue
-            print(f"[DEBUG] Adding '{download_item.title}' to finished queue with status '{download_item.status}'...")
             finished_item = self.finished_queue.add_download_item(
                 title=download_item.title,
                 artist=download_item.artist,
@@ -4481,33 +4477,42 @@ class TabbedDownloadManager(QTabWidget):
                 username=download_item.username,
                 soulseek_client=download_item.soulseek_client
             )
-            print(f"[DEBUG] Finished queue now has {len(self.finished_queue.download_items)} items")
             
             # Signal API that download is complete (only for completed downloads)
             # Note: Cancelled downloads already have their API signal sent by cancel_download()
             try:
                 if (download_item.status == 'completed' and 
                     download_item.download_id and download_item.username and download_item.soulseek_client):
-                    import asyncio
                     
-                    # Run the async API call to signal completion
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    success = loop.run_until_complete(
-                        download_item.soulseek_client.signal_download_completion(
-                            download_item.download_id, 
-                            download_item.username, 
-                            remove=True  # Remove completed downloads from transfer list
-                        )
-                    )
-                    loop.close()
+                    # PERFORMANCE FIX: Run API cleanup in background thread to prevent UI blocking
+                    def cleanup_completed_download():
+                        try:
+                            import asyncio
+                            loop = asyncio.new_event_loop()
+                            asyncio.set_event_loop(loop)
+                            success = loop.run_until_complete(
+                                download_item.soulseek_client.signal_download_completion(
+                                    download_item.download_id, 
+                                    download_item.username, 
+                                    remove=True
+                                )
+                            )
+                            loop.close()
+                            
+                            if success:
+                                print(f"✓ Successfully signaled completion for download {download_item.download_id}")
+                            else:
+                                print(f"⚠️ Failed to signal completion for download {download_item.download_id}")
+                        except Exception as e:
+                            print(f"⚠️ Error signaling download completion: {e}")
                     
-                    if success:
-                        print(f"✓ Successfully signaled completion for download {download_item.download_id}")
-                    else:
-                        print(f"⚠️ Failed to signal completion for download {download_item.download_id}")
+                    # Run in background thread to prevent UI blocking
+                    from concurrent.futures import ThreadPoolExecutor
+                    with ThreadPoolExecutor(max_workers=1) as executor:
+                        executor.submit(cleanup_completed_download)
+                        
             except Exception as e:
-                print(f"⚠️ Error signaling download completion: {e}")
+                print(f"⚠️ Error setting up download completion cleanup: {e}")
             
             self.update_tab_counts()
             return finished_item
@@ -8968,7 +8973,6 @@ class DownloadsPage(QWidget):
                                 download_ext = os.path.splitext(download_item.file_path)[1].lower()
                             transfer_ext = os.path.splitext(basename)[1].lower()
                             
-                            print(f"[DEBUG] Comparing extensions: download='{download_ext}' vs transfer='{transfer_ext}' for '{basename}'")
                             
                             # Strategy 1: Direct filename match (most reliable)
                             if basename_lower == download_title_lower + '.mp3' or basename_lower == download_title_lower + '.flac':
@@ -9043,10 +9047,9 @@ class DownloadsPage(QWidget):
                             if matches:
                                 matching_transfer = transfer
                                 matched_transfer_ids.add(transfer_id)
-                                print(f"[DEBUG] ✅ Found filename match: {match_reason}")
                                 break
                             else:
-                                print(f"[DEBUG] ❌ No match: download_title='{download_title_lower}' vs filename='{basename_lower}'")
+                                pass  # No match found, continue to next transfer
                         
                         if not matching_transfer:
                             print(f"[DEBUG] ⚠️ No matching transfer found for download_title='{download_item.title}' by artist='{download_item.artist}'")
@@ -9064,7 +9067,6 @@ class DownloadsPage(QWidget):
                         if 'Completed' in state or 'Succeeded' in state:
                             progress = 100
                         
-                        print(f"[DEBUG] Found transfer for '{download_item.title}': {state} - {progress:.1f}%")
                         
                         # Map slskd states to our download states (handle compound states)
                         if 'InProgress' in state:
@@ -9151,6 +9153,35 @@ class DownloadsPage(QWidget):
                                 download_speed=0,  # No speed for failed
                                 file_path=download_item.file_path
                             )
+                            
+                            # IMMEDIATE CLEANUP: Remove errored download from API immediately
+                            if download_item.download_id and download_item.username and download_item.soulseek_client:
+                                def cleanup_errored_download():
+                                    try:
+                                        import asyncio
+                                        loop = asyncio.new_event_loop()
+                                        asyncio.set_event_loop(loop)
+                                        success = loop.run_until_complete(
+                                            download_item.soulseek_client.cancel_download(
+                                                download_item.download_id, 
+                                                download_item.username, 
+                                                remove=True
+                                            )
+                                        )
+                                        loop.close()
+                                        
+                                        if success:
+                                            print(f"✓ Immediately cleaned up errored download {download_item.download_id}")
+                                        else:
+                                            print(f"⚠️ Failed to clean up errored download {download_item.download_id}")
+                                    except Exception as e:
+                                        print(f"⚠️ Error cleaning up errored download: {e}")
+                                
+                                # Run cleanup in background thread
+                                from concurrent.futures import ThreadPoolExecutor
+                                with ThreadPoolExecutor(max_workers=1) as executor:
+                                    executor.submit(cleanup_errored_download)
+                            
                             print(f"[DEBUG] Moving failed download '{download_item.title}' to finished queue")
                             self.download_queue.move_to_finished(download_item)
                             continue
@@ -9158,6 +9189,10 @@ class DownloadsPage(QWidget):
                             new_status = 'queued'
                         else:
                             new_status = state.lower()
+                        
+                        # Reset API missing counter since we found the download
+                        if hasattr(download_item, 'api_missing_count'):
+                            download_item.api_missing_count = 0
                         
                         # Update the download item with real-time data
                         download_item.update_status(
@@ -9189,13 +9224,34 @@ class DownloadsPage(QWidget):
                             # Remove from finished queue since it's no longer in slskd
                             self.download_queue.finished_queue.remove_download_item(download_item)
                             continue
+                        # CRITICAL FIX: Handle active downloads that disappeared from API (errored/cancelled in backend)
+                        elif download_item in self.download_queue.active_queue.download_items:
+                            # Add grace period to avoid false positives during API delays
+                            if not hasattr(download_item, 'api_missing_count'):
+                                download_item.api_missing_count = 0
+                            
+                            download_item.api_missing_count += 1
+                            print(f"[DEBUG] ⚠️ Active download '{download_item.title}' not found in API (count: {download_item.api_missing_count}/3)")
+                            
+                            # Only mark as failed after 3 consecutive misses (3 seconds with 1s polling)
+                            if download_item.api_missing_count >= 3:
+                                print(f"[DEBUG] ⚠️ Active download '{download_item.title}' consistently missing from API - marking as failed")
+                                # Update status to failed since it's gone from API (likely errored or cancelled)
+                                download_item.update_status(
+                                    status='failed', 
+                                    progress=download_item.progress,
+                                    download_speed=0,
+                                    file_path=download_item.file_path
+                                )
+                                # Move to finished queue so user can see it failed
+                                self.download_queue.move_to_finished(download_item)
+                            continue
                 
                 # After processing all download items, check for any that weren't found in the API
                 # This handles the case where downloads were removed from slskd externally
                 
                 # Update download counters after processing all transfers
                 self.download_queue.update_tab_counts()
-                print(f"[DEBUG] Updated tab counts - Active: {len(self.download_queue.active_queue.download_items)}, Finished: {len(self.download_queue.finished_queue.download_items)}")
                 
             except Exception as e:
                 print(f"[ERROR] Error processing transfer status update: {e}")
