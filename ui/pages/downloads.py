@@ -1603,6 +1603,57 @@ class TransferStatusThread(QThread):
         """Stop the transfer status gathering gracefully"""
         self._stop_requested = True
 
+class ApiCleanupThread(QThread):
+    """Thread for signaling download completion to slskd API without blocking UI"""
+    cleanup_completed = pyqtSignal(bool, str, str)  # success, download_id, username
+    
+    def __init__(self, soulseek_client, download_id, username):
+        super().__init__()
+        self.soulseek_client = soulseek_client
+        self.download_id = download_id
+        self.username = username
+        
+    def run(self):
+        """Signal download completion in background thread"""
+        loop = None
+        try:
+            import asyncio
+            
+            # Create a fresh event loop for this thread
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            # Signal download completion
+            success = loop.run_until_complete(
+                self.soulseek_client.signal_download_completion(
+                    self.download_id, 
+                    self.username, 
+                    remove=True
+                )
+            )
+            
+            # Emit completion signal
+            self.cleanup_completed.emit(success, self.download_id, self.username)
+            
+        except Exception as e:
+            print(f"⚠️ Error in API cleanup thread: {e}")
+            self.cleanup_completed.emit(False, self.download_id, self.username)
+        finally:
+            # Ensure proper cleanup
+            if loop:
+                try:
+                    # Close any remaining tasks
+                    pending = asyncio.all_tasks(loop)
+                    for task in pending:
+                        task.cancel()
+                    
+                    if pending:
+                        loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                    
+                    loop.close()
+                except Exception as e:
+                    print(f"Error cleaning up API cleanup event loop: {e}")
+
 class SearchThread(QThread):
     search_completed = pyqtSignal(object)  # Tuple of (tracks, albums) or list for backward compatibility
     search_failed = pyqtSignal(str)  # Error message
@@ -4183,6 +4234,14 @@ class DownloadQueue(QFrame):
         super().__init__(parent)
         self.queue_title = title
         self.queue_type = queue_type  # "active" or "finished"
+        
+        # Widget lifecycle optimization - batch widget deletions
+        self.deletion_timer = QTimer()
+        self.deletion_timer.setSingleShot(True)
+        self.deletion_timer.timeout.connect(self._process_pending_deletions)
+        self.deletion_timer.setInterval(100)  # 100ms delay for batching
+        self.pending_deletions = []
+        
         self.setup_ui()
     
     def setup_ui(self):
@@ -4327,7 +4386,7 @@ class DownloadQueue(QFrame):
             print(f"[DEBUG] Removing widget from queue_layout...")
             self.queue_layout.removeWidget(item)
             print(f"[DEBUG] Scheduling widget deletion...")
-            item.deleteLater()
+            self._schedule_widget_deletion(item)
             
             print(f"[DEBUG] Updating queue count...")
             self.update_queue_count()
@@ -4346,6 +4405,22 @@ class DownloadQueue(QFrame):
             print(f"[DEBUG] remove_download_item() completed for '{item.title}'")
         else:
             print(f"[DEBUG] Item '{item.title}' NOT found in download_items list!")
+    
+    def _schedule_widget_deletion(self, widget):
+        """Schedule a widget for batched deletion to improve performance"""
+        self.pending_deletions.append(widget)
+        if not self.deletion_timer.isActive():
+            self.deletion_timer.start()
+    
+    def _process_pending_deletions(self):
+        """Process all pending widget deletions in a batch"""
+        print(f"[DEBUG] Processing {len(self.pending_deletions)} pending widget deletions")
+        for widget in self.pending_deletions:
+            try:
+                widget.deleteLater()
+            except Exception as e:
+                print(f"[DEBUG] Error deleting widget: {e}")
+        self.pending_deletions.clear()
     
     def clear_completed_downloads(self):
         """Remove all completed and cancelled download items"""
@@ -4387,6 +4462,14 @@ class TabbedDownloadManager(QTabWidget):
     
     def __init__(self, parent=None):
         super().__init__(parent)
+        
+        # UI update batching to prevent excessive updates during transitions
+        self.update_timer = QTimer()
+        self.update_timer.setSingleShot(True)
+        self.update_timer.timeout.connect(self._perform_batched_update)
+        self.update_timer.setInterval(50)  # 50ms batch window
+        self.pending_updates = set()
+        
         self.setup_ui()
     
     def setup_ui(self):
@@ -4454,6 +4537,10 @@ class TabbedDownloadManager(QTabWidget):
     def move_to_finished(self, download_item):
         """Move a download item from active to finished queue"""
         
+        # Performance monitoring
+        import time
+        start_time = time.time()
+        
         if download_item in self.active_queue.download_items:
             # Remove from active queue
             self.active_queue.remove_download_item(download_item)
@@ -4484,42 +4571,89 @@ class TabbedDownloadManager(QTabWidget):
                 if (download_item.status == 'completed' and 
                     download_item.download_id and download_item.username and download_item.soulseek_client):
                     
-                    # PERFORMANCE FIX: Run API cleanup in background thread to prevent UI blocking
-                    def cleanup_completed_download():
-                        try:
-                            import asyncio
-                            loop = asyncio.new_event_loop()
-                            asyncio.set_event_loop(loop)
-                            success = loop.run_until_complete(
-                                download_item.soulseek_client.signal_download_completion(
-                                    download_item.download_id, 
-                                    download_item.username, 
-                                    remove=True
-                                )
-                            )
-                            loop.close()
-                            
-                            if success:
-                                print(f"✓ Successfully signaled completion for download {download_item.download_id}")
-                            else:
-                                print(f"⚠️ Failed to signal completion for download {download_item.download_id}")
-                        except Exception as e:
-                            print(f"⚠️ Error signaling download completion: {e}")
+                    # PERFORMANCE FIX: Use dedicated thread for API cleanup to prevent UI blocking
+                    # Find the parent DownloadsPage that manages the API cleanup threads
+                    parent_page = self.parent()
+                    while parent_page and not hasattr(parent_page, 'api_cleanup_threads'):
+                        parent_page = parent_page.parent()
                     
-                    # Run in background thread to prevent UI blocking
-                    from concurrent.futures import ThreadPoolExecutor
-                    with ThreadPoolExecutor(max_workers=1) as executor:
-                        executor.submit(cleanup_completed_download)
+                    if parent_page and hasattr(parent_page, 'api_cleanup_threads'):
+                        # Create and start API cleanup thread
+                        cleanup_thread = ApiCleanupThread(
+                            download_item.soulseek_client,
+                            download_item.download_id,
+                            download_item.username
+                        )
+                        cleanup_thread.cleanup_completed.connect(parent_page.api_cleanup_finished)
+                        cleanup_thread.finished.connect(lambda: self._cleanup_api_thread(cleanup_thread))
+                        
+                        # Track the thread
+                        parent_page.api_cleanup_threads.append(cleanup_thread)
+                        
+                        # Start the thread
+                        cleanup_thread.start()
+                        
+                        print(f"🧵 Started API cleanup thread for download {download_item.download_id}")
+                    else:
+                        print(f"⚠️ Cannot find parent DownloadsPage for API cleanup thread")
+                        # Fallback: Skip API cleanup to prevent blocking
+                        print(f"⚠️ Skipping API cleanup for download {download_item.download_id}")
                         
             except Exception as e:
                 print(f"⚠️ Error setting up download completion cleanup: {e}")
             
             self.update_tab_counts()
+            
+            # Performance monitoring
+            end_time = time.time()
+            duration_ms = (end_time - start_time) * 1000
+            print(f"⏱️ move_to_finished completed in {duration_ms:.2f}ms for '{download_item.title}'")
+            
             return finished_item
+        
+        # Performance monitoring for early return
+        end_time = time.time()
+        duration_ms = (end_time - start_time) * 1000
+        print(f"⏱️ move_to_finished early return in {duration_ms:.2f}ms (item not in active queue)")
         return None
     
+    def _cleanup_api_thread(self, thread):
+        """Clean up API cleanup thread when it finishes"""
+        try:
+            # Find the parent DownloadsPage that manages the API cleanup threads
+            parent_page = self.parent()
+            while parent_page and not hasattr(parent_page, 'api_cleanup_threads'):
+                parent_page = parent_page.parent()
+            
+            if parent_page and hasattr(parent_page, 'api_cleanup_threads'):
+                if thread in parent_page.api_cleanup_threads:
+                    parent_page.api_cleanup_threads.remove(thread)
+                
+                # Clean up the thread
+                if thread.isRunning():
+                    thread.wait(1000)  # Wait up to 1 second for completion
+                thread.deleteLater()
+                
+                print(f"🧹 Cleaned up API cleanup thread")
+        except Exception as e:
+            print(f"⚠️ Error cleaning up API cleanup thread: {e}")
+    
     def update_tab_counts(self):
-        """Update tab labels with current counts"""
+        """Schedule a batched tab count update to prevent excessive UI updates"""
+        self.pending_updates.add('tab_counts')
+        if not self.update_timer.isActive():
+            self.update_timer.start()
+    
+    def _perform_batched_update(self):
+        """Perform all pending UI updates in a single batch"""
+        if 'tab_counts' in self.pending_updates:
+            self._update_tab_counts_immediate()
+        
+        # Clear pending updates
+        self.pending_updates.clear()
+    
+    def _update_tab_counts_immediate(self):
+        """Immediately update tab labels with current counts (internal use only)"""
         active_count = len(self.active_queue.download_items)
         finished_count = len(self.finished_queue.download_items)
         
@@ -4534,7 +4668,7 @@ class TabbedDownloadManager(QTabWidget):
         
         if parent_widget and hasattr(parent_widget, 'update_download_manager_stats'):
             parent_widget.update_download_manager_stats(active_count, finished_count)
-            print(f"[DEBUG] Updated download manager stats: Active={active_count}, Finished={finished_count}")
+            print(f"[DEBUG] Batched update: download manager stats: Active={active_count}, Finished={finished_count}")
         else:
             print(f"[DEBUG] Could not find parent with update_download_manager_stats method")
     
@@ -4587,6 +4721,9 @@ class DownloadsPage(QWidget):
     # Signal for clear completed downloads completion (thread-safe communication)
     clear_completed_finished = pyqtSignal(bool, object)  # backend_success, ui_callback
     
+    # Signal for API cleanup completion (thread-safe communication)
+    api_cleanup_finished = pyqtSignal(bool, str, str)  # success, download_id, username
+    
     def __init__(self, soulseek_client=None, parent=None):
         super().__init__(parent)
         self.soulseek_client = soulseek_client
@@ -4595,6 +4732,7 @@ class DownloadsPage(QWidget):
         self.session_thread = None  # Track session info thread
         self.download_threads = []  # Track active download threads
         self.status_update_threads = []  # Track status update threads (CRITICAL FIX)
+        self.api_cleanup_threads = []  # Track API cleanup threads
         self.search_results = []
         self.current_filtered_results = []  # Cache for filtered results based on active filter
         self.download_items = []  # Track download items for the queue
@@ -4641,6 +4779,9 @@ class DownloadsPage(QWidget):
         
         # Connect clear completed signal for thread-safe communication
         self.clear_completed_finished.connect(self._handle_clear_completion)
+        
+        # Connect API cleanup signal for thread-safe communication
+        self.api_cleanup_finished.connect(self._handle_api_cleanup_completion)
         
         self.setup_ui()
     
@@ -8867,6 +9008,13 @@ class DownloadsPage(QWidget):
             import traceback
             traceback.print_exc()
     
+    def _handle_api_cleanup_completion(self, success, download_id, username):
+        """Handle completion of API cleanup operation on main thread"""
+        if success:
+            print(f"✓ Successfully signaled completion for download {download_id}")
+        else:
+            print(f"⚠️ Failed to signal completion for download {download_id}")
+    
     def _on_download_completion_finished(self, download_item, organized_path):
         """Handle successful completion of background download processing"""
         print(f"✅ Background processing completed for '{download_item.title}' -> {organized_path}")
@@ -9541,6 +9689,27 @@ class DownloadsPage(QWidget):
                     print(f"Error cleaning up download thread: {e}")
             
             self.download_threads.clear()
+            
+            # Stop all API cleanup threads
+            for cleanup_thread in self.api_cleanup_threads[:]:  # Copy list to avoid modification during iteration
+                try:
+                    # Disconnect signals first
+                    try:
+                        cleanup_thread.cleanup_completed.disconnect()
+                        cleanup_thread.finished.disconnect()
+                    except Exception:
+                        pass  # Ignore if signals are already disconnected
+                    
+                    if cleanup_thread.isRunning():
+                        cleanup_thread.wait(2000)  # Wait up to 2 seconds for completion
+                        if cleanup_thread.isRunning():
+                            cleanup_thread.terminate()
+                            cleanup_thread.wait(1000)
+                    cleanup_thread.deleteLater()
+                except Exception as e:
+                    print(f"Error cleaning up API cleanup thread: {e}")
+            
+            self.api_cleanup_threads.clear()
             
         except Exception as e:
             print(f"Error during thread cleanup: {e}")
