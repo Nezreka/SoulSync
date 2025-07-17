@@ -10005,9 +10005,9 @@ class DownloadsPage(QWidget):
         """Find downloads that need cleanup in the next tick"""
         try:
             # Get current downloads from backend
-            def check_backend_downloads():
+            async def check_backend_downloads():
                 try:
-                    result = self.soulseek_client.get_all_downloads()
+                    result = await self.soulseek_client.get_all_downloads()
                     if result:
                         bulk_cleanup_states = {'Completed, Succeeded', 'Completed, Cancelled', 'Cancelled', 'Canceled'}
                         individual_cleanup_states = {'Completed, Errored', 'Failed', 'Errored'}
@@ -10041,9 +10041,21 @@ class DownloadsPage(QWidget):
                     print(f"[ERROR] Error checking backend downloads: {e}")
             
             # Run in background to avoid blocking UI
+            def run_check():
+                import asyncio
+                try:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    loop.run_until_complete(check_backend_downloads())
+                finally:
+                    try:
+                        loop.close()
+                    except Exception:
+                        pass
+
             from concurrent.futures import ThreadPoolExecutor
             with ThreadPoolExecutor(max_workers=1) as executor:
-                executor.submit(check_backend_downloads)
+                executor.submit(run_check)
                 
         except Exception as e:
             print(f"[ERROR] Error finding downloads for cleanup: {e}")
