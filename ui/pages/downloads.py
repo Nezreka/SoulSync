@@ -9913,17 +9913,24 @@ class DownloadsPage(QWidget):
                             # Remove from finished queue since it's no longer in slskd
                             self.download_queue.finished_queue.remove_download_item(download_item)
                             continue
-                        # CRITICAL FIX: Handle active downloads that disappeared from API (errored/cancelled in backend)
-                        elif download_item in self.download_queue.active_queue.download_items:
+                        # CRITICAL FIX: Handle downloads that disappeared from API (errored/cancelled in backend)
+                        elif download_item in self.download_queue.download_items:
                             # Add grace period to avoid false positives during API delays
                             if not hasattr(download_item, 'api_missing_count'):
                                 download_item.api_missing_count = 0
                             
                             download_item.api_missing_count += 1
-                            print(f"[DEBUG] ⚠️ Active download '{download_item.title}' not found in API (count: {download_item.api_missing_count}/3)")
                             
-                            # Only mark as failed after 3 consecutive misses (3 seconds with 1s polling)
-                            if download_item.api_missing_count >= 3:
+                            # Smart grace period: faster sync for downloads that never started
+                            if not hasattr(download_item, 'download_id') or not download_item.download_id:
+                                grace_period = 2  # Faster sync for instant failures
+                                print(f"[DEBUG] ⚠️ Download '{download_item.title}' never started - not found in API (count: {download_item.api_missing_count}/{grace_period})")
+                            else:
+                                grace_period = 3  # Normal grace period for started downloads
+                                print(f"[DEBUG] ⚠️ Active download '{download_item.title}' not found in API (count: {download_item.api_missing_count}/{grace_period})")
+                            
+                            # Mark as failed after grace period
+                            if download_item.api_missing_count >= grace_period:
                                 print(f"[DEBUG] ⚠️ Active download '{download_item.title}' consistently missing from API - marking as failed")
                                 # Update status to failed since it's gone from API (likely errored or cancelled)
                                 download_item.update_status(
