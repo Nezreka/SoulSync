@@ -70,6 +70,108 @@ class DownloadCompletionWorker(QRunnable):
             # Emit error signal
             self.signals.error.emit(self.download_item, str(e))
 
+
+# OPTIMIZATION: This worker runs the existing status update logic in the background.
+class StatusProcessingWorkerSignals(QObject):
+    """Defines the signals available from the StatusProcessingWorker."""
+    completed = pyqtSignal(list)
+    error = pyqtSignal(str)
+
+class StatusProcessingWorker(QRunnable):
+    """
+    Runs the expensive download status processing in a background thread to prevent UI lag.
+    It performs all the matching and logic, then returns a list of actions for the main thread to execute.
+    """
+    def __init__(self, soulseek_client, download_items):
+        super().__init__()
+        self.signals = StatusProcessingWorkerSignals()
+        self.soulseek_client = soulseek_client
+        # We operate on a copy of the item data to avoid thread conflicts
+        self.download_items_data = [{
+            'widget_id': id(item),
+            'download_id': item.download_id,
+            'title': item.title,
+            'artist': item.artist,
+            'file_path': item.file_path,
+            'status': item.status,
+            'matched_artist': getattr(item, 'matched_artist', None)
+        } for item in download_items]
+
+    def run(self):
+        """The main logic of the background worker."""
+        try:
+            # This is the core of your original update_download_status method.
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+            transfers_data = loop.run_until_complete(
+                self.soulseek_client._make_request('GET', 'transfers/downloads')
+            )
+            loop.close()
+
+            results = []
+            if not transfers_data:
+                self.signals.completed.emit([])
+                return
+
+            all_transfers = [
+                file for user_data in transfers_data if 'directories' in user_data
+                for directory in user_data['directories'] if 'files' in directory
+                for file in directory['files']
+            ]
+
+            # Create a lookup for faster matching
+            transfers_by_id = {t['id']: t for t in all_transfers}
+            
+            # --- This is your existing, working logic, now running in the background ---
+            for item_data in self.download_items_data:
+                if item_data['status'].lower() in ['completed', 'finished', 'cancelled', 'failed']:
+                    continue
+
+                matching_transfer = transfers_by_id.get(item_data['download_id'])
+
+                if not matching_transfer:
+                    # Fallback to filename matching if ID match fails
+                    import os
+                    dl_filename = os.path.basename(item_data['file_path']).lower()
+                    for t in all_transfers:
+                        if os.path.basename(t.get('filename', '')).lower() == dl_filename:
+                            matching_transfer = t
+                            break
+
+                if matching_transfer:
+                    state = matching_transfer.get('state', 'Unknown')
+                    progress = matching_transfer.get('percentComplete', 0)
+                    new_status = 'queued'
+
+                    if 'InProgress' in state: new_status = 'downloading'
+                    elif 'Completed' in state or 'Succeeded' in state: new_status = 'completed'
+                    elif 'Cancelled' in state or 'Canceled' in state: new_status = 'cancelled'
+                    elif 'Failed' in state or 'Errored' in state: new_status = 'failed'
+
+                    # **CRITICAL FIX:** Package all necessary data for the main thread.
+                    payload = {
+                        'widget_id': item_data['widget_id'],
+                        'status': new_status,
+                        'progress': int(progress),
+                        'speed': int(matching_transfer.get('averageSpeed', 0)),
+                        'path': matching_transfer.get('filename', item_data['file_path']),
+                        'transfer_id': matching_transfer.get('id'), # This is key for cleanup
+                        'username': matching_transfer.get('username') # Also key for cleanup
+                    }
+                    
+                    if new_status == 'completed' and item_data['matched_artist']:
+                        payload['action'] = 'process_matched_completion'
+                    
+                    results.append(payload)
+
+            self.signals.completed.emit(results)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self.signals.error.emit(str(e))
+
 class OptimizedDownloadCompletionWorker(QRunnable):
     """OPTIMIZATION v2: Non-blocking background worker for download completion processing"""
     
@@ -4832,6 +4934,9 @@ class DownloadsPage(QWidget):
         self.displayed_results = 0  # Track how many results are currently displayed
         self.results_per_page = 15  # Show 15 results at a time
         self.is_loading_more = False  # Prevent multiple simultaneous loads
+        self.status_processing_pool = QThreadPool()
+        self.status_processing_pool.setMaxThreadCount(1) # Only one status worker at a time.
+        self._is_status_update_running = False
         
         # Initialize Spotify client and matching engine for matched downloads
         self.spotify_client = SpotifyClient()
@@ -9544,446 +9649,38 @@ class DownloadsPage(QWidget):
         self.download_status_timer.timeout.connect(self.update_download_status)
         self.download_status_timer.setInterval(1000)  # Back to 1 second
 
+# In class DownloadsPage, REPLACE your old update_download_status method with this one.
+
     def update_download_status(self):
-        """Poll slskd API for download status updates (QTimer callback) - FIXED VERSION"""
-        if not self.soulseek_client or not self.download_queue.download_items:
+        """
+        Starts the background worker to process download statuses without blocking the UI.
+        This method is called by the QTimer.
+        """
+        if self._is_status_update_running or not self.soulseek_client:
+            return # Don't start a new worker if one is already processing.
+
+        # Check if there are any active downloads to process
+        active_items = [item for item in self.download_queue.active_queue.download_items]
+        if not active_items:
+            self._is_status_update_running = False
             return
-            
-        # OPTIMIZATION v2: Use optimized status update if enabled
-        if hasattr(self, '_use_optimized_systems') and self._use_optimized_systems:
-            return self.update_download_status_v2()
+
+        self._is_status_update_running = True
+
+        # Create and start the background worker
+        worker = StatusProcessingWorker(
+            soulseek_client=self.soulseek_client,
+            download_items=active_items
+        )
+
+        # Connect signals from the worker to the main thread handler
+        worker.signals.completed.connect(self._handle_processed_status_updates)
+        worker.signals.error.connect(lambda e: print(f"Status Worker Error: {e}"))
         
-        # OPTIMIZATION v2: Update adaptive polling frequency
-        self._update_adaptive_polling()
-            
-        # CRITICAL FIX: Use tracked thread instead of anonymous thread
-        def handle_status_update(transfers_data):
-            """Handle the transfer status update from /api/v0/transfers/downloads endpoint"""
-            try:
-                if not transfers_data:
-                    return
-                    
-                # Flatten the transfers data structure 
-                all_transfers = []
-                for user_data in transfers_data:
-                    if 'directories' in user_data:
-                        for directory in user_data['directories']:
-                            if 'files' in directory:
-                                all_transfers.extend(directory['files'])
-                
-                
-                # Track which transfers have been matched to prevent duplicate assignments
-                matched_transfer_ids = set()
-                
-                # Update download items based on transfer data
-                for download_item in self.download_queue.download_items.copy():  # Use copy to avoid modification during iteration
-                    if download_item.status.lower() in ['completed', 'finished', 'cancelled', 'failed']:
-                        continue  # Skip completed items
-                    
-                        
-                    # Try to match by download_id first (most reliable)
-                    matching_transfer = None
-                    
-                    if hasattr(download_item, 'download_id') and download_item.download_id:
-                        for transfer in all_transfers:
-                            transfer_id = transfer.get('id')
-                            if transfer_id == download_item.download_id and transfer_id not in matched_transfer_ids:
-                                matching_transfer = transfer
-                                matched_transfer_ids.add(transfer_id)
-                                break
-                    
-                    # If no ID match, try improved filename matching as fallback
-                    if not matching_transfer:
-                        print(f"[DEBUG] No ID match found, trying filename matching...")
-                        for transfer in all_transfers:
-                            transfer_id = transfer.get('id')
-                            # Skip transfers that are already matched to other download items
-                            if transfer_id in matched_transfer_ids:
-                                continue
-                                
-                            full_filename = transfer.get('filename', '')
-                            transfer_filename = full_filename.lower()
-                            
-                            # Extract just the filename part (without directory path) for better matching
-                            import os
-                            basename = os.path.basename(full_filename).lower()
-                            
-                            # Normalize both sides for better matching
-                            download_title_lower = download_item.title.lower()
-                            basename_lower = basename.lower()
-                            
-                            # Try multiple matching strategies for better accuracy
-                            matches = False
-                            match_reason = ""
-                            
-                            # Get file extensions for comparison
-                            download_ext = ""
-                            if download_item.file_path:
-                                download_ext = os.path.splitext(download_item.file_path)[1].lower()
-                            transfer_ext = os.path.splitext(basename)[1].lower()
-                            
-                            
-                            # Strategy 1: Direct filename match (most reliable)
-                            if basename_lower == download_title_lower + '.mp3' or basename_lower == download_title_lower + '.flac':
-                                # Additional check: file extensions should match if we have the download item's file path
-                                if not download_ext or download_ext == transfer_ext:
-                                    matches = True
-                                    match_reason = f"direct filename match '{download_title_lower}' == '{basename_lower}'"
-                            
-                            # Strategy 2: Match track title in the actual filename
-                            elif download_title_lower in basename_lower:
-                                # Additional check: file extensions should match if we have the download item's file path
-                                if not download_ext or download_ext == transfer_ext:
-                                    matches = True
-                                    match_reason = f"track title '{download_title_lower}' in filename '{basename_lower}'"
-                            
-                            # Strategy 3: For album tracks, try to match by removing common prefixes
-                            elif ' - ' in download_item.title:
-                                # Extract just the song title part (e.g., "DAMN. - 01 - BLOOD" -> "BLOOD")
-                                title_parts = download_item.title.split(' - ')
-                                if len(title_parts) >= 3:  # Format: "Album - TrackNum - Title"
-                                    song_title = title_parts[-1].strip().lower()
-                                    if song_title in basename_lower and len(song_title) > 2:  # Avoid matching very short titles
-                                        # Additional check: file extensions should match if we have the download item's file path
-                                        if not download_ext or download_ext == transfer_ext:
-                                            matches = True
-                                            match_reason = f"extracted song title '{song_title}' in filename '{basename_lower}'"
-                            
-                            # Strategy 3.5: Core track name matching (remove parenthetical content)
-                            elif '(' in download_item.title and ')' in download_item.title:
-                                # Extract core track name by removing parenthetical content like "(Original Mix)"
-                                import re
-                                core_title = re.sub(r'\([^)]*\)', '', download_item.title).strip()
-                                core_title_lower = core_title.lower()
-                                
-                                if core_title_lower and len(core_title_lower) > 2:
-                                    # Check if core title words (excluding common terms) are in filename
-                                    common_music_terms = {'original', 'mix', 'remix', 'extended', 'radio', 'edit', 'version', 'album', 'single', 'feat', 'featuring'}
-                                    core_words = [w.lower() for w in core_title.split() if len(w) >= 4 and w.lower() not in common_music_terms]
-                                    
-                                    if core_words:
-                                        matching_core_words = [w for w in core_words if w in basename_lower]
-                                        if len(matching_core_words) >= min(2, len(core_words)):  # At least 2 unique words
-                                            # Additional check: file extensions should match if we have the download item's file path
-                                            if not download_ext or download_ext == transfer_ext:
-                                                matches = True
-                                                match_reason = f"core track name match: {matching_core_words} from '{core_title}' in '{basename_lower}'"
-                            
-                            # Strategy 4: Improved word matching (exclude common music terms)
-                            elif any(word.lower() in basename_lower for word in download_item.title.split() if len(word) >= 4):
-                                # Define common music terms to exclude from matching
-                                common_music_terms = {'original', 'mix', 'remix', 'extended', 'radio', 'edit', 'version', 'album', 'single', 'feat', 'featuring'}
-                                
-                                # Get meaningful words (longer, not common music terms)
-                                title_words = [w.lower() for w in download_item.title.split() 
-                                             if len(w) >= 4 and w.lower() not in common_music_terms]
-                                matching_words = [w for w in title_words if w in basename_lower]
-                                
-                                # Require at least 3 unique meaningful words for a match (stricter than before)
-                                if len(matching_words) >= min(3, len(title_words)) and len(matching_words) >= 2:
-                                    # Additional check: file extensions should match if we have the download item's file path
-                                    if not download_ext or download_ext == transfer_ext:
-                                        matches = True
-                                        match_reason = f"meaningful words match: {matching_words} in '{basename_lower}' (excluded common terms)"
-                            
-                            # Strategy 5: Match by download_item's stored file_path if available
-                            elif download_item.file_path:
-                                stored_filename = os.path.basename(download_item.file_path).lower()
-                                if stored_filename == basename_lower:
-                                    matches = True
-                                    match_reason = f"exact filename match '{stored_filename}'"
-                            
-                            if matches:
-                                matching_transfer = transfer
-                                matched_transfer_ids.add(transfer_id)
-                                break
-                            else:
-                                pass  # No match found, continue to next transfer
-                        
-                        if not matching_transfer:
-                            print(f"[DEBUG] ⚠️ No matching transfer found for download_title='{download_item.title}' by artist='{download_item.artist}'")
-                    
-                    if matching_transfer:
-                        # Extract progress information
-                        state = matching_transfer.get('state', 'Unknown')
-                        progress = matching_transfer.get('percentComplete', 0)
-                        bytes_transferred = matching_transfer.get('bytesTransferred', 0)
-                        total_size = matching_transfer.get('size', 0)
-                        avg_speed = matching_transfer.get('averageSpeed', 0)
-                        remaining_time = matching_transfer.get('remainingTime', '')
-                        
-                        # Ensure completed downloads show 100% progress
-                        if 'Completed' in state or 'Succeeded' in state:
-                            progress = 100
-                        
-                        
-                        # Map slskd states to our download states (handle compound states)
-                        if 'InProgress' in state:
-                            new_status = 'downloading'
-                        elif 'Completed' in state or 'Succeeded' in state:
-                            new_status = 'completed'
-                            # Construct absolute file path for completed downloads
-                            api_filename = matching_transfer.get('filename', '')
-                            if api_filename and self.soulseek_client and self.soulseek_client.download_path:
-                                from pathlib import Path
-                                # Convert API filename to absolute path using configured download directory
-                                absolute_file_path = str(Path(self.soulseek_client.download_path) / api_filename)
-                                print(f"[DEBUG] Constructed absolute path: {absolute_file_path}")
-                            else:
-                                absolute_file_path = download_item.file_path
-                            
-                            # Check if this is a matched download and process accordingly
-                            print(f"🔍 Checking download item '{download_item.title}' for matched artist...")
-                            if hasattr(download_item, 'matched_artist') and download_item.matched_artist:
-                                # CRITICAL FIX: Check if completion was already processed to prevent duplicates
-                                if hasattr(download_item, 'mark_completion_processed') and not download_item.mark_completion_processed():
-                                    print(f"⚠️ Completion already processed for '{download_item.title}' - skipping to prevent duplicates")
-                                    continue
-                                
-                                print(f"🎯 Queuing background processing for matched download: '{download_item.title}' by '{download_item.matched_artist.name}'")
-                                
-                                # Create background worker to handle the heavy processing
-                                worker = DownloadCompletionWorker(
-                                    download_item=download_item,
-                                    absolute_file_path=absolute_file_path,
-                                    organize_func=self._organize_matched_download
-                                )
-                                
-                                # Connect worker signals to handlers
-                                worker.signals.completed.connect(self._on_download_completion_finished)
-                                worker.signals.error.connect(self._on_download_completion_error)
-                                
-                                # Submit to thread pool for background processing
-                                self.completion_thread_pool.start(worker)
-                                
-                                # Don't process further here - worker will handle completion
-                                continue
-                            else:
-                                # Non-matched download - process normally on main thread
-                                if hasattr(download_item, 'matched_artist'):
-                                    print(f"    ⚠️ matched_artist is None or empty")
-                                else:
-                                    print(f"    ❌ No matched_artist attribute found")
-                                
-                                # Check if completion was already processed (for consistency)
-                                if hasattr(download_item, 'mark_completion_processed') and not download_item.mark_completion_processed():
-                                    print(f"⚠️ Normal download completion already processed for '{download_item.title}' - skipping")
-                                    continue
-                                    
-                                # Update the download item status and progress for normal downloads
-                                download_item.update_status(
-                                    status=new_status,
-                                    progress=100,  # Force 100% for completed downloads
-                                    download_speed=int(avg_speed),
-                                    file_path=absolute_file_path
-                                )
-                                # Move completed items to finished queue
-                                print(f"[DEBUG] Moving normal completed download '{download_item.title}' to finished queue")
-                                self.download_queue.move_to_finished(download_item)
-                                continue
-                        elif 'Cancelled' in state or 'Canceled' in state:
-                            new_status = 'cancelled'
-                            # Update the download item status BEFORE moving
-                            download_item.update_status(
-                                status=new_status,
-                                progress=download_item.progress,  # Keep current progress
-                                download_speed=0,  # No speed for cancelled
-                                file_path=download_item.file_path
-                            )
-                            
-                            # IMMEDIATE CLEANUP: Remove cancelled download from API immediately
-                            if download_item.download_id and download_item.username and download_item.soulseek_client:
-                                def cleanup_cancelled_download():
-                                    try:
-                                        import asyncio
-                                        loop = asyncio.new_event_loop()
-                                        asyncio.set_event_loop(loop)
-                                        success = loop.run_until_complete(
-                                            download_item.soulseek_client.cancel_download(
-                                                download_item.download_id, 
-                                                download_item.username, 
-                                                remove=True
-                                            )
-                                        )
-                                        loop.close()
-                                        
-                                        if success:
-                                            print(f"✓ Immediately cleaned up cancelled download {download_item.download_id}")
-                                        else:
-                                            print(f"⚠️ Failed to clean up cancelled download {download_item.download_id}")
-                                    except Exception as e:
-                                        print(f"⚠️ Error cleaning up cancelled download: {e}")
-                                
-                                # Run cleanup in background thread
-                                from concurrent.futures import ThreadPoolExecutor
-                                with ThreadPoolExecutor(max_workers=1) as executor:
-                                    executor.submit(cleanup_cancelled_download)
-                            
-                            print(f"[DEBUG] Moving cancelled download '{download_item.title}' to finished queue")
-                            self.download_queue.move_to_finished(download_item)
-                            continue
-                        elif 'Failed' in state or 'Errored' in state:
-                            new_status = 'failed'
-                            # Update the download item status BEFORE moving
-                            download_item.update_status(
-                                status=new_status,
-                                progress=download_item.progress,  # Keep current progress
-                                download_speed=0,  # No speed for failed
-                                file_path=download_item.file_path
-                            )
-                            
-                            # IMPROVED CLEANUP: Remove errored download with retry mechanism
-                            if download_item.download_id and download_item.username and download_item.soulseek_client:
-                                def cleanup_errored_download_with_retry():
-                                    import time
-                                    import asyncio
-                                    max_retries = 3
-                                    
-                                    for attempt in range(max_retries):
-                                        try:
-                                            # Add delay for API stabilization
-                                            if attempt == 0:
-                                                time.sleep(2)  # Initial delay for errored downloads
-                                            else:
-                                                time.sleep(5 * attempt)  # Progressive delay
-                                            
-                                            loop = asyncio.new_event_loop()
-                                            asyncio.set_event_loop(loop)
-                                            success = loop.run_until_complete(
-                                                download_item.soulseek_client.cancel_download(
-                                                    download_item.download_id, 
-                                                    download_item.username, 
-                                                    remove=True
-                                                )
-                                            )
-                                            loop.close()
-                                            
-                                            if success:
-                                                return  # Success, exit retry loop
-                                            elif attempt == max_retries - 1:
-                                                print(f"❌ Failed to clean up errored download after {max_retries} attempts: {download_item.title}")
-                                        except Exception as e:
-                                            if attempt == max_retries - 1:
-                                                print(f"❌ Error cleaning up errored download after {max_retries} attempts: {e}")
-                                
-                                # Run cleanup in background thread
-                                from concurrent.futures import ThreadPoolExecutor
-                                with ThreadPoolExecutor(max_workers=1) as executor:
-                                    executor.submit(cleanup_errored_download_with_retry)
-                            
-                            print(f"[DEBUG] Moving failed download '{download_item.title}' to finished queue")
-                            self.download_queue.move_to_finished(download_item)
-                            continue
-                        elif 'Queued' in state or 'Initializing' in state:
-                            new_status = 'queued'
-                        else:
-                            new_status = state.lower()
-                        
-                        # Reset API missing counter since we found the download
-                        if hasattr(download_item, 'api_missing_count'):
-                            download_item.api_missing_count = 0
-                        
-                        # Update the download item with real-time data
-                        download_item.update_status(
-                            status=new_status,
-                            progress=int(progress),
-                            download_speed=int(avg_speed),
-                            file_path=matching_transfer.get('filename', download_item.file_path)
-                        )
-                        
-                        # Update UI feedback for album track buttons if applicable
-                        self.update_album_track_button_states(download_item, new_status)
-                        
-                        # Store/update the download ID for future matching
-                        transfer_id = matching_transfer.get('id', '')
-                        if transfer_id and not download_item.download_id:
-                            download_item.download_id = transfer_id
-                            print(f"[DEBUG] Stored download ID for '{download_item.title}': {transfer_id}")
-                        elif transfer_id and download_item.download_id != transfer_id:
-                            # Update if we found a different/better ID
-                            print(f"[DEBUG] Updated download ID for '{download_item.title}': {download_item.download_id} -> {transfer_id}")
-                            download_item.download_id = transfer_id
-                    
-                    # If no matching transfer found, the download might have been removed from slskd
-                    else:
-                        # Check if this download was in finished state and might have been removed
-                        if download_item in self.download_queue.finished_queue.download_items:
-                            print(f"[DEBUG] 🗑️ Download '{download_item.title}' not found in API - likely removed from slskd")
-                            print(f"[DEBUG] Removing '{download_item.title}' from finished downloads UI")
-                            # Remove from finished queue since it's no longer in slskd
-                            self.download_queue.finished_queue.remove_download_item(download_item)
-                            continue
-                        # CRITICAL FIX: Handle downloads that disappeared from API (errored/cancelled in backend)
-                        elif download_item in self.download_queue.download_items:
-                            # Add grace period to avoid false positives during API delays
-                            if not hasattr(download_item, 'api_missing_count'):
-                                download_item.api_missing_count = 0
-                            
-                            download_item.api_missing_count += 1
-                            
-                            # Smart grace period: faster sync for downloads that never started
-                            if not hasattr(download_item, 'download_id') or not download_item.download_id:
-                                grace_period = 2  # Faster sync for instant failures
-                                print(f"[DEBUG] ⚠️ Download '{download_item.title}' never started - not found in API (count: {download_item.api_missing_count}/{grace_period})")
-                            else:
-                                grace_period = 3  # Normal grace period for started downloads
-                                print(f"[DEBUG] ⚠️ Active download '{download_item.title}' not found in API (count: {download_item.api_missing_count}/{grace_period})")
-                            
-                            # Mark as failed after grace period
-                            if download_item.api_missing_count >= grace_period:
-                                print(f"[DEBUG] ⚠️ Active download '{download_item.title}' consistently missing from API - marking as failed")
-                                # Update status to failed since it's gone from API (likely errored or cancelled)
-                                download_item.update_status(
-                                    status='failed', 
-                                    progress=download_item.progress,
-                                    download_speed=0,
-                                    file_path=download_item.file_path
-                                )
-                                # Move to finished queue so user can see it failed
-                                self.download_queue.move_to_finished(download_item)
-                            continue
-                
-                # After processing all download items, check for any that weren't found in the API
-                # This handles the case where downloads were removed from slskd externally
-                
-                # Update download counters after processing all transfers
-                self.download_queue.update_tab_counts()
-                
-            except Exception as e:
-                print(f"[ERROR] Error processing transfer status update: {e}")
-                import traceback
-                traceback.print_exc()
-        
-        def on_status_thread_finished(thread):
-            """Clean up status thread when finished"""
-            try:
-                if thread in self.status_update_threads:
-                    self.status_update_threads.remove(thread)
-                thread.deleteLater()
-            except Exception as e:
-                print(f"Error cleaning up status thread: {e}")
-        
-        # Create and start transfer status update thread
-        status_thread = TransferStatusThread(self.soulseek_client)
-        status_thread.transfer_status_completed.connect(handle_status_update)
-        status_thread.transfer_status_failed.connect(lambda error: print(f"Transfer status update failed: {error}"))
-        
-        # Track the thread to prevent garbage collection
-        self.status_update_threads.append(status_thread)
-        
-        # Clean up old threads (keep only last 2 for efficiency)
-        if len(self.status_update_threads) > 2:
-            old_thread = self.status_update_threads.pop(0)
-            if old_thread.isRunning():
-                old_thread.stop()
-                old_thread.wait(1000)
-            old_thread.deleteLater()
-            
-        status_thread.start()
-        
-        # Periodic cleanup for completed downloads in backend
-        self._periodic_cleanup_check()
-    
+        # The worker will automatically be cleaned up by the thread pool.
+        self.status_processing_pool.start(worker)
+
+
     def _periodic_cleanup_check(self):
         """Check for completed downloads and clean them up intelligently"""
         if not self.soulseek_client:
@@ -10653,6 +10350,75 @@ class DownloadsPage(QWidget):
         except Exception as e:
             print(f"❌ Error matching track to Spotify title: {e}")
             return None
+
+# In class DownloadsPage, add this new method
+
+    def _handle_processed_status_updates(self, results):
+        """
+        This runs on the main thread and applies updates from the background worker.
+        It crucially updates download_id and username before moving items to ensure
+        API cleanup works correctly.
+        """
+        # Create a lookup for active items by their memory ID for fast access
+        items_by_id = {id(item): item for item in self.download_queue.active_queue.download_items}
+
+        items_to_move = []
+
+        # Batch UI updates to prevent multiple repaints
+        self.download_queue.setUpdatesEnabled(False)
+
+        for result in results:
+            download_item = items_by_id.get(result['widget_id'])
+            if not download_item:
+                continue
+
+            # **THE CRITICAL FIX IS HERE:**
+            # Update the item with the real transfer ID and username from the API.
+            # This ensures that when move_to_finished is called, it has the correct data for API cleanup.
+            if result.get('transfer_id'):
+                download_item.download_id = result['transfer_id']
+            if result.get('username'):
+                download_item.username = result['username']
+
+            # Update the item's visual status
+            download_item.update_status(
+                status=result['status'],
+                progress=result['progress'],
+                download_speed=result['speed'],
+                file_path=result['path']
+            )
+            
+            action = result.get('action')
+            new_status = result['status']
+
+            if new_status == 'completed' and action == 'process_matched_completion':
+                # This is a matched download that just finished.
+                if download_item.mark_completion_processed():
+                    worker = DownloadCompletionWorker(
+                        download_item=download_item,
+                        absolute_file_path=result['path'],
+                        organize_func=self._organize_matched_download
+                    )
+                    worker.signals.completed.connect(self._on_download_completion_finished)
+                    worker.signals.error.connect(self._on_download_completion_error)
+                    self.completion_thread_pool.start(worker)
+
+            elif new_status in ['completed', 'failed', 'cancelled']:
+                # For regular completed items or any failed/cancelled item.
+                if download_item not in items_to_move:
+                    items_to_move.append(download_item)
+        
+        # Now, move all the items that need moving in one go
+        for item in items_to_move:
+            self.download_queue.move_to_finished(item)
+
+        # Re-enable UI updates and trigger a single repaint
+        self.download_queue.setUpdatesEnabled(True)
+        self.download_queue.update()
+        self.download_queue.update_tab_counts()
+
+        # Allow the next worker to run
+        self._is_status_update_running = False    
     
     def cleanup_resources(self):
         """Clean up resources when page is destroyed"""
