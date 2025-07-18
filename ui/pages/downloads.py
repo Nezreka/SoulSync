@@ -4934,6 +4934,7 @@ class DownloadsPage(QWidget):
         self.displayed_results = 0  # Track how many results are currently displayed
         self.results_per_page = 15  # Show 15 results at a time
         self.is_loading_more = False  # Prevent multiple simultaneous loads
+        self._results_to_load_queue = []
         self.status_processing_pool = QThreadPool()
         self.status_processing_pool.setMaxThreadCount(1) # Only one status worker at a time.
         self._is_status_update_running = False
@@ -6713,78 +6714,35 @@ class DownloadsPage(QWidget):
             if scroll_percentage >= 0.9 and self.displayed_results < len(self.current_filtered_results):
                 self.load_more_results()
     
+    # In downloads.py, find and REPLACE the existing load_more_results method with this:
+
     def load_more_results(self):
-        """Load the next batch of search results (respecting current filter)"""
+        """
+        Prepares a batch of results and initiates the staggered loading process.
+        """
         if self.is_loading_more or not self.current_filtered_results:
             return
-        
+
         self.is_loading_more = True
         
-        # Calculate how many more results to show from filtered results
+        # Calculate how many more results to show
         start_index = self.displayed_results
         end_index = min(start_index + self.results_per_page, len(self.current_filtered_results))
         
-        # Temporarily disable layout updates for smoother batch loading
-        self.search_results_widget.setUpdatesEnabled(False)
-        
-        # Add result items to UI from filtered results
-        for i in range(start_index, end_index):
-            result = self.current_filtered_results[i]
-            
-            # Create appropriate UI component based on result type
-            if isinstance(result, AlbumResult):
-                # Create expandable album result item
-                result_item = AlbumResultItem(result)
-                result_item.album_download_requested.connect(self.start_album_download)
-                result_item.matched_album_download_requested.connect(self.start_matched_album_download)
-                result_item.track_download_requested.connect(self.start_download)  # Individual track downloads
-                result_item.track_stream_requested.connect(lambda search_result, track_item: self.start_stream(search_result, track_item))  # Individual track streaming
-            else:
-                # Create track result item (play + download)
-                result_item = SearchResultItem(result)
-                result_item.download_requested.connect(self.start_download)
-                result_item.stream_requested.connect(lambda search_result, item=result_item: self.start_stream(search_result, item))
-                result_item.expansion_requested.connect(self.handle_expansion_request)
-            
-            # Insert before the stretch (which is always last)
-            insert_position = self.search_results_layout.count() - 1
-            self.search_results_layout.insertWidget(insert_position, result_item)
-        
-        # Re-enable updates and force layout refresh
-        self.search_results_widget.setUpdatesEnabled(True)
-        self.search_results_widget.updateGeometry()
-        self.search_results_layout.update()
-        
-        # Force scroll area to recognize new content size
-        self.search_results_scroll.updateGeometry()
-        
-        # Update displayed count
-        self.displayed_results = end_index
-        
-        # Update status based on filtered results
-        total_filtered = len(self.current_filtered_results)
-        if self.displayed_results >= total_filtered:
-            # Determine filter status text
-            if self.current_filter == "albums":
-                filter_text = "albums"
-            elif self.current_filter == "singles":
-                filter_text = "singles"
-            else:
-                filter_text = "results"
-            self.update_search_status(f"✨ Showing all {total_filtered} {filter_text}", "#1db954")
+        # Get the batch of results to load and add them to our queue
+        results_to_add = self.current_filtered_results[start_index:end_index]
+        self._results_to_load_queue.extend(results_to_add)
+
+        # Update status to show that we are loading more
+        self.update_search_status(f"✨ Loading more results...", "#1db954")
+
+        # Kick off the staggered loading process by loading the first item
+        if self._results_to_load_queue:
+            QTimer.singleShot(0, self._load_next_result_item)
         else:
-            remaining = total_filtered - self.displayed_results
-            # Determine filter status text
-            if self.current_filter == "albums":
-                filter_text = "albums"
-            elif self.current_filter == "singles":
-                filter_text = "singles"
-            else:
-                filter_text = "results"
-            self.update_search_status(f"✨ Showing {self.displayed_results} of {total_filtered} {filter_text} (scroll for {remaining} more)", "#1db954")
-        
-        self.is_loading_more = False
-    
+            self.is_loading_more = False
+
+
     def handle_expansion_request(self, requesting_item):
         """Handle accordion-style expansion where only one item can be expanded at a time"""
         # If there's a currently expanded item and it's not the requesting item, collapse it
@@ -10351,7 +10309,53 @@ class DownloadsPage(QWidget):
             print(f"❌ Error matching track to Spotify title: {e}")
             return None
 
-# In class DownloadsPage, add this new method
+    # In downloads.py, add this new method inside the DownloadsPage class (e.g., after load_more_results)
+
+    def _load_next_result_item(self):
+        """
+        Processes one item from the loading queue and schedules the next.
+        This breaks up the work into small, non-blocking chunks.
+        """
+        if not self._results_to_load_queue:
+            self.is_loading_more = False
+            return
+
+        # Pop one result from the front of the queue
+        result = self._results_to_load_queue.pop(0)
+        
+        # Create the appropriate widget for the result
+        if isinstance(result, AlbumResult):
+            result_item = AlbumResultItem(result)
+            result_item.album_download_requested.connect(self.start_album_download)
+            result_item.matched_album_download_requested.connect(self.start_matched_album_download)
+            result_item.track_download_requested.connect(self.start_download)
+            result_item.track_stream_requested.connect(lambda r, i=result_item: self.start_stream(r, i))
+        else:
+            result_item = SearchResultItem(result)
+            result_item.download_requested.connect(self.start_download)
+            result_item.stream_requested.connect(lambda r, i=result_item: self.start_stream(r, i))
+            result_item.expansion_requested.connect(self.handle_expansion_request)
+        
+        # Insert the newly created widget into the layout
+        insert_position = self.search_results_layout.count() - 1
+        self.search_results_layout.insertWidget(insert_position, result_item)
+        self.displayed_results += 1
+
+        # If there are more items in the queue, schedule the next one immediately
+        if self._results_to_load_queue:
+            QTimer.singleShot(0, self._load_next_result_item)
+        else:
+            # All items for this batch are loaded
+            self.is_loading_more = False
+            # Update the status message now that loading is complete
+            total_filtered = len(self.current_filtered_results)
+            if self.displayed_results < total_filtered:
+                remaining = total_filtered - self.displayed_results
+                self.update_search_status(f"✨ Showing {self.displayed_results} of {total_filtered} results (scroll for {remaining} more)", "#1db954")
+            else:
+                self.update_search_status(f"✨ Showing all {total_filtered} results", "#1db954")
+
+    # In class DownloadsPage, add this new method
 
     def _handle_processed_status_updates(self, results):
         """
