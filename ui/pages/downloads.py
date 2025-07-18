@@ -145,10 +145,18 @@ class StatusProcessingWorker(QRunnable):
                     progress = matching_transfer.get('percentComplete', 0)
                     new_status = 'queued'
 
-                    if 'InProgress' in state: new_status = 'downloading'
-                    elif 'Completed' in state or 'Succeeded' in state: new_status = 'completed'
-                    elif 'Cancelled' in state or 'Canceled' in state: new_status = 'cancelled'
-                    elif 'Failed' in state or 'Errored' in state: new_status = 'failed'
+                    # Determine the new status with the correct order of checks.
+                    # Terminal states like Cancelled and Failed must be checked BEFORE Completed.
+                    if 'Cancelled' in state or 'Canceled' in state:
+                        new_status = 'cancelled'
+                    elif 'Failed' in state or 'Errored' in state:
+                        new_status = 'failed'
+                    elif 'Completed' in state or 'Succeeded' in state:
+                        new_status = 'completed'
+                    elif 'InProgress' in state:
+                        new_status = 'downloading'
+                    else:
+                        new_status = 'queued'
 
                     # **CRITICAL FIX:** Package all necessary data for the main thread.
                     payload = {
@@ -165,6 +173,23 @@ class StatusProcessingWorker(QRunnable):
                         payload['action'] = 'process_matched_completion'
                     
                     results.append(payload)
+                else:
+                    # This handles downloads that have disappeared from the API (e.g., failed, cancelled by user).
+                    # We add a grace period before marking as failed to handle temporary API glitches.
+                    item_data['api_missing_count'] = item_data.get('api_missing_count', 0) + 1
+                    
+                    if item_data['api_missing_count'] >= 3:
+                        # After being missing for 3 update cycles (3 seconds), mark it as failed.
+                        payload = {
+                            'widget_id': item_data['widget_id'],
+                            'status': 'failed',
+                            'progress': item_data.get('progress', 0),
+                            'speed': 0,
+                            'path': item_data['file_path'],
+                            'transfer_id': item_data['download_id'],
+                            'username': item_data['artist'] 
+                        }
+                        results.append(payload)
 
             self.signals.completed.emit(results)
         except Exception as e:
@@ -4132,35 +4157,57 @@ class CompactDownloadItem(QFrame):
             bottom_layout.addWidget(self.cancel_btn)
             
         else:
-            # Finished downloads - PRESERVE ALL EXISTING BUTTON CODE
+            # Finished downloads - display a different widget based on the final status.
             self.progress_bar = None
             self.progress_label = None
+
+            final_status = self.status.lower()
             
-            # Section 3: Open button - PRESERVE EXACTLY AS IS, NO CHANGES
-            self.open_btn = QPushButton("Open")
-            self.open_btn.setFixedSize(60, 35)
-            self.open_btn.clicked.connect(self.open_download_location)
-            self.open_btn.setStyleSheet("""
-                QPushButton {
-                    background: rgba(40, 167, 69, 0.9);
-                    color: white;
-                    border: 1px solid rgba(29, 185, 84, 0.6);
-                    border-radius: 4px;
-                    font-size: 9px;
-                    font-weight: 500;
-                }
-                QPushButton:hover {
-                    background: rgba(50, 187, 79, 1.0);
-                }
-                QPushButton:pressed {
-                    background: rgba(32, 140, 58, 1.0);
-                }
-            """)
-            
-            # Add to bottom layout
+            action_widget = QWidget()
+            action_layout = QHBoxLayout(action_widget)
+            action_layout.setContentsMargins(0, 0, 0, 0)
+            action_layout.setAlignment(Qt.AlignmentFlag.AlignRight)
+            action_widget.setFixedWidth(70)
+
+            if 'completed' in final_status or 'succeeded' in final_status:
+                # For successfully completed downloads, show the 'Open' button.
+                open_btn = QPushButton("📂 Open")
+                open_btn.setFixedSize(60, 35)
+                open_btn.clicked.connect(self.open_download_location)
+                open_btn.setStyleSheet("""
+                    QPushButton {
+                        background: rgba(40, 167, 69, 0.9); color: white; border: 1px solid rgba(29, 185, 84, 0.6);
+                        border-radius: 4px; font-size: 9px; font-weight: 500;
+                    }
+                    QPushButton:hover { background: rgba(50, 187, 79, 1.0); }
+                    QPushButton:pressed { background: rgba(32, 140, 58, 1.0); }
+                """)
+                action_layout.addWidget(open_btn)
+
+            elif 'cancelled' in final_status or 'canceled' in final_status:
+                # For cancelled downloads, show a "Cancelled" label.
+                status_label = QLabel("Cancelled")
+                status_label.setStyleSheet("color: #ffa500; font-weight: bold; font-size: 10px;")
+                status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                action_layout.addWidget(status_label)
+
+            elif 'failed' in final_status or 'errored' in final_status:
+                # For failed or errored downloads, show a "Failed" label.
+                status_label = QLabel("Failed")
+                status_label.setStyleSheet("color: #e22134; font-weight: bold; font-size: 10px;")
+                status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                action_layout.addWidget(status_label)
+
+            else: # Fallback for any other unexpected status
+                open_btn = QPushButton("📂 Open")
+                open_btn.setFixedSize(60, 35)
+                open_btn.clicked.connect(self.open_download_location)
+                action_layout.addWidget(open_btn)
+
+            # Add the uploader label and the new action_widget to the layout.
             bottom_layout.addWidget(self.uploader_label, 1)
-            bottom_layout.addWidget(self.open_btn)
-        
+            bottom_layout.addWidget(action_widget)
+
         # Add both sections to main layout
         layout.addWidget(self.filename_label)
         layout.addLayout(bottom_layout)
@@ -4631,14 +4678,14 @@ class DownloadQueue(QFrame):
             should_remove = False
             
             # Check for exact matches
-            if status_lower in ["completed", "finished", "cancelled", "canceled", "failed"]:
+            # Check for terminal states with the correct priority to ensure proper cleanup.
+            # Cancelled and Failed must be checked BEFORE more general states like Completed.
+            if any(keyword in status_lower for keyword in ["cancelled", "canceled", "failed", "errored"]):
                 should_remove = True
-                print(f"[DEBUG] Exact status match: '{item.status}'")
-            
-            # Check for partial matches (handles compound statuses)
-            elif any(keyword in status_lower for keyword in ["completed", "finished", "cancelled", "canceled", "failed", "succeeded"]):
+                print(f"[DEBUG] Matched terminal state (Cancelled/Failed): '{item.status}'")
+            elif any(keyword in status_lower for keyword in ["completed", "finished", "succeeded"]):
                 should_remove = True
-                print(f"[DEBUG] Partial status match: '{item.status}'")
+                print(f"[DEBUG] Matched terminal state (Completed): '{item.status}'")
             
             if should_remove:
                 print(f"[DEBUG] Item '{item.title}' marked for removal (status: '{item.status}')")
