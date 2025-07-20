@@ -260,13 +260,32 @@ class PlaylistDetailsModal(QDialog):
             self.track_table.setItem(0, 0, placeholder_item)
             self.track_table.setSpan(0, 0, 1, 4)
         
-        # Set column widths
+        # Set optimal column widths with proportional sizing
         header = self.track_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)  # Track name
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)  # Artist
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # Album
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)  # Duration
-        self.track_table.setColumnWidth(3, 80)
+        header.setStretchLastSection(False)
+        
+        # Calculate available width (modal is 900px, account for margins/scrollbar)
+        available_width = 850
+        
+        # Set proportional widths: Track(40%), Artist(25%), Album(25%), Duration(10%)
+        track_width = int(available_width * 0.40)    # ~340px
+        artist_width = int(available_width * 0.25)   # ~212px  
+        album_width = int(available_width * 0.25)    # ~212px
+        duration_width = 80                          # Fixed 80px
+        
+        # Apply column widths with interactive resize capability
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)  # Track name
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)  # Artist
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)  # Album
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)        # Duration
+        
+        self.track_table.setColumnWidth(0, track_width)
+        self.track_table.setColumnWidth(1, artist_width)
+        self.track_table.setColumnWidth(2, album_width)
+        self.track_table.setColumnWidth(3, duration_width)
+        
+        # Set minimum widths to prevent columns from becoming too narrow
+        header.setMinimumSectionSize(100)  # Minimum 100px for any column
         
         # Hide row numbers
         self.track_table.verticalHeader().setVisible(False)
