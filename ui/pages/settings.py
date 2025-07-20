@@ -1,9 +1,144 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                            QFrame, QPushButton, QLineEdit, QComboBox,
                            QCheckBox, QSpinBox, QTextEdit, QGroupBox, QFormLayout, QMessageBox, QSizePolicy)
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QFont
 from config.settings import config_manager
+
+class ServiceTestThread(QThread):
+    test_completed = pyqtSignal(str, bool, str)  # service, success, message
+    
+    def __init__(self, service_type, test_config):
+        super().__init__()
+        self.service_type = service_type
+        self.test_config = test_config
+    
+    def run(self):
+        """Run the service test in background thread"""
+        try:
+            if self.service_type == "spotify":
+                success, message = self._test_spotify()
+            elif self.service_type == "plex":
+                success, message = self._test_plex()
+            elif self.service_type == "soulseek":
+                success, message = self._test_soulseek()
+            else:
+                success, message = False, "Unknown service type"
+                
+            self.test_completed.emit(self.service_type, success, message)
+            
+        except Exception as e:
+            self.test_completed.emit(self.service_type, False, f"Test failed: {str(e)}")
+    
+    def _test_spotify(self):
+        """Test Spotify connection"""
+        try:
+            from core.spotify_client import SpotifyClient
+            
+            # Save temporarily to test
+            original_client_id = config_manager.get('spotify.client_id')
+            original_client_secret = config_manager.get('spotify.client_secret')
+            
+            config_manager.set('spotify.client_id', self.test_config['client_id'])
+            config_manager.set('spotify.client_secret', self.test_config['client_secret'])
+            
+            # Test connection
+            client = SpotifyClient()
+            if client.is_authenticated():
+                user_info = client.get_user_info()
+                username = user_info.get('display_name', 'Unknown') if user_info else 'Unknown'
+                message = f"✓ Spotify connection successful!\nConnected as: {username}"
+                success = True
+            else:
+                message = "✗ Spotify connection failed.\nCheck your credentials and try again."
+                success = False
+            
+            # Restore original values
+            config_manager.set('spotify.client_id', original_client_id)
+            config_manager.set('spotify.client_secret', original_client_secret)
+            
+            return success, message
+            
+        except Exception as e:
+            return False, f"✗ Spotify test failed:\n{str(e)}"
+    
+    def _test_plex(self):
+        """Test Plex connection"""
+        try:
+            from core.plex_client import PlexClient
+            
+            # Save temporarily to test
+            original_base_url = config_manager.get('plex.base_url')
+            original_token = config_manager.get('plex.token')
+            
+            config_manager.set('plex.base_url', self.test_config['base_url'])
+            config_manager.set('plex.token', self.test_config['token'])
+            
+            # Test connection
+            client = PlexClient()
+            if client.is_connected():
+                server_name = client.server.friendlyName if client.server else 'Unknown'
+                message = f"✓ Plex connection successful!\nServer: {server_name}"
+                success = True
+            else:
+                message = "✗ Plex connection failed.\nCheck your server URL and token."
+                success = False
+            
+            # Restore original values
+            config_manager.set('plex.base_url', original_base_url)
+            config_manager.set('plex.token', original_token)
+            
+            return success, message
+            
+        except Exception as e:
+            return False, f"✗ Plex test failed:\n{str(e)}"
+    
+    def _test_soulseek(self):
+        """Test Soulseek connection"""
+        try:
+            import requests
+            
+            slskd_url = self.test_config['slskd_url']
+            api_key = self.test_config['api_key']
+            
+            if not slskd_url:
+                return False, ("Please enter slskd URL\n\n"
+                             "slskd is a headless Soulseek client that provides an HTTP API.\n"
+                             "Download from: https://github.com/slskd/slskd")
+            
+            # Test API endpoint
+            headers = {}
+            if api_key:
+                headers['X-API-Key'] = api_key
+            
+            response = requests.get(f"{slskd_url}/api/v0/session", headers=headers, timeout=5)
+            
+            if response.status_code == 200:
+                return True, "✓ Soulseek connection successful!\nslskd is responding."
+            elif response.status_code == 401:
+                return False, ("✗ Invalid API key\n\n"
+                             "Please check your slskd API key in the configuration.")
+            else:
+                return False, (f"✗ Soulseek connection failed\nHTTP {response.status_code}\n\n"
+                             "slskd is running but returned an error.")
+                
+        except requests.exceptions.ConnectionError as e:
+            if "refused" in str(e).lower():
+                return False, ("✗ Cannot connect to slskd\n\n"
+                             "slskd appears to not be running on the specified URL.\n\n"
+                             "To fix this:\n"
+                             "1. Install slskd from: https://github.com/slskd/slskd\n"
+                             "2. Start slskd service\n"
+                             "3. Ensure it's running on the correct port (default: 5030)")
+            else:
+                return False, f"✗ Network error:\n{str(e)}"
+        except requests.exceptions.Timeout:
+            return False, ("✗ Connection timed out\n\n"
+                         "slskd is not responding. Check if it's running and accessible.")
+        except requests.exceptions.RequestException as e:
+            return False, f"✗ Request failed:\n{str(e)}"
+        except Exception as e:
+            return False, f"✗ Unexpected error:\n{str(e)}"
 
 class SettingsGroup(QGroupBox):
     def __init__(self, title: str, parent=None):
@@ -31,8 +166,49 @@ class SettingsPage(QWidget):
         super().__init__(parent)
         self.config_manager = None
         self.form_inputs = {}
+        self.test_thread = None
+        self.test_buttons = {}
         self.setup_ui()
         self.load_config_values()
+    
+    def on_test_completed(self, service, success, message):
+        """Handle test completion from background thread"""
+        # Re-enable the test button
+        if service in self.test_buttons:
+            button = self.test_buttons[service]
+            button.setEnabled(True)
+            button.setText(f"Test {service.title()}")
+        
+        # Show result message
+        if success:
+            QMessageBox.information(self, "Success", message)
+        else:
+            if "Configuration Required" in message or "enter slskd URL" in message:
+                QMessageBox.warning(self, "Configuration Required", message)
+            else:
+                QMessageBox.critical(self, "Test Failed", message)
+        
+        # Clean up thread
+        if self.test_thread:
+            self.test_thread.deleteLater()
+            self.test_thread = None
+    
+    def start_service_test(self, service_type, test_config):
+        """Start a service test in background thread"""
+        # Don't start new test if one is already running
+        if self.test_thread and self.test_thread.isRunning():
+            return
+        
+        # Update button state
+        if service_type in self.test_buttons:
+            button = self.test_buttons[service_type]
+            button.setEnabled(False)
+            button.setText("Testing...")
+        
+        # Start test thread
+        self.test_thread = ServiceTestThread(service_type, test_config)
+        self.test_thread.test_completed.connect(self.on_test_completed)
+        self.test_thread.start()
     
     def setup_ui(self):
         self.setStyleSheet("""
@@ -166,117 +342,28 @@ class SettingsPage(QWidget):
         """)
     
     def test_spotify_connection(self):
-        """Test Spotify API connection"""
-        try:
-            from core.spotify_client import SpotifyClient
-            
-            # Create temporary client with current form values
-            temp_config = config_manager.get_spotify_config().copy()
-            temp_config['client_id'] = self.client_id_input.text()
-            temp_config['client_secret'] = self.client_secret_input.text()
-            
-            # Save temporarily to test
-            original_client_id = config_manager.get('spotify.client_id')
-            original_client_secret = config_manager.get('spotify.client_secret')
-            
-            config_manager.set('spotify.client_id', temp_config['client_id'])
-            config_manager.set('spotify.client_secret', temp_config['client_secret'])
-            
-            # Test connection
-            client = SpotifyClient()
-            if client.is_authenticated():
-                user_info = client.get_user_info()
-                username = user_info.get('display_name', 'Unknown') if user_info else 'Unknown'
-                QMessageBox.information(self, "Success", f"✓ Spotify connection successful!\nConnected as: {username}")
-            else:
-                QMessageBox.warning(self, "Failed", "✗ Spotify connection failed.\nCheck your credentials and try again.")
-            
-            # Restore original values
-            config_manager.set('spotify.client_id', original_client_id)
-            config_manager.set('spotify.client_secret', original_client_secret)
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"✗ Spotify test failed:\n{str(e)}")
+        """Test Spotify API connection in background thread"""
+        test_config = {
+            'client_id': self.client_id_input.text(),
+            'client_secret': self.client_secret_input.text()
+        }
+        self.start_service_test('spotify', test_config)
     
     def test_plex_connection(self):
-        """Test Plex server connection"""
-        try:
-            from core.plex_client import PlexClient
-            
-            # Save temporarily to test
-            original_base_url = config_manager.get('plex.base_url')
-            original_token = config_manager.get('plex.token')
-            
-            config_manager.set('plex.base_url', self.plex_url_input.text())
-            config_manager.set('plex.token', self.plex_token_input.text())
-            
-            # Test connection
-            client = PlexClient()
-            if client.is_connected():
-                server_name = client.server.friendlyName if client.server else 'Unknown'
-                QMessageBox.information(self, "Success", f"✓ Plex connection successful!\nServer: {server_name}")
-            else:
-                QMessageBox.warning(self, "Failed", "✗ Plex connection failed.\nCheck your server URL and token.")
-            
-            # Restore original values
-            config_manager.set('plex.base_url', original_base_url)
-            config_manager.set('plex.token', original_token)
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"✗ Plex test failed:\n{str(e)}")
+        """Test Plex server connection in background thread"""
+        test_config = {
+            'base_url': self.plex_url_input.text(),
+            'token': self.plex_token_input.text()
+        }
+        self.start_service_test('plex', test_config)
     
     def test_soulseek_connection(self):
-        """Test Soulseek slskd connection"""
-        try:
-            import requests
-            
-            slskd_url = self.slskd_url_input.text()
-            api_key = self.api_key_input.text()
-            
-            if not slskd_url:
-                QMessageBox.warning(self, "Configuration Required", 
-                                  "Please enter slskd URL\n\n"
-                                  "slskd is a headless Soulseek client that provides an HTTP API.\n"
-                                  "Download from: https://github.com/slskd/slskd")
-                return
-            
-            # Test API endpoint
-            headers = {}
-            if api_key:
-                headers['X-API-Key'] = api_key
-            
-            response = requests.get(f"{slskd_url}/api/v0/session", headers=headers, timeout=5)
-            
-            if response.status_code == 200:
-                QMessageBox.information(self, "Success", "✓ Soulseek connection successful!\nslskd is responding.")
-            elif response.status_code == 401:
-                QMessageBox.warning(self, "Authentication Required", 
-                                  "✗ Invalid API key\n\n"
-                                  "Please check your slskd API key in the configuration.")
-            else:
-                QMessageBox.warning(self, "Connection Failed", 
-                                  f"✗ Soulseek connection failed\nHTTP {response.status_code}\n\n"
-                                  "slskd is running but returned an error.")
-                
-        except requests.exceptions.ConnectionError as e:
-            if "refused" in str(e).lower():
-                QMessageBox.critical(self, "slskd Not Running", 
-                                   "✗ Cannot connect to slskd\n\n"
-                                   "slskd appears to not be running on the specified URL.\n\n"
-                                   "To fix this:\n"
-                                   "1. Install slskd from: https://github.com/slskd/slskd\n"
-                                   "2. Start slskd service\n"
-                                   "3. Ensure it's running on the correct port (default: 5030)")
-            else:
-                QMessageBox.critical(self, "Connection Error", f"✗ Network error:\n{str(e)}")
-        except requests.exceptions.Timeout:
-            QMessageBox.critical(self, "Connection Timeout", 
-                               "✗ Connection timed out\n\n"
-                               "slskd is not responding. Check if it's running and accessible.")
-        except requests.exceptions.RequestException as e:
-            QMessageBox.critical(self, "Request Error", f"✗ Request failed:\n{str(e)}")
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"✗ Unexpected error:\n{str(e)}")
+        """Test Soulseek slskd connection in background thread"""
+        test_config = {
+            'slskd_url': self.slskd_url_input.text(),
+            'api_key': self.api_key_input.text()
+        }
+        self.start_service_test('soulseek', test_config)
     
     def browse_download_path(self):
         """Open a directory dialog to select download path"""
@@ -448,27 +535,27 @@ class SettingsPage(QWidget):
         test_layout = QHBoxLayout()
         test_layout.setSpacing(12)
         
-        test_spotify = QPushButton("Test Spotify")
-        test_spotify.setFixedHeight(30)
-        test_spotify.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        test_spotify.clicked.connect(self.test_spotify_connection)
-        test_spotify.setStyleSheet(self.get_test_button_style())
+        self.test_buttons['spotify'] = QPushButton("Test Spotify")
+        self.test_buttons['spotify'].setFixedHeight(30)
+        self.test_buttons['spotify'].setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.test_buttons['spotify'].clicked.connect(self.test_spotify_connection)
+        self.test_buttons['spotify'].setStyleSheet(self.get_test_button_style())
         
-        test_plex = QPushButton("Test Plex")
-        test_plex.setFixedHeight(30)
-        test_plex.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        test_plex.clicked.connect(self.test_plex_connection)
-        test_plex.setStyleSheet(self.get_test_button_style())
+        self.test_buttons['plex'] = QPushButton("Test Plex")
+        self.test_buttons['plex'].setFixedHeight(30)
+        self.test_buttons['plex'].setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.test_buttons['plex'].clicked.connect(self.test_plex_connection)
+        self.test_buttons['plex'].setStyleSheet(self.get_test_button_style())
         
-        test_soulseek = QPushButton("Test Soulseek")
-        test_soulseek.setFixedHeight(30)
-        test_soulseek.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        test_soulseek.clicked.connect(self.test_soulseek_connection)
-        test_soulseek.setStyleSheet(self.get_test_button_style())
+        self.test_buttons['soulseek'] = QPushButton("Test Soulseek")
+        self.test_buttons['soulseek'].setFixedHeight(30)
+        self.test_buttons['soulseek'].setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.test_buttons['soulseek'].clicked.connect(self.test_soulseek_connection)
+        self.test_buttons['soulseek'].setStyleSheet(self.get_test_button_style())
         
-        test_layout.addWidget(test_spotify)
-        test_layout.addWidget(test_plex)
-        test_layout.addWidget(test_soulseek)
+        test_layout.addWidget(self.test_buttons['spotify'])
+        test_layout.addWidget(self.test_buttons['plex'])
+        test_layout.addWidget(self.test_buttons['soulseek'])
         
         api_layout.addLayout(test_layout)
         
