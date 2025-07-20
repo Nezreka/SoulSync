@@ -174,20 +174,38 @@ class SpotifyClient:
             )
             
             self.sp = spotipy.Spotify(auth_manager=auth_manager)
-            user_info = self.sp.current_user()
-            self.user_id = user_info['id']
-            logger.info(f"Successfully authenticated with Spotify as {user_info['display_name']}")
+            # Don't fetch user info on startup - do it lazily to avoid blocking UI
+            self.user_id = None
+            logger.info("Spotify client initialized (user info will be fetched when needed)")
             
         except Exception as e:
             logger.error(f"Failed to authenticate with Spotify: {e}")
             self.sp = None
     
     def is_authenticated(self) -> bool:
-        return self.sp is not None and self.user_id is not None
+        """Check if Spotify client is set up (fast check, no API calls)"""
+        return self.sp is not None
+    
+    def _ensure_user_id(self) -> bool:
+        """Ensure user_id is loaded (may make API call)"""
+        if self.user_id is None and self.sp is not None:
+            try:
+                user_info = self.sp.current_user()
+                self.user_id = user_info['id']
+                logger.info(f"Successfully authenticated with Spotify as {user_info['display_name']}")
+                return True
+            except Exception as e:
+                logger.error(f"Failed to fetch user info: {e}")
+                return False
+        return self.user_id is not None
     
     def get_user_playlists(self) -> List[Playlist]:
         if not self.is_authenticated():
             logger.error("Not authenticated with Spotify")
+            return []
+        
+        if not self._ensure_user_id():
+            logger.error("Failed to get user ID")
             return []
         
         playlists = []
@@ -210,6 +228,36 @@ class SpotifyClient:
             
         except Exception as e:
             logger.error(f"Error fetching user playlists: {e}")
+            return []
+    
+    def get_user_playlists_metadata_only(self) -> List[Playlist]:
+        """Get playlists without fetching all track details for faster loading"""
+        if not self.is_authenticated():
+            logger.error("Not authenticated with Spotify")
+            return []
+        
+        if not self._ensure_user_id():
+            logger.error("Failed to get user ID")
+            return []
+        
+        playlists = []
+        
+        try:
+            # Only fetch first batch initially for faster loading
+            results = self.sp.current_user_playlists(limit=20)
+            
+            if results and 'items' in results:
+                for playlist_data in results['items']:
+                    if playlist_data['owner']['id'] == self.user_id or playlist_data['collaborative']:
+                        # Create playlist with empty tracks list for now
+                        playlist = Playlist.from_spotify_playlist(playlist_data, [])
+                        playlists.append(playlist)
+            
+            logger.info(f"Retrieved {len(playlists)} playlist metadata (first batch)")
+            return playlists
+            
+        except Exception as e:
+            logger.error(f"Error fetching user playlists metadata: {e}")
             return []
     
     def _get_playlist_tracks(self, playlist_id: str) -> List[Track]:
