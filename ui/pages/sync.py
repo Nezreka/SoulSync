@@ -1,8 +1,9 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                            QFrame, QPushButton, QListWidget, QListWidgetItem,
                            QProgressBar, QTextEdit, QCheckBox, QComboBox,
-                           QScrollArea, QSizePolicy, QMessageBox)
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
+                           QScrollArea, QSizePolicy, QMessageBox, QDialog,
+                           QTableWidget, QTableWidgetItem, QHeaderView)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QPropertyAnimation, QEasingCurve, QRunnable, QThreadPool, QObject
 from PyQt6.QtGui import QFont
 
 class PlaylistLoaderThread(QThread):
@@ -23,24 +24,398 @@ class PlaylistLoaderThread(QThread):
                 return
             
             self.progress_updated.emit("Fetching playlists...")
-            playlists = self.spotify_client.get_user_playlists()
+            playlists = self.spotify_client.get_user_playlists_metadata_only()
             
             for i, playlist in enumerate(playlists):
                 self.progress_updated.emit(f"Loading playlist {i+1}/{len(playlists)}: {playlist.name}")
                 self.playlist_loaded.emit(playlist)
-                self.msleep(50)  # Small delay to show progressive loading
+                self.msleep(20)  # Reduced delay for faster but visible progressive loading
             
             self.loading_finished.emit(len(playlists))
             
         except Exception as e:
             self.loading_failed.emit(str(e))
 
+class TrackLoadingWorkerSignals(QObject):
+    """Signals for async track loading worker"""
+    tracks_loaded = pyqtSignal(str, list)  # playlist_id, tracks
+    loading_failed = pyqtSignal(str, str)  # playlist_id, error_message
+    loading_started = pyqtSignal(str)  # playlist_id
+
+class TrackLoadingWorker(QRunnable):
+    """Async worker for loading playlist tracks (following downloads.py pattern)"""
+    
+    def __init__(self, spotify_client, playlist_id, playlist_name):
+        super().__init__()
+        self.spotify_client = spotify_client
+        self.playlist_id = playlist_id
+        self.playlist_name = playlist_name
+        self.signals = TrackLoadingWorkerSignals()
+    
+    def run(self):
+        """Load tracks in background thread"""
+        try:
+            self.signals.loading_started.emit(self.playlist_id)
+            
+            # Fetch tracks from Spotify API
+            tracks = self.spotify_client._get_playlist_tracks(self.playlist_id)
+            
+            # Emit success signal
+            self.signals.tracks_loaded.emit(self.playlist_id, tracks)
+            
+        except Exception as e:
+            # Emit error signal
+            self.signals.loading_failed.emit(self.playlist_id, str(e))
+
+class PlaylistDetailsModal(QDialog):
+    def __init__(self, playlist, parent=None):
+        super().__init__(parent)
+        self.playlist = playlist
+        self.parent_page = parent
+        self.spotify_client = parent.spotify_client if parent else None
+        
+        self.setup_ui()
+        
+        # Load tracks asynchronously if not already cached
+        if not self.playlist.tracks and self.spotify_client:
+            # Check cache first
+            if hasattr(parent, 'track_cache') and playlist.id in parent.track_cache:
+                self.playlist.tracks = parent.track_cache[playlist.id]
+                self.refresh_track_table()
+            else:
+                self.load_tracks_async()
+    
+    def setup_ui(self):
+        self.setWindowTitle(f"Playlist Details - {self.playlist.name}")
+        self.setFixedSize(900, 700)
+        self.setStyleSheet("""
+            QDialog {
+                background: #191414;
+                color: #ffffff;
+            }
+        """)
+        
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(30, 30, 30, 30)
+        main_layout.setSpacing(20)
+        
+        # Header section
+        header = self.create_header()
+        main_layout.addWidget(header)
+        
+        # Track list section
+        track_list = self.create_track_list()
+        main_layout.addWidget(track_list)
+        
+        # Button section
+        button_widget = QWidget()
+        button_layout = self.create_buttons()
+        button_widget.setLayout(button_layout)
+        main_layout.addWidget(button_widget)
+    
+    def create_header(self):
+        header = QFrame()
+        header.setStyleSheet("""
+            QFrame {
+                background: #282828;
+                border-radius: 12px;
+                border: 1px solid #404040;
+            }
+        """)
+        
+        layout = QVBoxLayout(header)
+        layout.setContentsMargins(25, 20, 25, 20)
+        layout.setSpacing(10)
+        
+        # Playlist name
+        name_label = QLabel(self.playlist.name)
+        name_label.setFont(QFont("Arial", 20, QFont.Weight.Bold))
+        name_label.setStyleSheet("color: #ffffff; border: none; background: transparent;")
+        
+        # Playlist info
+        info_layout = QHBoxLayout()
+        info_layout.setSpacing(20)
+        
+        # Track count
+        track_count = QLabel(f"{self.playlist.total_tracks} tracks")
+        track_count.setFont(QFont("Arial", 12))
+        track_count.setStyleSheet("color: #b3b3b3; border: none; background: transparent;")
+        
+        # Owner
+        owner = QLabel(f"by {self.playlist.owner}")
+        owner.setFont(QFont("Arial", 12))
+        owner.setStyleSheet("color: #b3b3b3; border: none; background: transparent;")
+        
+        # Public/Private status
+        visibility = "Public" if self.playlist.public else "Private"
+        if self.playlist.collaborative:
+            visibility = "Collaborative"
+        status = QLabel(visibility)
+        status.setFont(QFont("Arial", 12))
+        status.setStyleSheet("color: #1db954; border: none; background: transparent;")
+        
+        info_layout.addWidget(track_count)
+        info_layout.addWidget(owner)
+        info_layout.addWidget(status)
+        info_layout.addStretch()
+        
+        # Description (if available)
+        if self.playlist.description:
+            desc_label = QLabel(self.playlist.description)
+            desc_label.setFont(QFont("Arial", 11))
+            desc_label.setStyleSheet("color: #b3b3b3; border: none; background: transparent;")
+            desc_label.setWordWrap(True)
+            desc_label.setMaximumHeight(60)
+            layout.addWidget(desc_label)
+        
+        layout.addWidget(name_label)
+        layout.addLayout(info_layout)
+        
+        return header
+    
+    def create_track_list(self):
+        container = QFrame()
+        container.setStyleSheet("""
+            QFrame {
+                background: #282828;
+                border-radius: 12px;
+                border: 1px solid #404040;
+            }
+        """)
+        
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(25, 20, 25, 20)
+        layout.setSpacing(15)
+        
+        # Section title
+        title = QLabel("Tracks")
+        title.setFont(QFont("Arial", 16, QFont.Weight.Bold))
+        title.setStyleSheet("color: #ffffff; border: none; background: transparent;")
+        
+        # Track table
+        self.track_table = QTableWidget()
+        self.track_table.setColumnCount(4)
+        self.track_table.setHorizontalHeaderLabels(["Track", "Artist", "Album", "Duration"])
+        
+        # Set initial row count (may be 0 if tracks not loaded yet)
+        track_count = len(self.playlist.tracks) if self.playlist.tracks else 1
+        self.track_table.setRowCount(track_count)
+        
+        # Style the table
+        self.track_table.setStyleSheet("""
+            QTableWidget {
+                background: #181818;
+                border: 1px solid #404040;
+                border-radius: 8px;
+                gridline-color: #404040;
+                color: #ffffff;
+                font-size: 11px;
+            }
+            QTableWidget::item {
+                padding: 8px;
+                border-bottom: 1px solid #333333;
+            }
+            QTableWidget::item:selected {
+                background: #1db954;
+                color: #000000;
+            }
+            QHeaderView::section {
+                background: #404040;
+                color: #ffffff;
+                padding: 10px;
+                border: none;
+                font-weight: bold;
+                font-size: 11px;
+            }
+        """)
+        
+        # Populate table
+        if self.playlist.tracks:
+            for row, track in enumerate(self.playlist.tracks):
+                # Track name
+                track_item = QTableWidgetItem(track.name)
+                track_item.setFlags(track_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                self.track_table.setItem(row, 0, track_item)
+                
+                # Artist(s)
+                artists = ", ".join(track.artists)
+                artist_item = QTableWidgetItem(artists)
+                artist_item.setFlags(artist_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                self.track_table.setItem(row, 1, artist_item)
+                
+                # Album
+                album_item = QTableWidgetItem(track.album)
+                album_item.setFlags(album_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                self.track_table.setItem(row, 2, album_item)
+                
+                # Duration
+                duration = self.format_duration(track.duration_ms)
+                duration_item = QTableWidgetItem(duration)
+                duration_item.setFlags(duration_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                self.track_table.setItem(row, 3, duration_item)
+        else:
+            # Show placeholder while tracks are being loaded
+            placeholder_item = QTableWidgetItem("Tracks will load momentarily...")
+            placeholder_item.setFlags(placeholder_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.track_table.setItem(0, 0, placeholder_item)
+            self.track_table.setSpan(0, 0, 1, 4)
+        
+        # Set column widths
+        header = self.track_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)  # Track name
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)  # Artist
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # Album
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)  # Duration
+        self.track_table.setColumnWidth(3, 80)
+        
+        # Hide row numbers
+        self.track_table.verticalHeader().setVisible(False)
+        
+        layout.addWidget(title)
+        layout.addWidget(self.track_table)
+        
+        return container
+    
+    def create_buttons(self):
+        button_layout = QHBoxLayout()
+        button_layout.setSpacing(15)
+        
+        # Close button
+        close_btn = QPushButton("Close")
+        close_btn.setFixedSize(100, 40)
+        close_btn.clicked.connect(self.close)
+        close_btn.setStyleSheet("""
+            QPushButton {
+                background: #404040;
+                border: none;
+                border-radius: 20px;
+                color: #ffffff;
+                font-size: 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #505050;
+            }
+        """)
+        
+        # Sync button
+        sync_btn = QPushButton("Sync This Playlist")
+        sync_btn.setFixedSize(150, 40)
+        sync_btn.setStyleSheet("""
+            QPushButton {
+                background: #1db954;
+                border: none;
+                border-radius: 20px;
+                color: #000000;
+                font-size: 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #1ed760;
+            }
+        """)
+        
+        button_layout.addStretch()
+        button_layout.addWidget(close_btn)
+        button_layout.addWidget(sync_btn)
+        
+        return button_layout
+    
+    def format_duration(self, duration_ms):
+        """Convert milliseconds to MM:SS format"""
+        seconds = duration_ms // 1000
+        minutes = seconds // 60
+        seconds = seconds % 60
+        return f"{minutes}:{seconds:02d}"
+    
+    def load_tracks_async(self):
+        """Load tracks asynchronously using worker thread"""
+        if not self.spotify_client:
+            return
+        
+        # Show loading state in track table
+        if hasattr(self, 'track_table'):
+            self.track_table.setRowCount(1)
+            loading_item = QTableWidgetItem("Loading tracks...")
+            loading_item.setFlags(loading_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.track_table.setItem(0, 0, loading_item)
+            self.track_table.setSpan(0, 0, 1, 4)
+        
+        # Create and submit worker to thread pool
+        worker = TrackLoadingWorker(self.spotify_client, self.playlist.id, self.playlist.name)
+        worker.signals.tracks_loaded.connect(self.on_tracks_loaded)
+        worker.signals.loading_failed.connect(self.on_tracks_loading_failed)
+        
+        # Submit to parent's thread pool if available, otherwise create one
+        if hasattr(self.parent_page, 'thread_pool'):
+            self.parent_page.thread_pool.start(worker)
+        else:
+            # Fallback thread pool
+            thread_pool = QThreadPool()
+            thread_pool.start(worker)
+    
+    def on_tracks_loaded(self, playlist_id, tracks):
+        """Handle successful track loading"""
+        if playlist_id == self.playlist.id:
+            self.playlist.tracks = tracks
+            
+            # Cache tracks in parent for future use
+            if hasattr(self.parent_page, 'track_cache'):
+                self.parent_page.track_cache[playlist_id] = tracks
+            
+            # Refresh the track table
+            self.refresh_track_table()
+    
+    def on_tracks_loading_failed(self, playlist_id, error_message):
+        """Handle track loading failure"""
+        if playlist_id == self.playlist.id and hasattr(self, 'track_table'):
+            self.track_table.setRowCount(1)
+            error_item = QTableWidgetItem(f"Error loading tracks: {error_message}")
+            error_item.setFlags(error_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.track_table.setItem(0, 0, error_item)
+            self.track_table.setSpan(0, 0, 1, 4)
+    
+    def refresh_track_table(self):
+        """Refresh the track table with loaded tracks"""
+        if not hasattr(self, 'track_table'):
+            return
+            
+        self.track_table.setRowCount(len(self.playlist.tracks))
+        self.track_table.clearSpans()  # Remove any spans from loading state
+        
+        # Populate table
+        for row, track in enumerate(self.playlist.tracks):
+            # Track name
+            track_item = QTableWidgetItem(track.name)
+            track_item.setFlags(track_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.track_table.setItem(row, 0, track_item)
+            
+            # Artist(s)
+            artists = ", ".join(track.artists)
+            artist_item = QTableWidgetItem(artists)
+            artist_item.setFlags(artist_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.track_table.setItem(row, 1, artist_item)
+            
+            # Album
+            album_item = QTableWidgetItem(track.album)
+            album_item.setFlags(album_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.track_table.setItem(row, 2, album_item)
+            
+            # Duration
+            duration = self.format_duration(track.duration_ms)
+            duration_item = QTableWidgetItem(duration)
+            duration_item.setFlags(duration_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.track_table.setItem(row, 3, duration_item)
+
 class PlaylistItem(QFrame):
-    def __init__(self, name: str, track_count: int, sync_status: str, parent=None):
+    view_details_clicked = pyqtSignal(object)  # Signal to emit playlist object
+    
+    def __init__(self, name: str, track_count: int, sync_status: str, playlist=None, parent=None):
         super().__init__(parent)
         self.name = name
         self.track_count = track_count
         self.sync_status = sync_status
+        self.playlist = playlist  # Store playlist object reference
         self.is_selected = False
         self.setup_ui()
     
@@ -117,6 +492,7 @@ class PlaylistItem(QFrame):
         # Action button
         action_btn = QPushButton("View Details")
         action_btn.setFixedSize(100, 30)
+        action_btn.clicked.connect(self.on_view_details_clicked)
         action_btn.setStyleSheet("""
             QPushButton {
                 background: transparent;
@@ -141,6 +517,11 @@ class PlaylistItem(QFrame):
         if event.button() == Qt.MouseButton.LeftButton:
             self.checkbox.setChecked(not self.checkbox.isChecked())
         super().mousePressEvent(event)
+    
+    def on_view_details_clicked(self):
+        """Handle View Details button click"""
+        if self.playlist:
+            self.view_details_clicked.emit(self.playlist)
 
 class SyncOptionsPanel(QFrame):
     def __init__(self, parent=None):
@@ -227,10 +608,81 @@ class SyncPage(QWidget):
         self.plex_client = plex_client
         self.current_playlists = []
         self.playlist_loader = None
+        
+        # Track cache for performance
+        self.track_cache = {}  # playlist_id -> tracks
+        
+        # Thread pool for async operations (like downloads.py)
+        self.thread_pool = QThreadPool()
+        self.thread_pool.setMaxThreadCount(3)  # Limit concurrent Spotify API calls
+        
         self.setup_ui()
         
-        # Start loading playlists asynchronously after UI is ready
-        QTimer.singleShot(100, self.load_playlists_async)
+        # Don't auto-load on startup, but do auto-load when page becomes visible
+        self.show_initial_state()
+        self.playlists_loaded = False
+    
+    def showEvent(self, event):
+        """Auto-load playlists when page becomes visible (but not during app startup)"""
+        super().showEvent(event)
+        
+        # Only auto-load once and only if we have a spotify client
+        if (not self.playlists_loaded and 
+            self.spotify_client and 
+            self.spotify_client.is_authenticated()):
+            
+            # Small delay to ensure UI is fully rendered
+            QTimer.singleShot(100, self.auto_load_playlists)
+    
+    def auto_load_playlists(self):
+        """Auto-load playlists with proper UI transition"""
+        # Clear the welcome state first
+        self.clear_playlists()
+        
+        # Start loading (this will set playlists_loaded = True)
+        self.load_playlists_async()
+    
+    def show_initial_state(self):
+        """Show initial state with option to load playlists"""
+        # Add welcome message to playlist area
+        welcome_message = QLabel("Ready to sync playlists!\nClick 'Load Playlists' to get started.")
+        welcome_message.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        welcome_message.setStyleSheet("""
+            QLabel {
+                color: #b3b3b3;
+                font-size: 16px;
+                padding: 60px;
+                background: #282828;
+                border-radius: 12px;
+                border: 1px solid #404040;
+                line-height: 1.5;
+            }
+        """)
+        
+        # Add load button
+        load_btn = QPushButton("🎵 Load Playlists")
+        load_btn.setFixedSize(200, 50)
+        load_btn.clicked.connect(self.load_playlists_async)
+        load_btn.setStyleSheet("""
+            QPushButton {
+                background: #1db954;
+                border: none;
+                border-radius: 25px;
+                color: #000000;
+                font-size: 14px;
+                font-weight: bold;
+                margin-top: 20px;
+            }
+            QPushButton:hover {
+                background: #1ed760;
+            }
+        """)
+        
+        # Add them to the playlist layout  
+        if hasattr(self, 'playlist_layout'):
+            self.playlist_layout.addWidget(welcome_message)
+            self.playlist_layout.addWidget(load_btn)
+            self.playlist_layout.addStretch()
     
     def setup_ui(self):
         self.setStyleSheet("""
@@ -300,7 +752,7 @@ class SyncPage(QWidget):
         
         self.refresh_btn = QPushButton("🔄 Refresh")
         self.refresh_btn.setFixedSize(100, 35)
-        self.refresh_btn.clicked.connect(self.refresh_playlists)
+        self.refresh_btn.clicked.connect(self.load_playlists_async)
         self.refresh_btn.setStyleSheet("""
             QPushButton {
                 background: #1db954;
@@ -490,8 +942,26 @@ class SyncPage(QWidget):
         if self.playlist_loader and self.playlist_loader.isRunning():
             return
         
+        # Mark as loaded to prevent duplicate auto-loading
+        self.playlists_loaded = True
+        
         # Clear existing playlists
         self.clear_playlists()
+        
+        # Add loading placeholder
+        loading_label = QLabel("🔄 Loading playlists...")
+        loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        loading_label.setStyleSheet("""
+            QLabel {
+                color: #b3b3b3;
+                font-size: 14px;
+                padding: 40px;
+                background: #282828;
+                border-radius: 8px;
+                border: 1px solid #404040;
+            }
+        """)
+        self.playlist_layout.insertWidget(0, loading_label)
         
         # Show loading state
         self.refresh_btn.setText("🔄 Loading...")
@@ -510,22 +980,111 @@ class SyncPage(QWidget):
         """Add a single playlist to the UI as it's loaded"""
         # Simple sync status (placeholder for now)
         sync_status = "Never Synced"  # TODO: Check actual sync status
-        item = PlaylistItem(playlist.name, playlist.total_tracks, sync_status)
+        item = PlaylistItem(playlist.name, playlist.total_tracks, sync_status, playlist)
+        item.view_details_clicked.connect(self.show_playlist_details)
+        
+        # Add subtle fade-in animation
+        item.setStyleSheet(item.styleSheet() + "background: rgba(40, 40, 40, 0);")
+        
         # Insert before the stretch item
         self.playlist_layout.insertWidget(self.playlist_layout.count() - 1, item)
         self.current_playlists.append(playlist)
         
+        # Animate the item appearing
+        self.animate_item_fade_in(item)
+        
         # Update log
         self.log_area.append(f"Added playlist: {playlist.name} ({playlist.total_tracks} tracks)")
     
+    def animate_item_fade_in(self, item):
+        """Add a subtle fade-in animation to playlist items"""
+        # Start with reduced opacity
+        item.setStyleSheet("""
+            PlaylistItem {
+                background: #282828;
+                border-radius: 8px;
+                border: 1px solid #404040;
+                opacity: 0.3;
+            }
+            PlaylistItem:hover {
+                background: #333333;
+                border: 1px solid #1db954;
+            }
+        """)
+        
+        # Animate to full opacity after a short delay
+        QTimer.singleShot(50, lambda: item.setStyleSheet("""
+            PlaylistItem {
+                background: #282828;
+                border-radius: 8px;
+                border: 1px solid #404040;
+            }
+            PlaylistItem:hover {
+                background: #333333;
+                border: 1px solid #1db954;
+            }
+        """))
+    
     def on_loading_finished(self, count):
         """Handle completion of playlist loading"""
+        # Remove loading placeholder if it exists
+        for i in range(self.playlist_layout.count()):
+            item = self.playlist_layout.itemAt(i)
+            if item and item.widget() and isinstance(item.widget(), QLabel):
+                if "Loading playlists" in item.widget().text():
+                    item.widget().deleteLater()
+                    break
+        
         self.refresh_btn.setText("🔄 Refresh")
         self.refresh_btn.setEnabled(True)
         self.log_area.append(f"✓ Loaded {count} Spotify playlists successfully")
         
+        # Start background preloading of tracks for smaller playlists
+        self.start_background_preloading()
+    
+    def start_background_preloading(self):
+        """Start background preloading of tracks for smaller playlists"""
+        if not self.spotify_client:
+            return
+        
+        # Preload tracks for playlists with < 100 tracks to improve responsiveness
+        for playlist in self.current_playlists:
+            if (playlist.total_tracks < 100 and 
+                playlist.id not in self.track_cache and 
+                not playlist.tracks):
+                
+                # Create background worker
+                worker = TrackLoadingWorker(self.spotify_client, playlist.id, playlist.name)
+                worker.signals.tracks_loaded.connect(self.on_background_tracks_loaded)
+                # Don't connect error signals for background loading to avoid spam
+                
+                # Submit with low priority
+                self.thread_pool.start(worker)
+                
+                # Add delay between requests to be nice to Spotify API
+                QTimer.singleShot(2000, lambda: None)  # 2 second delay
+    
+    def on_background_tracks_loaded(self, playlist_id, tracks):
+        """Handle background track loading completion"""
+        # Cache the tracks for future use
+        self.track_cache[playlist_id] = tracks
+        
+        # Update the playlist object if we can find it
+        for playlist in self.current_playlists:
+            if playlist.id == playlist_id:
+                playlist.tracks = tracks
+                break
+        
     def on_loading_failed(self, error_msg):
         """Handle playlist loading failure"""
+        # Remove loading placeholder if it exists
+        for i in range(self.playlist_layout.count()):
+            item = self.playlist_layout.itemAt(i)
+            if item and item.widget() and isinstance(item.widget(), QLabel):
+                if "Loading playlists" in item.widget().text():
+                    item.widget().deleteLater()
+                    break
+        
         self.refresh_btn.setText("🔄 Refresh")
         self.refresh_btn.setEnabled(True)
         self.log_area.append(f"✗ Failed to load playlists: {error_msg}")
@@ -551,7 +1110,7 @@ class SyncPage(QWidget):
             ]
             
             for name, count, status in playlists:
-                item = PlaylistItem(name, count, status)
+                item = PlaylistItem(name, count, status, None)  # No playlist object for placeholders
                 self.playlist_layout.addWidget(item)
     
     def refresh_playlists(self):
@@ -567,12 +1126,18 @@ class SyncPage(QWidget):
         # Use the async loader
         self.load_playlists_async()
     
+    def show_playlist_details(self, playlist):
+        """Show playlist details modal"""
+        if playlist:
+            modal = PlaylistDetailsModal(playlist, self)
+            modal.exec()
+    
     def clear_playlists(self):
         """Clear all playlist items from the layout"""
         # Clear the current playlists list
         self.current_playlists = []
         
-        # Remove all items except the stretch
+        # Remove all items including welcome state
         for i in reversed(range(self.playlist_layout.count())):
             item = self.playlist_layout.itemAt(i)
             if item.widget():
