@@ -51,21 +51,36 @@ class TrackLoadingWorker(QRunnable):
         self.playlist_id = playlist_id
         self.playlist_name = playlist_name
         self.signals = TrackLoadingWorkerSignals()
+        self._cancelled = False
+    
+    def cancel(self):
+        """Cancel the worker operation"""
+        self._cancelled = True
     
     def run(self):
         """Load tracks in background thread"""
         try:
+            if self._cancelled:
+                return
+                
             self.signals.loading_started.emit(self.playlist_id)
+            
+            if self._cancelled:
+                return
             
             # Fetch tracks from Spotify API
             tracks = self.spotify_client._get_playlist_tracks(self.playlist_id)
+            
+            if self._cancelled:
+                return
             
             # Emit success signal
             self.signals.tracks_loaded.emit(self.playlist_id, tracks)
             
         except Exception as e:
-            # Emit error signal
-            self.signals.loading_failed.emit(self.playlist_id, str(e))
+            if not self._cancelled:
+                # Emit error signal only if not cancelled
+                self.signals.loading_failed.emit(self.playlist_id, str(e))
 
 class PlaylistDetailsModal(QDialog):
     def __init__(self, playlist, parent=None):
@@ -73,6 +88,11 @@ class PlaylistDetailsModal(QDialog):
         self.playlist = playlist
         self.parent_page = parent
         self.spotify_client = parent.spotify_client if parent else None
+        
+        # Thread management
+        self.active_workers = []
+        self.fallback_pools = []
+        self.is_closing = False
         
         self.setup_ui()
         
@@ -84,6 +104,54 @@ class PlaylistDetailsModal(QDialog):
                 self.refresh_track_table()
             else:
                 self.load_tracks_async()
+    
+    def closeEvent(self, event):
+        """Clean up threads and resources when modal is closed"""
+        self.is_closing = True
+        self.cleanup_workers()
+        super().closeEvent(event)
+    
+    def cleanup_workers(self):
+        """Clean up all active workers and thread pools"""
+        # Cancel active workers first
+        for worker in self.active_workers:
+            try:
+                if hasattr(worker, 'cancel'):
+                    worker.cancel()
+            except (RuntimeError, AttributeError):
+                pass
+        
+        # Disconnect signals from active workers to prevent race conditions
+        for worker in self.active_workers:
+            try:
+                if hasattr(worker, 'signals'):
+                    # Only disconnect signals that are actually connected to this modal
+                    try:
+                        worker.signals.tracks_loaded.disconnect(self.on_tracks_loaded)
+                    except (RuntimeError, TypeError):
+                        pass
+                    try:
+                        worker.signals.loading_failed.disconnect(self.on_tracks_loading_failed)
+                    except (RuntimeError, TypeError):
+                        pass
+                    # Note: loading_started is not connected in this modal, so don't disconnect it
+            except (RuntimeError, AttributeError):
+                # Signal may already be disconnected or worker deleted
+                pass
+        
+        # Clean up fallback thread pools with timeout
+        for pool in self.fallback_pools:
+            try:
+                pool.clear()  # Cancel pending workers
+                if not pool.waitForDone(2000):  # Wait 2 seconds max
+                    # Force termination if workers don't finish gracefully
+                    pool.clear()
+            except (RuntimeError, AttributeError):
+                pass
+        
+        # Clear tracking lists
+        self.active_workers.clear()
+        self.fallback_pools.clear()
     
     def setup_ui(self):
         self.setWindowTitle(f"Playlist Details - {self.playlist.name}")
@@ -365,17 +433,26 @@ class PlaylistDetailsModal(QDialog):
         worker.signals.tracks_loaded.connect(self.on_tracks_loaded)
         worker.signals.loading_failed.connect(self.on_tracks_loading_failed)
         
+        # Track active worker for cleanup
+        self.active_workers.append(worker)
+        
         # Submit to parent's thread pool if available, otherwise create one
         if hasattr(self.parent_page, 'thread_pool'):
             self.parent_page.thread_pool.start(worker)
         else:
-            # Fallback thread pool
+            # Create and track fallback thread pool
             thread_pool = QThreadPool()
+            self.fallback_pools.append(thread_pool)
             thread_pool.start(worker)
     
     def on_tracks_loaded(self, playlist_id, tracks):
         """Handle successful track loading"""
-        if playlist_id == self.playlist.id:
+        # Validate modal state before processing
+        if (playlist_id == self.playlist.id and 
+            not self.is_closing and 
+            not self.isHidden() and 
+            hasattr(self, 'track_table')):
+            
             self.playlist.tracks = tracks
             
             # Cache tracks in parent for future use
@@ -387,7 +464,11 @@ class PlaylistDetailsModal(QDialog):
     
     def on_tracks_loading_failed(self, playlist_id, error_message):
         """Handle track loading failure"""
-        if playlist_id == self.playlist.id and hasattr(self, 'track_table'):
+        # Validate modal state before processing
+        if (playlist_id == self.playlist.id and 
+            not self.is_closing and 
+            not self.isHidden() and 
+            hasattr(self, 'track_table')):
             self.track_table.setRowCount(1)
             error_item = QTableWidgetItem(f"Error loading tracks: {error_message}")
             error_item.setFlags(error_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
