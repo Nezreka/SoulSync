@@ -808,14 +808,10 @@ class SyncPage(QWidget):
         content_layout.addWidget(playlist_section, 2)
         
         # Right side - Options and actions
-        options_section = self.create_options_section()
-        content_layout.addWidget(options_section, 1)
+        right_sidebar = self.create_right_sidebar()
+        content_layout.addWidget(right_sidebar, 1)
         
-        main_layout.addLayout(content_layout)
-        
-        # Progress section
-        progress_section = self.create_progress_section()
-        main_layout.addWidget(progress_section)
+        main_layout.addLayout(content_layout, 1)  # Allow content to stretch
     
     def create_header(self):
         header = QWidget()
@@ -907,7 +903,7 @@ class SyncPage(QWidget):
         
         return section
     
-    def create_options_section(self):
+    def create_right_sidebar(self):
         section = QWidget()
         layout = QVBoxLayout(section)
         layout.setSpacing(20)
@@ -971,13 +967,16 @@ class SyncPage(QWidget):
         actions_layout.addWidget(preview_btn)
         
         layout.addWidget(actions_frame)
-        layout.addStretch()
+        
+        # Progress section below buttons
+        progress_section = self.create_progress_section()
+        layout.addWidget(progress_section, 1)  # Allow progress section to stretch
         
         return section
     
     def create_progress_section(self):
         section = QFrame()
-        section.setFixedHeight(150)
+        section.setMinimumHeight(200)  # Set minimum height instead of fixed
         section.setStyleSheet("""
             QFrame {
                 background: #282828;
@@ -1017,7 +1016,7 @@ class SyncPage(QWidget):
         
         # Log area
         self.log_area = QTextEdit()
-        self.log_area.setMaximumHeight(60)
+        self.log_area.setMinimumHeight(80)  # Set minimum height instead of maximum
         self.log_area.setStyleSheet("""
             QTextEdit {
                 background: #181818;
@@ -1033,7 +1032,7 @@ class SyncPage(QWidget):
         layout.addWidget(progress_header)
         layout.addWidget(self.progress_bar)
         layout.addWidget(self.progress_text)
-        layout.addWidget(self.log_area)
+        layout.addWidget(self.log_area, 1)  # Allow log area to stretch
         
         return section
     
