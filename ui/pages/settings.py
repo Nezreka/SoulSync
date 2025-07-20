@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                            QFrame, QPushButton, QLineEdit, QComboBox,
-                           QCheckBox, QSpinBox, QTextEdit, QGroupBox, QFormLayout, QMessageBox)
+                           QCheckBox, QSpinBox, QTextEdit, QGroupBox, QFormLayout, QMessageBox, QSizePolicy)
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 from config.settings import config_manager
@@ -42,8 +42,8 @@ class SettingsPage(QWidget):
         """)
         
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(30, 30, 30, 30)
-        main_layout.setSpacing(25)
+        main_layout.setContentsMargins(20, 16, 20, 20)
+        main_layout.setSpacing(16)
         
         # Header
         header = self.create_header()
@@ -51,7 +51,7 @@ class SettingsPage(QWidget):
         
         # Settings content
         content_layout = QHBoxLayout()
-        content_layout.setSpacing(30)
+        content_layout.setSpacing(24)
         
         # Left column
         left_column = self.create_left_column()
@@ -102,6 +102,7 @@ class SettingsPage(QWidget):
             self.slskd_url_input.setText(soulseek_config.get('slskd_url', ''))
             self.api_key_input.setText(soulseek_config.get('api_key', ''))
             self.download_path_input.setText(soulseek_config.get('download_path', './downloads'))
+            self.transfer_path_input.setText(soulseek_config.get('transfer_path', './Transfer'))
             
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to load configuration: {e}")
@@ -121,6 +122,7 @@ class SettingsPage(QWidget):
             config_manager.set('soulseek.slskd_url', self.slskd_url_input.text())
             config_manager.set('soulseek.api_key', self.api_key_input.text())
             config_manager.set('soulseek.download_path', self.download_path_input.text())
+            config_manager.set('soulseek.transfer_path', self.transfer_path_input.text())
             
             # Show success message
             QMessageBox.information(self, "Success", "Settings saved successfully!")
@@ -291,11 +293,26 @@ class SettingsPage(QWidget):
         if selected_path:
             self.download_path_input.setText(selected_path)
     
+    def browse_transfer_path(self):
+        """Open a directory dialog to select transfer path"""
+        from PyQt6.QtWidgets import QFileDialog
+        
+        current_path = self.transfer_path_input.text()
+        selected_path = QFileDialog.getExistingDirectory(
+            self, 
+            "Select Transfer Directory", 
+            current_path if current_path else ".",
+            QFileDialog.Option.ShowDirsOnly
+        )
+        
+        if selected_path:
+            self.transfer_path_input.setText(selected_path)
+    
     def create_header(self):
         header = QWidget()
         layout = QVBoxLayout(header)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(5)
+        layout.setSpacing(8)
         
         # Title
         title_label = QLabel("Settings")
@@ -315,80 +332,113 @@ class SettingsPage(QWidget):
     def create_left_column(self):
         column = QWidget()
         layout = QVBoxLayout(column)
-        layout.setSpacing(20)
+        layout.setSpacing(18)
         
         # API Configuration
         api_group = SettingsGroup("API Configuration")
         api_layout = QVBoxLayout(api_group)
-        api_layout.setContentsMargins(20, 25, 20, 20)
-        api_layout.setSpacing(15)
+        api_layout.setContentsMargins(16, 20, 16, 16)
+        api_layout.setSpacing(12)
         
         # Spotify settings
         spotify_frame = QFrame()
-        spotify_layout = QFormLayout(spotify_frame)
-        spotify_layout.setSpacing(10)
+        spotify_layout = QVBoxLayout(spotify_frame)
+        spotify_layout.setSpacing(8)
         
         spotify_title = QLabel("Spotify")
         spotify_title.setFont(QFont("Arial", 12, QFont.Weight.Bold))
         spotify_title.setStyleSheet("color: #1db954;")
+        spotify_layout.addWidget(spotify_title)
+        
+        # Client ID
+        client_id_label = QLabel("Client ID:")
+        client_id_label.setStyleSheet("color: #ffffff; font-size: 11px;")
+        spotify_layout.addWidget(client_id_label)
         
         self.client_id_input = QLineEdit()
         self.client_id_input.setStyleSheet(self.get_input_style())
+        self.client_id_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.form_inputs['spotify.client_id'] = self.client_id_input
+        spotify_layout.addWidget(self.client_id_input)
+        
+        # Client Secret
+        client_secret_label = QLabel("Client Secret:")
+        client_secret_label.setStyleSheet("color: #ffffff; font-size: 11px;")
+        spotify_layout.addWidget(client_secret_label)
         
         self.client_secret_input = QLineEdit()
         self.client_secret_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.client_secret_input.setStyleSheet(self.get_input_style())
+        self.client_secret_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.form_inputs['spotify.client_secret'] = self.client_secret_input
-        
-        spotify_layout.addRow(spotify_title)
-        spotify_layout.addRow("Client ID:", self.client_id_input)
-        spotify_layout.addRow("Client Secret:", self.client_secret_input)
+        spotify_layout.addWidget(self.client_secret_input)
         
         # Plex settings
         plex_frame = QFrame()
-        plex_layout = QFormLayout(plex_frame)
-        plex_layout.setSpacing(10)
+        plex_layout = QVBoxLayout(plex_frame)
+        plex_layout.setSpacing(8)
         
         plex_title = QLabel("Plex")
         plex_title.setFont(QFont("Arial", 12, QFont.Weight.Bold))
         plex_title.setStyleSheet("color: #e5a00d;")
+        plex_layout.addWidget(plex_title)
+        
+        # Server URL
+        plex_url_label = QLabel("Server URL:")
+        plex_url_label.setStyleSheet("color: #ffffff; font-size: 11px;")
+        plex_layout.addWidget(plex_url_label)
         
         self.plex_url_input = QLineEdit()
         self.plex_url_input.setStyleSheet(self.get_input_style())
+        self.plex_url_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.form_inputs['plex.base_url'] = self.plex_url_input
+        plex_layout.addWidget(self.plex_url_input)
+        
+        # Token
+        plex_token_label = QLabel("Token:")
+        plex_token_label.setStyleSheet("color: #ffffff; font-size: 11px;")
+        plex_layout.addWidget(plex_token_label)
         
         self.plex_token_input = QLineEdit()
         self.plex_token_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.plex_token_input.setStyleSheet(self.get_input_style())
+        self.plex_token_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.form_inputs['plex.token'] = self.plex_token_input
-        
-        plex_layout.addRow(plex_title)
-        plex_layout.addRow("Server URL:", self.plex_url_input)
-        plex_layout.addRow("Token:", self.plex_token_input)
+        plex_layout.addWidget(self.plex_token_input)
         
         # Soulseek settings
         soulseek_frame = QFrame()
-        soulseek_layout = QFormLayout(soulseek_frame)
-        soulseek_layout.setSpacing(10)
+        soulseek_layout = QVBoxLayout(soulseek_frame)
+        soulseek_layout.setSpacing(8)
         
         soulseek_title = QLabel("Soulseek")
         soulseek_title.setFont(QFont("Arial", 12, QFont.Weight.Bold))
         soulseek_title.setStyleSheet("color: #ff6b35;")
+        soulseek_layout.addWidget(soulseek_title)
+        
+        # slskd URL
+        slskd_url_label = QLabel("slskd URL:")
+        slskd_url_label.setStyleSheet("color: #ffffff; font-size: 11px;")
+        soulseek_layout.addWidget(slskd_url_label)
         
         self.slskd_url_input = QLineEdit()
         self.slskd_url_input.setStyleSheet(self.get_input_style())
+        self.slskd_url_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.form_inputs['soulseek.slskd_url'] = self.slskd_url_input
+        soulseek_layout.addWidget(self.slskd_url_input)
+        
+        # API Key
+        api_key_label = QLabel("API Key:")
+        api_key_label.setStyleSheet("color: #ffffff; font-size: 11px;")
+        soulseek_layout.addWidget(api_key_label)
         
         self.api_key_input = QLineEdit()
         self.api_key_input.setPlaceholderText("Enter your slskd API key")
         self.api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.api_key_input.setStyleSheet(self.get_input_style())
+        self.api_key_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.form_inputs['soulseek.api_key'] = self.api_key_input
-        
-        soulseek_layout.addRow(soulseek_title)
-        soulseek_layout.addRow("slskd URL:", self.slskd_url_input)
-        soulseek_layout.addRow("API Key:", self.api_key_input)
+        soulseek_layout.addWidget(self.api_key_input)
         
         api_layout.addWidget(spotify_frame)
         api_layout.addWidget(plex_frame)
@@ -396,20 +446,23 @@ class SettingsPage(QWidget):
         
         # Test connections
         test_layout = QHBoxLayout()
-        test_layout.setSpacing(10)
+        test_layout.setSpacing(12)
         
         test_spotify = QPushButton("Test Spotify")
         test_spotify.setFixedHeight(30)
+        test_spotify.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         test_spotify.clicked.connect(self.test_spotify_connection)
         test_spotify.setStyleSheet(self.get_test_button_style())
         
         test_plex = QPushButton("Test Plex")
         test_plex.setFixedHeight(30)
+        test_plex.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         test_plex.clicked.connect(self.test_plex_connection)
         test_plex.setStyleSheet(self.get_test_button_style())
         
         test_soulseek = QPushButton("Test Soulseek")
         test_soulseek.setFixedHeight(30)
+        test_soulseek.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         test_soulseek.clicked.connect(self.test_soulseek_connection)
         test_soulseek.setStyleSheet(self.get_test_button_style())
         
@@ -427,13 +480,13 @@ class SettingsPage(QWidget):
     def create_right_column(self):
         column = QWidget()
         layout = QVBoxLayout(column)
-        layout.setSpacing(20)
+        layout.setSpacing(18)
         
         # Download Settings
         download_group = SettingsGroup("Download Settings")
         download_layout = QVBoxLayout(download_group)
-        download_layout.setContentsMargins(20, 25, 20, 20)
-        download_layout.setSpacing(15)
+        download_layout.setContentsMargins(16, 20, 16, 16)
+        download_layout.setSpacing(12)
         
         # Quality preference
         quality_layout = QHBoxLayout()
@@ -444,10 +497,10 @@ class SettingsPage(QWidget):
         quality_combo.addItems(["FLAC", "320 kbps MP3", "256 kbps MP3", "192 kbps MP3", "Any"])
         quality_combo.setCurrentText("FLAC")
         quality_combo.setStyleSheet(self.get_combo_style())
+        quality_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         
         quality_layout.addWidget(quality_label)
         quality_layout.addWidget(quality_combo)
-        quality_layout.addStretch()
         
         # Max concurrent downloads
         concurrent_layout = QHBoxLayout()
@@ -458,10 +511,10 @@ class SettingsPage(QWidget):
         concurrent_spin.setRange(1, 10)
         concurrent_spin.setValue(5)
         concurrent_spin.setStyleSheet(self.get_spin_style())
+        concurrent_spin.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         
         concurrent_layout.addWidget(concurrent_label)
         concurrent_layout.addWidget(concurrent_spin)
-        concurrent_layout.addStretch()
         
         # Download timeout
         timeout_layout = QHBoxLayout()
@@ -472,38 +525,62 @@ class SettingsPage(QWidget):
         timeout_spin.setRange(30, 600)
         timeout_spin.setValue(300)
         timeout_spin.setStyleSheet(self.get_spin_style())
+        timeout_spin.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         
         timeout_layout.addWidget(timeout_label)
         timeout_layout.addWidget(timeout_spin)
-        timeout_layout.addStretch()
         
         # Download path
-        path_layout = QHBoxLayout()
-        path_label = QLabel("Download Path:")
+        path_container = QVBoxLayout()
+        path_label = QLabel("Slskd Download Dir:")
         path_label.setStyleSheet("color: #ffffff; font-size: 12px;")
+        path_container.addWidget(path_label)
         
+        path_input_layout = QHBoxLayout()
         self.download_path_input = QLineEdit("./downloads")
         self.download_path_input.setStyleSheet(self.get_input_style())
+        self.download_path_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         
         browse_btn = QPushButton("Browse")
         browse_btn.setFixedSize(70, 30)
         browse_btn.clicked.connect(self.browse_download_path)
         browse_btn.setStyleSheet(self.get_test_button_style())
         
-        path_layout.addWidget(path_label)
-        path_layout.addWidget(self.download_path_input)
-        path_layout.addWidget(browse_btn)
+        path_input_layout.addWidget(self.download_path_input)
+        path_input_layout.addWidget(browse_btn)
+        path_container.addLayout(path_input_layout)
+
+        # Transfer folder path
+        transfer_path_container = QVBoxLayout()
+        transfer_path_label = QLabel("Matched Transfer Dir:")
+        transfer_path_label.setStyleSheet("color: #ffffff; font-size: 12px;")
+        transfer_path_container.addWidget(transfer_path_label)
+        
+        transfer_input_layout = QHBoxLayout()
+        self.transfer_path_input = QLineEdit("./Transfer")
+        self.transfer_path_input.setStyleSheet(self.get_input_style())
+        self.transfer_path_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        
+        transfer_browse_btn = QPushButton("Browse")
+        transfer_browse_btn.setFixedSize(70, 30)
+        transfer_browse_btn.clicked.connect(self.browse_transfer_path)
+        transfer_browse_btn.setStyleSheet(self.get_test_button_style())
+        
+        transfer_input_layout.addWidget(self.transfer_path_input)
+        transfer_input_layout.addWidget(transfer_browse_btn)
+        transfer_path_container.addLayout(transfer_input_layout)
         
         download_layout.addLayout(quality_layout)
         download_layout.addLayout(concurrent_layout)
         download_layout.addLayout(timeout_layout)
-        download_layout.addLayout(path_layout)
+        download_layout.addLayout(path_container)
+        download_layout.addLayout(transfer_path_container)
         
         # Sync Settings
         sync_group = SettingsGroup("Sync Settings")
         sync_layout = QVBoxLayout(sync_group)
-        sync_layout.setContentsMargins(20, 25, 20, 20)
-        sync_layout.setSpacing(15)
+        sync_layout.setContentsMargins(16, 20, 16, 16)
+        sync_layout.setSpacing(12)
         
         # Auto-sync checkbox
         auto_sync = QCheckBox("Auto-sync playlists every hour")
@@ -519,10 +596,10 @@ class SettingsPage(QWidget):
         interval_spin.setRange(5, 1440)  # 5 minutes to 24 hours
         interval_spin.setValue(60)
         interval_spin.setStyleSheet(self.get_spin_style())
+        interval_spin.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         
         interval_layout.addWidget(interval_label)
         interval_layout.addWidget(interval_spin)
-        interval_layout.addStretch()
         
         sync_layout.addWidget(auto_sync)
         sync_layout.addLayout(interval_layout)
@@ -530,8 +607,8 @@ class SettingsPage(QWidget):
         # Logging Settings
         logging_group = SettingsGroup("Logging Settings")
         logging_layout = QVBoxLayout(logging_group)
-        logging_layout.setContentsMargins(20, 25, 20, 20)
-        logging_layout.setSpacing(15)
+        logging_layout.setContentsMargins(16, 20, 16, 16)
+        logging_layout.setSpacing(12)
         
         # Log level
         log_level_layout = QHBoxLayout()
@@ -542,24 +619,24 @@ class SettingsPage(QWidget):
         log_level_combo.addItems(["DEBUG", "INFO", "WARNING", "ERROR"])
         log_level_combo.setCurrentText("DEBUG")
         log_level_combo.setStyleSheet(self.get_combo_style())
+        log_level_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         
         log_level_layout.addWidget(log_level_label)
         log_level_layout.addWidget(log_level_combo)
-        log_level_layout.addStretch()
         
         # Log file path
-        log_path_layout = QHBoxLayout()
+        log_path_container = QVBoxLayout()
         log_path_label = QLabel("Log File Path:")
         log_path_label.setStyleSheet("color: #ffffff; font-size: 12px;")
+        log_path_container.addWidget(log_path_label)
         
         log_path_input = QLineEdit("logs/app.log")
         log_path_input.setStyleSheet(self.get_input_style())
-        
-        log_path_layout.addWidget(log_path_label)
-        log_path_layout.addWidget(log_path_input)
+        log_path_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        log_path_container.addWidget(log_path_input)
         
         logging_layout.addLayout(log_level_layout)
-        logging_layout.addLayout(log_path_layout)
+        logging_layout.addLayout(log_path_container)
         
         layout.addWidget(download_group)
         layout.addWidget(sync_group)
