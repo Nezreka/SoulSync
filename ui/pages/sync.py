@@ -801,7 +801,7 @@ class SyncPage(QWidget):
         
         # Content area
         content_layout = QHBoxLayout()
-        content_layout.setSpacing(25)
+        content_layout.setSpacing(15)  # Reduced from 25 to 15 for tighter spacing
         
         # Left side - Playlist list
         playlist_section = self.create_playlist_section()
