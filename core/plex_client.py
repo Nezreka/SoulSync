@@ -64,7 +64,24 @@ class PlexClient:
     def __init__(self):
         self.server: Optional[PlexServer] = None
         self.music_library: Optional[MusicSection] = None
-        self._setup_client()
+        self._connection_attempted = False
+        self._is_connecting = False
+    
+    def ensure_connection(self) -> bool:
+        """Ensure connection to Plex server with lazy initialization."""
+        if self._connection_attempted:
+            return self.server is not None
+        
+        if self._is_connecting:
+            return False
+        
+        self._is_connecting = True
+        try:
+            self._setup_client()
+            return self.server is not None
+        finally:
+            self._is_connecting = False
+            self._connection_attempted = True
     
     def _setup_client(self):
         config = config_manager.get_plex_config()
@@ -75,7 +92,8 @@ class PlexClient:
         
         try:
             if config.get('token'):
-                self.server = PlexServer(config['base_url'], config['token'])
+                # Use shorter timeout (5 seconds) to prevent app freezing
+                self.server = PlexServer(config['base_url'], config['token'], timeout=5)
             else:
                 logger.error("Plex token not configured")
                 return
@@ -105,10 +123,15 @@ class PlexClient:
             logger.error(f"Error finding music library: {e}")
     
     def is_connected(self) -> bool:
+        """Check if connected to Plex server with lazy initialization."""
+        if not self._connection_attempted:
+            # Try to connect on first call, but don't block if already connecting
+            if not self._is_connecting:
+                self.ensure_connection()
         return self.server is not None and self.music_library is not None
     
     def get_all_playlists(self) -> List[PlexPlaylistInfo]:
-        if not self.is_connected():
+        if not self.ensure_connection():
             logger.error("Not connected to Plex server")
             return []
         
@@ -128,7 +151,7 @@ class PlexClient:
             return []
     
     def get_playlist_by_name(self, name: str) -> Optional[PlexPlaylistInfo]:
-        if not self.is_connected():
+        if not self.ensure_connection():
             return None
         
         try:
@@ -145,7 +168,7 @@ class PlexClient:
             return None
     
     def create_playlist(self, name: str, tracks: List[PlexTrackInfo]) -> bool:
-        if not self.is_connected():
+        if not self.ensure_connection():
             logger.error("Not connected to Plex server")
             return False
         
@@ -171,7 +194,7 @@ class PlexClient:
             return False
     
     def update_playlist(self, playlist_name: str, tracks: List[PlexTrackInfo]) -> bool:
-        if not self.is_connected():
+        if not self.ensure_connection():
             return False
         
         try:
@@ -247,7 +270,7 @@ class PlexClient:
             return {}
     
     def update_track_metadata(self, track_id: str, metadata: Dict[str, Any]) -> bool:
-        if not self.is_connected():
+        if not self.ensure_connection():
             return False
         
         try:
