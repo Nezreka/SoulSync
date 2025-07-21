@@ -41,6 +41,86 @@ If we fail to match an artist in the modal, treat the download as a normal downo
 
 Remix should be handled elegantly. If artist A does a remix of Artist B song. The song artist will be Artist A with a contributting artist of Artist B.
 the matching system should be super extensive and robust and professional. at the level of Spotify, Google, Facebook and Apple. So logical, practical and sophisticated it would make them proud. I provided how i want this to play out. I expect a 'Matched Download' button do appear on all singles and all tracks inside albums beside the 'download' button. and albums should  have a matched download button as well that match downloads all tracks in the album. The modal should be beautiful, elegant, and provide space for content to fit. We should be very smart with our api calls to spotify so we don't reach limits. If it doesn't need to be in another file, then don't put it in one. you can do this. Give your best work. I'ts also very important that you come to this document and update the TODO list with what you are doing, what you are going to do next. And udpating the TODO list at each step. 
+
+---
+
+## DOWNLOAD MISSING TRACKS - NEW FEATURE SPECIFICATION
+
+### Feature Overview
+A new "Download Missing Tracks" button on playlist sync modals that intelligently downloads only tracks that don't exist in Plex, with proper folder organization mimicking the matched download system.
+
+### Core Workflow
+
+1. **Button Click**: User clicks "Download Missing Tracks" on a playlist in sync modal
+2. **Plex Check**: If Plex is connected, analyze each track for existence with high confidence matching (≥0.8)
+3. **Track Processing**: For each missing track:
+   - Search Soulseek using: `{TrackName}` first, then `{ArtistName} {TrackName}` if needed
+   - Apply intelligent filtering to find best quality match
+   - Queue download with custom folder structure
+4. **Folder Organization**: Use same structure as matched downloads:
+   - **Album tracks**: `ArtistName/ArtistName - AlbumName/Track.ext`
+   - **Singles**: `ArtistName/ArtistName - TrackName/Track.ext`
+5. **Failed Matches**: Save tracks that can't be matched with high certainty for manual review
+
+### Technical Requirements
+
+#### Plex Integration
+- Use intelligent track matching with confidence scoring
+- If Plex unavailable/unreachable: download ALL tracks in playlist
+- Per-track analysis with real-time progress feedback
+
+#### Search Strategy
+- Primary: Search by track name only
+- Fallback: Search by artist + track name
+- Use existing search filtering for quality/format preferences
+- Modern, performant async operations
+
+#### Folder Structure
+- **NOT** `Transfer/[PLAYLIST_NAME]/` as originally specified
+- **INSTEAD**: Use matched download structure:
+  - Singles: `ArtistName/ArtistName - TrackName/Track.ext`
+  - Albums: `ArtistName/ArtistName - AlbumName/Track.ext`
+- Leverage existing downloads.py folder organization logic
+- Automatic album vs single detection using Spotify metadata
+
+#### Performance & API Efficiency
+- Smart Spotify API usage to avoid rate limits
+- Batch operations where possible
+- Background processing with progress tracking
+- Minimal changes to existing downloads.py infrastructure
+
+### Implementation Strategy
+
+#### Extend Existing Downloads.py
+- Add custom path support (minimal changes required)
+- Leverage existing search, filtering, and download queue logic
+- Use existing folder organization patterns from matched downloads
+- Integrate with current download progress tracking
+
+#### Data Flow
+```
+Playlist Track → Plex Check → (Missing) → Soulseek Search → Quality Filter → Queue Download → Folder Organization
+```
+
+#### Error Handling
+- Network failures: Continue with remaining tracks
+- Search failures: Log for manual review
+- Plex unavailable: Download all tracks
+- API limits: Implement backoff/retry logic
+
+### User Experience
+- Real-time progress indication during Plex analysis
+- Clear feedback on skipped vs queued tracks
+- Integration with existing download queue UI
+- Optional: Progress tracking for playlist download completion
+
+### Success Criteria
+- Seamless integration with existing download infrastructure
+- No modifications needed to core downloads.py functionality
+- Intelligent track matching preventing duplicates
+- Proper folder organization matching app standards
+- Robust error handling with graceful degradation
+
 ---
 
 ## VERY IMPORTANT! DO NOT BREAK ANYTHING
@@ -112,47 +192,64 @@ the matching system should be super extensive and robust and professional. at th
     - File operation error handling
     - API rate limiting considerations
 
-### 🔄 IMPLEMENTATION STATUS:
+### 🆕 NEW FEATURE: DOWNLOAD MISSING TRACKS
 
-**Core Features: COMPLETE ✅**
-- All major functionality implemented and tested for syntax
-- UI integration complete with proper styling
-- Signal/slot architecture properly implemented
-- Error handling and fallbacks in place
+#### 📋 PLANNED IMPLEMENTATION STEPS:
 
-**Folder Structure: COMPLETE ✅**
-- Transfer directory organization working
-- Single vs album detection implemented
-- File sanitization and conflict resolution
+1. **✅ COMPLETED - Hook "Download Missing Tracks" Button**
+   - ✅ Connect button click to new playlist analysis workflow
+   - ✅ Implement basic playlist track retrieval from Spotify
+   - ✅ Add basic progress indication for user feedback
+   - ✅ Added graceful Plex connection handling
 
-**API Integration: COMPLETE ✅** 
-- Spotify artist search and matching
-- Existing MusicMatchingEngine integration
-- Cover art downloading
+2. **🔄 IN PROGRESS - Plex Integration for Track Existence Checking**
+   - Implement intelligent track matching against Plex library
+   - Use confidence scoring (≥0.8) to determine existing tracks
+   - Handle Plex connection failures gracefully (download all tracks)
 
-**User Experience: COMPLETE ✅**
-- Elegant modal interface
-- Responsive background operations
-- Clear visual feedback and progress indication
-- Intuitive matched download buttons
+3. **⏳ PENDING - Soulseek Search Integration**
+   - Implement per-track search strategy (track name → artist + track name)
+   - Leverage existing search filtering and quality selection
+   - Use async operations for performance
 
-### 🚀 READY FOR TESTING:
+4. **⏳ PENDING - Download Queue Integration**
+   - Extend downloads.py with minimal custom path support
+   - Queue missing tracks with proper folder paths
+   - Integrate with existing download progress tracking
 
-The Spotify matching system is now fully implemented and ready for testing! All core functionality is in place:
+5. **⏳ PENDING - Folder Organization**
+   - Apply matched download folder structure
+   - Implement album vs single detection per track
+   - Use Spotify metadata for accurate organization
 
-1. **Matched Download Buttons** - Purple 📱 buttons appear next to all download buttons
-2. **Artist Matching Modal** - Beautiful interface with auto-suggestions and manual search
-3. **Smart Organization** - Automatic folder structure based on single/album detection
-4. **Cover Art** - Downloads artist images for albums
-5. **Error Safety** - Falls back to normal downloads if anything fails
+6. **⏳ PENDING - Error Handling & User Feedback**
+   - Track failed matches for manual review
+   - Provide real-time progress updates
+   - Implement retry logic for API failures
 
-### 🔧 POTENTIAL ENHANCEMENTS:
+### 🔧 TECHNICAL ARCHITECTURE:
 
-While the core system is complete, future enhancements could include:
-- Enhanced album artwork (actual album covers vs artist images)
-- Audio metadata tagging with Spotify data
-- Track number detection from full album metadata
-- Bulk re-organization of existing downloads
-- Advanced matching algorithms with machine learning
-- Integration with additional music services
+**Minimal Changes Approach:**
+- Extend existing downloads.py with custom path parameter
+- Reuse matched download folder organization logic
+- Leverage existing Plex integration and search functionality
+- Build on current progress tracking and queue management
 
+**Data Flow:**
+```
+Playlist → Spotify Tracks → Plex Check → Missing Tracks → Soulseek Search → Download Queue → Folder Organization
+```
+
+**Integration Points:**
+- `downloads.py` - custom path support for playlist downloads
+- `plex_client.py` - track existence checking with confidence scoring  
+- `soulseek_client.py` - individual track search and download
+- `spotify_client.py` - playlist track metadata retrieval
+- `sync.py` - button handling and progress UI
+
+### 🎯 SUCCESS METRICS:
+- No breaking changes to existing download functionality
+- Seamless integration with current UI and workflow
+- Intelligent Plex deduplication preventing unnecessary downloads
+- Proper folder organization matching app standards
+- Robust error handling with graceful degradation to download all tracks
