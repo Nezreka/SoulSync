@@ -203,23 +203,23 @@ Playlist Track → Plex Check → (Missing) → Soulseek Search → Quality Filt
    - ✅ Background worker with progress tracking and confidence scoring
    - ✅ String normalization, similarity scoring, and duration matching
 
-2. **🔄 IN PROGRESS - Enhanced Modal Interface**
-   - Replace simple QMessageBox with sophisticated modal
-   - Modal closes sync window and opens new interface
-   - Dashboard with live counters: Total Tracks, Matched Tracks, To Download
-   - Enhanced track table with Matched and Downloaded status columns
-   - Dual progress bar system (Plex analysis + Download progress)
-   - Three-button system: Begin Search, Cancel, Close
+2. **✅ COMPLETED - Enhanced Modal Interface**
+   - ✅ Replace simple QMessageBox with sophisticated modal
+   - ✅ Modal closes sync window and opens new interface
+   - ✅ Dashboard with live counters: Total Tracks, Matched Tracks, To Download
+   - ✅ Enhanced track table with Matched and Downloaded status columns
+   - ✅ Dual progress bar system (Plex analysis + Download progress)
+   - ✅ Three-button system: Begin Search, Cancel, Close
 
-3. **⏳ PENDING - Modal State Persistence**
-   - Progress bubble system when modal is closed during operations
-   - Clickable bubble to reopen modal and review progress
-   - Maintain operation state across modal open/close cycles
+3. **✅ COMPLETED - Modal State Persistence**
+   - ✅ Progress bubble system when modal is closed during operations
+   - ✅ Clickable bubble to reopen modal and review progress
+   - ✅ Maintain operation state across modal open/close cycles
 
-4. **⏳ PENDING - Soulseek Search Integration**
-   - Implement per-track search strategy (track name → artist + track name)
-   - Leverage existing search filtering and quality selection
-   - Use async operations for performance
+4. **✅ COMPLETED - Soulseek Search Integration**
+   - ✅ Implement per-track search strategy (track name → artist + track name)
+   - ✅ Leverage existing search filtering and quality selection
+   - ✅ Use async operations for performance
 
 5. **⏳ PENDING - Download Queue Integration**
    - Extend downloads.py with minimal custom path support
