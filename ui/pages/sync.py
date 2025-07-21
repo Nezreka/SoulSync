@@ -402,8 +402,26 @@ class PlaylistDetailsModal(QDialog):
             }
         """)
         
+        # Download missing tracks button
+        download_btn = QPushButton("Download Missing Tracks")
+        download_btn.setFixedSize(180, 40)
+        download_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                border: 1px solid #1db954;
+                border-radius: 20px;
+                color: #1db954;
+                font-size: 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: rgba(29, 185, 84, 0.1);
+            }
+        """)
+        
         button_layout.addStretch()
         button_layout.addWidget(close_btn)
+        button_layout.addWidget(download_btn)
         button_layout.addWidget(sync_btn)
         
         return button_layout
@@ -590,8 +608,8 @@ class PlaylistItem(QFrame):
         content_layout.addLayout(info_layout)
         
         # Action button
-        action_btn = QPushButton("View Details")
-        action_btn.setFixedSize(100, 30)
+        action_btn = QPushButton("Sync / Download")
+        action_btn.setFixedSize(120, 30)  # Slightly wider for longer text
         action_btn.clicked.connect(self.on_view_details_clicked)
         action_btn.setStyleSheet("""
             QPushButton {
