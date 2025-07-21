@@ -637,7 +637,10 @@ class PlaylistDetailsModal(QDialog):
             # Store modal reference to prevent garbage collection
             self.download_modal = modal
             
-            print("🖥️ Showing modal...")
+            print("🖥️ Closing current sync modal...")
+            self.accept()  # Close the current sync modal
+            
+            print("🖥️ Showing download modal...")
             result = modal.exec()
             print(f"✅ Modal closed with result: {result}")
             
