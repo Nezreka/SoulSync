@@ -2,7 +2,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                            QFrame, QPushButton, QListWidget, QListWidgetItem,
                            QProgressBar, QTextEdit, QCheckBox, QComboBox,
                            QScrollArea, QSizePolicy, QMessageBox, QDialog,
-                           QTableWidget, QTableWidgetItem, QHeaderView)
+                           QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QPropertyAnimation, QEasingCurve, QRunnable, QThreadPool, QObject
 from PyQt6.QtGui import QFont
 from dataclasses import dataclass
@@ -605,25 +605,47 @@ class PlaylistDetailsModal(QDialog):
     
     def on_download_missing_tracks_clicked(self):
         """Handle Download Missing Tracks button click"""
+        print("🔄 Download Missing Tracks button clicked!")
+        
         if not self.playlist:
+            print("❌ No playlist selected")
             QMessageBox.warning(self, "Error", "No playlist selected")
             return
             
         if not self.playlist.tracks:
+            print("❌ Playlist tracks not loaded")
             QMessageBox.warning(self, "Error", "Playlist tracks not loaded")
             return
         
+        print(f"✅ Playlist: {self.playlist.name} with {len(self.playlist.tracks)} tracks")
+        
         # Get access to parent's Plex and Soulseek clients through parent reference
         if not hasattr(self.parent_page, 'plex_client'):
+            print("❌ Plex client not available")
             QMessageBox.warning(self, "Service Unavailable", 
                               "Plex client not available. Please check your configuration.")
             return
+        
+        print("✅ Plex client available")
             
-        # Start the download missing tracks workflow
+        # Create and show the enhanced download missing tracks modal
         try:
-            self.start_playlist_missing_tracks_download()
+            print("🚀 Creating modal...")
+            modal = DownloadMissingTracksModal(self.playlist, self.parent_page, self)
+            print("✅ Modal created successfully")
+            
+            # Store modal reference to prevent garbage collection
+            self.download_modal = modal
+            
+            print("🖥️ Showing modal...")
+            result = modal.exec()
+            print(f"✅ Modal closed with result: {result}")
+            
         except Exception as e:
-            QMessageBox.critical(self, "Download Error", f"Failed to start download: {str(e)}")
+            print(f"❌ Exception creating modal: {e}")
+            import traceback
+            traceback.print_exc()
+            QMessageBox.critical(self, "Modal Error", f"Failed to open download modal: {str(e)}")
     
     def start_playlist_missing_tracks_download(self):
         """Start the process of downloading missing tracks from playlist"""
@@ -1547,3 +1569,816 @@ class SyncPage(QWidget):
                 continue  # Keep the stretch spacer
             else:
                 self.playlist_layout.removeItem(item)
+
+
+class DownloadMissingTracksModal(QDialog):
+    """Enhanced modal for downloading missing tracks with live progress tracking"""
+    
+    def __init__(self, playlist, parent_page, sync_modal):
+        print(f"🏗️ Initializing DownloadMissingTracksModal...")
+        super().__init__(sync_modal)  # Set sync modal as parent
+        self.playlist = playlist
+        self.parent_page = parent_page
+        self.sync_modal = sync_modal
+        
+        # State tracking
+        self.total_tracks = len(playlist.tracks)
+        self.matched_tracks_count = 0
+        self.tracks_to_download_count = 0
+        self.analysis_complete = False
+        self.download_in_progress = False
+        
+        print(f"📊 Total tracks: {self.total_tracks}")
+        
+        # Track analysis results
+        self.analysis_results = []
+        self.missing_tracks = []
+        
+        # Worker tracking
+        self.active_workers = []
+        self.fallback_pools = []
+        
+        print("🎨 Setting up UI...")
+        self.setup_ui()
+        print("✅ Modal initialization complete")
+        
+    def setup_ui(self):
+        """Set up the enhanced modal UI"""
+        self.setWindowTitle(f"Download Missing Tracks - {self.playlist.name}")
+        self.resize(1200, 900)  # Larger size
+        self.setModal(True)
+        
+        # Set window flags for proper dialog behavior
+        self.setWindowFlags(Qt.WindowType.Dialog)
+        
+        # Improved dark theme styling
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #1e1e1e;
+                color: #ffffff;
+            }
+            QLabel {
+                color: #ffffff;
+            }
+            QPushButton {
+                background-color: #1db954;
+                color: #000000;
+                border: none;
+                border-radius: 6px;
+                font-size: 13px;
+                font-weight: bold;
+                padding: 10px 20px;
+                min-width: 100px;
+            }
+            QPushButton:hover {
+                background-color: #1ed760;
+            }
+            QPushButton:disabled {
+                background-color: #404040;
+                color: #888888;
+            }
+        """)
+        
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(25, 25, 25, 25)
+        main_layout.setSpacing(15)
+        
+        # Compact header with dashboard in same row
+        top_section = self.create_compact_top_section()
+        main_layout.addWidget(top_section)
+        
+        # Progress bars section (compact)
+        progress_section = self.create_progress_section()
+        main_layout.addWidget(progress_section)
+        
+        # Track table (main focus - takes most space)
+        table_section = self.create_track_table()
+        main_layout.addWidget(table_section, stretch=1)  # Give it all available space
+        
+        # Button controls
+        button_section = self.create_buttons()
+        main_layout.addWidget(button_section)
+        
+    def create_compact_top_section(self):
+        """Create compact top section with header and dashboard combined"""
+        top_frame = QFrame()
+        top_frame.setStyleSheet("""
+            QFrame {
+                background-color: #2d2d2d;
+                border: 1px solid #444444;
+                border-radius: 8px;
+                padding: 15px;
+            }
+        """)
+        
+        layout = QVBoxLayout(top_frame)
+        layout.setSpacing(15)
+        
+        # Header row
+        header_layout = QHBoxLayout()
+        
+        # Left side - Title and subtitle
+        title_section = QVBoxLayout()
+        title_section.setSpacing(2)
+        
+        title = QLabel("Download Missing Tracks")
+        title.setFont(QFont("Arial", 16, QFont.Weight.Bold))
+        title.setStyleSheet("color: #1db954;")
+        
+        subtitle = QLabel(f"Playlist: {self.playlist.name}")
+        subtitle.setFont(QFont("Arial", 11))
+        subtitle.setStyleSheet("color: #aaaaaa;")
+        
+        title_section.addWidget(title)
+        title_section.addWidget(subtitle)
+        
+        # Right side - Dashboard counters (horizontal)
+        dashboard_layout = QHBoxLayout()
+        dashboard_layout.setSpacing(20)
+        
+        # Total Tracks
+        self.total_card = self.create_compact_counter_card("📀 Total", str(self.total_tracks), "#1db954")
+        
+        # Matched Tracks
+        self.matched_card = self.create_compact_counter_card("✅ Found", "0", "#4CAF50")
+        
+        # To Download
+        self.download_card = self.create_compact_counter_card("⬇️ Missing", "0", "#ff6b6b")
+        
+        dashboard_layout.addWidget(self.total_card)
+        dashboard_layout.addWidget(self.matched_card)
+        dashboard_layout.addWidget(self.download_card)
+        dashboard_layout.addStretch()
+        
+        header_layout.addLayout(title_section)
+        header_layout.addStretch()
+        header_layout.addLayout(dashboard_layout)
+        
+        layout.addLayout(header_layout)
+        
+        return top_frame
+        
+    def create_dashboard(self):
+        """Create dashboard with live counters"""
+        dashboard_frame = QFrame()
+        dashboard_frame.setStyleSheet("""
+            QFrame {
+                background-color: #404040;
+                border: 1px solid #555555;
+                border-radius: 8px;
+                padding: 15px;
+                margin-bottom: 5px;
+            }
+        """)
+        
+        layout = QHBoxLayout(dashboard_frame)
+        layout.setSpacing(30)
+        
+        # Total Tracks
+        self.total_card = self.create_counter_card("📀 Total Tracks", str(self.total_tracks), "#1db954")
+        
+        # Matched Tracks
+        self.matched_card = self.create_counter_card("✅ Matched", "0", "#1ed760")
+        
+        # To Download
+        self.download_card = self.create_counter_card("⬇️ To Download", "0", "#ff6b6b")
+        
+        layout.addWidget(self.total_card)
+        layout.addWidget(self.matched_card)
+        layout.addWidget(self.download_card)
+        layout.addStretch()
+        
+        return dashboard_frame
+        
+    def create_compact_counter_card(self, title, count, color):
+        """Create a compact counter card widget"""
+        card = QFrame()
+        card.setStyleSheet(f"""
+            QFrame {{
+                background-color: #3a3a3a;
+                border: 2px solid {color};
+                border-radius: 6px;
+                padding: 8px 12px;
+                min-width: 80px;
+            }}
+        """)
+        
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
+        
+        count_label = QLabel(count)
+        count_label.setFont(QFont("Arial", 16, QFont.Weight.Bold))
+        count_label.setStyleSheet(f"color: {color}; background: transparent;")
+        count_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        title_label = QLabel(title)
+        title_label.setFont(QFont("Arial", 9))
+        title_label.setStyleSheet("color: #cccccc; background: transparent;")
+        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        layout.addWidget(count_label)
+        layout.addWidget(title_label)
+        
+        # Store references for updates
+        if "Total" in title:
+            self.total_count_label = count_label
+        elif "Found" in title:
+            self.matched_count_label = count_label
+        elif "Missing" in title:
+            self.download_count_label = count_label
+            
+        return card
+        
+    def create_counter_card(self, title, count, color):
+        """Create a counter card widget"""
+        card = QFrame()
+        card.setStyleSheet(f"""
+            QFrame {{
+                background-color: #333333;
+                border: 2px solid {color};
+                border-radius: 6px;
+                padding: 10px;
+                min-width: 120px;
+            }}
+        """)
+        
+        layout = QVBoxLayout(card)
+        layout.setSpacing(5)
+        
+        title_label = QLabel(title)
+        title_label.setFont(QFont("Arial", 10))
+        title_label.setStyleSheet("color: #b3b3b3;")
+        
+        count_label = QLabel(count)
+        count_label.setFont(QFont("Arial", 20, QFont.Weight.Bold))
+        count_label.setStyleSheet(f"color: {color};")
+        count_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        layout.addWidget(title_label)
+        layout.addWidget(count_label)
+        
+        # Store references for updates
+        if "Total" in title:
+            self.total_count_label = count_label
+        elif "Matched" in title:
+            self.matched_count_label = count_label
+        elif "Download" in title:
+            self.download_count_label = count_label
+            
+        return card
+        
+    def create_progress_section(self):
+        """Create compact dual progress bar section"""
+        progress_frame = QFrame()
+        progress_frame.setStyleSheet("""
+            QFrame {
+                background-color: #2d2d2d;
+                border: 1px solid #444444;
+                border-radius: 8px;
+                padding: 12px;
+            }
+        """)
+        
+        layout = QVBoxLayout(progress_frame)
+        layout.setSpacing(8)
+        
+        # Plex Analysis Progress
+        analysis_container = QVBoxLayout()
+        analysis_container.setSpacing(4)
+        
+        analysis_label = QLabel("🔍 Plex Analysis")
+        analysis_label.setFont(QFont("Arial", 11, QFont.Weight.Bold))
+        analysis_label.setStyleSheet("color: #cccccc;")
+        
+        self.analysis_progress = QProgressBar()
+        self.analysis_progress.setFixedHeight(20)
+        self.analysis_progress.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid #555555;
+                border-radius: 10px;
+                text-align: center;
+                background-color: #444444;
+                color: #ffffff;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QProgressBar::chunk {
+                background-color: #1db954;
+                border-radius: 9px;
+            }
+        """)
+        self.analysis_progress.setVisible(False)
+        
+        analysis_container.addWidget(analysis_label)
+        analysis_container.addWidget(self.analysis_progress)
+        
+        # Download Progress
+        download_container = QVBoxLayout()
+        download_container.setSpacing(4)
+        
+        download_label = QLabel("⬇️ Download Progress")
+        download_label.setFont(QFont("Arial", 11, QFont.Weight.Bold))
+        download_label.setStyleSheet("color: #cccccc;")
+        
+        self.download_progress = QProgressBar()
+        self.download_progress.setFixedHeight(20)
+        self.download_progress.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid #555555;
+                border-radius: 10px;
+                text-align: center;
+                background-color: #444444;
+                color: #ffffff;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QProgressBar::chunk {
+                background-color: #ff6b6b;
+                border-radius: 9px;
+            }
+        """)
+        self.download_progress.setVisible(False)
+        
+        download_container.addWidget(download_label)
+        download_container.addWidget(self.download_progress)
+        
+        layout.addLayout(analysis_container)
+        layout.addLayout(download_container)
+        
+        return progress_frame
+        
+    def create_track_table(self):
+        """Create enhanced track table with Matched/Downloaded columns"""
+        table_frame = QFrame()
+        table_frame.setStyleSheet("""
+            QFrame {
+                background-color: #2d2d2d;
+                border: 1px solid #444444;
+                border-radius: 8px;
+                padding: 0px;
+            }
+        """)
+        
+        layout = QVBoxLayout(table_frame)
+        layout.setContentsMargins(15, 15, 15, 15)  # Internal padding for spacing
+        layout.setSpacing(10)
+        
+        # Table header
+        header_label = QLabel("📋 Track Analysis")
+        header_label.setFont(QFont("Arial", 13, QFont.Weight.Bold))
+        header_label.setStyleSheet("color: #ffffff; padding: 5px;")
+        
+        # Create custom header row instead of table header
+        custom_header = self.create_custom_header()
+        
+        # Create table WITHOUT header
+        self.track_table = QTableWidget()
+        self.track_table.setColumnCount(5)
+        self.track_table.horizontalHeader().setVisible(False)  # Hide the problematic header
+        
+        # Clean table styling (no header needed now)
+        self.track_table.setStyleSheet("""
+            QTableWidget {
+                background-color: #3a3a3a;
+                alternate-background-color: #424242;
+                selection-background-color: #1db954;
+                selection-color: #000000;
+                gridline-color: #555555;
+                color: #ffffff;
+                border: 1px solid #555555;
+                border-top: none;
+                font-size: 12px;
+            }
+            QTableWidget::item {
+                padding: 12px 8px;
+                border-bottom: 1px solid #4a4a4a;
+            }
+            QTableWidget::item:selected {
+                background-color: #1db954;
+                color: #000000;
+            }
+        """)
+        
+        # Configure column sizes to EXACTLY match custom header
+        header = self.track_table.horizontalHeader()
+        
+        # Set fixed columns first to match header exactly
+        self.track_table.setColumnWidth(2, 90)   # Duration - fixed
+        self.track_table.setColumnWidth(3, 140)  # Matched - fixed
+        
+        # Configure resize modes for proper alignment
+        # Two stretching columns (Track, Artist) and one last section stretch (Downloaded)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)  # Track - flexible
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # Artist - flexible  
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)    # Duration - fixed 90px
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)    # Matched - fixed 140px
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Interactive)  # Downloaded - will be handled by setStretchLastSection
+        
+        # Let the last section (Downloaded) stretch to fill remaining space
+        header.setStretchLastSection(True)
+        
+        # Better table behavior
+        self.track_table.setAlternatingRowColors(True)
+        self.track_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.track_table.setShowGrid(True)
+        self.track_table.setGridStyle(Qt.PenStyle.SolidLine)
+        
+        # Set row height for better readability
+        self.track_table.verticalHeader().setDefaultSectionSize(35)
+        self.track_table.verticalHeader().setVisible(False)
+        
+        # Populate with initial track data
+        self.populate_track_table()
+        
+        layout.addWidget(header_label)
+        layout.addWidget(custom_header)
+        layout.addWidget(self.track_table)
+        
+        return table_frame
+    
+    def create_custom_header(self):
+        """Create a custom header row with visible labels"""
+        header_frame = QFrame()
+        header_frame.setStyleSheet("""
+            QFrame {
+                background-color: #1db954;
+                border: 1px solid #169441;
+                border-radius: 6px;
+                padding: 0px;
+                margin: 0px;
+            }
+        """)
+        
+        layout = QHBoxLayout(header_frame)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(1)
+        
+        # Create header labels with same proportions as table columns
+        headers = ["Track", "Artist", "Duration", "Matched", "Downloaded"]
+        
+        # Track - stretch
+        track_label = QLabel("Track")
+        track_label.setStyleSheet("""
+            QLabel {
+                background-color: transparent;
+                color: #000000;
+                font-weight: bold;
+                font-size: 13px;
+                padding: 12px 8px;
+                border-right: 1px solid #169441;
+            }
+        """)
+        track_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        # Artist - stretch  
+        artist_label = QLabel("Artist")
+        artist_label.setStyleSheet("""
+            QLabel {
+                background-color: transparent;
+                color: #000000;
+                font-weight: bold;
+                font-size: 13px;
+                padding: 12px 8px;
+                border-right: 1px solid #169441;
+            }
+        """)
+        artist_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        # Duration - fixed width
+        duration_label = QLabel("Duration")
+        duration_label.setFixedWidth(90)
+        duration_label.setStyleSheet("""
+            QLabel {
+                background-color: transparent;
+                color: #000000;
+                font-weight: bold;
+                font-size: 13px;
+                padding: 12px 8px;
+                border-right: 1px solid #169441;
+            }
+        """)
+        duration_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        # Matched - fixed width
+        matched_label = QLabel("Matched")
+        matched_label.setFixedWidth(140)
+        matched_label.setStyleSheet("""
+            QLabel {
+                background-color: transparent;
+                color: #000000;
+                font-weight: bold;
+                font-size: 13px;
+                padding: 12px 8px;
+                border-right: 1px solid #169441;
+            }
+        """)
+        matched_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        # Downloaded - stretch to fill remaining space  
+        downloaded_label = QLabel("Downloaded")
+        downloaded_label.setStyleSheet("""
+            QLabel {
+                background-color: transparent;
+                color: #000000;
+                font-weight: bold;
+                font-size: 13px;
+                padding: 12px 8px;
+            }
+        """)
+        downloaded_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        layout.addWidget(track_label, stretch=1)
+        layout.addWidget(artist_label, stretch=1)
+        layout.addWidget(duration_label)
+        layout.addWidget(matched_label)
+        layout.addWidget(downloaded_label, stretch=1)  # Let it stretch to fill remaining space
+        
+        return header_frame
+        
+    def populate_track_table(self):
+        """Populate track table with playlist tracks"""
+        self.track_table.setRowCount(len(self.playlist.tracks))
+        
+        for i, track in enumerate(self.playlist.tracks):
+            # Track name
+            track_item = QTableWidgetItem(track.name)
+            track_item.setFlags(track_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.track_table.setItem(i, 0, track_item)
+            
+            # Artist
+            artist_name = track.artists[0] if track.artists else "Unknown Artist"
+            artist_item = QTableWidgetItem(artist_name)
+            artist_item.setFlags(artist_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.track_table.setItem(i, 1, artist_item)
+            
+            # Duration
+            duration = self.format_duration(track.duration_ms)
+            duration_item = QTableWidgetItem(duration)
+            duration_item.setFlags(duration_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            duration_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.track_table.setItem(i, 2, duration_item)
+            
+            # Matched status (initially pending)
+            matched_item = QTableWidgetItem("⏳ Pending")
+            matched_item.setFlags(matched_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            matched_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.track_table.setItem(i, 3, matched_item)
+            
+            # Downloaded status (initially pending)
+            downloaded_item = QTableWidgetItem("⏳ Pending")
+            downloaded_item.setFlags(downloaded_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            downloaded_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.track_table.setItem(i, 4, downloaded_item)
+            
+    def format_duration(self, duration_ms):
+        """Convert milliseconds to MM:SS format"""
+        seconds = duration_ms // 1000
+        minutes = seconds // 60
+        seconds = seconds % 60
+        return f"{minutes}:{seconds:02d}"
+        
+    def create_buttons(self):
+        """Create improved button section"""
+        button_frame = QFrame()
+        button_frame.setStyleSheet("""
+            QFrame {
+                background-color: transparent;
+                padding: 10px;
+            }
+        """)
+        
+        layout = QHBoxLayout(button_frame)
+        layout.setSpacing(15)
+        layout.setContentsMargins(0, 10, 0, 0)
+        
+        # Begin Search button
+        self.begin_search_btn = QPushButton("Begin Search")
+        self.begin_search_btn.setFixedSize(160, 40)
+        self.begin_search_btn.clicked.connect(self.on_begin_search_clicked)
+        
+        # Cancel button
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setFixedSize(110, 40)
+        self.cancel_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #d32f2f;
+                color: #ffffff;
+                border: none;
+                border-radius: 6px;
+                font-size: 13px;
+                font-weight: bold;
+                padding: 10px 20px;
+            }
+            QPushButton:hover {
+                background-color: #f44336;
+            }
+            QPushButton:pressed {
+                background-color: #b71c1c;
+            }
+        """)
+        self.cancel_btn.clicked.connect(self.on_cancel_clicked)
+        
+        # Close button
+        self.close_btn = QPushButton("Close")
+        self.close_btn.setFixedSize(110, 40)
+        self.close_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #616161;
+                color: #ffffff;
+                border: none;
+                border-radius: 6px;
+                font-size: 13px;
+                font-weight: bold;
+                padding: 10px 20px;
+            }
+            QPushButton:hover {
+                background-color: #757575;
+            }
+            QPushButton:pressed {
+                background-color: #424242;
+            }
+        """)
+        self.close_btn.clicked.connect(self.on_close_clicked)
+        
+        layout.addStretch()
+        layout.addWidget(self.begin_search_btn)
+        layout.addWidget(self.cancel_btn)
+        layout.addWidget(self.close_btn)
+        
+        return button_frame
+        
+    def on_begin_search_clicked(self):
+        """Handle Begin Search button click - starts Plex analysis"""
+        self.begin_search_btn.setEnabled(False)
+        self.begin_search_btn.setText("Searching Plex...")
+        
+        # Show and reset analysis progress bar
+        self.analysis_progress.setVisible(True)
+        self.analysis_progress.setMaximum(self.total_tracks)
+        self.analysis_progress.setValue(0)
+        
+        # Start Plex analysis
+        self.start_plex_analysis()
+        
+    def start_plex_analysis(self):
+        """Start Plex analysis using existing worker"""
+        plex_client = getattr(self.parent_page, 'plex_client', None)
+        worker = PlaylistTrackAnalysisWorker(self.playlist.tracks, plex_client)
+        
+        # Connect signals for live updates
+        worker.signals.analysis_started.connect(self.on_analysis_started)
+        worker.signals.track_analyzed.connect(self.on_track_analyzed)
+        worker.signals.analysis_completed.connect(self.on_analysis_completed)
+        worker.signals.analysis_failed.connect(self.on_analysis_failed)
+        
+        # Track worker for cleanup
+        self.active_workers.append(worker)
+        
+        # Submit to thread pool
+        if hasattr(self.parent_page, 'thread_pool'):
+            self.parent_page.thread_pool.start(worker)
+        else:
+            # Create fallback thread pool
+            thread_pool = QThreadPool()
+            self.fallback_pools.append(thread_pool)
+            thread_pool.start(worker)
+            
+    def on_analysis_started(self, total_tracks):
+        """Handle analysis start"""
+        print(f"🔍 Analysis started for {total_tracks} tracks")
+        
+    def on_track_analyzed(self, track_index, result):
+        """Handle individual track analysis completion with live UI updates"""
+        # Update progress bar
+        self.analysis_progress.setValue(track_index)
+        
+        # Update counters and table
+        if result.exists_in_plex:
+            # Track found in Plex
+            matched_text = f"✅ Found ({result.confidence:.1f})"
+            self.matched_tracks_count += 1
+            self.matched_count_label.setText(str(self.matched_tracks_count))
+        else:
+            # Track missing from Plex - will need download
+            matched_text = "❌ Missing"
+            self.tracks_to_download_count += 1
+            self.download_count_label.setText(str(self.tracks_to_download_count))
+            
+        # Update table row
+        matched_item = QTableWidgetItem(matched_text)
+        matched_item.setFlags(matched_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        matched_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.track_table.setItem(track_index - 1, 3, matched_item)
+        
+        print(f"  Track {track_index}: {result.spotify_track.name} - {'Found' if result.exists_in_plex else 'Missing'}")
+        
+    def on_analysis_completed(self, results):
+        """Handle analysis completion"""
+        self.analysis_complete = True
+        self.analysis_results = results
+        self.missing_tracks = [r for r in results if not r.exists_in_plex]
+        
+        print(f"✅ Analysis complete: {len(self.missing_tracks)} to download, {self.matched_tracks_count} matched")
+        
+        # Update UI
+        self.begin_search_btn.setText("Analysis Complete")
+        
+        if self.missing_tracks:
+            # Automatically start download progress
+            self.start_download_progress()
+        else:
+            QMessageBox.information(self, "Analysis Complete", 
+                                  "All tracks already exist in Plex library!\nNo downloads needed.")
+            
+    def on_analysis_failed(self, error_message):
+        """Handle analysis failure"""
+        print(f"❌ Analysis failed: {error_message}")
+        QMessageBox.critical(self, "Analysis Failed", f"Failed to analyze tracks: {error_message}")
+        
+        # Reset UI
+        self.begin_search_btn.setEnabled(True)
+        self.begin_search_btn.setText("Begin Search")
+        self.analysis_progress.setVisible(False)
+        
+    def start_download_progress(self):
+        """Start download progress tracking (simulated for now)"""
+        print(f"🚀 Starting download progress for {len(self.missing_tracks)} tracks")
+        
+        # Show download progress bar
+        self.download_progress.setVisible(True)
+        self.download_progress.setMaximum(len(self.missing_tracks))
+        self.download_progress.setValue(0)
+        
+        # TODO: Implement actual download integration
+        # For now, simulate download progress
+        self.simulate_downloads()
+        
+    def simulate_downloads(self):
+        """Simulate download process (placeholder for real implementation)"""
+        from PyQt6.QtCore import QTimer
+        
+        self.current_download = 0
+        self.download_timer = QTimer()
+        self.download_timer.timeout.connect(self.simulate_next_download)
+        self.download_timer.start(1500)  # Simulate 1.5 seconds per download
+        
+    def simulate_next_download(self):
+        """Simulate next download completion"""
+        if self.current_download < len(self.missing_tracks):
+            # Find the track in the table and update its status
+            missing_result = self.missing_tracks[self.current_download]
+            
+            # Find track index in original playlist
+            track_index = None
+            for i, track in enumerate(self.playlist.tracks):
+                if track.id == missing_result.spotify_track.id:
+                    track_index = i
+                    break
+                    
+            if track_index is not None:
+                # Update Downloaded column
+                downloaded_item = QTableWidgetItem("✅ Complete")
+                downloaded_item.setFlags(downloaded_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                downloaded_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.track_table.setItem(track_index, 4, downloaded_item)
+            
+            # Update progress
+            self.current_download += 1
+            self.download_progress.setValue(self.current_download)
+            
+        else:
+            # All downloads complete
+            self.download_timer.stop()
+            self.begin_search_btn.setText("Downloads Complete")
+            QMessageBox.information(self, "Downloads Complete", 
+                                  f"Successfully downloaded {len(self.missing_tracks)} missing tracks!")
+            
+    def on_cancel_clicked(self):
+        """Handle Cancel button - cancels operations and closes modal"""
+        self.cancel_operations()
+        self.reject()  # Close modal with cancel result
+        
+    def on_close_clicked(self):
+        """Handle Close button - closes modal without canceling operations"""
+        # Don't cancel operations, just close modal
+        self.reject()  # Close modal
+        
+    def cancel_operations(self):
+        """Cancel any ongoing operations"""
+        # Cancel workers
+        for worker in self.active_workers:
+            if hasattr(worker, 'cancel'):
+                worker.cancel()
+                
+        # Stop timers
+        if hasattr(self, 'download_timer'):
+            self.download_timer.stop()
+            
+        print("🛑 Operations cancelled")
+        
+    def closeEvent(self, event):
+        """Handle modal close event"""
+        # Only cancel if user explicitly clicked Cancel
+        # For Close button or X button, preserve operations
+        event.accept()
