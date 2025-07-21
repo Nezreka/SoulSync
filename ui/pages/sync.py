@@ -656,6 +656,9 @@ class PlaylistDetailsModal(QDialog):
         # Connect download missing tracks button
         download_btn.clicked.connect(self.on_download_missing_tracks_clicked)
         
+        # Connect sync button
+        sync_btn.clicked.connect(self.on_sync_playlist_clicked)
+        
         button_layout.addStretch()
         button_layout.addWidget(close_btn)
         button_layout.addWidget(download_btn)
@@ -741,6 +744,113 @@ class PlaylistDetailsModal(QDialog):
                 if playlist_item.playlist and playlist_item.playlist.id == self.playlist.id:
                     return playlist_item
         return None
+    
+    def on_sync_playlist_clicked(self):
+        """Handle Sync This Playlist button click"""
+        if not self.playlist:
+            QMessageBox.warning(self, "Error", "No playlist selected")
+            return
+            
+        if not self.playlist.tracks:
+            QMessageBox.warning(self, "Error", "Playlist tracks not loaded")
+            return
+        
+        # Check if sync service is available
+        if not hasattr(self.parent_page, 'sync_service'):
+            # Create sync service if not available
+            from services.sync_service import PlaylistSyncService
+            self.parent_page.sync_service = PlaylistSyncService(
+                self.parent_page.spotify_client,
+                self.parent_page.plex_client,
+                self.parent_page.soulseek_client
+            )
+        
+        # Set up progress callback to update console
+        self.parent_page.sync_service.set_progress_callback(self.on_sync_progress)
+        
+        # Add initial console log
+        self.parent_page.log_area.append(f"🔄 Starting sync for playlist: {self.playlist.name}")
+        
+        # Start sync in background thread
+        self.start_sync_thread()
+        
+        # Close modal to return to main view
+        self.accept()
+    
+    def on_sync_progress(self, progress):
+        """Handle sync progress updates and forward to console"""
+        if hasattr(self.parent_page, 'log_area'):
+            progress_msg = f"⏳ {progress.current_step}"
+            if progress.current_track:
+                progress_msg += f" - {progress.current_track}"
+            progress_msg += f" ({progress.progress:.1f}%)"
+            self.parent_page.log_area.append(progress_msg)
+    
+    def start_sync_thread(self):
+        """Start playlist sync in a background thread"""
+        import asyncio
+        from PyQt6.QtCore import QRunnable, QObject, pyqtSignal
+        
+        class SyncWorkerSignals(QObject):
+            finished = pyqtSignal(object)  # SyncResult
+            error = pyqtSignal(str)
+        
+        class SyncWorker(QRunnable):
+            def __init__(self, sync_service, playlist_name):
+                super().__init__()
+                self.sync_service = sync_service
+                self.playlist_name = playlist_name
+                self.signals = SyncWorkerSignals()
+            
+            def run(self):
+                try:
+                    # Create new event loop for this thread
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    
+                    # Run sync
+                    result = loop.run_until_complete(
+                        self.sync_service.sync_playlist(self.playlist_name, download_missing=False)
+                    )
+                    
+                    loop.close()
+                    self.signals.finished.emit(result)
+                    
+                except Exception as e:
+                    self.signals.error.emit(str(e))
+        
+        # Create and start worker
+        worker = SyncWorker(self.parent_page.sync_service, self.playlist.name)
+        worker.signals.finished.connect(self.on_sync_finished)
+        worker.signals.error.connect(self.on_sync_error)
+        
+        # Submit to thread pool
+        if hasattr(self.parent_page, 'thread_pool'):
+            self.parent_page.thread_pool.start(worker)
+        else:
+            # Create fallback thread pool
+            thread_pool = QThreadPool()
+            thread_pool.start(worker)
+    
+    def on_sync_finished(self, result):
+        """Handle sync completion"""
+        if hasattr(self.parent_page, 'log_area'):
+            success_rate = result.success_rate
+            msg = f"✅ Sync complete: {result.synced_tracks}/{result.total_tracks} tracks synced ({success_rate:.1f}%)"
+            if result.failed_tracks > 0:
+                msg += f", {result.failed_tracks} failed"
+            self.parent_page.log_area.append(msg)
+            
+            # Add detailed results
+            if result.errors:
+                for error in result.errors:
+                    self.parent_page.log_area.append(f"❌ Error: {error}")
+    
+    def on_sync_error(self, error):
+        """Handle sync error"""
+        if hasattr(self.parent_page, 'log_area'):
+            self.parent_page.log_area.append(f"❌ Sync failed: {error}")
+        QMessageBox.critical(self, "Sync Error", f"Sync failed: {error}")
     
     def start_playlist_missing_tracks_download(self):
         """Start the process of downloading missing tracks from playlist"""
@@ -1665,6 +1775,16 @@ class SyncPage(QWidget):
         """Update progress text"""
         self.log_area.append(message)
     
+    def disable_refresh_button(self, operation_name="Operation"):
+        """Disable refresh button during sync/download operations"""
+        self.refresh_btn.setEnabled(False)
+        self.refresh_btn.setText(f"🔄 {operation_name}...")
+    
+    def enable_refresh_button(self):
+        """Re-enable refresh button after operations complete"""
+        self.refresh_btn.setEnabled(True)
+        self.refresh_btn.setText("🔄 Refresh")
+    
     def load_initial_playlists(self):
         """Load initial playlist data (placeholder or real)"""
         if self.spotify_client and self.spotify_client.is_authenticated():
@@ -2374,6 +2494,10 @@ class DownloadMissingTracksModal(QDialog):
         if playlist_item:
             playlist_item.show_operation_status("🔍 Starting analysis...")
         
+        # Disable refresh button during operations
+        if hasattr(self.parent_page, 'disable_refresh_button'):
+            self.parent_page.disable_refresh_button("Analyzing")
+        
         # Start Plex analysis
         self.start_plex_analysis()
         
@@ -2404,6 +2528,10 @@ class DownloadMissingTracksModal(QDialog):
         """Handle analysis start"""
         print(f"🔍 Analysis started for {total_tracks} tracks")
         
+        # Update main console log
+        if hasattr(self.parent_page, 'log_area'):
+            self.parent_page.log_area.append(f"🔍 Starting Plex analysis for {total_tracks} tracks...")
+        
     def on_track_analyzed(self, track_index, result):
         """Handle individual track analysis completion with live UI updates"""
         # Update progress bar
@@ -2427,6 +2555,24 @@ class DownloadMissingTracksModal(QDialog):
         matched_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         self.track_table.setItem(track_index - 1, 3, matched_item)
         
+        # Update main console log every 10 tracks or significant findings
+        if hasattr(self.parent_page, 'log_area'):
+            track_name = result.spotify_track.name
+            artist_name = result.spotify_track.artists[0] if result.spotify_track.artists else "Unknown"
+            
+            # Log every 10 tracks
+            if track_index % 10 == 0:
+                progress_pct = (track_index / len(self.playlist.tracks)) * 100
+                self.parent_page.log_area.append(f"⏳ Analyzed {track_index}/{len(self.playlist.tracks)} tracks ({progress_pct:.0f}%) - {self.matched_tracks_count} found, {self.tracks_to_download_count} missing")
+            
+            # Log specific track info for missing tracks
+            elif not result.exists_in_plex:
+                self.parent_page.log_area.append(f"❌ Missing: {track_name} by {artist_name}")
+            
+            # Log high confidence matches occasionally
+            elif result.confidence >= 0.95 and track_index % 20 == 0:
+                self.parent_page.log_area.append(f"✅ High confidence match: {track_name} ({result.confidence:.1f})")
+        
         # Update playlist status indicator
         playlist_item = self.find_playlist_item()
         if playlist_item:
@@ -2444,12 +2590,29 @@ class DownloadMissingTracksModal(QDialog):
         
         print(f"✅ Analysis complete: {len(self.missing_tracks)} to download, {self.matched_tracks_count} matched")
         
+        # Update main console log with analysis summary
+        if hasattr(self.parent_page, 'log_area'):
+            total_tracks = len(results)
+            matched_count = len([r for r in results if r.exists_in_plex])
+            missing_count = len(self.missing_tracks)
+            
+            self.parent_page.log_area.append(f"✅ Plex analysis complete: {matched_count}/{total_tracks} tracks found in library")
+            
+            if missing_count > 0:
+                self.parent_page.log_area.append(f"⏬ Preparing to download {missing_count} missing tracks...")
+            else:
+                self.parent_page.log_area.append(f"🎉 All tracks already exist in Plex - no downloads needed!")
+        
         if self.missing_tracks:
             # Update playlist status for download phase
             playlist_item = self.find_playlist_item()
             if playlist_item:
                 status_text = f"⏬ Starting downloads..."
                 playlist_item.update_operation_status(status_text)
+            
+            # Update refresh button text for download phase
+            if hasattr(self.parent_page, 'disable_refresh_button'):
+                self.parent_page.disable_refresh_button("Downloading")
             
             # Automatically start download progress
             self.start_download_progress()
@@ -2459,6 +2622,10 @@ class DownloadMissingTracksModal(QDialog):
             playlist_item = self.find_playlist_item()
             if playlist_item:
                 playlist_item.hide_operation_status()
+            
+            # Re-enable refresh button - operations complete
+            if hasattr(self.parent_page, 'enable_refresh_button'):
+                self.parent_page.enable_refresh_button()
             
             QMessageBox.information(self, "Analysis Complete", 
                                   "All tracks already exist in Plex library!\nNo downloads needed.")
@@ -2475,9 +2642,17 @@ class DownloadMissingTracksModal(QDialog):
         self.begin_search_btn.setText("Begin Search")
         self.analysis_progress.setVisible(False)
         
+        # Re-enable refresh button - operation failed
+        if hasattr(self.parent_page, 'enable_refresh_button'):
+            self.parent_page.enable_refresh_button()
+        
     def start_download_progress(self):
         """Start actual download progress tracking"""
         print(f"🚀 Starting download progress for {len(self.missing_tracks)} tracks")
+        
+        # Update main console log
+        if hasattr(self.parent_page, 'log_area'):
+            self.parent_page.log_area.append(f"🚀 Starting Soulseek downloads for {len(self.missing_tracks)} missing tracks...")
         
         # Show download progress bar
         self.download_progress.setVisible(True)
@@ -2518,6 +2693,12 @@ class DownloadMissingTracksModal(QDialog):
         
         print(f"🎵 Downloading track {self.current_download + 1}/{len(self.missing_tracks)}: {track.name}")
         
+        # Update main console log
+        if hasattr(self.parent_page, 'log_area'):
+            artist_name = track.artists[0] if track.artists else "Unknown Artist"
+            progress_pct = ((self.current_download + 1) / len(self.missing_tracks)) * 100
+            self.parent_page.log_area.append(f"🎵 Downloading ({self.current_download + 1}/{len(self.missing_tracks)}, {progress_pct:.0f}%): {track.name} by {artist_name}")
+        
         # Update table to show downloading status
         if track_index is not None:
             downloading_item = QTableWidgetItem("⏬ Downloading")
@@ -2553,6 +2734,14 @@ class DownloadMissingTracksModal(QDialog):
         """Handle successful track download"""
         print(f"✅ Download {download_index + 1} completed: {download_id}")
         
+        # Update main console log
+        if hasattr(self.parent_page, 'log_area') and download_index < len(self.missing_tracks):
+            track = self.missing_tracks[download_index].spotify_track
+            track_name = track.name
+            artist_name = track.artists[0] if track.artists else "Unknown Artist"
+            remaining = len(self.missing_tracks) - (download_index + 1)
+            self.parent_page.log_area.append(f"✅ Downloaded: {track_name} by {artist_name} ({remaining} remaining)")
+        
         # Update table row
         if track_index is not None:
             downloaded_item = QTableWidgetItem("✅ Downloaded")
@@ -2578,6 +2767,13 @@ class DownloadMissingTracksModal(QDialog):
         """Handle failed track download"""
         print(f"❌ Download {download_index + 1} failed: {error_message}")
         
+        # Update main console log
+        if hasattr(self.parent_page, 'log_area') and download_index < len(self.missing_tracks):
+            track = self.missing_tracks[download_index].spotify_track
+            track_name = track.name
+            artist_name = track.artists[0] if track.artists else "Unknown Artist"
+            self.parent_page.log_area.append(f"❌ Download failed: {track_name} by {artist_name} - {error_message}")
+        
         # Update table row  
         if track_index is not None:
             failed_item = QTableWidgetItem("❌ Failed")
@@ -2597,6 +2793,31 @@ class DownloadMissingTracksModal(QDialog):
         self.download_in_progress = False
         print("🎉 All downloads completed!")
         
+        # Calculate download statistics
+        completed_count = 0
+        failed_count = 0
+        
+        # Count successful vs failed downloads
+        for i in range(len(self.missing_tracks)):
+            if i < self.track_table.rowCount():
+                download_item = self.track_table.item(i, 4)
+                if download_item:
+                    if "✅" in download_item.text():
+                        completed_count += 1
+                    elif "❌" in download_item.text():
+                        failed_count += 1
+        
+        # Update main console log with final statistics
+        if hasattr(self.parent_page, 'log_area'):
+            total_requested = len(self.missing_tracks)
+            success_rate = (completed_count / total_requested * 100) if total_requested > 0 else 0
+            
+            self.parent_page.log_area.append(f"🎉 Download operation complete!")
+            self.parent_page.log_area.append(f"📊 Results: {completed_count}/{total_requested} successful ({success_rate:.1f}%)")
+            
+            if failed_count > 0:
+                self.parent_page.log_area.append(f"⚠️  {failed_count} downloads failed - tracks may need manual search")
+        
         # Hide Cancel button - operations complete
         self.cancel_btn.hide()
         
@@ -2605,8 +2826,12 @@ class DownloadMissingTracksModal(QDialog):
         if playlist_item:
             playlist_item.hide_operation_status()
         
+        # Re-enable refresh button - downloads complete
+        if hasattr(self.parent_page, 'enable_refresh_button'):
+            self.parent_page.enable_refresh_button()
+        
         QMessageBox.information(self, "Downloads Complete", 
-                              f"Completed downloading {len(self.missing_tracks)} missing tracks!")
+                              f"Completed downloading {completed_count}/{len(self.missing_tracks)} missing tracks!")
     
     def setup_background_status_updates(self):
         """Set up timer-based background status updates for playlist indicator"""
@@ -2645,6 +2870,10 @@ class DownloadMissingTracksModal(QDialog):
                 if hasattr(self, 'status_update_timer'):
                     self.status_update_timer.stop()
                 playlist_item.hide_operation_status()
+                
+                # Re-enable refresh button - background operations complete
+                if hasattr(self.parent_page, 'enable_refresh_button'):
+                    self.parent_page.enable_refresh_button()
                 
         except Exception as e:
             print(f"Background status update error: {e}")
@@ -2770,6 +2999,10 @@ class DownloadMissingTracksModal(QDialog):
         playlist_item = self.find_playlist_item()
         if playlist_item:
             playlist_item.hide_operation_status()
+        
+        # Re-enable refresh button - operations cancelled
+        if hasattr(self.parent_page, 'enable_refresh_button'):
+            self.parent_page.enable_refresh_button()
             
         print("🛑 Operations cancelled")
         
@@ -2779,6 +3012,10 @@ class DownloadMissingTracksModal(QDialog):
         if (self.download_in_progress or not self.analysis_complete) and not hasattr(self, 'background_timer_started'):
             self.setup_background_status_updates()
             self.background_timer_started = True
+        else:
+            # If no operations in progress, re-enable refresh button
+            if hasattr(self.parent_page, 'enable_refresh_button'):
+                self.parent_page.enable_refresh_button()
         
         # Only cancel if user explicitly clicked Cancel
         # For Close button or X button, preserve operations
