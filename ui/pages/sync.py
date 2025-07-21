@@ -693,7 +693,13 @@ class PlaylistDetailsModal(QDialog):
                               "Plex client not available. Please check your configuration.")
             return
         
-        print("✅ Plex client available")
+        if not hasattr(self.parent_page, 'soulseek_client') or not self.parent_page.soulseek_client:
+            print("❌ Soulseek client not available")
+            QMessageBox.warning(self, "Service Unavailable", 
+                              "Soulseek client not available. Please check your configuration.")
+            return
+        
+        print("✅ Plex and Soulseek clients available")
             
         # Create and show the enhanced download missing tracks modal
         try:
@@ -703,6 +709,11 @@ class PlaylistDetailsModal(QDialog):
             
             # Store modal reference to prevent garbage collection
             self.download_modal = modal
+            
+            # Find and store modal reference in playlist item for reopening
+            playlist_item = self.find_playlist_item_from_sync_modal()
+            if playlist_item:
+                playlist_item.set_download_modal(modal)
             
             print("🖥️ Closing current sync modal...")
             self.accept()  # Close the current sync modal
@@ -716,6 +727,20 @@ class PlaylistDetailsModal(QDialog):
             import traceback
             traceback.print_exc()
             QMessageBox.critical(self, "Modal Error", f"Failed to open download modal: {str(e)}")
+    
+    def find_playlist_item_from_sync_modal(self):
+        """Find the PlaylistItem widget for this playlist from sync modal"""
+        if not hasattr(self.parent_page, 'current_playlists'):
+            return None
+        
+        # Look through the parent page's playlist items
+        for i in range(self.parent_page.playlist_layout.count()):
+            item = self.parent_page.playlist_layout.itemAt(i)
+            if item and item.widget() and isinstance(item.widget(), PlaylistItem):
+                playlist_item = item.widget()
+                if playlist_item.playlist and playlist_item.playlist.id == self.playlist.id:
+                    return playlist_item
+        return None
     
     def start_playlist_missing_tracks_download(self):
         """Start the process of downloading missing tracks from playlist"""
@@ -983,11 +1008,11 @@ class PlaylistItem(QFrame):
         content_layout.addWidget(name_label)
         content_layout.addLayout(info_layout)
         
-        # Action button
-        action_btn = QPushButton("Sync / Download")
-        action_btn.setFixedSize(120, 30)  # Slightly wider for longer text
-        action_btn.clicked.connect(self.on_view_details_clicked)
-        action_btn.setStyleSheet("""
+        # Action button or status indicator
+        self.action_btn = QPushButton("Sync / Download")
+        self.action_btn.setFixedSize(120, 30)  # Slightly wider for longer text
+        self.action_btn.clicked.connect(self.on_view_details_clicked)
+        self.action_btn.setStyleSheet("""
             QPushButton {
                 background: transparent;
                 border: 1px solid #1db954;
@@ -1002,10 +1027,36 @@ class PlaylistItem(QFrame):
             }
         """)
         
+        # Status label (hidden by default)
+        self.status_label = QPushButton()
+        self.status_label.setFixedSize(120, 30)
+        self.status_label.setStyleSheet("""
+            QPushButton {
+                background: #1db954;
+                border: 1px solid #169441;
+                border-radius: 15px;
+                color: #000000;
+                font-size: 10px;
+                font-weight: bold;
+                padding: 5px;
+                text-align: center;
+            }
+            QPushButton:hover {
+                background: #1ed760;
+                cursor: pointer;
+            }
+        """)
+        self.status_label.clicked.connect(self.on_status_clicked)
+        self.status_label.hide()
+        
+        # Store reference to the download modal
+        self.download_modal = None
+        
         layout.addWidget(self.checkbox)
         layout.addLayout(content_layout)
         layout.addStretch()
-        layout.addWidget(action_btn)
+        layout.addWidget(self.action_btn)
+        layout.addWidget(self.status_label)
     
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -1016,6 +1067,32 @@ class PlaylistItem(QFrame):
         """Handle View Details button click"""
         if self.playlist:
             self.view_details_clicked.emit(self.playlist)
+    
+    def show_operation_status(self, status_text):
+        """Show operation status and hide action button"""
+        self.status_label.setText(status_text)
+        self.status_label.show()
+        self.action_btn.hide()
+    
+    def hide_operation_status(self):
+        """Hide operation status and show action button"""
+        self.status_label.hide()
+        self.action_btn.show()
+    
+    def update_operation_status(self, status_text):
+        """Update the operation status text"""
+        self.status_label.setText(status_text)
+    
+    def set_download_modal(self, modal):
+        """Store reference to the download modal"""
+        self.download_modal = modal
+    
+    def on_status_clicked(self):
+        """Handle status button click - reopen modal"""
+        if self.download_modal and not self.download_modal.isVisible():
+            self.download_modal.show()
+            self.download_modal.activateWindow()
+            self.download_modal.raise_()
 
 class SyncOptionsPanel(QFrame):
     def __init__(self, parent=None):
@@ -1096,10 +1173,11 @@ class SyncOptionsPanel(QFrame):
         layout.addLayout(quality_layout)
 
 class SyncPage(QWidget):
-    def __init__(self, spotify_client=None, plex_client=None, parent=None):
+    def __init__(self, spotify_client=None, plex_client=None, soulseek_client=None, parent=None):
         super().__init__(parent)
         self.spotify_client = spotify_client
         self.plex_client = plex_client
+        self.soulseek_client = soulseek_client
         self.current_playlists = []
         self.playlist_loader = None
         
@@ -1640,77 +1718,6 @@ class SyncPage(QWidget):
             else:
                 self.playlist_layout.removeItem(item)
     
-    def create_download_progress_bubble(self, progress_info):
-        """Create a progress bubble for ongoing downloads"""
-        if hasattr(self, 'progress_bubble'):
-            # Remove existing bubble
-            self.progress_bubble.deleteLater()
-        
-        # Create bubble widget
-        self.progress_bubble = QFrame(self)
-        self.progress_bubble.setFixedSize(300, 80)
-        self.progress_bubble.setStyleSheet("""
-            QFrame {
-                background-color: #1db954;
-                border: 2px solid #169441;
-                border-radius: 15px;
-                color: #000000;
-            }
-            QLabel {
-                color: #000000;
-                font-weight: bold;
-            }
-        """)
-        
-        # Create bubble layout
-        bubble_layout = QVBoxLayout(self.progress_bubble)
-        bubble_layout.setContentsMargins(10, 8, 10, 8)
-        bubble_layout.setSpacing(5)
-        
-        # Title
-        title = QLabel(f"📥 {progress_info['playlist_name']}")
-        title.setFont(QFont("Arial", 11, QFont.Weight.Bold))
-        
-        # Progress text
-        if progress_info['analysis_complete']:
-            progress_text = f"Downloading: {progress_info['download_progress']}/{progress_info['download_total']}"
-        else:
-            progress_text = f"Analyzing: {progress_info['analysis_progress']}/{progress_info['total_tracks']}"
-        
-        progress_label = QLabel(progress_text)
-        progress_label.setFont(QFont("Arial", 9))
-        
-        # Click to reopen
-        click_label = QLabel("Click to view details")
-        click_label.setFont(QFont("Arial", 8))
-        click_label.setStyleSheet("color: #666666;")
-        
-        bubble_layout.addWidget(title)
-        bubble_layout.addWidget(progress_label)
-        bubble_layout.addWidget(click_label)
-        
-        # Position bubble in top-right corner
-        self.progress_bubble.move(self.width() - 320, 20)
-        self.progress_bubble.show()
-        
-        # Make bubble clickable
-        self.progress_bubble.mousePressEvent = lambda event: self.reopen_download_modal(progress_info['modal_reference'])
-        
-        # Store reference for updates
-        self.progress_bubble.progress_info = progress_info
-    
-    def reopen_download_modal(self, modal_reference):
-        """Reopen the download modal from the progress bubble"""
-        if modal_reference and not modal_reference.isVisible():
-            # Remove bubble
-            if hasattr(self, 'progress_bubble'):
-                self.progress_bubble.deleteLater()
-                delattr(self, 'progress_bubble')
-            
-            # Show modal
-            modal_reference.show()
-            modal_reference.activateWindow()
-            modal_reference.raise_()
 
 
 class DownloadMissingTracksModal(QDialog):
@@ -2320,6 +2327,7 @@ class DownloadMissingTracksModal(QDialog):
             }
         """)
         self.cancel_btn.clicked.connect(self.on_cancel_clicked)
+        self.cancel_btn.hide()  # Initially hidden
         
         # Close button
         self.close_btn = QPushButton("Close")
@@ -2352,13 +2360,19 @@ class DownloadMissingTracksModal(QDialog):
         
     def on_begin_search_clicked(self):
         """Handle Begin Search button click - starts Plex analysis"""
-        self.begin_search_btn.setEnabled(False)
-        self.begin_search_btn.setText("Searching Plex...")
+        # Hide Begin Search button and show Cancel button
+        self.begin_search_btn.hide()
+        self.cancel_btn.show()
         
         # Show and reset analysis progress bar
         self.analysis_progress.setVisible(True)
         self.analysis_progress.setMaximum(self.total_tracks)
         self.analysis_progress.setValue(0)
+        
+        # Update playlist status indicator
+        playlist_item = self.find_playlist_item()
+        if playlist_item:
+            playlist_item.show_operation_status("🔍 Starting analysis...")
         
         # Start Plex analysis
         self.start_plex_analysis()
@@ -2413,6 +2427,13 @@ class DownloadMissingTracksModal(QDialog):
         matched_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         self.track_table.setItem(track_index - 1, 3, matched_item)
         
+        # Update playlist status indicator
+        playlist_item = self.find_playlist_item()
+        if playlist_item:
+            total = len(self.playlist.tracks)
+            status_text = f"🔍 Analyzing {track_index}/{total}"
+            playlist_item.update_operation_status(status_text)
+        
         print(f"  Track {track_index}: {result.spotify_track.name} - {'Found' if result.exists_in_plex else 'Missing'}")
         
     def on_analysis_completed(self, results):
@@ -2423,13 +2444,22 @@ class DownloadMissingTracksModal(QDialog):
         
         print(f"✅ Analysis complete: {len(self.missing_tracks)} to download, {self.matched_tracks_count} matched")
         
-        # Update UI
-        self.begin_search_btn.setText("Analysis Complete")
-        
         if self.missing_tracks:
+            # Update playlist status for download phase
+            playlist_item = self.find_playlist_item()
+            if playlist_item:
+                status_text = f"⏬ Starting downloads..."
+                playlist_item.update_operation_status(status_text)
+            
             # Automatically start download progress
             self.start_download_progress()
         else:
+            # All tracks found - hide Cancel button and update status
+            self.cancel_btn.hide()
+            playlist_item = self.find_playlist_item()
+            if playlist_item:
+                playlist_item.hide_operation_status()
+            
             QMessageBox.information(self, "Analysis Complete", 
                                   "All tracks already exist in Plex library!\nNo downloads needed.")
             
@@ -2438,7 +2468,9 @@ class DownloadMissingTracksModal(QDialog):
         print(f"❌ Analysis failed: {error_message}")
         QMessageBox.critical(self, "Analysis Failed", f"Failed to analyze tracks: {error_message}")
         
-        # Reset UI
+        # Reset UI - show Begin Search again, hide Cancel
+        self.cancel_btn.hide()
+        self.begin_search_btn.show()
         self.begin_search_btn.setEnabled(True)
         self.begin_search_btn.setText("Begin Search")
         self.analysis_progress.setVisible(False)
@@ -2461,8 +2493,7 @@ class DownloadMissingTracksModal(QDialog):
             return
             
         # Get Soulseek client from parent
-        soulseek_client = getattr(self.parent_page, 'soulseek_client', None)
-        if not soulseek_client:
+        if not self.parent_page.soulseek_client:
             QMessageBox.critical(self, "Soulseek Unavailable", 
                                "Soulseek client not available. Please check your configuration.")
             return
@@ -2495,8 +2526,7 @@ class DownloadMissingTracksModal(QDialog):
             self.track_table.setItem(track_index, 4, downloading_item)
         
         # Create download worker
-        soulseek_client = getattr(self.parent_page, 'soulseek_client', None)
-        worker = TrackDownloadWorker(track, soulseek_client, self.current_download, track_index)
+        worker = TrackDownloadWorker(track, self.parent_page.soulseek_client, self.current_download, track_index)
         worker.signals.download_completed.connect(self.on_track_download_complete)
         worker.signals.download_failed.connect(self.on_track_download_failed)
         
@@ -2534,6 +2564,13 @@ class DownloadMissingTracksModal(QDialog):
         self.current_download += 1
         self.download_progress.setValue(self.current_download)
         
+        # Update playlist status indicator
+        playlist_item = self.find_playlist_item()
+        if playlist_item:
+            total = len(self.missing_tracks) if hasattr(self, 'missing_tracks') else 0
+            status_text = f"⏬ Downloading {self.current_download}/{total}"
+            playlist_item.update_operation_status(status_text)
+        
         # Continue with next download
         self.download_next_track()
         
@@ -2560,31 +2597,92 @@ class DownloadMissingTracksModal(QDialog):
         self.download_in_progress = False
         print("🎉 All downloads completed!")
         
-        # Update button text
-        self.begin_search_btn.setText("Downloads Complete")
+        # Hide Cancel button - operations complete
+        self.cancel_btn.hide()
+        
+        # Update playlist status indicator - operation complete
+        playlist_item = self.find_playlist_item()
+        if playlist_item:
+            playlist_item.hide_operation_status()
         
         QMessageBox.information(self, "Downloads Complete", 
                               f"Completed downloading {len(self.missing_tracks)} missing tracks!")
     
-    def create_progress_bubble(self):
-        """Create a progress bubble on the main sync page"""
-        if hasattr(self.parent_page, 'create_download_progress_bubble'):
-            # Calculate current progress
-            total_tracks = len(self.playlist.tracks)
-            completed_analysis = self.analysis_progress.value() if self.analysis_complete else 0
-            completed_downloads = self.download_progress.value() if self.download_in_progress else 0
+    def setup_background_status_updates(self):
+        """Set up timer-based background status updates for playlist indicator"""
+        from PyQt6.QtCore import QTimer
+        
+        # Create a timer for background updates
+        if not hasattr(self, 'status_update_timer'):
+            self.status_update_timer = QTimer()
+            self.status_update_timer.timeout.connect(self.update_background_status)
+            self.status_update_timer.start(500)  # Update every 500ms
+    
+    def update_background_status(self):
+        """Update playlist status in background"""
+        playlist_item = self.find_playlist_item()
+        if not playlist_item:
+            return
             
-            progress_info = {
-                'playlist_name': self.playlist.name,
-                'total_tracks': total_tracks,
-                'analysis_complete': self.analysis_complete,
-                'analysis_progress': completed_analysis,
-                'download_progress': completed_downloads,
-                'download_total': len(self.missing_tracks) if hasattr(self, 'missing_tracks') else 0,
-                'modal_reference': self  # Keep reference to reopen modal
-            }
+        try:
+            # Update based on current progress state
+            if not self.analysis_complete:
+                # Still analyzing
+                if hasattr(self, 'analysis_progress'):
+                    progress = self.analysis_progress.value()
+                    total = len(self.playlist.tracks)
+                    status_text = f"🔍 Analyzing {progress}/{total}"
+                    playlist_item.update_operation_status(status_text)
+            elif self.download_in_progress:
+                # Downloading
+                if hasattr(self, 'download_progress'):
+                    progress = self.download_progress.value()
+                    total = len(self.missing_tracks) if hasattr(self, 'missing_tracks') else 0
+                    status_text = f"⏬ Downloading {progress}/{total}"
+                    playlist_item.update_operation_status(status_text)
+            else:
+                # Operations complete - stop timer and hide status
+                if hasattr(self, 'status_update_timer'):
+                    self.status_update_timer.stop()
+                playlist_item.hide_operation_status()
+                
+        except Exception as e:
+            print(f"Background status update error: {e}")
+    
+    def update_playlist_status_indicator(self):
+        """Update the playlist status indicator instead of creating a bubble"""
+        # Find the playlist item in the parent page
+        playlist_item = self.find_playlist_item()
+        if playlist_item:
+            # Determine current operation status
+            if not self.analysis_complete:
+                # Still analyzing
+                progress = self.analysis_progress.value()
+                total = len(self.playlist.tracks)
+                status_text = f"🔍 Analyzing {progress}/{total}"
+            elif self.download_in_progress:
+                # Downloading
+                progress = self.download_progress.value()
+                total = len(self.missing_tracks) if hasattr(self, 'missing_tracks') else 0
+                status_text = f"⏬ Downloading {progress}/{total}"
+            else:
+                status_text = "✅ Complete"
             
-            self.parent_page.create_download_progress_bubble(progress_info)
+            playlist_item.show_operation_status(status_text)
+    
+    def find_playlist_item(self):
+        """Find the PlaylistItem widget for this playlist"""
+        if not hasattr(self.parent_page, 'current_playlists'):
+            return None
+        
+        # Look through the parent page's playlist items
+        for i in range(self.parent_page.playlist_layout.count()):
+            item = self.parent_page.playlist_layout.itemAt(i)
+            if item and item.widget() and isinstance(item.widget(), PlaylistItem):
+                playlist_item = item.widget()
+                if playlist_item.playlist and playlist_item.playlist.id == self.playlist.id:
+                    return playlist_item
+        return None
 
     def simulate_downloads(self):
         """Simulate download process (placeholder for real implementation)"""
@@ -2633,9 +2731,9 @@ class DownloadMissingTracksModal(QDialog):
         
     def on_close_clicked(self):
         """Handle Close button - closes modal without canceling operations"""
-        # If operations are in progress, create progress bubble
+        # If operations are in progress, set up background status updates
         if self.download_in_progress or not self.analysis_complete:
-            self.create_progress_bubble()
+            self.setup_background_status_updates()
         
         # Close modal without canceling operations
         self.reject()
@@ -2650,11 +2748,38 @@ class DownloadMissingTracksModal(QDialog):
         # Stop timers
         if hasattr(self, 'download_timer'):
             self.download_timer.stop()
+        
+        if hasattr(self, 'status_update_timer'):
+            self.status_update_timer.stop()
+                
+        # Reset button states - hide Cancel, show Begin Search
+        self.cancel_btn.hide()
+        self.begin_search_btn.show()
+        self.begin_search_btn.setEnabled(True)
+        self.begin_search_btn.setText("Begin Search")
+        
+        # Hide progress bars
+        self.analysis_progress.setVisible(False)
+        self.download_progress.setVisible(False)
+        
+        # Reset state flags
+        self.analysis_complete = False
+        self.download_in_progress = False
+        
+        # Reset playlist status indicator
+        playlist_item = self.find_playlist_item()
+        if playlist_item:
+            playlist_item.hide_operation_status()
             
         print("🛑 Operations cancelled")
         
     def closeEvent(self, event):
         """Handle modal close event"""
+        # If operations are still in progress when closing, set up background updates
+        if (self.download_in_progress or not self.analysis_complete) and not hasattr(self, 'background_timer_started'):
+            self.setup_background_status_updates()
+            self.background_timer_started = True
+        
         # Only cancel if user explicitly clicked Cancel
         # For Close button or X button, preserve operations
         event.accept()

@@ -212,8 +212,8 @@ Playlist Track → Plex Check → (Missing) → Soulseek Search → Quality Filt
    - ✅ Three-button system: Begin Search, Cancel, Close
 
 3. **✅ COMPLETED - Modal State Persistence**
-   - ✅ Progress bubble system when modal is closed during operations
-   - ✅ Clickable bubble to reopen modal and review progress
+   - ✅ Playlist status indicator system when modal is closed during operations
+   - ✅ Real-time status updates on playlist buttons (🔍 Analyzing, ⏬ Downloading)
    - ✅ Maintain operation state across modal open/close cycles
 
 4. **✅ COMPLETED - Soulseek Search Integration**
@@ -236,25 +236,42 @@ Playlist Track → Plex Check → (Missing) → Soulseek Search → Quality Filt
    - Provide real-time progress updates
    - Implement retry logic for API failures
 
+### ✅ COMPLETE WORKFLOW IMPLEMENTED:
+
+**User Experience Flow:**
+1. **Click "Download Missing Tracks"** → Sync modal closes, Download modal opens
+2. **Click "Begin Search"** → Playlist button shows "🔍 Analyzing..." status
+3. **Plex Analysis Phase** → Real-time track table updates with ✅/❌ status
+4. **Auto-Download Phase** → Playlist button shows "⏬ Downloading X/Y" status
+5. **Modal Interaction Options:**
+   - **Cancel Button**: Stops all operations, closes modal, restores playlist button
+   - **Close Button**: Closes modal, continues operations with status updates
+   - **Re-open Modal**: Click playlist status indicator to view detailed progress
+6. **Completion** → Playlist button returns to normal "Sync / Download"
+
+**Playlist Status Indicators:**
+- `🔍 Analyzing X/Y` - During Plex analysis phase
+- `⏬ Downloading X/Y` - During Soulseek download phase  
+- `✅ Complete` - When all operations finished
+- Clickable to reopen detailed progress modal
+
+**Track Table Status Updates:**
+- **Matched Column**: ✅ Found (confidence), ❌ Missing, ⏳ Pending
+- **Downloaded Column**: ✅ Downloaded, ⏬ Downloading, ❌ Failed, ⏳ Pending
+
 ### 🔧 TECHNICAL ARCHITECTURE:
 
-**Minimal Changes Approach:**
-- Extend existing downloads.py with custom path parameter
-- Reuse matched download folder organization logic
-- Leverage existing Plex integration and search functionality
-- Build on current progress tracking and queue management
+**Core Integration Points:**
+- `SyncPage` - Enhanced with soulseek_client parameter and playlist status indicators
+- `PlaylistItem` - Added show/hide/update operation status methods
+- `DownloadMissingTracksModal` - Complete workflow with real-time UI updates
+- `TrackDownloadWorker` - Background Soulseek download integration
+- Existing `plex_client.py` and `soulseek_client.py` - Leveraged without modification
 
 **Data Flow:**
 ```
-Playlist → Spotify Tracks → Plex Check → Missing Tracks → Soulseek Search → Download Queue → Folder Organization
+Playlist → Spotify Tracks → Plex Analysis → Track Table Updates → Missing Tracks → Soulseek Downloads → Status Updates
 ```
-
-**Integration Points:**
-- `downloads.py` - custom path support for playlist downloads
-- `plex_client.py` - track existence checking with confidence scoring  
-- `soulseek_client.py` - individual track search and download
-- `spotify_client.py` - playlist track metadata retrieval
-- `sync.py` - button handling and progress UI
 
 ### 🎯 SUCCESS METRICS:
 - No breaking changes to existing download functionality
