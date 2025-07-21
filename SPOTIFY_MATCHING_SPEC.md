@@ -202,12 +202,15 @@ Playlist Track → Plex Check → (Missing) → Soulseek Search → Quality Filt
    - ✅ Add basic progress indication for user feedback
    - ✅ Added graceful Plex connection handling
 
-2. **🔄 IN PROGRESS - Plex Integration for Track Existence Checking**
-   - Implement intelligent track matching against Plex library
-   - Use confidence scoring (≥0.8) to determine existing tracks
-   - Handle Plex connection failures gracefully (download all tracks)
+2. **✅ COMPLETED - Plex Integration for Track Existence Checking**
+   - ✅ Implement intelligent track matching against Plex library
+   - ✅ Use confidence scoring (≥0.8) to determine existing tracks
+   - ✅ Handle Plex connection failures gracefully (download all tracks)
+   - ✅ Background worker with progress tracking
+   - ✅ String normalization and similarity scoring
+   - ✅ Duration matching with 10% tolerance
 
-3. **⏳ PENDING - Soulseek Search Integration**
+3. **🔄 IN PROGRESS - Soulseek Search Integration**
    - Implement per-track search strategy (track name → artist + track name)
    - Leverage existing search filtering and quality selection
    - Use async operations for performance

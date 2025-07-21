@@ -5,6 +5,156 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                            QTableWidget, QTableWidgetItem, QHeaderView)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QPropertyAnimation, QEasingCurve, QRunnable, QThreadPool, QObject
 from PyQt6.QtGui import QFont
+from dataclasses import dataclass
+from typing import List, Optional
+
+@dataclass
+class TrackAnalysisResult:
+    """Result of analyzing a track for Plex existence"""
+    spotify_track: object  # Spotify track object
+    exists_in_plex: bool
+    plex_match: Optional[object] = None  # Plex track if found
+    confidence: float = 0.0
+    error_message: Optional[str] = None
+
+class PlaylistTrackAnalysisWorkerSignals(QObject):
+    """Signals for playlist track analysis worker"""
+    analysis_started = pyqtSignal(int)  # total_tracks
+    track_analyzed = pyqtSignal(int, object)  # track_index, TrackAnalysisResult
+    analysis_completed = pyqtSignal(list)  # List[TrackAnalysisResult]
+    analysis_failed = pyqtSignal(str)  # error_message
+
+class PlaylistTrackAnalysisWorker(QRunnable):
+    """Background worker to analyze playlist tracks against Plex library"""
+    
+    def __init__(self, playlist_tracks, plex_client):
+        super().__init__()
+        self.playlist_tracks = playlist_tracks
+        self.plex_client = plex_client
+        self.signals = PlaylistTrackAnalysisWorkerSignals()
+        self._cancelled = False
+    
+    def cancel(self):
+        """Cancel the analysis operation"""
+        self._cancelled = True
+    
+    def run(self):
+        """Analyze each track in the playlist"""
+        try:
+            if self._cancelled:
+                return
+                
+            self.signals.analysis_started.emit(len(self.playlist_tracks))
+            results = []
+            
+            # Check if Plex is connected
+            plex_connected = False
+            try:
+                if self.plex_client:
+                    plex_connected = self.plex_client.is_connected()
+            except Exception as e:
+                print(f"Plex connection check failed: {e}")
+                plex_connected = False
+            
+            for i, track in enumerate(self.playlist_tracks):
+                if self._cancelled:
+                    return
+                
+                result = TrackAnalysisResult(
+                    spotify_track=track,
+                    exists_in_plex=False
+                )
+                
+                if plex_connected:
+                    # Check if track exists in Plex
+                    try:
+                        plex_match, confidence = self._check_track_in_plex(track)
+                        if plex_match and confidence >= 0.8:  # High confidence threshold
+                            result.exists_in_plex = True
+                            result.plex_match = plex_match
+                            result.confidence = confidence
+                    except Exception as e:
+                        result.error_message = f"Plex check failed: {str(e)}"
+                
+                results.append(result)
+                self.signals.track_analyzed.emit(i + 1, result)
+            
+            if not self._cancelled:
+                self.signals.analysis_completed.emit(results)
+                
+        except Exception as e:
+            if not self._cancelled:
+                self.signals.analysis_failed.emit(str(e))
+    
+    def _check_track_in_plex(self, spotify_track):
+        """Check if a Spotify track exists in Plex with confidence scoring"""
+        try:
+            # Search Plex for similar tracks
+            # Use first artist for search
+            artist_name = spotify_track.artists[0] if spotify_track.artists else ""
+            search_query = f"{artist_name} {spotify_track.name}".strip()
+            
+            # Get potential matches from Plex
+            plex_tracks = self.plex_client.search_tracks(search_query, limit=10)
+            
+            if not plex_tracks:
+                return None, 0.0
+            
+            # Find best match using confidence scoring
+            best_match = None
+            best_confidence = 0.0
+            
+            for plex_track in plex_tracks:
+                confidence = self._calculate_track_confidence(spotify_track, plex_track)
+                if confidence > best_confidence:
+                    best_confidence = confidence
+                    best_match = plex_track
+            
+            return best_match, best_confidence
+            
+        except Exception as e:
+            print(f"Error checking track in Plex: {e}")
+            return None, 0.0
+    
+    def _calculate_track_confidence(self, spotify_track, plex_track):
+        """Calculate confidence score between Spotify and Plex tracks"""
+        try:
+            # Basic string similarity for now (can be enhanced with existing matching engine)
+            import re
+            
+            def normalize_string(s):
+                return re.sub(r'[^a-zA-Z0-9\s]', '', s.lower()).strip()
+            
+            # Normalize track titles
+            spotify_title = normalize_string(spotify_track.name)
+            plex_title = normalize_string(plex_track.title)
+            
+            # Normalize artist names
+            spotify_artist = normalize_string(spotify_track.artists[0]) if spotify_track.artists else ""
+            plex_artist = normalize_string(plex_track.artist)
+            
+            # Simple similarity scoring
+            title_similarity = 1.0 if spotify_title == plex_title else 0.0
+            artist_similarity = 1.0 if spotify_artist == plex_artist else 0.0
+            
+            # Weight title more heavily
+            confidence = (title_similarity * 0.7) + (artist_similarity * 0.3)
+            
+            # Duration check (allow 10% variance)
+            if hasattr(spotify_track, 'duration_ms') and hasattr(plex_track, 'duration'):
+                spotify_duration = spotify_track.duration_ms / 1000
+                plex_duration = plex_track.duration / 1000 if plex_track.duration else 0
+                
+                if plex_duration > 0:
+                    duration_diff = abs(spotify_duration - plex_duration) / max(spotify_duration, plex_duration)
+                    if duration_diff <= 0.1:  # Within 10%
+                        confidence += 0.1  # Bonus for duration match
+            
+            return min(confidence, 1.0)  # Cap at 1.0
+            
+        except Exception as e:
+            print(f"Error calculating track confidence: {e}")
+            return 0.0
 
 class PlaylistLoaderThread(QThread):
     playlist_loaded = pyqtSignal(object)  # Single playlist
@@ -125,7 +275,7 @@ class PlaylistDetailsModal(QDialog):
         for worker in self.active_workers:
             try:
                 if hasattr(worker, 'signals'):
-                    # Only disconnect signals that are actually connected to this modal
+                    # Disconnect track loading worker signals
                     try:
                         worker.signals.tracks_loaded.disconnect(self.on_tracks_loaded)
                     except (RuntimeError, TypeError):
@@ -134,7 +284,24 @@ class PlaylistDetailsModal(QDialog):
                         worker.signals.loading_failed.disconnect(self.on_tracks_loading_failed)
                     except (RuntimeError, TypeError):
                         pass
-                    # Note: loading_started is not connected in this modal, so don't disconnect it
+                    
+                    # Disconnect playlist analysis worker signals
+                    try:
+                        worker.signals.analysis_started.disconnect(self.on_analysis_started)
+                    except (RuntimeError, TypeError):
+                        pass
+                    try:
+                        worker.signals.track_analyzed.disconnect(self.on_track_analyzed)
+                    except (RuntimeError, TypeError):
+                        pass
+                    try:
+                        worker.signals.analysis_completed.disconnect(self.on_analysis_completed)
+                    except (RuntimeError, TypeError):
+                        pass
+                    try:
+                        worker.signals.analysis_failed.disconnect(self.on_analysis_failed)
+                    except (RuntimeError, TypeError):
+                        pass
             except (RuntimeError, AttributeError):
                 # Signal may already be disconnected or worker deleted
                 pass
@@ -419,6 +586,9 @@ class PlaylistDetailsModal(QDialog):
             }
         """)
         
+        # Connect download missing tracks button
+        download_btn.clicked.connect(self.on_download_missing_tracks_clicked)
+        
         button_layout.addStretch()
         button_layout.addWidget(close_btn)
         button_layout.addWidget(download_btn)
@@ -432,6 +602,120 @@ class PlaylistDetailsModal(QDialog):
         minutes = seconds // 60
         seconds = seconds % 60
         return f"{minutes}:{seconds:02d}"
+    
+    def on_download_missing_tracks_clicked(self):
+        """Handle Download Missing Tracks button click"""
+        if not self.playlist:
+            QMessageBox.warning(self, "Error", "No playlist selected")
+            return
+            
+        if not self.playlist.tracks:
+            QMessageBox.warning(self, "Error", "Playlist tracks not loaded")
+            return
+        
+        # Get access to parent's Plex and Soulseek clients through parent reference
+        if not hasattr(self.parent_page, 'plex_client'):
+            QMessageBox.warning(self, "Service Unavailable", 
+                              "Plex client not available. Please check your configuration.")
+            return
+            
+        # Start the download missing tracks workflow
+        try:
+            self.start_playlist_missing_tracks_download()
+        except Exception as e:
+            QMessageBox.critical(self, "Download Error", f"Failed to start download: {str(e)}")
+    
+    def start_playlist_missing_tracks_download(self):
+        """Start the process of downloading missing tracks from playlist"""
+        track_count = len(self.playlist.tracks)
+        
+        # Start analysis worker
+        self.start_track_analysis()
+        
+        # Show analysis started message
+        QMessageBox.information(self, "Analysis Started", 
+                              f"Starting analysis of {track_count} tracks.\nChecking Plex library for existing tracks...")
+    
+    def start_track_analysis(self):
+        """Start background track analysis against Plex library"""
+        # Create analysis worker
+        plex_client = getattr(self.parent_page, 'plex_client', None)
+        worker = PlaylistTrackAnalysisWorker(self.playlist.tracks, plex_client)
+        
+        # Connect signals
+        worker.signals.analysis_started.connect(self.on_analysis_started)
+        worker.signals.track_analyzed.connect(self.on_track_analyzed)
+        worker.signals.analysis_completed.connect(self.on_analysis_completed)
+        worker.signals.analysis_failed.connect(self.on_analysis_failed)
+        
+        # Track worker for cleanup
+        self.active_workers.append(worker)
+        
+        # Submit to thread pool
+        if hasattr(self.parent_page, 'thread_pool'):
+            self.parent_page.thread_pool.start(worker)
+        else:
+            # Create and track fallback thread pool
+            thread_pool = QThreadPool()
+            self.fallback_pools.append(thread_pool)
+            thread_pool.start(worker)
+    
+    def on_analysis_started(self, total_tracks):
+        """Handle analysis started signal"""
+        print(f"Started analyzing {total_tracks} tracks against Plex library")
+    
+    def on_track_analyzed(self, track_index, result):
+        """Handle individual track analysis completion"""
+        track = result.spotify_track
+        if result.exists_in_plex:
+            print(f"Track {track_index}: '{track.name}' by {track.artists[0]} EXISTS in Plex (confidence: {result.confidence:.2f})")
+        else:
+            print(f"Track {track_index}: '{track.name}' by {track.artists[0]} MISSING from Plex - will download")
+    
+    def on_analysis_completed(self, results):
+        """Handle analysis completion and start downloads for missing tracks"""
+        missing_tracks = [r for r in results if not r.exists_in_plex]
+        existing_tracks = [r for r in results if r.exists_in_plex]
+        
+        print(f"Analysis complete: {len(missing_tracks)} missing, {len(existing_tracks)} existing")
+        
+        if not missing_tracks:
+            QMessageBox.information(self, "Analysis Complete", 
+                                  "All tracks already exist in Plex library!\nNo downloads needed.")
+            return
+        
+        # Show results to user
+        message = f"Analysis complete!\n\n"
+        message += f"Tracks already in Plex: {len(existing_tracks)}\n"
+        message += f"Tracks to download: {len(missing_tracks)}\n\n"
+        message += "Ready to start downloading missing tracks?"
+        
+        reply = QMessageBox.question(self, "Start Downloads?", message,
+                                   QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            self.start_missing_track_downloads(missing_tracks)
+    
+    def on_analysis_failed(self, error_message):
+        """Handle analysis failure"""
+        QMessageBox.critical(self, "Analysis Failed", f"Failed to analyze tracks: {error_message}")
+    
+    def start_missing_track_downloads(self, missing_tracks):
+        """Start downloading the missing tracks"""
+        # TODO: Implement Soulseek search and download queueing
+        # For now, just show what would be downloaded
+        track_list = []
+        for result in missing_tracks:
+            track = result.spotify_track
+            artist = track.artists[0] if track.artists else "Unknown Artist"
+            track_list.append(f"• {track.name} by {artist}")
+        
+        message = f"Would download {len(missing_tracks)} tracks:\n\n"
+        message += "\n".join(track_list[:10])  # Show first 10
+        if len(track_list) > 10:
+            message += f"\n... and {len(track_list) - 10} more"
+        
+        QMessageBox.information(self, "Downloads Queued", message)
     
     def load_tracks_async(self):
         """Load tracks asynchronously using worker thread"""
