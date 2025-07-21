@@ -156,6 +156,73 @@ class PlaylistTrackAnalysisWorker(QRunnable):
             print(f"Error calculating track confidence: {e}")
             return 0.0
 
+class TrackDownloadWorkerSignals(QObject):
+    """Signals for track download worker"""
+    download_completed = pyqtSignal(int, int, str)  # download_index, track_index, download_id
+    download_failed = pyqtSignal(int, int, str)  # download_index, track_index, error_message
+
+class TrackDownloadWorker(QRunnable):
+    """Background worker to download individual tracks via Soulseek"""
+    
+    def __init__(self, spotify_track, soulseek_client, download_index, track_index):
+        super().__init__()
+        self.spotify_track = spotify_track
+        self.soulseek_client = soulseek_client
+        self.download_index = download_index
+        self.track_index = track_index
+        self.signals = TrackDownloadWorkerSignals()
+        self._cancelled = False
+    
+    def cancel(self):
+        """Cancel the download operation"""
+        self._cancelled = True
+    
+    def run(self):
+        """Download the track via Soulseek"""
+        try:
+            if self._cancelled or not self.soulseek_client:
+                return
+            
+            # Create search queries - try track name first, then artist + track
+            track_name = self.spotify_track.name
+            artist_name = self.spotify_track.artists[0] if self.spotify_track.artists else ""
+            
+            search_queries = []
+            search_queries.append(track_name)  # Try track name only first
+            if artist_name:
+                search_queries.append(f"{artist_name} {track_name}")  # Then artist + track
+            
+            download_id = None
+            
+            # Try each search query until we find a download
+            for query in search_queries:
+                if self._cancelled:
+                    return
+                    
+                print(f"🔍 Searching Soulseek: {query}")
+                
+                # Use the async method (need to run in sync context)
+                import asyncio
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+                try:
+                    download_id = loop.run_until_complete(
+                        self.soulseek_client.search_and_download_best(query)
+                    )
+                    if download_id:
+                        break  # Success - stop trying other queries
+                finally:
+                    loop.close()
+            
+            if download_id:
+                self.signals.download_completed.emit(self.download_index, self.track_index, download_id)
+            else:
+                self.signals.download_failed.emit(self.download_index, self.track_index, "No search results found")
+                
+        except Exception as e:
+            self.signals.download_failed.emit(self.download_index, self.track_index, str(e))
+
 class PlaylistLoaderThread(QThread):
     playlist_loaded = pyqtSignal(object)  # Single playlist
     loading_finished = pyqtSignal(int)  # Total count
@@ -1572,6 +1639,78 @@ class SyncPage(QWidget):
                 continue  # Keep the stretch spacer
             else:
                 self.playlist_layout.removeItem(item)
+    
+    def create_download_progress_bubble(self, progress_info):
+        """Create a progress bubble for ongoing downloads"""
+        if hasattr(self, 'progress_bubble'):
+            # Remove existing bubble
+            self.progress_bubble.deleteLater()
+        
+        # Create bubble widget
+        self.progress_bubble = QFrame(self)
+        self.progress_bubble.setFixedSize(300, 80)
+        self.progress_bubble.setStyleSheet("""
+            QFrame {
+                background-color: #1db954;
+                border: 2px solid #169441;
+                border-radius: 15px;
+                color: #000000;
+            }
+            QLabel {
+                color: #000000;
+                font-weight: bold;
+            }
+        """)
+        
+        # Create bubble layout
+        bubble_layout = QVBoxLayout(self.progress_bubble)
+        bubble_layout.setContentsMargins(10, 8, 10, 8)
+        bubble_layout.setSpacing(5)
+        
+        # Title
+        title = QLabel(f"📥 {progress_info['playlist_name']}")
+        title.setFont(QFont("Arial", 11, QFont.Weight.Bold))
+        
+        # Progress text
+        if progress_info['analysis_complete']:
+            progress_text = f"Downloading: {progress_info['download_progress']}/{progress_info['download_total']}"
+        else:
+            progress_text = f"Analyzing: {progress_info['analysis_progress']}/{progress_info['total_tracks']}"
+        
+        progress_label = QLabel(progress_text)
+        progress_label.setFont(QFont("Arial", 9))
+        
+        # Click to reopen
+        click_label = QLabel("Click to view details")
+        click_label.setFont(QFont("Arial", 8))
+        click_label.setStyleSheet("color: #666666;")
+        
+        bubble_layout.addWidget(title)
+        bubble_layout.addWidget(progress_label)
+        bubble_layout.addWidget(click_label)
+        
+        # Position bubble in top-right corner
+        self.progress_bubble.move(self.width() - 320, 20)
+        self.progress_bubble.show()
+        
+        # Make bubble clickable
+        self.progress_bubble.mousePressEvent = lambda event: self.reopen_download_modal(progress_info['modal_reference'])
+        
+        # Store reference for updates
+        self.progress_bubble.progress_info = progress_info
+    
+    def reopen_download_modal(self, modal_reference):
+        """Reopen the download modal from the progress bubble"""
+        if modal_reference and not modal_reference.isVisible():
+            # Remove bubble
+            if hasattr(self, 'progress_bubble'):
+                self.progress_bubble.deleteLater()
+                delattr(self, 'progress_bubble')
+            
+            # Show modal
+            modal_reference.show()
+            modal_reference.activateWindow()
+            modal_reference.raise_()
 
 
 class DownloadMissingTracksModal(QDialog):
@@ -2305,7 +2444,7 @@ class DownloadMissingTracksModal(QDialog):
         self.analysis_progress.setVisible(False)
         
     def start_download_progress(self):
-        """Start download progress tracking (simulated for now)"""
+        """Start actual download progress tracking"""
         print(f"🚀 Starting download progress for {len(self.missing_tracks)} tracks")
         
         # Show download progress bar
@@ -2313,10 +2452,140 @@ class DownloadMissingTracksModal(QDialog):
         self.download_progress.setMaximum(len(self.missing_tracks))
         self.download_progress.setValue(0)
         
-        # TODO: Implement actual download integration
-        # For now, simulate download progress
-        self.simulate_downloads()
+        # Start real downloads
+        self.start_soulseek_downloads()
         
+    def start_soulseek_downloads(self):
+        """Start real Soulseek downloads for missing tracks"""
+        if not self.missing_tracks:
+            return
+            
+        # Get Soulseek client from parent
+        soulseek_client = getattr(self.parent_page, 'soulseek_client', None)
+        if not soulseek_client:
+            QMessageBox.critical(self, "Soulseek Unavailable", 
+                               "Soulseek client not available. Please check your configuration.")
+            return
+        
+        # Create download worker
+        self.download_in_progress = True
+        self.current_download = 0
+        
+        # Start downloading first track
+        self.download_next_track()
+        
+    def download_next_track(self):
+        """Download the next missing track"""
+        if self.current_download >= len(self.missing_tracks):
+            # All downloads complete
+            self.on_all_downloads_complete()
+            return
+            
+        track_result = self.missing_tracks[self.current_download]
+        track = track_result.spotify_track
+        track_index = self.find_track_index(track)
+        
+        print(f"🎵 Downloading track {self.current_download + 1}/{len(self.missing_tracks)}: {track.name}")
+        
+        # Update table to show downloading status
+        if track_index is not None:
+            downloading_item = QTableWidgetItem("⏬ Downloading")
+            downloading_item.setFlags(downloading_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            downloading_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.track_table.setItem(track_index, 4, downloading_item)
+        
+        # Create download worker
+        soulseek_client = getattr(self.parent_page, 'soulseek_client', None)
+        worker = TrackDownloadWorker(track, soulseek_client, self.current_download, track_index)
+        worker.signals.download_completed.connect(self.on_track_download_complete)
+        worker.signals.download_failed.connect(self.on_track_download_failed)
+        
+        # Track worker for cleanup
+        self.active_workers.append(worker)
+        
+        # Submit to thread pool
+        if hasattr(self.parent_page, 'thread_pool'):
+            self.parent_page.thread_pool.start(worker)
+        else:
+            thread_pool = QThreadPool()
+            self.fallback_pools.append(thread_pool)
+            thread_pool.start(worker)
+            
+    def find_track_index(self, spotify_track):
+        """Find the table row index for a given Spotify track"""
+        for i, playlist_track in enumerate(self.playlist.tracks):
+            if (playlist_track.name == spotify_track.name and 
+                playlist_track.artists[0] == spotify_track.artists[0]):
+                return i
+        return None
+        
+    def on_track_download_complete(self, download_index, track_index, download_id):
+        """Handle successful track download"""
+        print(f"✅ Download {download_index + 1} completed: {download_id}")
+        
+        # Update table row
+        if track_index is not None:
+            downloaded_item = QTableWidgetItem("✅ Downloaded")
+            downloaded_item.setFlags(downloaded_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            downloaded_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.track_table.setItem(track_index, 4, downloaded_item)
+        
+        # Update progress
+        self.current_download += 1
+        self.download_progress.setValue(self.current_download)
+        
+        # Continue with next download
+        self.download_next_track()
+        
+    def on_track_download_failed(self, download_index, track_index, error_message):
+        """Handle failed track download"""
+        print(f"❌ Download {download_index + 1} failed: {error_message}")
+        
+        # Update table row  
+        if track_index is not None:
+            failed_item = QTableWidgetItem("❌ Failed")
+            failed_item.setFlags(failed_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            failed_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.track_table.setItem(track_index, 4, failed_item)
+        
+        # Update progress and continue
+        self.current_download += 1
+        self.download_progress.setValue(self.current_download)
+        
+        # Continue with next download
+        self.download_next_track()
+        
+    def on_all_downloads_complete(self):
+        """Handle completion of all downloads"""
+        self.download_in_progress = False
+        print("🎉 All downloads completed!")
+        
+        # Update button text
+        self.begin_search_btn.setText("Downloads Complete")
+        
+        QMessageBox.information(self, "Downloads Complete", 
+                              f"Completed downloading {len(self.missing_tracks)} missing tracks!")
+    
+    def create_progress_bubble(self):
+        """Create a progress bubble on the main sync page"""
+        if hasattr(self.parent_page, 'create_download_progress_bubble'):
+            # Calculate current progress
+            total_tracks = len(self.playlist.tracks)
+            completed_analysis = self.analysis_progress.value() if self.analysis_complete else 0
+            completed_downloads = self.download_progress.value() if self.download_in_progress else 0
+            
+            progress_info = {
+                'playlist_name': self.playlist.name,
+                'total_tracks': total_tracks,
+                'analysis_complete': self.analysis_complete,
+                'analysis_progress': completed_analysis,
+                'download_progress': completed_downloads,
+                'download_total': len(self.missing_tracks) if hasattr(self, 'missing_tracks') else 0,
+                'modal_reference': self  # Keep reference to reopen modal
+            }
+            
+            self.parent_page.create_download_progress_bubble(progress_info)
+
     def simulate_downloads(self):
         """Simulate download process (placeholder for real implementation)"""
         from PyQt6.QtCore import QTimer
@@ -2364,8 +2633,12 @@ class DownloadMissingTracksModal(QDialog):
         
     def on_close_clicked(self):
         """Handle Close button - closes modal without canceling operations"""
-        # Don't cancel operations, just close modal
-        self.reject()  # Close modal
+        # If operations are in progress, create progress bubble
+        if self.download_in_progress or not self.analysis_complete:
+            self.create_progress_bubble()
+        
+        # Close modal without canceling operations
+        self.reject()
         
     def cancel_operations(self):
         """Cancel any ongoing operations"""
