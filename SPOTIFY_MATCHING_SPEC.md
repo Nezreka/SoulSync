@@ -192,40 +192,46 @@ Playlist Track → Plex Check → (Missing) → Soulseek Search → Quality Filt
     - File operation error handling
     - API rate limiting considerations
 
-### 🆕 NEW FEATURE: DOWNLOAD MISSING TRACKS
+### 🆕 NEW FEATURE: ENHANCED DOWNLOAD MISSING TRACKS MODAL
 
-#### 📋 PLANNED IMPLEMENTATION STEPS:
+#### 📋 CURRENT IMPLEMENTATION STEPS:
 
-1. **✅ COMPLETED - Hook "Download Missing Tracks" Button**
-   - ✅ Connect button click to new playlist analysis workflow
+1. **✅ COMPLETED - Basic Infrastructure**
+   - ✅ Hook "Download Missing Tracks" button to workflow
    - ✅ Implement basic playlist track retrieval from Spotify
-   - ✅ Add basic progress indication for user feedback
-   - ✅ Added graceful Plex connection handling
+   - ✅ Create PlaylistTrackAnalysisWorker for Plex analysis
+   - ✅ Background worker with progress tracking and confidence scoring
+   - ✅ String normalization, similarity scoring, and duration matching
 
-2. **✅ COMPLETED - Plex Integration for Track Existence Checking**
-   - ✅ Implement intelligent track matching against Plex library
-   - ✅ Use confidence scoring (≥0.8) to determine existing tracks
-   - ✅ Handle Plex connection failures gracefully (download all tracks)
-   - ✅ Background worker with progress tracking
-   - ✅ String normalization and similarity scoring
-   - ✅ Duration matching with 10% tolerance
+2. **🔄 IN PROGRESS - Enhanced Modal Interface**
+   - Replace simple QMessageBox with sophisticated modal
+   - Modal closes sync window and opens new interface
+   - Dashboard with live counters: Total Tracks, Matched Tracks, To Download
+   - Enhanced track table with Matched and Downloaded status columns
+   - Dual progress bar system (Plex analysis + Download progress)
+   - Three-button system: Begin Search, Cancel, Close
 
-3. **🔄 IN PROGRESS - Soulseek Search Integration**
+3. **⏳ PENDING - Modal State Persistence**
+   - Progress bubble system when modal is closed during operations
+   - Clickable bubble to reopen modal and review progress
+   - Maintain operation state across modal open/close cycles
+
+4. **⏳ PENDING - Soulseek Search Integration**
    - Implement per-track search strategy (track name → artist + track name)
    - Leverage existing search filtering and quality selection
    - Use async operations for performance
 
-4. **⏳ PENDING - Download Queue Integration**
+5. **⏳ PENDING - Download Queue Integration**
    - Extend downloads.py with minimal custom path support
    - Queue missing tracks with proper folder paths
    - Integrate with existing download progress tracking
 
-5. **⏳ PENDING - Folder Organization**
+6. **⏳ PENDING - Folder Organization**
    - Apply matched download folder structure
    - Implement album vs single detection per track
    - Use Spotify metadata for accurate organization
 
-6. **⏳ PENDING - Error Handling & User Feedback**
+7. **⏳ PENDING - Error Handling & User Feedback**
    - Track failed matches for manual review
    - Provide real-time progress updates
    - Implement retry logic for API failures
