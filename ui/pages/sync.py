@@ -2696,6 +2696,10 @@ class DownloadMissingTracksModal(QDialog):
         self.completed_downloads = 0
         self.current_search_index = 0
         
+        # Track search attempts per track (max 5 attempts per song) 
+        self.track_attempts = {}  # track_index -> attempt_count
+        self.MAX_ATTEMPTS_PER_TRACK = 5
+        
         # Start searching tracks sequentially to avoid overwhelming the system
         # (searches can take up to 25 seconds each)
         self.start_next_track_search()
@@ -2909,6 +2913,22 @@ class DownloadMissingTracksModal(QDialog):
         print(f"🔄 Generated {len(fallback_queries)} fallback queries")
         return fallback_queries
     
+    def generate_and_try_fallback_queries(self, spotify_track, track_index, table_index):
+        """Generate and try fallback queries when initial queries fail"""
+        print(f"🔄 Generating fallback queries for track {track_index + 1} (attempt {self.track_attempts[track_index]}/{self.MAX_ATTEMPTS_PER_TRACK})")
+        
+        # Generate fallback queries using existing logic
+        original_query = spotify_track.name  # Start with track name for fallbacks
+        fallback_queries = self.generate_word_removal_fallbacks(original_query, spotify_track)
+        
+        if fallback_queries:
+            print(f"🔄 Trying {len(fallback_queries)} fallback queries...")
+            # Start trying the fallback queries
+            self.try_search_queries(fallback_queries, spotify_track, track_index, table_index, 0)
+        else:
+            print(f"❌ No fallback queries generated - marking track as failed")
+            self.on_search_failed(spotify_track, track_index, table_index)
+    
     def try_search_queries(self, queries, spotify_track, track_index, table_index, query_index):
         """Try search queries sequentially until we find good results"""
         # Check for cancellation
@@ -2916,17 +2936,39 @@ class DownloadMissingTracksModal(QDialog):
             print("🛑 Search queries cancelled by user")
             return
             
-        if query_index >= len(queries):
-            # All queries failed
+        # Check max attempts limit (5 total queries per track)
+        if not hasattr(self, 'track_attempts'):
+            self.track_attempts = {}
+        
+        current_attempts = self.track_attempts.get(track_index, 0)
+        if current_attempts >= self.MAX_ATTEMPTS_PER_TRACK:
+            print(f"⚠️ Max attempts ({self.MAX_ATTEMPTS_PER_TRACK}) reached for track {track_index + 1}")
+            if hasattr(self.parent_page, 'log_area'):
+                track_name = spotify_track.name
+                artist_name = spotify_track.artists[0] if spotify_track.artists else "Unknown Artist"
+                self.parent_page.log_area.append(f"   ⚠️ Max attempts reached: {track_name} by {artist_name}")
             self.on_search_failed(spotify_track, track_index, table_index)
+            return
+            
+        if query_index >= len(queries):
+            # All queries in this batch failed - increment attempts
+            self.track_attempts[track_index] = current_attempts + 1
+            print(f"🔄 Attempt {self.track_attempts[track_index]}/{self.MAX_ATTEMPTS_PER_TRACK} failed for track {track_index + 1}")
+            
+            # Try generating fallback queries for next attempt
+            if self.track_attempts[track_index] < self.MAX_ATTEMPTS_PER_TRACK:
+                self.generate_and_try_fallback_queries(spotify_track, track_index, table_index)
+            else:
+                self.on_search_failed(spotify_track, track_index, table_index)
             return
         
         current_query = queries[query_index]
-        print(f"🔍 Trying search query {query_index + 1}/{len(queries)}: '{current_query}'")
+        attempts_info = f"(Attempt {current_attempts + 1}/{self.MAX_ATTEMPTS_PER_TRACK})"
+        print(f"🔍 Trying search query {query_index + 1}/{len(queries)} {attempts_info}: '{current_query}'")
         
         # Update console with current search attempt
         if hasattr(self.parent_page, 'log_area'):
-            self.parent_page.log_area.append(f"   🔍 Query {query_index + 1}: '{current_query}'")
+            self.parent_page.log_area.append(f"   🔍 Query {query_index + 1} {attempts_info}: '{current_query}'")
         
         # Start search using downloads.py SearchThread
         from PyQt6.QtCore import QRunnable, QObject, pyqtSignal
@@ -3153,7 +3195,7 @@ class DownloadMissingTracksModal(QDialog):
                 result_duration = result.duration
             
             # INTELLIGENT TRACK MATCHING: Use advanced matching with confidence scoring
-            match_result = self.intelligent_track_match(track_name, result_title, result_filename)
+            match_result = self.intelligent_track_match(track_name, artist_name, result_title, result_artist, result_filename)
             
             # Only proceed if we have a reasonable match
             if not match_result['matched'] or match_result['confidence'] < 60:
@@ -3163,26 +3205,40 @@ class DownloadMissingTracksModal(QDialog):
             base_score = match_result['confidence']
             match_type = match_result['type']
             
-            if match_type == 'exact_title':
-                score += 150  # Highest priority for exact title match
+            # NEW STRICT MATCHING TYPES (user requirements)
+            if match_type == 'exact_title_artist':
+                score += 200  # HIGHEST priority for exact title + artist match (user requirement)
+                reasons.append(f"STRICT_title_artist_match({match_result['confidence']}%)")
+            elif match_type == 'exact_filename_artist':
+                score += 190  # Very high for exact filename + artist match
+                reasons.append(f"STRICT_filename_artist_match({match_result['confidence']}%)")
+            elif match_type == 'title_with_partial_artist':
+                score += 180  # High for title + partial artist
+                reasons.append(f"STRICT_title_partial_artist({match_result['confidence']}%)")
+            elif match_type == 'title_with_weak_artist':
+                score += 160  # Medium for title + weak artist
+                reasons.append(f"STRICT_title_weak_artist({match_result['confidence']}%)")
+            # LEGACY MATCH TYPES (for backwards compatibility)
+            elif match_type == 'exact_title':
+                score += 150  # Legacy: exact title match
                 reasons.append(f"track_exact_title({match_result['confidence']}%)")
             elif match_type == 'exact_filename':
-                score += 140  # Very high for exact filename match
+                score += 140  # Legacy: exact filename match
                 reasons.append(f"track_exact_filename({match_result['confidence']}%)")
             elif match_type == 'substring_title':
-                score += 130  # High for substring in title
+                score += 130  # Legacy: substring in title
                 reasons.append(f"track_substring_title({match_result['confidence']}%)")
             elif match_type == 'substring_filename':
-                score += 120  # High for substring in filename
+                score += 120  # Legacy: substring in filename
                 reasons.append(f"track_substring_filename({match_result['confidence']}%)")
             elif match_type == 'word_match_high':
-                score += 110  # Good for high word match
+                score += 110  # Legacy: high word match
                 reasons.append(f"track_word_match_high({match_result['confidence']}%)")
             elif match_type == 'word_match_medium':
-                score += 100  # Medium for medium word match
+                score += 100  # Legacy: medium word match
                 reasons.append(f"track_word_match_medium({match_result['confidence']}%)")
             elif match_type == 'fuzzy_match':
-                score += 90   # Lower for fuzzy match
+                score += 90   # Legacy: fuzzy match
                 reasons.append(f"track_fuzzy_match({match_result['confidence']}%)")
             else:
                 score += base_score  # Use confidence as base score
@@ -3314,7 +3370,7 @@ class DownloadMissingTracksModal(QDialog):
                 result_duration = result.duration
             
             # Use the same intelligent matching as select_best_match
-            match_result = self.intelligent_track_match(track_name, result_title, result_filename)
+            match_result = self.intelligent_track_match(track_name, artist_name, result_title, result_artist, result_filename)
             
             # Only include candidates that meet minimum match criteria
             if not match_result['matched'] or match_result['confidence'] < 60:
@@ -3396,6 +3452,126 @@ class DownloadMissingTracksModal(QDialog):
             reasons.append(quality_score['reason'])
         
         return score
+    
+    def intelligent_track_match(self, spotify_track_name, spotify_artist_name, result_title, result_artist, result_filename):
+        """
+        STRICT track matching as required by user:
+        1. Spotify playlist track title MUST be contained in slskd result filename/title
+        2. Secondary validation that extracted artist matches Spotify artist
+        
+        Example:
+        - Spotify: "Orbit Love" by "Virtual Mage"  
+        - Slskd result: "Virtual Mage - Orbit Love - 44hz.flac" ✅ MATCH (title + artist match)
+        - Slskd result: "Finley Quaye & William Orbit - Dice" ❌ NO MATCH (wrong track title)
+        """
+        
+        # Normalize inputs
+        spotify_title_norm = spotify_track_name.lower().strip()
+        spotify_artist_norm = spotify_artist_name.lower().strip()
+        result_title_norm = result_title.lower().strip() if result_title else ""
+        result_artist_norm = result_artist.lower().strip() if result_artist else ""
+        result_filename_norm = result_filename.lower().strip() if result_filename else ""
+        
+        print(f"🔍 STRICT MATCH CHECK:")
+        print(f"   📋 Spotify: '{spotify_title_norm}' by '{spotify_artist_norm}'")  
+        print(f"   📄 Result title: '{result_title_norm}' by '{result_artist_norm}'")
+        print(f"   📁 Result filename: '{result_filename_norm}'")
+        
+        # REQUIREMENT 1: Spotify track title MUST be contained EXACTLY as consecutive words in result
+        # This prevents "Astral Chill" from matching "Astral Beach is Chill"
+        import re
+        
+        # Create regex pattern for exact phrase matching (words must appear together in order)
+        # Escape special regex characters in the track name
+        escaped_title = re.escape(spotify_title_norm)
+        # Replace spaces in the escaped title with flexible whitespace/separator pattern
+        flexible_title_pattern = escaped_title.replace(r'\ ', r'[\s\-_\.]+')
+        # Add word boundaries to ensure we match complete words
+        exact_phrase_pattern = r'\b' + flexible_title_pattern + r'\b'
+        
+        title_in_result_title = bool(re.search(exact_phrase_pattern, result_title_norm, re.IGNORECASE)) if result_title_norm else False
+        title_in_result_filename = bool(re.search(exact_phrase_pattern, result_filename_norm, re.IGNORECASE)) if result_filename_norm else False
+        
+        if not title_in_result_title and not title_in_result_filename:
+            print(f"   ❌ STRICT FAIL: Spotify track '{spotify_title_norm}' NOT found in result")
+            return {
+                'matched': False,
+                'confidence': 0,
+                'type': 'no_title_match',
+                'reason': f"Spotify track '{spotify_track_name}' not found in result filename/title"
+            }
+        
+        print(f"   ✅ TITLE MATCH: Spotify track found in result")
+        
+        # REQUIREMENT 2: Secondary artist validation
+        artist_match_score = 0
+        artist_match_reason = ""
+        
+        # Check if Spotify artist is in result artist field
+        if result_artist_norm and spotify_artist_norm in result_artist_norm:
+            artist_match_score = 100
+            artist_match_reason = f"exact artist match in result.artist"
+            print(f"   ✅ ARTIST MATCH: '{spotify_artist_norm}' found in result artist '{result_artist_norm}'")
+        
+        # Check if Spotify artist is in result filename
+        elif spotify_artist_norm in result_filename_norm:
+            artist_match_score = 90
+            artist_match_reason = f"exact artist match in filename"
+            print(f"   ✅ ARTIST MATCH: '{spotify_artist_norm}' found in filename")
+        
+        # Check if Spotify artist is in result title
+        elif result_title_norm and spotify_artist_norm in result_title_norm:
+            artist_match_score = 85
+            artist_match_reason = f"exact artist match in result.title" 
+            print(f"   ✅ ARTIST MATCH: '{spotify_artist_norm}' found in result title")
+        
+        # Check for partial artist word matches (more lenient)
+        else:
+            spotify_artist_words = set(spotify_artist_norm.split())
+            result_text = f"{result_artist_norm} {result_filename_norm} {result_title_norm}"
+            result_words = set(result_text.split())
+            
+            common_words = spotify_artist_words.intersection(result_words)
+            if common_words and len(common_words) >= len(spotify_artist_words) * 0.5:  # At least 50% word match
+                artist_match_score = 70
+                artist_match_reason = f"partial artist word match: {common_words}"
+                print(f"   ⚠️ PARTIAL ARTIST MATCH: {common_words} from '{spotify_artist_norm}'")
+            else:
+                artist_match_score = 0
+                artist_match_reason = f"no artist match found"
+                print(f"   ❌ NO ARTIST MATCH: '{spotify_artist_norm}' not found in result")
+        
+        # Calculate final confidence based on both title and artist matching
+        title_confidence = 100 if title_in_result_title and title_in_result_filename else 90
+        final_confidence = min(95, (title_confidence + artist_match_score) / 2)
+        
+        # Determine match type based on strengths
+        if title_in_result_title and artist_match_score >= 85:
+            match_type = 'exact_title_artist'
+        elif title_in_result_filename and artist_match_score >= 85:
+            match_type = 'exact_filename_artist'
+        elif artist_match_score >= 70:
+            match_type = 'title_with_partial_artist'
+        elif artist_match_score > 0:
+            match_type = 'title_with_weak_artist'
+        else:
+            # Title matches but no artist match - this should be rejected as per user requirements
+            print(f"   ❌ FINAL REJECT: Title matches but artist doesn't - likely wrong song!")
+            return {
+                'matched': False,
+                'confidence': 0,
+                'type': 'title_only_no_artist',
+                'reason': f"Title found but artist mismatch - prevents wrong song downloads"
+            }
+            
+        print(f"   ✅ FINAL MATCH: confidence={final_confidence:.0f}%, type={match_type}")
+        
+        return {
+            'matched': True,
+            'confidence': int(final_confidence),
+            'type': match_type,
+            'reason': f"Title + {artist_match_reason}"
+        }
     
     def calculate_string_similarity(self, str1, str2):
         """Calculate similarity between two strings (0.0 to 1.0)"""
@@ -3540,57 +3716,6 @@ class DownloadMissingTracksModal(QDialog):
         
         return {'score': score, 'reason': reason}
     
-    def intelligent_track_match(self, spotify_track_name, result_title, result_filename):
-        """Intelligent track matching that handles various formatting patterns"""
-        import re
-        
-        # Normalize the Spotify track name
-        clean_spotify_name = self.normalize_track_title(spotify_track_name)
-        
-        # Create multiple versions of the result title/filename for matching
-        result_text = f"{result_title} {result_filename}".lower()
-        clean_result_title = self.normalize_track_title(result_title)
-        clean_result_filename = self.normalize_track_title(result_filename)
-        
-        # Matching strategies with different confidence levels
-        match_types = []
-        
-        # EXACT MATCH (highest confidence)
-        if clean_spotify_name == clean_result_title:
-            match_types.append(('exact_title', 100))
-        elif clean_spotify_name == clean_result_filename:
-            match_types.append(('exact_filename', 95))
-        
-        # SUBSTRING MATCH (high confidence)
-        elif clean_spotify_name in clean_result_title:
-            match_types.append(('substring_title', 90))
-        elif clean_spotify_name in clean_result_filename:
-            match_types.append(('substring_filename', 85))
-        
-        # WORD MATCH (medium confidence)
-        # Check if all important words from track name appear in result
-        spotify_words = set(clean_spotify_name.split())
-        result_words = set(clean_result_title.split()) | set(clean_result_filename.split())
-        
-        if spotify_words and len(spotify_words) > 0:
-            word_match_ratio = len(spotify_words.intersection(result_words)) / len(spotify_words)
-            if word_match_ratio >= 0.8:  # 80% of words match
-                match_types.append(('word_match_high', int(80 * word_match_ratio)))
-            elif word_match_ratio >= 0.6:  # 60% of words match
-                match_types.append(('word_match_medium', int(60 * word_match_ratio)))
-        
-        # FUZZY MATCH (lower confidence for complex cases)
-        # Handle cases like "Track Name - Artist Name [320kbps]"
-        simplified_result = self.simplify_complex_title(result_text)
-        if clean_spotify_name in simplified_result:
-            match_types.append(('fuzzy_match', 70))
-        
-        # Return the best match type found
-        if match_types:
-            best_match = max(match_types, key=lambda x: x[1])
-            return {'type': best_match[0], 'confidence': best_match[1], 'matched': True}
-        else:
-            return {'type': 'no_match', 'confidence': 0, 'matched': False}
     
     def normalize_track_title(self, title):
         """Normalize track title by removing common formatting and extra content"""
@@ -3686,11 +3811,13 @@ class DownloadMissingTracksModal(QDialog):
         track_name = spotify_track.name
         artist_name = spotify_track.artists[0] if spotify_track.artists else "Unknown Artist"
         
-        print(f"❌ All search strategies failed for: {track_name} by {artist_name}")
+        # Get attempt count
+        attempts_made = self.track_attempts.get(track_index, 0)
+        print(f"❌ All search strategies failed for: {track_name} by {artist_name} after {attempts_made} attempts")
         
         # Update console
         if hasattr(self.parent_page, 'log_area'):
-            self.parent_page.log_area.append(f"❌ No results found: {track_name} by {artist_name}")
+            self.parent_page.log_area.append(f"❌ Failed after {attempts_made} attempts: {track_name} by {artist_name}")
         
         # Update table to show failed status
         if table_index is not None:

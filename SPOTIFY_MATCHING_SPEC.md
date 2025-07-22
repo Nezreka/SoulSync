@@ -393,3 +393,12 @@ Playlist → Spotify Tracks → Plex Analysis → Track Table Updates → Missin
 2. **Add Spotify metadata lookup** for proper folder structure
 3. **Enhance track title parsing** for better matching accuracy
 4. **Implement confidence thresholds** for auto vs manual matching
+
+### 🤔 FUTURE CONSIDERATIONS (May Be Overkill):
+
+#### **Advanced Spotify API Validation**
+**Concept:** After finding slskd match, extract artist/title from result and re-query Spotify API to double-validate
+**Flow:** slskd result → extract metadata → Spotify API lookup → compare to original → approve/reject
+**Pros:** Ultimate validation accuracy, consistent with matched download system
+**Cons:** Extra API calls, rate limiting concerns, added complexity, slower performance
+**Decision:** Current strict title+artist matching may be sufficient - monitor for false positives
