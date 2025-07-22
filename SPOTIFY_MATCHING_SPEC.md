@@ -216,29 +216,29 @@ Playlist Track → Plex Check → (Missing) → Soulseek Search → Quality Filt
    - ✅ Real-time status updates on playlist buttons (🔍 Analyzing, ⏬ Downloading)
    - ✅ Maintain operation state across modal open/close cycles
 
-4. **⚠️ NEEDS FIXING - Soulseek Search Integration**
-   - ⚠️ **CRITICAL**: Must use existing downloads.py infrastructure for search/download
-   - ⚠️ **CRITICAL**: Implement smart search strategy for artist name issues
-   - ⚠️ **CRITICAL**: Use existing quality filtering and result matching logic
-   - ⚠️ **CRITICAL**: Integrate with existing download queue system
+4. **✅ COMPLETED - Soulseek Search Integration**
+   - ✅ **CRITICAL**: Using existing downloads.py infrastructure for search/download
+   - ✅ **CRITICAL**: Implemented smart search strategy for artist name issues
+   - ✅ **CRITICAL**: Using existing quality filtering and result matching logic
+   - ✅ **CRITICAL**: Integrated with existing download queue system
 
-5. **🔄 IN PROGRESS - Smart Search Strategy**
-   - **Primary Search**: Track name only (e.g., "humble" not "kendrick lamar humble")
-   - **Secondary Search**: Shortened artist + track (e.g., "kendrick humble" not "kendrick lamar humble")  
-   - **Matching Logic**: Use duration, artist name from slskd results for verification
-   - **Quality Selection**: Leverage existing downloads.py filtering and sorting
+5. **✅ COMPLETED - Smart Search Strategy**
+   - ✅ **Single-word tracks**: Track + full artist first (e.g., "Aether Virtual Mage")
+   - ✅ **Multi-word tracks**: Track name first (e.g., "Astral Chill")
+   - ✅ **Fallback strategies**: Shortened artist, first word, full artist combinations
+   - ✅ **Strict matching**: Exact track name containment required in results
 
-6. **🔄 IN PROGRESS - Downloads.py Integration**
-   - Use existing `SoulseekClient.search()` and filtering infrastructure
-   - Integrate with existing download queue management
-   - Apply matched download folder structure automatically
-   - Use existing file organization and metadata handling
+6. **✅ COMPLETED - Downloads.py Integration**
+   - ✅ Using existing `SoulseekClient.search()` and filtering infrastructure
+   - ✅ Integrated with existing download queue management
+   - ✅ Applied matched download folder structure automatically
+   - ✅ Using existing file organization and metadata handling
 
-7. **🔄 IN PROGRESS - Folder Organization & Matching**
-   - **Structure**: `ArtistName/ArtistName - AlbumName/Track.ext` (existing matched download logic)
-   - **Album Detection**: Use Spotify metadata to determine album vs single
-   - **Automatic Matching**: Treat as "matched downloads" with Spotify metadata
-   - **Quality Filtering**: Use existing downloads.py quality/format preferences
+7. **⚠️ NEEDS IMPROVEMENT - Advanced Matching & Quality Selection**
+   - ⚠️ **HIGH PRIORITY**: FLAC preference when multiple valid matches exist
+   - ⚠️ **HIGH PRIORITY**: More intelligent track title parsing (handle '-', '_', bitrate, etc.)
+   - ⚠️ **HIGH PRIORITY**: Spotify matching for proper folder naming structure
+   - ⚠️ **HIGH PRIORITY**: Confidence-based auto-matching with failed matches tracking
 
 ### ✅ COMPLETE WORKFLOW IMPLEMENTED:
 
@@ -283,3 +283,113 @@ Playlist → Spotify Tracks → Plex Analysis → Track Table Updates → Missin
 - Intelligent Plex deduplication preventing unnecessary downloads
 - Proper folder organization matching app standards
 - Robust error handling with graceful degradation to download all tracks
+
+---
+
+## 🚀 CURRENT STATE & NEXT PHASE IMPROVEMENTS
+
+### ✅ CURRENT WORKING STATE (What's Working Now):
+
+#### **Core Functionality Complete:**
+1. **Modal System**: Sophisticated UI with live counters, dual progress bars, track table
+2. **Plex Analysis**: Background thread analyzes tracks against Plex library
+3. **Smart Search**: Single-word tracks prioritize artist inclusion, multi-word tracks work well
+4. **Download Integration**: Uses existing downloads.py infrastructure properly
+5. **Progress Tracking**: Real-time updates, modal can be closed/reopened
+6. **Folder Structure**: Basic folder creation for downloaded tracks
+
+#### **Search Strategy Working:**
+- ✅ "Aether Virtual Mage" → finds correct Virtual Mage track
+- ✅ "Astral Chill" → finds correct track 
+- ✅ "Orbit Love" → finds correct track
+- ✅ Downloads integrate with existing queue system
+- ✅ Sequential searching prevents overwhelming slskd
+
+### ⚠️ CRITICAL IMPROVEMENTS NEEDED (Next Phase):
+
+#### **1. INTELLIGENT MATCHING SYSTEM**
+**Current Issue**: System is finding tracks but not always selecting the best quality/match
+**Requirements**:
+- **FLAC Priority**: When multiple valid matches exist, always choose FLAC over MP3/other formats
+- **Advanced Title Parsing**: Handle track names with extra characters like:
+  - `Artist - Track Name [320kbps]`
+  - `01. Track_Name - Artist_Name.flac`
+  - `Track Name (feat. Other Artist) - 2023 Remaster`
+- **Bitrate Recognition**: Parse and prefer higher quality files
+- **Version Filtering**: Avoid unwanted remixes, live versions, instrumentals unless specified
+
+#### **2. SPOTIFY INTEGRATION FOR FOLDER STRUCTURE**
+**Current Issue**: Downloads go to basic folders without proper Spotify metadata integration
+**Requirements**:
+- **Must work exactly like "matched downloads"** from the main downloads.py functionality
+- **Spotify API Lookup**: For each track, find exact Spotify match for metadata
+- **Album Detection**: Determine if track is part of album or is a single
+- **Proper Folder Structure**:
+  - **Singles**: `Transfer/ARTIST_NAME/ARTIST_NAME - SINGLE_NAME/SINGLE_NAME.flac`
+  - **Albums**: `Transfer/ARTIST_NAME/ARTIST_NAME - ALBUM_NAME/01 TRACK_NAME.flac`
+- **Cover Art**: Download album/artist artwork automatically
+- **Metadata Enhancement**: Update file tags with Spotify metadata
+
+#### **3. CONFIDENCE-BASED AUTO-MATCHING**
+**Current Issue**: No systematic tracking of failed matches or confidence thresholds
+**Requirements**:
+- **High Confidence Auto-Download**: Tracks with >80% confidence match automatically
+- **Medium Confidence Review**: 60-80% confidence tracks flagged for manual review
+- **Failed Matches List**: Maintain list of tracks that couldn't be matched reliably
+- **Manual Search Integration**: Allow manual search for failed tracks
+- **Success Rate Tracking**: Show user statistics on match success rates
+
+#### **4. ENHANCED QUALITY SELECTION ALGORITHM**
+**Current Scoring System Improvements Needed**:
+```python
+# Current basic scoring needs enhancement:
+# - Track name containment: 120-150 points
+# - Artist containment: 40-80 points  
+# - Duration matching: Up to 100 points
+
+# NEEDED: Advanced quality scoring:
+# - FLAC/Lossless: +50 points (higher than current +15)
+# - High bitrate: +30 points (320kbps vs 128kbps)
+# - Clean filename: +20 points (avoid [tags], underscores)
+# - Proper metadata: +15 points (correct artist/title fields)
+# - Album context: +10 points (part of complete album)
+```
+
+### 🔧 TECHNICAL IMPLEMENTATION ROADMAP:
+
+#### **Phase 1: FLAC Priority & Quality Enhancement** (Immediate)
+1. Update `select_best_match()` scoring in `sync.py:2955`
+2. Add FLAC detection and boost scoring significantly
+3. Implement bitrate parsing and quality preference
+4. Add file format detection improvements
+
+#### **Phase 2: Spotify Matching Integration** (High Priority)
+1. Add Spotify API lookup for each downloaded track
+2. Implement album vs single detection using existing matched download logic
+3. Create proper Transfer folder structure with Spotify metadata
+4. Integration with existing downloads.py matched download functions
+
+#### **Phase 3: Advanced Matching Intelligence** (Critical)
+1. Enhanced track title parsing with regex patterns
+2. Improved artist name normalization and matching
+3. Context-aware matching (album context, release year, etc.)
+4. Machine learning-style confidence scoring improvements
+
+#### **Phase 4: Failed Matches & Manual Review** (Important)
+1. Failed matches tracking and storage
+2. Manual search interface for problem tracks
+3. Success rate analytics and reporting
+4. User feedback integration for match quality
+
+### 📊 EXPECTED OUTCOMES:
+- **90%+ automatic match rate** for popular tracks
+- **FLAC preference** ensuring highest quality downloads
+- **Perfect folder organization** matching existing matched download standards
+- **Zero manual intervention** for high-confidence matches
+- **Clear manual review workflow** for edge cases
+
+### 🎯 CURRENT NEXT STEPS:
+1. **Update FLAC priority** in matching algorithm
+2. **Add Spotify metadata lookup** for proper folder structure
+3. **Enhance track title parsing** for better matching accuracy
+4. **Implement confidence thresholds** for auto vs manual matching
