@@ -2981,6 +2981,11 @@ class DownloadMissingTracksModal(QDialog):
             
             async def _do_search(self):
                 """Perform the actual search with proper await"""
+                # Check for cancellation before starting search
+                if self._stop_requested:
+                    print(f"🛑 Search cancelled before starting: {self.query}")
+                    return []
+                
                 return await self.soulseek_client.search(self.query)
             
             def _process_search_results(self, raw_results):
@@ -3020,6 +3025,11 @@ class DownloadMissingTracksModal(QDialog):
             )
         )
         
+        # CRITICAL: Track worker for cancellation
+        if not hasattr(self, 'active_workers'):
+            self.active_workers = []
+        self.active_workers.append(worker)
+        
         # Submit to thread pool
         if hasattr(self.parent_page, 'thread_pool'):
             self.parent_page.thread_pool.start(worker)
@@ -3030,6 +3040,11 @@ class DownloadMissingTracksModal(QDialog):
     
     def on_search_query_completed(self, results, queries, spotify_track, track_index, table_index, query_index, query):
         """Handle completion of a search query"""
+        # Check for cancellation
+        if hasattr(self, 'cancel_requested') and self.cancel_requested:
+            print("🛑 Search query completed after cancellation - ignoring results")
+            return
+            
         print(f"✅ Search query '{query}' returned {len(results)} results")
         
         # Update console with result count
@@ -3090,6 +3105,11 @@ class DownloadMissingTracksModal(QDialog):
     
     def on_search_query_failed(self, queries, spotify_track, track_index, table_index, query_index, query, error):
         """Handle search query failure"""
+        # Check for cancellation
+        if hasattr(self, 'cancel_requested') and self.cancel_requested:
+            print("🛑 Search query failed after cancellation - stopping retry")
+            return
+            
         print(f"❌ Search query '{query}' failed: {error}")
         
         # Try next query
@@ -3963,6 +3983,11 @@ class DownloadMissingTracksModal(QDialog):
         worker.signals.status_checked.connect(self.on_download_status_checked)
         worker.signals.check_failed.connect(self.on_download_status_check_failed)
         
+        # CRITICAL: Track worker for cancellation
+        if not hasattr(self, 'active_workers'):
+            self.active_workers = []
+        self.active_workers.append(worker)
+        
         # Submit to thread pool
         if hasattr(self.parent_page, 'thread_pool'):
             self.parent_page.thread_pool.start(worker)
@@ -4083,6 +4108,11 @@ class DownloadMissingTracksModal(QDialog):
         worker = SpotifyValidationWorker(spotify_client, original_track)
         worker.signals.validation_completed.connect(self.on_validation_completed)
         worker.signals.validation_failed.connect(self.on_validation_failed)
+        
+        # CRITICAL: Track worker for cancellation
+        if not hasattr(self, 'active_workers'):
+            self.active_workers = []
+        self.active_workers.append(worker)
         
         # Submit to thread pool
         if hasattr(self.parent_page, 'thread_pool'):
@@ -4495,43 +4525,89 @@ class DownloadMissingTracksModal(QDialog):
         
         # Cancel all active workers
         if hasattr(self, 'active_workers'):
+            print(f"🛑 Stopping {len(self.active_workers)} active workers...")
             for worker in self.active_workers:
                 if hasattr(worker, 'cancel'):
                     worker.cancel()
-                # Also try to set stop flag for our custom workers
+                # Set stop flag for our custom workers
                 if hasattr(worker, '_stop_requested'):
                     worker._stop_requested = True
+                    print(f"   🛑 Set stop flag for worker: {type(worker).__name__}")
+            self.active_workers.clear()
+            
+        # Terminate any fallback thread pools
+        if hasattr(self, 'fallback_pools'):
+            print(f"🛑 Waiting for {len(self.fallback_pools)} thread pools to finish...")
+            for pool in self.fallback_pools:
+                if pool:
+                    pool.waitForDone(5000)  # Wait up to 5 seconds
+            self.fallback_pools.clear()
                 
         # Stop all download monitoring timers
         if hasattr(self, 'download_timers'):
+            print(f"🛑 Stopping {len(self.download_timers)} download timers...")
             for timer in self.download_timers:
                 if timer.isActive():
                     timer.stop()
             self.download_timers.clear()
                 
         # Stop analysis/download timer
-        if hasattr(self, 'download_timer'):
-            self.download_timer.stop()
+        if hasattr(self, 'download_timer') and self.download_timer:
+            if self.download_timer.isActive():
+                print("🛑 Stopping main download timer...")
+                self.download_timer.stop()
         
         # Stop status update timer
-        if hasattr(self, 'status_update_timer'):
-            self.status_update_timer.stop()
+        if hasattr(self, 'status_update_timer') and self.status_update_timer:
+            if self.status_update_timer.isActive():
+                print("🛑 Stopping status update timer...")
+                self.status_update_timer.stop()
         
-        # Cancel any pending downloads via downloads.py infrastructure
+        # Cancel any pending downloads via SoulseekClient
         if hasattr(self, 'track_download_items'):
             for download_item, (track_index, table_index) in self.track_download_items.items():
                 try:
                     if hasattr(download_item, 'download_id') and download_item.download_id:
-                        # Try to cancel download
-                        print(f"🛑 Attempting to cancel download: {download_item.download_id}")
-                        # Note: Actual cancellation would need to be implemented in downloads.py
+                        # Cancel download via SoulseekClient
+                        print(f"🛑 Cancelling download: {download_item.download_id}")
+                        
+                        # Create async task to cancel download
+                        import asyncio
+                        try:
+                            loop = asyncio.new_event_loop()
+                            asyncio.set_event_loop(loop)
+                            cancel_result = loop.run_until_complete(
+                                self.parent_page.soulseek_client.cancel_download(download_item.download_id)
+                            )
+                            loop.close()
+                            print(f"   ✅ Download {download_item.download_id} cancellation: {cancel_result}")
+                        except Exception as async_error:
+                            print(f"   ❌ Async cancel error: {async_error}")
+                            
                 except Exception as e:
                     print(f"❌ Error cancelling download: {e}")
         
+        # Restore playlist button to normal state
+        if hasattr(self, 'playlist_item') and self.playlist_item:
+            self.playlist_item.hide_operation_status()
+        
         # Update main console
         if hasattr(self.parent_page, 'log_area'):
-            self.parent_page.log_area.append("🛑 Download operations cancelled by user")
+            self.parent_page.log_area.append("🛑 All download operations cancelled by user")
+            
+        print("✅ Cancellation complete - all operations stopped")
                 
+        # Reset all operation states
+        self.download_in_progress = False
+        self.analysis_complete = False
+        self.current_search_index = 0
+        self.successful_downloads = 0
+        self.completed_downloads = 0
+        
+        # Clear download tracking
+        if hasattr(self, 'track_download_items'):
+            self.track_download_items.clear()
+        
         # Reset button states - hide Cancel, show Begin Search
         self.cancel_btn.hide()
         self.begin_search_btn.show()
