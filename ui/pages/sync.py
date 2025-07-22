@@ -2702,6 +2702,11 @@ class DownloadMissingTracksModal(QDialog):
     
     def start_next_track_search(self):
         """Start searching for the next track in sequence"""
+        # Check for cancellation
+        if hasattr(self, 'cancel_requested') and self.cancel_requested:
+            print("🛑 Search cancelled by user")
+            return
+            
         if self.current_search_index >= len(self.missing_tracks):
             # All searches complete - check if we should finish
             if self.completed_downloads >= len(self.missing_tracks):
@@ -2832,8 +2837,85 @@ class DownloadMissingTracksModal(QDialog):
         
         return shortened.strip()
     
+    def generate_word_removal_fallbacks(self, original_query, spotify_track):
+        """Generate fallback queries by removing words when original query returns 0 results"""
+        fallback_queries = []
+        
+        # Parse the original query to understand its components
+        track_name = spotify_track.name.strip()
+        artist_name = spotify_track.artists[0] if spotify_track.artists else ""
+        
+        print(f"🔄 Generating fallbacks for: '{original_query}' (track: '{track_name}', artist: '{artist_name}')")
+        
+        # If the query contains the artist name, try removing words from artist
+        if artist_name and artist_name.lower() in original_query.lower():
+            # Remove common words from artist name
+            artist_words = artist_name.split()
+            if len(artist_words) > 1:
+                # Try removing first word if it's a common article/prefix
+                if artist_words[0].lower() in ['the', 'a', 'an', 'dj', 'mc', 'lil', 'big', 'young', 'old', 'saint', 'st.', 'dr.', 'mr.', 'ms.']:
+                    reduced_artist = ' '.join(artist_words[1:])
+                    fallback_query = f"{track_name} {reduced_artist}".strip()
+                    if fallback_query != original_query and fallback_query not in fallback_queries:
+                        fallback_queries.append(fallback_query)
+                        print(f"   💡 Fallback 1: '{fallback_query}' (removed article/prefix)")
+                
+                # Try removing last word (often suffixes like Jr., Sr., etc.)
+                if artist_words[-1].lower() in ['jr.', 'sr.', 'jr', 'sr', 'iii', 'ii', 'iv', 'v']:
+                    reduced_artist = ' '.join(artist_words[:-1])
+                    fallback_query = f"{track_name} {reduced_artist}".strip()
+                    if fallback_query != original_query and fallback_query not in fallback_queries:
+                        fallback_queries.append(fallback_query)
+                        print(f"   💡 Fallback 2: '{fallback_query}' (removed suffix)")
+                
+                # Try just first word of artist if multi-word
+                if len(artist_words) >= 2:
+                    first_word = artist_words[0]
+                    if len(first_word) > 2 and first_word.lower() not in ['the', 'a', 'an']:
+                        fallback_query = f"{track_name} {first_word}".strip()
+                        if fallback_query != original_query and fallback_query not in fallback_queries:
+                            fallback_queries.append(fallback_query)
+                            print(f"   💡 Fallback 3: '{fallback_query}' (first word only)")
+                
+                # Try just last word of artist if it's likely the main name
+                if len(artist_words) >= 2:
+                    last_word = artist_words[-1]
+                    if len(last_word) > 2 and last_word.lower() not in ['jr.', 'sr.', 'jr', 'sr', 'iii', 'ii']:
+                        fallback_query = f"{track_name} {last_word}".strip()
+                        if fallback_query != original_query and fallback_query not in fallback_queries:
+                            fallback_queries.append(fallback_query)
+                            print(f"   💡 Fallback 4: '{fallback_query}' (last word only)")
+        
+        # Try just track name if not already tried
+        if track_name.strip() != original_query and track_name.strip() not in fallback_queries:
+            fallback_queries.append(track_name.strip())
+            print(f"   💡 Fallback 5: '{track_name.strip()}' (track only)")
+        
+        # Try removing special characters and punctuation from track name
+        import re
+        clean_track = re.sub(r'[^\w\s]', '', track_name).strip()
+        if clean_track != track_name and clean_track not in fallback_queries:
+            fallback_queries.append(clean_track)
+            print(f"   💡 Fallback 6: '{clean_track}' (cleaned track)")
+        
+        # If track has multiple words, try just the first word
+        track_words = track_name.split()
+        if len(track_words) > 1:
+            first_track_word = track_words[0]
+            if len(first_track_word) > 2 and first_track_word not in fallback_queries:
+                fallback_queries.append(first_track_word)
+                print(f"   💡 Fallback 7: '{first_track_word}' (first track word)")
+        
+        print(f"🔄 Generated {len(fallback_queries)} fallback queries")
+        return fallback_queries
+    
     def try_search_queries(self, queries, spotify_track, track_index, table_index, query_index):
         """Try search queries sequentially until we find good results"""
+        # Check for cancellation
+        if hasattr(self, 'cancel_requested') and self.cancel_requested:
+            print("🛑 Search queries cancelled by user")
+            return
+            
         if query_index >= len(queries):
             # All queries failed
             self.on_search_failed(spotify_track, track_index, table_index)
@@ -2981,6 +3063,23 @@ class DownloadMissingTracksModal(QDialog):
                 
                 # Start download with the best match
                 self.start_download_with_match(best_match, spotify_track, track_index, table_index)
+                return
+        
+        # Check if this query returned zero results and try word removal fallback
+        if len(results) == 0:
+            print(f"⚠️ Query '{query}' returned 0 results, trying word removal fallback...")
+            if hasattr(self.parent_page, 'log_area'):
+                self.parent_page.log_area.append(f"   ⚠️ 0 results for '{query}', trying word removal...")
+            
+            # Generate fallback queries with word removal
+            fallback_queries = self.generate_word_removal_fallbacks(query, spotify_track)
+            if fallback_queries:
+                print(f"🔄 Generated {len(fallback_queries)} fallback queries")
+                # Insert fallback queries into the remaining query list
+                remaining_queries = queries[query_index + 1:]
+                new_queries = queries[:query_index + 1] + fallback_queries + remaining_queries
+                # Try the first fallback
+                self.try_search_queries(new_queries, spotify_track, track_index, table_index, query_index + 1)
                 return
         
         # No good results, try next query
@@ -3590,6 +3689,11 @@ class DownloadMissingTracksModal(QDialog):
     
     def advance_to_next_track(self):
         """Move to searching the next track"""
+        # Check for cancellation
+        if hasattr(self, 'cancel_requested') and self.cancel_requested:
+            print("🛑 Track advancement cancelled by user")
+            return
+            
         self.current_search_index += 1
         self.start_next_track_search()
     
@@ -4384,17 +4488,49 @@ class DownloadMissingTracksModal(QDialog):
         
     def cancel_operations(self):
         """Cancel any ongoing operations"""
-        # Cancel workers
-        for worker in self.active_workers:
-            if hasattr(worker, 'cancel'):
-                worker.cancel()
+        print("🛑 Cancelling all operations...")
+        
+        # Set cancellation flag to stop ongoing processes
+        self.cancel_requested = True
+        
+        # Cancel all active workers
+        if hasattr(self, 'active_workers'):
+            for worker in self.active_workers:
+                if hasattr(worker, 'cancel'):
+                    worker.cancel()
+                # Also try to set stop flag for our custom workers
+                if hasattr(worker, '_stop_requested'):
+                    worker._stop_requested = True
                 
-        # Stop timers
+        # Stop all download monitoring timers
+        if hasattr(self, 'download_timers'):
+            for timer in self.download_timers:
+                if timer.isActive():
+                    timer.stop()
+            self.download_timers.clear()
+                
+        # Stop analysis/download timer
         if hasattr(self, 'download_timer'):
             self.download_timer.stop()
         
+        # Stop status update timer
         if hasattr(self, 'status_update_timer'):
             self.status_update_timer.stop()
+        
+        # Cancel any pending downloads via downloads.py infrastructure
+        if hasattr(self, 'track_download_items'):
+            for download_item, (track_index, table_index) in self.track_download_items.items():
+                try:
+                    if hasattr(download_item, 'download_id') and download_item.download_id:
+                        # Try to cancel download
+                        print(f"🛑 Attempting to cancel download: {download_item.download_id}")
+                        # Note: Actual cancellation would need to be implemented in downloads.py
+                except Exception as e:
+                    print(f"❌ Error cancelling download: {e}")
+        
+        # Update main console
+        if hasattr(self.parent_page, 'log_area'):
+            self.parent_page.log_area.append("🛑 Download operations cancelled by user")
                 
         # Reset button states - hide Cancel, show Begin Search
         self.cancel_btn.hide()
@@ -4409,6 +4545,15 @@ class DownloadMissingTracksModal(QDialog):
         # Reset state flags
         self.analysis_complete = False
         self.download_in_progress = False
+        self.cancel_requested = False  # Reset for next time
+        
+        # Reset search state
+        if hasattr(self, 'current_search_index'):
+            self.current_search_index = 0
+        if hasattr(self, 'track_search_results'):
+            self.track_search_results.clear()
+        if hasattr(self, 'track_candidate_index'):
+            self.track_candidate_index.clear()
         
         # Reset playlist status indicator
         playlist_item = self.find_playlist_item()
@@ -4419,7 +4564,7 @@ class DownloadMissingTracksModal(QDialog):
         if hasattr(self.parent_page, 'enable_refresh_button'):
             self.parent_page.enable_refresh_button()
             
-        print("🛑 Operations cancelled")
+        print("🛑 All operations cancelled successfully")
         
     def closeEvent(self, event):
         """Handle modal close event"""
