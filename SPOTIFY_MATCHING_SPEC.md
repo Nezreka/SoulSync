@@ -216,25 +216,29 @@ Playlist Track → Plex Check → (Missing) → Soulseek Search → Quality Filt
    - ✅ Real-time status updates on playlist buttons (🔍 Analyzing, ⏬ Downloading)
    - ✅ Maintain operation state across modal open/close cycles
 
-4. **✅ COMPLETED - Soulseek Search Integration**
-   - ✅ Implement per-track search strategy (track name → artist + track name)
-   - ✅ Leverage existing search filtering and quality selection
-   - ✅ Use async operations for performance
+4. **⚠️ NEEDS FIXING - Soulseek Search Integration**
+   - ⚠️ **CRITICAL**: Must use existing downloads.py infrastructure for search/download
+   - ⚠️ **CRITICAL**: Implement smart search strategy for artist name issues
+   - ⚠️ **CRITICAL**: Use existing quality filtering and result matching logic
+   - ⚠️ **CRITICAL**: Integrate with existing download queue system
 
-5. **⏳ PENDING - Download Queue Integration**
-   - Extend downloads.py with minimal custom path support
-   - Queue missing tracks with proper folder paths
-   - Integrate with existing download progress tracking
+5. **🔄 IN PROGRESS - Smart Search Strategy**
+   - **Primary Search**: Track name only (e.g., "humble" not "kendrick lamar humble")
+   - **Secondary Search**: Shortened artist + track (e.g., "kendrick humble" not "kendrick lamar humble")  
+   - **Matching Logic**: Use duration, artist name from slskd results for verification
+   - **Quality Selection**: Leverage existing downloads.py filtering and sorting
 
-6. **⏳ PENDING - Folder Organization**
-   - Apply matched download folder structure
-   - Implement album vs single detection per track
-   - Use Spotify metadata for accurate organization
+6. **🔄 IN PROGRESS - Downloads.py Integration**
+   - Use existing `SoulseekClient.search()` and filtering infrastructure
+   - Integrate with existing download queue management
+   - Apply matched download folder structure automatically
+   - Use existing file organization and metadata handling
 
-7. **⏳ PENDING - Error Handling & User Feedback**
-   - Track failed matches for manual review
-   - Provide real-time progress updates
-   - Implement retry logic for API failures
+7. **🔄 IN PROGRESS - Folder Organization & Matching**
+   - **Structure**: `ArtistName/ArtistName - AlbumName/Track.ext` (existing matched download logic)
+   - **Album Detection**: Use Spotify metadata to determine album vs single
+   - **Automatic Matching**: Treat as "matched downloads" with Spotify metadata
+   - **Quality Filtering**: Use existing downloads.py quality/format preferences
 
 ### ✅ COMPLETE WORKFLOW IMPLEMENTED:
 

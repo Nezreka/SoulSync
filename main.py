@@ -99,8 +99,8 @@ class MainWindow(QMainWindow):
         
         # Create and add pages
         self.dashboard_page = DashboardPage()
-        self.sync_page = SyncPage(self.spotify_client, self.plex_client, self.soulseek_client)
         self.downloads_page = DownloadsPage(self.soulseek_client)
+        self.sync_page = SyncPage(self.spotify_client, self.plex_client, self.soulseek_client, self.downloads_page)
         self.artists_page = ArtistsPage()
         self.settings_page = SettingsPage()
         
