@@ -3016,25 +3016,41 @@ class DownloadMissingTracksModal(QDialog):
             if hasattr(result, 'duration') and result.duration:
                 result_duration = result.duration
             
-            # STRICT REQUIREMENT: Track title must be contained exactly in filename or title
-            # This is now a mandatory requirement - no match without this
-            track_contained = False
+            # INTELLIGENT TRACK MATCHING: Use advanced matching with confidence scoring
+            match_result = self.intelligent_track_match(track_name, result_title, result_filename)
             
-            # Check if full track name is contained in the result title
-            if track_name in result_title:
-                score += 150  # High score for exact containment in title
-                reasons.append("track_exact_in_title")
-                track_contained = True
-            
-            # Check if full track name is contained in the filename
-            elif track_name in result_filename:
-                score += 120  # High score for exact containment in filename
-                reasons.append("track_exact_in_filename")
-                track_contained = True
-            
-            # If track name is not contained exactly, reject this result immediately
-            if not track_contained:
+            # Only proceed if we have a reasonable match
+            if not match_result['matched'] or match_result['confidence'] < 60:
                 continue  # Skip this result entirely
+            
+            # Score based on match confidence and type
+            base_score = match_result['confidence']
+            match_type = match_result['type']
+            
+            if match_type == 'exact_title':
+                score += 150  # Highest priority for exact title match
+                reasons.append(f"track_exact_title({match_result['confidence']}%)")
+            elif match_type == 'exact_filename':
+                score += 140  # Very high for exact filename match
+                reasons.append(f"track_exact_filename({match_result['confidence']}%)")
+            elif match_type == 'substring_title':
+                score += 130  # High for substring in title
+                reasons.append(f"track_substring_title({match_result['confidence']}%)")
+            elif match_type == 'substring_filename':
+                score += 120  # High for substring in filename
+                reasons.append(f"track_substring_filename({match_result['confidence']}%)")
+            elif match_type == 'word_match_high':
+                score += 110  # Good for high word match
+                reasons.append(f"track_word_match_high({match_result['confidence']}%)")
+            elif match_type == 'word_match_medium':
+                score += 100  # Medium for medium word match
+                reasons.append(f"track_word_match_medium({match_result['confidence']}%)")
+            elif match_type == 'fuzzy_match':
+                score += 90   # Lower for fuzzy match
+                reasons.append(f"track_fuzzy_match({match_result['confidence']}%)")
+            else:
+                score += base_score  # Use confidence as base score
+                reasons.append(f"track_match_{match_type}({match_result['confidence']}%)")
             
             # BONUS: Artist name contained (extra points)
             artist_contained = False
@@ -3077,15 +3093,11 @@ class DownloadMissingTracksModal(QDialog):
                     score -= 20
                     reasons.append(f"duration_mismatch({duration_diff:.1f}s)")
             
-            # Quality preference: FLAC > other lossless > high bitrate > low bitrate
-            if hasattr(result, 'quality') and result.quality:
-                quality_lower = result.quality.lower()
-                if quality_lower in ['flac', 'alac', 'ape']:
-                    score += 15  # Lossless bonus (lower priority than matching)
-                    reasons.append(f"quality_lossless({quality_lower})")
-                elif 'mp3' in quality_lower or 'aac' in quality_lower:
-                    score += 5  # Standard formats
-                    reasons.append(f"quality_standard({quality_lower})")
+            # ENHANCED QUALITY PREFERENCE: Heavily prioritize FLAC and high quality
+            quality_score = self.calculate_quality_score(result, result_filename)
+            score += quality_score['score']
+            if quality_score['reason']:
+                reasons.append(quality_score['reason'])
             
             # File size reasonableness (avoid tiny or corrupted files)
             if hasattr(result, 'size') and result.size:
@@ -3155,6 +3167,243 @@ class DownloadMissingTracksModal(QDialog):
         union = words1.union(words2)
         
         return len(intersection) / len(union) if union else 0.0
+    
+    def calculate_quality_score(self, result, filename):
+        """Calculate enhanced quality score prioritizing FLAC and high bitrates"""
+        score = 0
+        reason = ""
+        
+        # Get file format from multiple sources
+        file_format = ""
+        bitrate = 0
+        
+        # Check quality field first
+        if hasattr(result, 'quality') and result.quality:
+            quality_lower = result.quality.lower()
+            file_format = quality_lower
+        
+        # Also check filename for format clues
+        filename_lower = filename.lower() if filename else ""
+        
+        # Extract format from filename if not found in quality field
+        if not file_format:
+            if '.flac' in filename_lower:
+                file_format = 'flac'
+            elif '.alac' in filename_lower or '.m4a' in filename_lower:
+                file_format = 'alac'
+            elif '.ape' in filename_lower:
+                file_format = 'ape'
+            elif '.mp3' in filename_lower:
+                file_format = 'mp3'
+            elif '.aac' in filename_lower:
+                file_format = 'aac'
+            elif '.ogg' in filename_lower or '.oga' in filename_lower:
+                file_format = 'ogg'
+        
+        # Extract bitrate from filename (common patterns)
+        import re
+        bitrate_match = re.search(r'(\d{2,4})\s*k?bps?', filename_lower)
+        if not bitrate_match:
+            bitrate_match = re.search(r'\[(\d{2,4})k?\]', filename_lower)
+        if not bitrate_match:
+            bitrate_match = re.search(r'(\d{2,4})k(?![a-z])', filename_lower)  # 320k but not 320kb
+        
+        if bitrate_match:
+            try:
+                bitrate = int(bitrate_match.group(1))
+            except:
+                bitrate = 0
+        
+        # PRIORITY 1: FLAC gets highest bonus (user requirement)
+        if file_format == 'flac' or 'flac' in filename_lower:
+            score += 50  # Significantly higher than old +15
+            reason = f"format_flac_priority"
+            
+            # Extra bonus for high quality FLAC indicators
+            if any(indicator in filename_lower for indicator in ['24bit', '24-bit', '96khz', '192khz', 'hi-res']):
+                score += 20
+                reason += "_hires"
+                
+        # PRIORITY 2: Other lossless formats
+        elif file_format in ['alac', 'ape']:
+            score += 35
+            reason = f"format_lossless_{file_format}"
+            
+        # PRIORITY 3: High bitrate MP3/AAC (320kbps)
+        elif file_format in ['mp3', 'aac']:
+            if bitrate >= 320:
+                score += 25
+                reason = f"format_mp3_320kbps"
+            elif bitrate >= 256:
+                score += 15
+                reason = f"format_mp3_256kbps"
+            elif bitrate >= 192:
+                score += 10
+                reason = f"format_mp3_192kbps"
+            elif bitrate >= 128:
+                score += 5
+                reason = f"format_mp3_128kbps"
+            else:
+                score += 5  # Unknown bitrate MP3
+                reason = f"format_mp3_unknown"
+                
+        # PRIORITY 4: Other formats
+        elif file_format == 'ogg':
+            score += 8
+            reason = "format_ogg"
+        else:
+            # Unknown format - give minimal points
+            score += 2
+            reason = "format_unknown"
+        
+        # BONUS: Clean filename (no brackets, underscores, or messy formatting)
+        clean_filename_score = 0
+        if filename_lower:
+            # Penalty for messy filenames
+            underscore_count = filename_lower.count('_')
+            if underscore_count > 3:  # Too many underscores
+                clean_filename_score -= 5
+            elif '[' in filename_lower and ']' in filename_lower:
+                # Some brackets are OK (like [FLAC]) but too many is messy
+                bracket_count = filename_lower.count('[') + filename_lower.count(']')
+                if bracket_count > 4:
+                    clean_filename_score -= 3
+            
+            # Bonus for clean formatting
+            if not any(char in filename_lower for char in ['_', '@', '#', '$', '%']):
+                clean_filename_score += 10
+                if reason:
+                    reason += "_clean"
+        
+        score += clean_filename_score
+        
+        # BONUS: Album context detection
+        if any(indicator in filename_lower for indicator in ['album', 'discography', 'collection']):
+            score += 5
+            if reason:
+                reason += "_album_context"
+        
+        return {'score': score, 'reason': reason}
+    
+    def intelligent_track_match(self, spotify_track_name, result_title, result_filename):
+        """Intelligent track matching that handles various formatting patterns"""
+        import re
+        
+        # Normalize the Spotify track name
+        clean_spotify_name = self.normalize_track_title(spotify_track_name)
+        
+        # Create multiple versions of the result title/filename for matching
+        result_text = f"{result_title} {result_filename}".lower()
+        clean_result_title = self.normalize_track_title(result_title)
+        clean_result_filename = self.normalize_track_title(result_filename)
+        
+        # Matching strategies with different confidence levels
+        match_types = []
+        
+        # EXACT MATCH (highest confidence)
+        if clean_spotify_name == clean_result_title:
+            match_types.append(('exact_title', 100))
+        elif clean_spotify_name == clean_result_filename:
+            match_types.append(('exact_filename', 95))
+        
+        # SUBSTRING MATCH (high confidence)
+        elif clean_spotify_name in clean_result_title:
+            match_types.append(('substring_title', 90))
+        elif clean_spotify_name in clean_result_filename:
+            match_types.append(('substring_filename', 85))
+        
+        # WORD MATCH (medium confidence)
+        # Check if all important words from track name appear in result
+        spotify_words = set(clean_spotify_name.split())
+        result_words = set(clean_result_title.split()) | set(clean_result_filename.split())
+        
+        if spotify_words and len(spotify_words) > 0:
+            word_match_ratio = len(spotify_words.intersection(result_words)) / len(spotify_words)
+            if word_match_ratio >= 0.8:  # 80% of words match
+                match_types.append(('word_match_high', int(80 * word_match_ratio)))
+            elif word_match_ratio >= 0.6:  # 60% of words match
+                match_types.append(('word_match_medium', int(60 * word_match_ratio)))
+        
+        # FUZZY MATCH (lower confidence for complex cases)
+        # Handle cases like "Track Name - Artist Name [320kbps]"
+        simplified_result = self.simplify_complex_title(result_text)
+        if clean_spotify_name in simplified_result:
+            match_types.append(('fuzzy_match', 70))
+        
+        # Return the best match type found
+        if match_types:
+            best_match = max(match_types, key=lambda x: x[1])
+            return {'type': best_match[0], 'confidence': best_match[1], 'matched': True}
+        else:
+            return {'type': 'no_match', 'confidence': 0, 'matched': False}
+    
+    def normalize_track_title(self, title):
+        """Normalize track title by removing common formatting and extra content"""
+        if not title:
+            return ""
+        
+        import re
+        
+        # Convert to lowercase and strip
+        normalized = title.lower().strip()
+        
+        # Remove file extensions
+        normalized = re.sub(r'\.(flac|mp3|aac|alac|ape|ogg|m4a)$', '', normalized)
+        
+        # Remove common bracketed content (but preserve essential parts)
+        # Remove quality indicators: [320kbps], [FLAC], [24bit], etc.
+        normalized = re.sub(r'\[(320|256|192|128)k?bps?\]', '', normalized)
+        normalized = re.sub(r'\[flac\]', '', normalized)
+        normalized = re.sub(r'\[24bit\]', '', normalized)
+        normalized = re.sub(r'\[hi-?res\]', '', normalized)
+        
+        # Remove track numbers: "01. ", "1-", "01 - "
+        normalized = re.sub(r'^(\d{1,2}[-.\s]*)', '', normalized)
+        
+        # Remove common separators between track and artist when they appear together
+        # "Track Name - Artist Name" -> focus on track name part
+        if ' - ' in normalized:
+            parts = normalized.split(' - ')
+            # Usually the first part is the track name
+            if len(parts) >= 2:
+                normalized = parts[0].strip()
+        
+        # Remove featuring info: "(feat. Artist)", "ft. Artist", etc.
+        normalized = re.sub(r'\(feat\.?[^)]*\)', '', normalized)
+        normalized = re.sub(r'\bft\.?\s+[^,\s]+', '', normalized)
+        normalized = re.sub(r'\bfeat\.?\s+[^,\s]+', '', normalized)
+        
+        # Remove common extra content
+        normalized = re.sub(r'\(remix\)', '', normalized)
+        normalized = re.sub(r'\(remaster\)', '', normalized)
+        normalized = re.sub(r'\(official[^)]*\)', '', normalized)
+        
+        # Replace multiple separators with spaces
+        normalized = re.sub(r'[_\-\.\s]+', ' ', normalized)
+        
+        # Remove extra whitespace
+        normalized = re.sub(r'\s+', ' ', normalized).strip()
+        
+        return normalized
+    
+    def simplify_complex_title(self, text):
+        """Simplify complex titles that may have artist names, quality info, etc."""
+        import re
+        
+        # Remove everything in brackets and parentheses
+        simplified = re.sub(r'\[[^\]]*\]', '', text)
+        simplified = re.sub(r'\([^)]*\)', '', text)
+        
+        # Remove common quality indicators
+        simplified = re.sub(r'\b(320|256|192|128)k?bps?\b', '', simplified)
+        simplified = re.sub(r'\bflac\b', '', simplified)
+        simplified = re.sub(r'\bmp3\b', '', simplified)
+        
+        # Remove excessive punctuation
+        simplified = re.sub(r'[_\-\.\s]+', ' ', simplified)
+        simplified = re.sub(r'\s+', ' ', simplified).strip()
+        
+        return simplified
     
     def start_download_with_match(self, search_result, spotify_track, track_index, table_index):
         """Start download using the matched search result and downloads.py infrastructure"""
@@ -3246,8 +3495,88 @@ class DownloadMissingTracksModal(QDialog):
         
         return search_result
     
+    def create_spotify_based_search_result(self, original_search_result, spotify_track, spotify_artist):
+        """Create a search result using Spotify metadata instead of Soulseek metadata"""
+        from dataclasses import dataclass
+        
+        # Debug: Check what type of search result we received
+        print(f"🔍 Debug - original_search_result type: {type(original_search_result)}")
+        print(f"🔍 Debug - original_search_result attributes: {dir(original_search_result)}")
+        if hasattr(original_search_result, 'filename'):
+            print(f"🔍 Debug - filename: {original_search_result.filename}")
+        if hasattr(original_search_result, 'user'):
+            print(f"🔍 Debug - user: {original_search_result.user}")
+        else:
+            print(f"🔍 Debug - NO USER ATTRIBUTE FOUND")
+        
+        @dataclass
+        class SpotifyBasedSearchResult:
+            # Soulseek download details - using expected field names
+            filename: str
+            username: str      # downloads.py expects 'username' not 'user'
+            size: int
+            bitrate: int       # downloads.py expects 'bitrate' not 'bit_rate'
+            sample_rate: int
+            duration: int
+            quality: str       # downloads.py expects 'quality' not 'format'
+            
+            # Spotify metadata for organization
+            title: str
+            artist: str
+            album: str
+            track_number: int = 0
+            
+            # Add compatibility properties for any code expecting old names
+            @property
+            def user(self):
+                return self.username
+                
+            @property 
+            def bit_rate(self):
+                return self.bitrate
+                
+            @property
+            def format(self):
+                return self.quality
+            
+        # Get Spotify metadata 
+        spotify_title = spotify_track.name
+        spotify_artist_name = spotify_artist.name
+        spotify_album = getattr(spotify_track, 'album', 'Unknown Album')
+        spotify_duration = int(spotify_track.duration_ms / 1000) if hasattr(spotify_track, 'duration_ms') else 0
+        
+        # Determine track number if this is part of an album
+        track_number = getattr(spotify_track, 'track_number', 0) if hasattr(spotify_track, 'track_number') else 0
+        
+        # Create hybrid result - Soulseek download data + Spotify metadata
+        # Map TrackResult attributes to expected format
+        spotify_based_result = SpotifyBasedSearchResult(
+            # Soulseek download details (keep for actual download) - map attributes correctly
+            filename=getattr(original_search_result, 'filename', f"{spotify_title}.flac"),
+            username=getattr(original_search_result, 'username', 'unknown_user'),  # TrackResult uses 'username'
+            size=getattr(original_search_result, 'size', 50000000),
+            bitrate=getattr(original_search_result, 'bitrate', 1411),  # TrackResult uses 'bitrate'
+            sample_rate=getattr(original_search_result, 'sample_rate', 44100),
+            duration=getattr(original_search_result, 'duration', spotify_duration),
+            quality=getattr(original_search_result, 'quality', 'flac'),  # TrackResult uses 'quality'
+            
+            # Spotify metadata (used for folder organization)
+            title=spotify_title,
+            artist=spotify_artist_name,
+            album=spotify_album,
+            track_number=track_number
+        )
+        
+        print(f"🎯 Created Spotify-based search result:")
+        print(f"   📁 Title: {spotify_title} (Spotify)")
+        print(f"   🎤 Artist: {spotify_artist_name} (Spotify)")  
+        print(f"   💿 Album: {spotify_album} (Spotify)")
+        print(f"   📄 File: {original_search_result.filename} (Soulseek)")
+        
+        return spotify_based_result
+    
     def start_matched_download_via_infrastructure(self, search_result, track_index, table_index):
-        """Start matched download using downloads.py infrastructure with automatic artist matching"""
+        """Start matched download using downloads.py infrastructure with Spotify metadata"""
         try:
             # Get the Spotify track for artist info
             track_result = self.missing_tracks[track_index]
@@ -3273,9 +3602,13 @@ class DownloadMissingTracksModal(QDialog):
             
             artist = SpotifyArtist(name=artist_name)
             
-            # Call downloads.py infrastructure directly with auto-matched artist
-            # This bypasses the SpotifyMatchingModal since we already have the artist info
-            download_item = self.downloads_page._start_download_with_artist(search_result, artist)
+            # CREATE SPOTIFY-BASED SEARCH RESULT instead of using Soulseek metadata
+            # This ensures folder organization uses Spotify metadata, not Soulseek metadata
+            spotify_based_result = self.create_spotify_based_search_result(search_result, spotify_track, artist)
+            
+            # Call downloads.py infrastructure with Spotify-based search result
+            # This ensures proper folder organization using Spotify metadata
+            download_item = self.downloads_page._start_download_with_artist(spotify_based_result, artist)
             
             if download_item:
                 print(f"✅ Successfully queued download for: {spotify_track.name}")
