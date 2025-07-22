@@ -2955,13 +2955,30 @@ class DownloadMissingTracksModal(QDialog):
             self.parent_page.log_area.append(f"   ✅ Found {len(results)} tracks for '{query}'")
         
         if results and len(results) > 0:
-            # Found results - filter and select best match
-            best_match = self.select_best_match(results, spotify_track, query)
-            if best_match:
-                print(f"🎯 Selected best match: {best_match.filename}")
+            # Found results - collect all valid candidates (not just best match)
+            valid_candidates = self.get_valid_candidates(results, spotify_track, query)
+            
+            if valid_candidates:
+                print(f"🎯 Found {len(valid_candidates)} valid candidates")
+                
+                # Store all candidates for potential retry
+                if not hasattr(self, 'track_search_results'):
+                    self.track_search_results = {}
+                self.track_search_results[track_index] = valid_candidates
+                
+                # Reset candidate index for this track
+                if not hasattr(self, 'track_candidate_index'):
+                    self.track_candidate_index = {}
+                self.track_candidate_index[track_index] = 0
+                
+                # Start with the best candidate
+                best_match = valid_candidates[0]
+                print(f"🎯 Selected best match (1/{len(valid_candidates)}): {best_match.filename}")
+                
                 # Update console with selection
                 if hasattr(self.parent_page, 'log_area'):
-                    self.parent_page.log_area.append(f"   🎯 Best match: {best_match.filename}")
+                    self.parent_page.log_area.append(f"   🎯 Best match (1/{len(valid_candidates)}): {best_match.filename}")
+                
                 # Start download with the best match
                 self.start_download_with_match(best_match, spotify_track, track_index, table_index)
                 return
@@ -3141,6 +3158,125 @@ class DownloadMissingTracksModal(QDialog):
                 return None
         
         return None
+    
+    def get_valid_candidates(self, results, spotify_track, query):
+        """Get all valid candidates sorted by score (for retry mechanism)"""
+        if not results:
+            return []
+        
+        # Get Spotify track metadata for comparison
+        track_name = spotify_track.name.lower().strip()
+        artist_name = spotify_track.artists[0].lower().strip() if spotify_track.artists else ""
+        duration_ms = getattr(spotify_track, 'duration_ms', 0)
+        target_duration_seconds = duration_ms / 1000 if duration_ms > 0 else None
+        
+        # Score each result
+        scored_results = []
+        
+        for result in results:
+            score = 0
+            reasons = []
+            
+            # Get result metadata with proper null handling
+            result_title = ""
+            if hasattr(result, 'title') and result.title:
+                result_title = str(result.title).lower().strip()
+            
+            result_artist = ""
+            if hasattr(result, 'artist') and result.artist:
+                result_artist = str(result.artist).lower().strip()
+            
+            result_filename = ""
+            if hasattr(result, 'filename') and result.filename:
+                result_filename = str(result.filename).lower()
+            
+            result_duration = 0
+            if hasattr(result, 'duration') and result.duration:
+                result_duration = result.duration
+            
+            # Use the same intelligent matching as select_best_match
+            match_result = self.intelligent_track_match(track_name, result_title, result_filename)
+            
+            # Only include candidates that meet minimum match criteria
+            if not match_result['matched'] or match_result['confidence'] < 60:
+                continue  # Skip this result
+            
+            # Calculate full score using the same logic as select_best_match
+            score = self._calculate_candidate_score(match_result, artist_name, result_artist, result_filename, 
+                                                  target_duration_seconds, result_duration, result, reasons)
+            
+            if score >= 120:  # Same minimum threshold as select_best_match
+                scored_results.append((score, result, reasons))
+        
+        # Sort by score (highest first)
+        scored_results.sort(key=lambda x: x[0], reverse=True)
+        
+        # Return just the result objects, sorted by quality
+        candidates = [result for score, result, reasons in scored_results]
+        
+        print(f"🔍 Valid candidates found: {len(candidates)} (from {len(results)} total results)")
+        for i, (score, result, reasons) in enumerate(scored_results[:5]):  # Show top 5
+            print(f"   {i+1}. Score: {score} - {result.filename} - {' + '.join(reasons[:3])}")
+        
+        return candidates
+    
+    def _calculate_candidate_score(self, match_result, artist_name, result_artist, result_filename, 
+                                 target_duration_seconds, result_duration, result, reasons):
+        """Calculate full score for a candidate (extracted from select_best_match logic)"""
+        score = 0
+        
+        # Track matching score
+        match_type = match_result['type']
+        if match_type == 'exact_title':
+            score += 150
+            reasons.append(f"track_exact_title({match_result['confidence']}%)")
+        elif match_type == 'exact_filename':
+            score += 140
+            reasons.append(f"track_exact_filename({match_result['confidence']}%)")
+        elif match_type == 'substring_title':
+            score += 130
+            reasons.append(f"track_substring_title({match_result['confidence']}%)")
+        elif match_type == 'substring_filename':
+            score += 120
+            reasons.append(f"track_substring_filename({match_result['confidence']}%)")
+        elif match_type == 'word_match_high':
+            score += 110
+            reasons.append(f"track_word_match_high({match_result['confidence']}%)")
+        elif match_type == 'word_match_medium':
+            score += 100
+            reasons.append(f"track_word_match_medium({match_result['confidence']}%)")
+        elif match_type == 'fuzzy_match':
+            score += 90
+            reasons.append(f"track_fuzzy_match({match_result['confidence']}%)")
+        
+        # Artist matching
+        if artist_name and artist_name in result_artist:
+            score += 80
+            reasons.append("artist_exact_in_artist")
+        elif artist_name and artist_name in result_filename:
+            score += 60
+            reasons.append("artist_exact_in_filename")
+        
+        # Duration matching
+        if target_duration_seconds and result_duration > 0:
+            duration_diff = abs(result_duration - target_duration_seconds)
+            if duration_diff <= 2:
+                score += 100
+                reasons.append(f"duration_perfect({duration_diff:.1f}s)")
+            elif duration_diff <= 5:
+                score += 60
+                reasons.append(f"duration_very_good({duration_diff:.1f}s)")
+            elif duration_diff <= 10:
+                score += 30
+                reasons.append(f"duration_good({duration_diff:.1f}s)")
+        
+        # Quality scoring
+        quality_score = self.calculate_quality_score(result, result_filename)
+        score += quality_score['score']
+        if quality_score['reason']:
+            reasons.append(quality_score['reason'])
+        
+        return score
     
     def calculate_string_similarity(self, str1, str2):
         """Calculate similarity between two strings (0.0 to 1.0)"""
@@ -3606,6 +3742,10 @@ class DownloadMissingTracksModal(QDialog):
             # This ensures folder organization uses Spotify metadata, not Soulseek metadata
             spotify_based_result = self.create_spotify_based_search_result(search_result, spotify_track, artist)
             
+            # ADD VALIDATION DATA to the search result for later verification
+            spotify_based_result.original_spotify_track = spotify_track  # Store for validation
+            spotify_based_result.validation_required = True
+            
             # Call downloads.py infrastructure with Spotify-based search result
             # This ensures proper folder organization using Spotify metadata
             download_item = self.downloads_page._start_download_with_artist(spotify_based_result, artist)
@@ -3747,25 +3887,203 @@ class DownloadMissingTracksModal(QDialog):
         self.on_track_download_failed_infrastructure(track_index, table_index, f"Status check failed: {error}")
     
     def on_track_download_complete_infrastructure(self, track_index, table_index):
-        """Handle successful track download via infrastructure"""
-        self.successful_downloads += 1
+        """Handle successful track download via infrastructure - with Spotify validation"""
+        print(f"🔍 Download {track_index + 1} completed, starting Spotify validation...")
         
-        print(f"✅ Download {track_index + 1} completed via infrastructure")
+        # Get the original track for validation
+        if track_index < len(self.missing_tracks):
+            original_track = self.missing_tracks[track_index].spotify_track
+            self.validate_downloaded_track(track_index, table_index, original_track)
+        else:
+            print(f"❌ Track index {track_index} out of range, marking as failed")
+            self.on_track_download_failed_infrastructure(track_index, table_index, "Track index out of range")
+    
+    def validate_downloaded_track(self, track_index, table_index, original_track):
+        """Validate that downloaded track matches original Spotify track via API lookup"""
+        print(f"🎯 Validating: {original_track.name} by {original_track.artists[0] if original_track.artists else 'Unknown'}")
         
-        # Update main console log
-        if hasattr(self.parent_page, 'log_area') and track_index < len(self.missing_tracks):
-            track = self.missing_tracks[track_index].spotify_track
-            track_name = track.name
-            artist_name = track.artists[0] if track.artists else "Unknown Artist"
-            remaining = len(self.missing_tracks) - self.completed_downloads
-            self.parent_page.log_area.append(f"✅ Downloaded: {track_name} by {artist_name}")
-        
-        # Update table row
+        # Update table to show validation in progress
         if table_index is not None:
-            downloaded_item = QTableWidgetItem("✅ Downloaded")
-            downloaded_item.setFlags(downloaded_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            downloaded_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.track_table.setItem(table_index, 4, downloaded_item)
+            validating_item = QTableWidgetItem("🔍 Validating")
+            validating_item.setFlags(validating_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            validating_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.track_table.setItem(table_index, 4, validating_item)
+        
+        # Update console
+        if hasattr(self.parent_page, 'log_area'):
+            track_name = original_track.name
+            artist_name = original_track.artists[0] if original_track.artists else "Unknown"
+            self.parent_page.log_area.append(f"🔍 Validating download: {track_name} by {artist_name}")
+        
+        # Start Spotify validation worker
+        self.start_spotify_validation_worker(track_index, table_index, original_track)
+    
+    def start_spotify_validation_worker(self, track_index, table_index, original_track):
+        """Start background worker to validate track via Spotify API"""
+        from PyQt6.QtCore import QRunnable, QObject, pyqtSignal
+        
+        class SpotifyValidationWorkerSignals(QObject):
+            validation_completed = pyqtSignal(bool, str, int, int, object)  # is_valid, reason, track_index, table_index, original_track
+            validation_failed = pyqtSignal(str, int, int, object)  # error, track_index, table_index, original_track
+        
+        class SpotifyValidationWorker(QRunnable):
+            def __init__(self, spotify_client, original_track):
+                super().__init__()
+                self.spotify_client = spotify_client
+                self.original_track = original_track
+                self.signals = SpotifyValidationWorkerSignals()
+            
+            def run(self):
+                try:
+                    # Search Spotify for the track to get API response
+                    original_artist = self.original_track.artists[0] if self.original_track.artists else ""
+                    original_title = self.original_track.name
+                    
+                    print(f"🔍 Spotify API lookup: '{original_title}' by '{original_artist}'")
+                    
+                    # Search Spotify API for this track
+                    search_query = f"track:{original_title} artist:{original_artist}"
+                    spotify_results = self.spotify_client.search_tracks(search_query, limit=5)
+                    
+                    if not spotify_results:
+                        self.signals.validation_completed.emit(False, "No Spotify API results found", track_index, table_index, self.original_track)
+                        return
+                    
+                    # Check if any result matches our original track artist
+                    for result in spotify_results:
+                        if result.artists:
+                            spotify_api_artist = result.artists[0].lower().strip()
+                            original_artist_clean = original_artist.lower().strip()
+                            
+                            # Exact match validation
+                            if spotify_api_artist == original_artist_clean:
+                                print(f"✅ Validation passed: Spotify API confirms '{result.name}' by '{result.artists[0]}'")
+                                self.signals.validation_completed.emit(True, f"Spotify API confirmed artist match: {result.artists[0]}", track_index, table_index, self.original_track)
+                                return
+                    
+                    # No matching artist found
+                    found_artists = [r.artists[0] if r.artists else "Unknown" for r in spotify_results[:3]]
+                    reason = f"Artist mismatch. Expected: '{original_artist}', Spotify API returned: {found_artists}"
+                    self.signals.validation_completed.emit(False, reason, track_index, table_index, self.original_track)
+                    
+                except Exception as e:
+                    self.signals.validation_failed.emit(str(e), track_index, table_index, self.original_track)
+        
+        # Create and start validation worker
+        spotify_client = getattr(self.parent_page, 'spotify_client', None)
+        if not spotify_client:
+            print("❌ No Spotify client available for validation")
+            self.on_validation_failed("No Spotify client available", track_index, table_index, original_track)
+            return
+        
+        worker = SpotifyValidationWorker(spotify_client, original_track)
+        worker.signals.validation_completed.connect(self.on_validation_completed)
+        worker.signals.validation_failed.connect(self.on_validation_failed)
+        
+        # Submit to thread pool
+        if hasattr(self.parent_page, 'thread_pool'):
+            self.parent_page.thread_pool.start(worker)
+        else:
+            thread_pool = QThreadPool()
+            self.fallback_pools.append(thread_pool)
+            thread_pool.start(worker)
+    
+    def on_validation_completed(self, is_valid, reason, track_index, table_index, original_track):
+        """Handle Spotify validation completion"""
+        if is_valid:
+            # Validation passed - mark as truly completed
+            self.successful_downloads += 1
+            
+            print(f"✅ Validation passed for track {track_index + 1}: {reason}")
+            
+            # Update main console log
+            if hasattr(self.parent_page, 'log_area'):
+                track_name = original_track.name
+                artist_name = original_track.artists[0] if original_track.artists else "Unknown"
+                self.parent_page.log_area.append(f"✅ Downloaded & validated: {track_name} by {artist_name}")
+            
+            # Update table row
+            if table_index is not None:
+                downloaded_item = QTableWidgetItem("✅ Downloaded")
+                downloaded_item.setFlags(downloaded_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                downloaded_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.track_table.setItem(table_index, 4, downloaded_item)
+                
+            # Update progress
+            self.completed_downloads += 1
+            self.advance_to_next_track()
+            
+        else:
+            # Validation failed - try next search candidate
+            print(f"❌ Validation failed for track {track_index + 1}: {reason}")
+            
+            if hasattr(self.parent_page, 'log_area'):
+                track_name = original_track.name
+                artist_name = original_track.artists[0] if original_track.artists else "Unknown"
+                self.parent_page.log_area.append(f"❌ Validation failed: {track_name} by {artist_name} - {reason}")
+                self.parent_page.log_area.append(f"🔄 Trying next search candidate...")
+            
+            # Try next search candidate 
+            self.retry_with_next_candidate(track_index, table_index, original_track, reason)
+    
+    def on_validation_failed(self, error, track_index, table_index, original_track):
+        """Handle Spotify validation error"""
+        print(f"❌ Validation error for track {track_index + 1}: {error}")
+        
+        if hasattr(self.parent_page, 'log_area'):
+            track_name = original_track.name
+            artist_name = original_track.artists[0] if original_track.artists else "Unknown" 
+            self.parent_page.log_area.append(f"❌ Validation error: {track_name} by {artist_name} - {error}")
+            self.parent_page.log_area.append(f"🔄 Trying next search candidate...")
+        
+        # Try next search candidate
+        self.retry_with_next_candidate(track_index, table_index, original_track, error)
+    
+    def retry_with_next_candidate(self, track_index, table_index, original_track, reason):
+        """Try the next search candidate for this track"""
+        print(f"🔄 Retrying track {track_index + 1} with next search candidate")
+        
+        # Update table to show retry in progress
+        if table_index is not None:
+            retry_item = QTableWidgetItem("🔄 Retrying")
+            retry_item.setFlags(retry_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            retry_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.track_table.setItem(table_index, 4, retry_item)
+        
+        # Check if we have already stored search results for this track
+        if not hasattr(self, 'track_search_results'):
+            self.track_search_results = {}
+        
+        if not hasattr(self, 'track_candidate_index'):
+            self.track_candidate_index = {}
+        
+        # Initialize candidate index if first retry
+        if track_index not in self.track_candidate_index:
+            self.track_candidate_index[track_index] = 0
+        
+        # Move to next candidate
+        self.track_candidate_index[track_index] += 1
+        
+        # Check if we have more candidates to try
+        if track_index in self.track_search_results:
+            candidates = self.track_search_results[track_index]
+            current_index = self.track_candidate_index[track_index]
+            
+            if current_index < len(candidates):
+                # Try next candidate
+                next_candidate = candidates[current_index]
+                print(f"🎯 Trying candidate {current_index + 1}/{len(candidates)}: {next_candidate.filename}")
+                
+                if hasattr(self.parent_page, 'log_area'):
+                    self.parent_page.log_area.append(f"   🎯 Trying candidate {current_index + 1}/{len(candidates)}: {next_candidate.filename}")
+                
+                # Start download with next candidate
+                self.start_download_with_match(next_candidate, original_track, track_index, table_index)
+                return
+        
+        # No more candidates available - mark as failed
+        print(f"❌ No more candidates available for track {track_index + 1}")
+        self.on_track_download_failed_infrastructure(track_index, table_index, f"All candidates failed validation. Last reason: {reason}")
     
     def on_track_download_failed_infrastructure(self, track_index, table_index, error_message):
         """Handle failed track download via infrastructure"""
