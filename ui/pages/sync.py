@@ -707,7 +707,7 @@ class PlaylistDetailsModal(QDialog):
         # Create and show the enhanced download missing tracks modal
         try:
             print("🚀 Creating modal...")
-            modal = DownloadMissingTracksModal(self.playlist, self.parent_page, self)
+            modal = DownloadMissingTracksModal(self.playlist, self.parent_page, self, self.parent_page.downloads_page)
             print("✅ Modal created successfully")
             
             # Store modal reference to prevent garbage collection
@@ -1283,11 +1283,12 @@ class SyncOptionsPanel(QFrame):
         layout.addLayout(quality_layout)
 
 class SyncPage(QWidget):
-    def __init__(self, spotify_client=None, plex_client=None, soulseek_client=None, parent=None):
+    def __init__(self, spotify_client=None, plex_client=None, soulseek_client=None, downloads_page=None, parent=None):
         super().__init__(parent)
         self.spotify_client = spotify_client
         self.plex_client = plex_client
         self.soulseek_client = soulseek_client
+        self.downloads_page = downloads_page
         self.current_playlists = []
         self.playlist_loader = None
         
@@ -1843,12 +1844,13 @@ class SyncPage(QWidget):
 class DownloadMissingTracksModal(QDialog):
     """Enhanced modal for downloading missing tracks with live progress tracking"""
     
-    def __init__(self, playlist, parent_page, sync_modal):
+    def __init__(self, playlist, parent_page, sync_modal, downloads_page):
         print(f"🏗️ Initializing DownloadMissingTracksModal...")
         super().__init__(sync_modal)  # Set sync modal as parent
         self.playlist = playlist
         self.parent_page = parent_page
         self.sync_modal = sync_modal
+        self.downloads_page = downloads_page
         
         # State tracking
         self.total_tracks = len(playlist.tracks)
@@ -2663,22 +2665,794 @@ class DownloadMissingTracksModal(QDialog):
         self.start_soulseek_downloads()
         
     def start_soulseek_downloads(self):
-        """Start real Soulseek downloads for missing tracks"""
+        """Start real Soulseek downloads for missing tracks using existing downloads.py infrastructure"""
         if not self.missing_tracks:
             return
             
-        # Get Soulseek client from parent
-        if not self.parent_page.soulseek_client:
-            QMessageBox.critical(self, "Soulseek Unavailable", 
-                               "Soulseek client not available. Please check your configuration.")
+        # Check downloads page availability
+        if not self.downloads_page:
+            QMessageBox.critical(self, "Downloads Page Unavailable", 
+                               "Downloads page not available. Please restart the application.")
             return
         
-        # Create download worker
+        # Start download process
         self.download_in_progress = True
         self.current_download = 0
         
-        # Start downloading first track
-        self.download_next_track()
+        # Start downloading tracks using downloads.py infrastructure
+        self.download_missing_tracks_with_infrastructure()
+    
+    def download_missing_tracks_with_infrastructure(self):
+        """Download missing tracks using existing matched download infrastructure"""
+        if not self.missing_tracks:
+            self.on_all_downloads_complete()
+            return
+        
+        print(f"🚀 Starting download of {len(self.missing_tracks)} missing tracks using downloads.py infrastructure...")
+        
+        # Process each missing track
+        self.successful_downloads = 0
+        self.failed_downloads = 0
+        self.completed_downloads = 0
+        self.current_search_index = 0
+        
+        # Start searching tracks sequentially to avoid overwhelming the system
+        # (searches can take up to 25 seconds each)
+        self.start_next_track_search()
+    
+    def start_next_track_search(self):
+        """Start searching for the next track in sequence"""
+        if self.current_search_index >= len(self.missing_tracks):
+            # All searches complete - check if we should finish
+            if self.completed_downloads >= len(self.missing_tracks):
+                self.on_all_downloads_complete()
+            return
+        
+        track_result = self.missing_tracks[self.current_search_index]
+        self.start_single_track_download(track_result, self.current_search_index)
+    
+    def start_single_track_download(self, track_result, track_index):
+        """Start download for a single track using smart search strategy"""
+        track = track_result.spotify_track
+        artist_name = track.artists[0] if track.artists else "Unknown Artist"
+        track_name = track.name
+        
+        print(f"🎵 Starting search {track_index + 1}/{len(self.missing_tracks)}: {track_name} by {artist_name}")
+        
+        # Update main console log
+        if hasattr(self.parent_page, 'log_area'):
+            progress_pct = ((track_index + 1) / len(self.missing_tracks)) * 100
+            self.parent_page.log_area.append(f"🔍 Searching ({track_index + 1}/{len(self.missing_tracks)}, {progress_pct:.0f}%): {track_name} by {artist_name}")
+        
+        # Update table to show searching status
+        table_index = self.find_track_index(track)
+        if table_index is not None:
+            searching_item = QTableWidgetItem("🔍 Searching")
+            searching_item.setFlags(searching_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            searching_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.track_table.setItem(table_index, 4, searching_item)
+        
+        # Use smart search strategy to find best match
+        self.smart_search_and_download(track, track_index, table_index)
+    
+    def smart_search_and_download(self, spotify_track, track_index, table_index):
+        """Implement smart search strategy with multiple query variations"""
+        artist_name = spotify_track.artists[0] if spotify_track.artists else "Unknown Artist"
+        track_name = spotify_track.name
+        duration_ms = getattr(spotify_track, 'duration_ms', 0)
+        
+        # Generate multiple search queries in order of preference
+        search_queries = self.generate_smart_search_queries(artist_name, track_name)
+        
+        print(f"🔍 Generated {len(search_queries)} search queries for: {track_name} by {artist_name}")
+        
+        # Try each search query until we find good results
+        self.try_search_queries(search_queries, spotify_track, track_index, table_index, 0)
+    
+    def generate_smart_search_queries(self, artist_name, track_name):
+        """Generate multiple search query variations with special handling for single-word tracks"""
+        queries = []
+        
+        # Check if track name is a single word (no spaces)
+        is_single_word = len(track_name.strip().split()) == 1
+        
+        if is_single_word:
+            # For single-word tracks (like "Aether"), always include artist to be more specific
+            print(f"🎯 Single-word track detected: '{track_name}' - including artist name for specificity")
+            
+            # Strategy 1: Track + full artist name (most specific)
+            if artist_name:
+                queries.append(f"{track_name} {artist_name}".strip())
+            
+            # Strategy 2: Track + shortened artist (remove common articles and prefixes)
+            shortened_artist = self.shorten_artist_name(artist_name)
+            if shortened_artist and shortened_artist != artist_name:
+                queries.append(f"{track_name} {shortened_artist}".strip())
+            
+            # Strategy 3: Track + first word of artist (for multi-word artists)
+            first_word = artist_name.split()[0] if artist_name else ""
+            if first_word and len(first_word) > 2:
+                queries.append(f"{track_name} {first_word}".strip())
+            
+            # Strategy 4: Track name only (fallback for single words)
+            queries.append(track_name.strip())
+            
+        else:
+            # For multi-word tracks, use original logic (track name only often works well)
+            
+            # Strategy 1: Track name only (often most effective for popular multi-word tracks)
+            queries.append(track_name.strip())
+            
+            # Strategy 2: Track name + shortened artist (remove common articles and prefixes)
+            shortened_artist = self.shorten_artist_name(artist_name)
+            if shortened_artist and shortened_artist != artist_name:
+                queries.append(f"{track_name} {shortened_artist}".strip())
+            
+            # Strategy 3: Track name + first word of artist (for multi-word artists)
+            first_word = artist_name.split()[0] if artist_name else ""
+            if first_word and len(first_word) > 2:
+                queries.append(f"{track_name} {first_word}".strip())
+            
+            # Strategy 4: Track name + full artist name (traditional approach)
+            if artist_name:
+                queries.append(f"{track_name} {artist_name}".strip())
+        
+        # Remove duplicates while preserving order
+        unique_queries = []
+        for query in queries:
+            if query and query not in unique_queries:
+                unique_queries.append(query)
+        
+        return unique_queries
+    
+    def shorten_artist_name(self, artist_name):
+        """Remove common articles and prefixes that cause search issues"""
+        if not artist_name:
+            return artist_name
+        
+        # Common prefixes that cause search problems
+        prefixes_to_remove = [
+            "The ", "A ", "An ", 
+            "DJ ", "MC ", "Lil ", "Big ",
+            "Young ", "Old ", "Saint ", "St. "
+        ]
+        
+        shortened = artist_name
+        for prefix in prefixes_to_remove:
+            if shortened.startswith(prefix):
+                shortened = shortened[len(prefix):]
+                break
+        
+        # Remove common suffixes
+        suffixes_to_remove = [" Jr.", " Sr.", " Jr", " Sr", " III", " II"]
+        for suffix in suffixes_to_remove:
+            if shortened.endswith(suffix):
+                shortened = shortened[:-len(suffix)]
+                break
+        
+        return shortened.strip()
+    
+    def try_search_queries(self, queries, spotify_track, track_index, table_index, query_index):
+        """Try search queries sequentially until we find good results"""
+        if query_index >= len(queries):
+            # All queries failed
+            self.on_search_failed(spotify_track, track_index, table_index)
+            return
+        
+        current_query = queries[query_index]
+        print(f"🔍 Trying search query {query_index + 1}/{len(queries)}: '{current_query}'")
+        
+        # Update console with current search attempt
+        if hasattr(self.parent_page, 'log_area'):
+            self.parent_page.log_area.append(f"   🔍 Query {query_index + 1}: '{current_query}'")
+        
+        # Start search using downloads.py SearchThread
+        from PyQt6.QtCore import QRunnable, QObject, pyqtSignal
+        
+        class SmartSearchWorkerSignals(QObject):
+            search_completed = pyqtSignal(list, int, str)  # results, query_index, query
+            search_failed = pyqtSignal(int, str, str)  # query_index, query, error
+        
+        class SmartSearchWorker(QRunnable):
+            def __init__(self, soulseek_client, query, query_index):
+                super().__init__()
+                self.soulseek_client = soulseek_client
+                self.query = query
+                self.query_index = query_index
+                self.signals = SmartSearchWorkerSignals()
+                self._stop_requested = False
+                
+            def run(self):
+                loop = None
+                try:
+                    import asyncio
+                    # Create a completely fresh event loop for this thread
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    
+                    # Perform search with proper await
+                    results = loop.run_until_complete(self._do_search())
+                    
+                    if not self._stop_requested:
+                        # Process results into the format expected by our system
+                        processed_results = self._process_search_results(results)
+                        self.signals.search_completed.emit(processed_results, self.query_index, self.query)
+                        
+                except Exception as e:
+                    if not self._stop_requested:
+                        self.signals.search_failed.emit(self.query_index, self.query, str(e))
+                finally:
+                    # Ensure proper cleanup
+                    if loop:
+                        try:
+                            # Close any remaining tasks
+                            pending = asyncio.all_tasks(loop)
+                            for task in pending:
+                                task.cancel()
+                            
+                            if pending:
+                                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                            
+                            loop.close()
+                        except Exception as e:
+                            print(f"Error cleaning up event loop: {e}")
+            
+            async def _do_search(self):
+                """Perform the actual search with proper await"""
+                return await self.soulseek_client.search(self.query)
+            
+            def _process_search_results(self, raw_results):
+                """Process raw search results into the format we need"""
+                if not raw_results:
+                    return []
+                
+                # The search returns a tuple (tracks, albums)
+                processed_results = []
+                
+                if isinstance(raw_results, tuple) and len(raw_results) == 2:
+                    tracks, albums = raw_results
+                    
+                    # Add individual tracks
+                    if tracks:
+                        processed_results.extend(tracks)
+                    
+                    # Add tracks from albums (since we're looking for individual tracks)
+                    if albums:
+                        for album in albums:
+                            if hasattr(album, 'tracks') and album.tracks:
+                                processed_results.extend(album.tracks)
+                
+                print(f"🔍 Processed {len(processed_results)} track results from search")
+                return processed_results
+        
+        # Create and start search worker
+        worker = SmartSearchWorker(self.parent_page.soulseek_client, current_query, query_index)
+        worker.signals.search_completed.connect(
+            lambda results, qi, query: self.on_search_query_completed(
+                results, queries, spotify_track, track_index, table_index, qi, query
+            )
+        )
+        worker.signals.search_failed.connect(
+            lambda qi, query, error: self.on_search_query_failed(
+                queries, spotify_track, track_index, table_index, qi, query, error
+            )
+        )
+        
+        # Submit to thread pool
+        if hasattr(self.parent_page, 'thread_pool'):
+            self.parent_page.thread_pool.start(worker)
+        else:
+            thread_pool = QThreadPool()
+            self.fallback_pools.append(thread_pool)
+            thread_pool.start(worker)
+    
+    def on_search_query_completed(self, results, queries, spotify_track, track_index, table_index, query_index, query):
+        """Handle completion of a search query"""
+        print(f"✅ Search query '{query}' returned {len(results)} results")
+        
+        # Update console with result count
+        if hasattr(self.parent_page, 'log_area'):
+            self.parent_page.log_area.append(f"   ✅ Found {len(results)} tracks for '{query}'")
+        
+        if results and len(results) > 0:
+            # Found results - filter and select best match
+            best_match = self.select_best_match(results, spotify_track, query)
+            if best_match:
+                print(f"🎯 Selected best match: {best_match.filename}")
+                # Update console with selection
+                if hasattr(self.parent_page, 'log_area'):
+                    self.parent_page.log_area.append(f"   🎯 Best match: {best_match.filename}")
+                # Start download with the best match
+                self.start_download_with_match(best_match, spotify_track, track_index, table_index)
+                return
+        
+        # No good results, try next query
+        print(f"⚠️ Query '{query}' had no suitable matches, trying next...")
+        if hasattr(self.parent_page, 'log_area'):
+            self.parent_page.log_area.append(f"   ⚠️ No suitable matches for '{query}', trying next strategy...")
+        self.try_search_queries(queries, spotify_track, track_index, table_index, query_index + 1)
+    
+    def on_search_query_failed(self, queries, spotify_track, track_index, table_index, query_index, query, error):
+        """Handle search query failure"""
+        print(f"❌ Search query '{query}' failed: {error}")
+        
+        # Try next query
+        self.try_search_queries(queries, spotify_track, track_index, table_index, query_index + 1)
+    
+    def select_best_match(self, results, spotify_track, query):
+        """Select the best match from search results using strict matching criteria"""
+        if not results:
+            return None
+        
+        # Get Spotify track metadata for comparison
+        track_name = spotify_track.name.lower().strip()
+        artist_name = spotify_track.artists[0].lower().strip() if spotify_track.artists else ""
+        duration_ms = getattr(spotify_track, 'duration_ms', 0)
+        target_duration_seconds = duration_ms / 1000 if duration_ms > 0 else None
+        
+        print(f"🎯 Matching against: '{track_name}' by '{artist_name}' ({target_duration_seconds}s)")
+        
+        # Score each result
+        scored_results = []
+        
+        for result in results:
+            score = 0
+            reasons = []  # For debugging
+            
+            # Get result metadata with proper null handling
+            result_title = ""
+            if hasattr(result, 'title') and result.title:
+                result_title = str(result.title).lower().strip()
+            
+            result_artist = ""
+            if hasattr(result, 'artist') and result.artist:
+                result_artist = str(result.artist).lower().strip()
+            
+            result_filename = ""
+            if hasattr(result, 'filename') and result.filename:
+                result_filename = str(result.filename).lower()
+            
+            result_duration = 0
+            if hasattr(result, 'duration') and result.duration:
+                result_duration = result.duration
+            
+            # STRICT REQUIREMENT: Track title must be contained exactly in filename or title
+            # This is now a mandatory requirement - no match without this
+            track_contained = False
+            
+            # Check if full track name is contained in the result title
+            if track_name in result_title:
+                score += 150  # High score for exact containment in title
+                reasons.append("track_exact_in_title")
+                track_contained = True
+            
+            # Check if full track name is contained in the filename
+            elif track_name in result_filename:
+                score += 120  # High score for exact containment in filename
+                reasons.append("track_exact_in_filename")
+                track_contained = True
+            
+            # If track name is not contained exactly, reject this result immediately
+            if not track_contained:
+                continue  # Skip this result entirely
+            
+            # BONUS: Artist name contained (extra points)
+            artist_contained = False
+            
+            # Check if artist name is contained in the result artist field
+            if artist_name and artist_name in result_artist:
+                score += 80
+                reasons.append("artist_exact_in_artist")
+                artist_contained = True
+            
+            # Check if artist name is contained in the filename
+            elif artist_name and artist_name in result_filename:
+                score += 60
+                reasons.append("artist_exact_in_filename")
+                artist_contained = True
+            
+            # Check if artist name is contained in the title
+            elif artist_name and artist_name in result_title:
+                score += 40
+                reasons.append("artist_exact_in_title")
+                artist_contained = True
+            
+            # CRITICAL: Duration matching (highest priority for accuracy)
+            if target_duration_seconds and result_duration > 0:
+                duration_diff = abs(result_duration - target_duration_seconds)
+                if duration_diff <= 2:  # Within 2 seconds - almost certainly correct
+                    score += 100
+                    reasons.append(f"duration_perfect({duration_diff:.1f}s)")
+                elif duration_diff <= 5:  # Within 5 seconds - very likely correct
+                    score += 60
+                    reasons.append(f"duration_very_good({duration_diff:.1f}s)")
+                elif duration_diff <= 10:  # Within 10 seconds - likely correct
+                    score += 30
+                    reasons.append(f"duration_good({duration_diff:.1f}s)")
+                elif duration_diff <= 30:  # Within 30 seconds - possibly correct
+                    score += 10
+                    reasons.append(f"duration_fair({duration_diff:.1f}s)")
+                else:
+                    # Penalty for very different duration
+                    score -= 20
+                    reasons.append(f"duration_mismatch({duration_diff:.1f}s)")
+            
+            # Quality preference: FLAC > other lossless > high bitrate > low bitrate
+            if hasattr(result, 'quality') and result.quality:
+                quality_lower = result.quality.lower()
+                if quality_lower in ['flac', 'alac', 'ape']:
+                    score += 15  # Lossless bonus (lower priority than matching)
+                    reasons.append(f"quality_lossless({quality_lower})")
+                elif 'mp3' in quality_lower or 'aac' in quality_lower:
+                    score += 5  # Standard formats
+                    reasons.append(f"quality_standard({quality_lower})")
+            
+            # File size reasonableness (avoid tiny or corrupted files)
+            if hasattr(result, 'size') and result.size:
+                if result.size > 5000000:  # > 5MB (reasonable for music)
+                    score += 5
+                    reasons.append("size_reasonable")
+                elif result.size < 1000000:  # < 1MB (suspicious)
+                    score -= 10
+                    reasons.append("size_suspicious")
+            
+            # Penalize obvious mismatches in filename
+            if 'remix' in result_filename and 'remix' not in track_name.lower():
+                score -= 30
+                reasons.append("unwanted_remix")
+            
+            if 'live' in result_filename and 'live' not in track_name.lower():
+                score -= 20
+                reasons.append("unwanted_live")
+            
+            if 'instrumental' in result_filename and 'instrumental' not in track_name.lower():
+                score -= 25
+                reasons.append("unwanted_instrumental")
+            
+            scored_results.append((score, result, reasons))
+        
+        # Sort by score (highest first)
+        scored_results.sort(key=lambda x: x[0], reverse=True)
+        
+        if scored_results:
+            best_score, best_result, best_reasons = scored_results[0]
+            print(f"🏆 Best match score: {best_score} - {' + '.join(best_reasons)}")
+            print(f"   File: {best_result.filename}")
+            
+            # Only return result if score is reasonable (avoid terrible matches)
+            # Since we now require exact track name containment (120-150 points minimum),
+            # we can set a higher threshold
+            if best_score >= 120:  # Require minimum quality with strict matching
+                return best_result
+            else:
+                print(f"⚠️ Best score ({best_score}) too low, rejecting all matches")
+                return None
+        
+        return None
+    
+    def calculate_string_similarity(self, str1, str2):
+        """Calculate similarity between two strings (0.0 to 1.0)"""
+        if not str1 or not str2:
+            return 0.0
+        
+        # Normalize strings
+        str1 = str1.lower().strip()
+        str2 = str2.lower().strip()
+        
+        # Exact match
+        if str1 == str2:
+            return 1.0
+        
+        # Simple similarity calculation
+        # Count matching words
+        words1 = set(str1.split())
+        words2 = set(str2.split())
+        
+        if not words1 or not words2:
+            return 0.0
+        
+        intersection = words1.intersection(words2)
+        union = words1.union(words2)
+        
+        return len(intersection) / len(union) if union else 0.0
+    
+    def start_download_with_match(self, search_result, spotify_track, track_index, table_index):
+        """Start download using the matched search result and downloads.py infrastructure"""
+        print(f"🚀 Starting download with matched result: {search_result.filename}")
+        
+        # Update table to show downloading status
+        if table_index is not None:
+            downloading_item = QTableWidgetItem("⏬ Downloading")
+            downloading_item.setFlags(downloading_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            downloading_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.track_table.setItem(table_index, 4, downloading_item)
+        
+        # Update console
+        if hasattr(self.parent_page, 'log_area'):
+            self.parent_page.log_area.append(f"🎵 Downloading: {search_result.filename}")
+        
+        # Use downloads.py infrastructure for the actual download with auto-matching
+        self.start_matched_download_via_infrastructure(search_result, track_index, table_index)
+        
+        # Move to next track search
+        self.advance_to_next_track()
+    
+    def on_search_failed(self, spotify_track, track_index, table_index):
+        """Handle case where all search queries failed"""
+        track_name = spotify_track.name
+        artist_name = spotify_track.artists[0] if spotify_track.artists else "Unknown Artist"
+        
+        print(f"❌ All search strategies failed for: {track_name} by {artist_name}")
+        
+        # Update console
+        if hasattr(self.parent_page, 'log_area'):
+            self.parent_page.log_area.append(f"❌ No results found: {track_name} by {artist_name}")
+        
+        # Update table to show failed status
+        if table_index is not None:
+            failed_item = QTableWidgetItem("❌ No Results")
+            failed_item.setFlags(failed_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            failed_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.track_table.setItem(table_index, 4, failed_item)
+        
+        # Update completion tracking
+        self.completed_downloads += 1
+        self.failed_downloads += 1
+        self.download_progress.setValue(self.completed_downloads)
+        
+        # Move to next track search
+        self.advance_to_next_track()
+    
+    def advance_to_next_track(self):
+        """Move to searching the next track"""
+        self.current_search_index += 1
+        self.start_next_track_search()
+    
+    def create_search_result_from_spotify_track(self, spotify_track):
+        """Create a mock search result object from Spotify track to work with downloads.py"""
+        from dataclasses import dataclass
+        
+        @dataclass
+        class MockSearchResult:
+            filename: str
+            user: str = "spotify_match"
+            size: int = 0
+            bit_rate: int = 0
+            sample_rate: int = 0
+            duration: int = 0
+            format: str = "flac"
+            title: str = ""
+            artist: str = ""
+            album: str = ""
+            track_number: int = 0
+            
+        # Create mock search result with Spotify metadata
+        artist_name = spotify_track.artists[0] if spotify_track.artists else "Unknown Artist"
+        track_name = spotify_track.name
+        album_name = getattr(spotify_track, 'album', 'Unknown Album')
+        duration_seconds = int(spotify_track.duration_ms / 1000) if hasattr(spotify_track, 'duration_ms') else 0
+        
+        search_result = MockSearchResult(
+            filename=f"{artist_name} - {track_name}.flac",
+            title=track_name,
+            artist=artist_name,
+            album=album_name,
+            duration=duration_seconds,
+            size=50000000,  # Assume ~50MB for FLAC
+            bit_rate=1411,  # Standard FLAC bitrate
+            sample_rate=44100,
+            format="flac"
+        )
+        
+        return search_result
+    
+    def start_matched_download_via_infrastructure(self, search_result, track_index, table_index):
+        """Start matched download using downloads.py infrastructure with automatic artist matching"""
+        try:
+            # Get the Spotify track for artist info
+            track_result = self.missing_tracks[track_index]
+            spotify_track = track_result.spotify_track
+            
+            # Use the first artist from Spotify as the "matched" artist
+            artist_name = spotify_track.artists[0] if spotify_track.artists else "Unknown Artist"
+            
+            # Create an Artist object compatible with downloads.py
+            from dataclasses import dataclass
+            
+            @dataclass
+            class SpotifyArtist:
+                name: str
+                id: str = ""
+                image_url: str = ""
+                popularity: int = 50
+                genres: list = None
+                
+                def __post_init__(self):
+                    if self.genres is None:
+                        self.genres = []
+            
+            artist = SpotifyArtist(name=artist_name)
+            
+            # Call downloads.py infrastructure directly with auto-matched artist
+            # This bypasses the SpotifyMatchingModal since we already have the artist info
+            download_item = self.downloads_page._start_download_with_artist(search_result, artist)
+            
+            if download_item:
+                print(f"✅ Successfully queued download for: {spotify_track.name}")
+                
+                # Set up completion tracking
+                self.track_download_items = getattr(self, 'track_download_items', {})
+                self.track_download_items[download_item] = (track_index, table_index)
+                
+                # Monitor download completion
+                self.monitor_download_completion(download_item, track_index, table_index)
+            else:
+                # Download failed to start
+                self.on_track_download_failed_infrastructure(track_index, table_index, "Failed to start download")
+                
+        except Exception as e:
+            print(f"❌ Error starting download via infrastructure: {str(e)}")
+            self.on_track_download_failed_infrastructure(track_index, table_index, str(e))
+    
+    def monitor_download_completion(self, download_item, track_index, table_index):
+        """Monitor download completion using QTimer"""
+        from PyQt6.QtCore import QTimer
+        
+        # Create timer to check download status
+        timer = QTimer()
+        timer.timeout.connect(lambda: self.check_download_status(download_item, track_index, table_index, timer))
+        timer.start(1000)  # Check every second
+        
+        # Store timer reference for cleanup
+        if not hasattr(self, 'download_timers'):
+            self.download_timers = []
+        self.download_timers.append(timer)
+    
+    def check_download_status(self, download_item, track_index, table_index, timer):
+        """Check if download is complete"""
+        try:
+            # Check if download item still exists and get its status
+            if hasattr(download_item, 'download_id') and download_item.download_id:
+                # Use async function to get download status properly
+                self.check_download_status_async(download_item, track_index, table_index, timer)
+                return
+            
+            # Check if timer has been running too long (timeout after 5 minutes)
+            if not hasattr(timer, 'start_time'):
+                timer.start_time = 0
+            timer.start_time += 1
+            
+            if timer.start_time > 300:  # 5 minutes timeout
+                timer.stop()
+                self.on_track_download_failed_infrastructure(track_index, table_index, "Download timeout")
+                
+        except Exception as e:
+            print(f"❌ Error checking download status: {str(e)}")
+            timer.stop()
+            self.on_track_download_failed_infrastructure(track_index, table_index, str(e))
+    
+    def check_download_status_async(self, download_item, track_index, table_index, timer):
+        """Check download status using proper async handling"""
+        from PyQt6.QtCore import QRunnable, QObject, pyqtSignal
+        
+        class DownloadStatusWorkerSignals(QObject):
+            status_checked = pyqtSignal(str, int, int, object)  # state, track_index, table_index, timer
+            check_failed = pyqtSignal(str, int, int, object)  # error, track_index, table_index, timer
+        
+        class DownloadStatusWorker(QRunnable):
+            def __init__(self, soulseek_client, download_id):
+                super().__init__()
+                self.soulseek_client = soulseek_client
+                self.download_id = download_id
+                self.signals = DownloadStatusWorkerSignals()
+            
+            def run(self):
+                loop = None
+                try:
+                    import asyncio
+                    # Create fresh event loop for this thread
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    
+                    # Get downloads with proper await
+                    downloads = loop.run_until_complete(self.soulseek_client.get_all_downloads())
+                    
+                    # Find our download
+                    for download in downloads:
+                        if download.id == self.download_id:
+                            self.signals.status_checked.emit(download.state, track_index, table_index, timer)
+                            return
+                    
+                    # Download not found - might be completed already
+                    self.signals.status_checked.emit("NotFound", track_index, table_index, timer)
+                    
+                except Exception as e:
+                    self.signals.check_failed.emit(str(e), track_index, table_index, timer)
+                finally:
+                    if loop:
+                        try:
+                            # Clean up
+                            pending = asyncio.all_tasks(loop)
+                            for task in pending:
+                                task.cancel()
+                            if pending:
+                                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                            loop.close()
+                        except Exception:
+                            pass
+        
+        # Create and start worker
+        worker = DownloadStatusWorker(self.parent_page.soulseek_client, download_item.download_id)
+        worker.signals.status_checked.connect(self.on_download_status_checked)
+        worker.signals.check_failed.connect(self.on_download_status_check_failed)
+        
+        # Submit to thread pool
+        if hasattr(self.parent_page, 'thread_pool'):
+            self.parent_page.thread_pool.start(worker)
+        else:
+            thread_pool = QThreadPool()
+            self.fallback_pools.append(thread_pool)
+            thread_pool.start(worker)
+    
+    def on_download_status_checked(self, state, track_index, table_index, timer):
+        """Handle download status check result"""
+        if state == "Completed":
+            timer.stop()
+            self.on_track_download_complete_infrastructure(track_index, table_index)
+        elif state in ["Cancelled", "Failed"]:
+            timer.stop()
+            self.on_track_download_failed_infrastructure(track_index, table_index, f"Download {state.lower()}")
+        elif state == "NotFound":
+            timer.stop()
+            self.on_track_download_complete_infrastructure(track_index, table_index)  # Assume completed
+        # For "InProgress" or other states, timer continues
+    
+    def on_download_status_check_failed(self, error, track_index, table_index, timer):
+        """Handle download status check failure"""
+        print(f"❌ Download status check failed: {error}")
+        timer.stop()
+        self.on_track_download_failed_infrastructure(track_index, table_index, f"Status check failed: {error}")
+    
+    def on_track_download_complete_infrastructure(self, track_index, table_index):
+        """Handle successful track download via infrastructure"""
+        self.successful_downloads += 1
+        
+        print(f"✅ Download {track_index + 1} completed via infrastructure")
+        
+        # Update main console log
+        if hasattr(self.parent_page, 'log_area') and track_index < len(self.missing_tracks):
+            track = self.missing_tracks[track_index].spotify_track
+            track_name = track.name
+            artist_name = track.artists[0] if track.artists else "Unknown Artist"
+            remaining = len(self.missing_tracks) - self.completed_downloads
+            self.parent_page.log_area.append(f"✅ Downloaded: {track_name} by {artist_name}")
+        
+        # Update table row
+        if table_index is not None:
+            downloaded_item = QTableWidgetItem("✅ Downloaded")
+            downloaded_item.setFlags(downloaded_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            downloaded_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.track_table.setItem(table_index, 4, downloaded_item)
+    
+    def on_track_download_failed_infrastructure(self, track_index, table_index, error_message):
+        """Handle failed track download via infrastructure"""
+        self.failed_downloads += 1
+        
+        print(f"❌ Download {track_index + 1} failed via infrastructure: {error_message}")
+        
+        # Update main console log
+        if hasattr(self.parent_page, 'log_area') and track_index < len(self.missing_tracks):
+            track = self.missing_tracks[track_index].spotify_track
+            track_name = track.name
+            artist_name = track.artists[0] if track.artists else "Unknown Artist"
+            self.parent_page.log_area.append(f"❌ Download failed: {track_name} by {artist_name} - {error_message}")
+        
+        # Update table row  
+        if table_index is not None:
+            failed_item = QTableWidgetItem("❌ Failed")
+            failed_item.setFlags(failed_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            failed_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.track_table.setItem(table_index, 4, failed_item)
         
     def download_next_track(self):
         """Download the next missing track"""
@@ -2793,19 +3567,9 @@ class DownloadMissingTracksModal(QDialog):
         self.download_in_progress = False
         print("🎉 All downloads completed!")
         
-        # Calculate download statistics
-        completed_count = 0
-        failed_count = 0
-        
-        # Count successful vs failed downloads
-        for i in range(len(self.missing_tracks)):
-            if i < self.track_table.rowCount():
-                download_item = self.track_table.item(i, 4)
-                if download_item:
-                    if "✅" in download_item.text():
-                        completed_count += 1
-                    elif "❌" in download_item.text():
-                        failed_count += 1
+        # Use our tracked statistics
+        completed_count = self.successful_downloads
+        failed_count = self.failed_downloads
         
         # Update main console log with final statistics
         if hasattr(self.parent_page, 'log_area'):
@@ -3008,6 +3772,18 @@ class DownloadMissingTracksModal(QDialog):
         
     def closeEvent(self, event):
         """Handle modal close event"""
+        print("🔄 DownloadMissingTracksModal closing...")
+        
+        # Clean up any timers first to prevent reentrant modal session errors
+        if hasattr(self, 'download_timers'):
+            for timer in self.download_timers:
+                try:
+                    if timer.isActive():
+                        timer.stop()
+                except Exception:
+                    pass
+            self.download_timers.clear()
+        
         # If operations are still in progress when closing, set up background updates
         if (self.download_in_progress or not self.analysis_complete) and not hasattr(self, 'background_timer_started'):
             self.setup_background_status_updates()
@@ -3017,6 +3793,38 @@ class DownloadMissingTracksModal(QDialog):
             if hasattr(self.parent_page, 'enable_refresh_button'):
                 self.parent_page.enable_refresh_button()
         
+        # Clean up workers
+        try:
+            self.cleanup_workers()
+        except Exception as e:
+            print(f"⚠️ Error cleaning up workers: {e}")
+        
         # Only cancel if user explicitly clicked Cancel
         # For Close button or X button, preserve operations
         event.accept()
+        print("✅ DownloadMissingTracksModal closed")
+    
+    def cleanup_workers(self):
+        """Clean up all active workers and thread pools"""
+        # Cancel active workers first
+        for worker in self.active_workers:
+            try:
+                if hasattr(worker, 'cancel'):
+                    worker.cancel()
+                elif hasattr(worker, '_stop_requested'):
+                    worker._stop_requested = True
+            except (RuntimeError, AttributeError):
+                pass
+        
+        # Clean up fallback thread pools with timeout
+        for pool in self.fallback_pools:
+            try:
+                pool.clear()  # Cancel pending workers
+                if not pool.waitForDone(1000):  # Wait 1 second max
+                    pool.clear()  # Force termination
+            except (RuntimeError, AttributeError):
+                pass
+        
+        # Clear tracking lists
+        self.active_workers.clear()
+        self.fallback_pools.clear()
