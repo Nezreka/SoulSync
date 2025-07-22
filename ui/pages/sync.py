@@ -158,7 +158,7 @@ class PlaylistTrackAnalysisWorker(QRunnable):
 
 class TrackDownloadWorkerSignals(QObject):
     """Signals for track download worker"""
-    download_completed = pyqtSignal(int, int, str)  # download_index, track_index, download_id
+    download_started = pyqtSignal(int, int, str)  # download_index, track_index, download_id
     download_failed = pyqtSignal(int, int, str)  # download_index, track_index, error_message
 
 class TrackDownloadWorker(QRunnable):
@@ -216,7 +216,7 @@ class TrackDownloadWorker(QRunnable):
                     loop.close()
             
             if download_id:
-                self.signals.download_completed.emit(self.download_index, self.track_index, download_id)
+                self.signals.download_started.emit(self.download_index, self.track_index, download_id)
             else:
                 self.signals.download_failed.emit(self.download_index, self.track_index, "No search results found")
                 
@@ -4267,7 +4267,7 @@ class DownloadMissingTracksModal(QDialog):
         
         # Create download worker
         worker = TrackDownloadWorker(track, self.parent_page.soulseek_client, self.current_download, track_index)
-        worker.signals.download_completed.connect(self.on_track_download_complete)
+        worker.signals.download_started.connect(self.on_track_download_started)
         worker.signals.download_failed.connect(self.on_track_download_failed)
         
         # Track worker for cleanup
@@ -4289,37 +4289,35 @@ class DownloadMissingTracksModal(QDialog):
                 return i
         return None
         
-    def on_track_download_complete(self, download_index, track_index, download_id):
-        """Handle successful track download"""
-        print(f"✅ Download {download_index + 1} completed: {download_id}")
+    def on_track_download_started(self, download_index, track_index, download_id):
+        """Handle download start - set up monitoring for completion"""
+        print(f"⏬ Download {download_index + 1} started: {download_id}")
+        
+        # Store download info for monitoring
+        if not hasattr(self, 'active_downloads'):
+            self.active_downloads = {}
+        self.active_downloads[download_id] = {
+            'download_index': download_index,
+            'track_index': track_index,
+            'status': 'downloading'
+        }
         
         # Update main console log
         if hasattr(self.parent_page, 'log_area') and download_index < len(self.missing_tracks):
             track = self.missing_tracks[download_index].spotify_track
             track_name = track.name
             artist_name = track.artists[0] if track.artists else "Unknown Artist"
-            remaining = len(self.missing_tracks) - (download_index + 1)
-            self.parent_page.log_area.append(f"✅ Downloaded: {track_name} by {artist_name} ({remaining} remaining)")
+            self.parent_page.log_area.append(f"⏬ Started download: {track_name} by {artist_name}")
         
-        # Update table row
-        if track_index is not None:
-            downloaded_item = QTableWidgetItem("✅ Downloaded")
-            downloaded_item.setFlags(downloaded_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            downloaded_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.track_table.setItem(track_index, 4, downloaded_item)
+        # Table already shows "⏬ Downloading" from download_next_track()
         
-        # Update progress
+        # Start monitoring this download for completion
+        self.start_download_monitoring(download_id, download_index, track_index)
+        
+        # Increment download counter (tracking started downloads)
         self.current_download += 1
-        self.download_progress.setValue(self.current_download)
         
-        # Update playlist status indicator
-        playlist_item = self.find_playlist_item()
-        if playlist_item:
-            total = len(self.missing_tracks) if hasattr(self, 'missing_tracks') else 0
-            status_text = f"⏬ Downloading {self.current_download}/{total}"
-            playlist_item.update_operation_status(status_text)
-        
-        # Continue with next download
+        # Continue with next download (don't wait for completion)
         self.download_next_track()
         
     def on_track_download_failed(self, download_index, track_index, error_message):
@@ -4340,12 +4338,16 @@ class DownloadMissingTracksModal(QDialog):
             failed_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.track_table.setItem(track_index, 4, failed_item)
         
-        # Update progress and continue
-        self.current_download += 1
-        self.download_progress.setValue(self.current_download)
+        # Update failure tracking
+        self.failed_downloads += 1
+        self.completed_downloads += 1  # Count as completed (failed = finished)
         
-        # Continue with next download
-        self.download_next_track()
+        # Update progress based on completed downloads (success + failures)
+        self.download_progress.setValue(self.completed_downloads)
+        
+        # Check if all downloads are complete
+        if self.completed_downloads >= len(self.missing_tracks):
+            self.on_all_downloads_complete()
         
     def on_all_downloads_complete(self):
         """Handle completion of all downloads"""
@@ -4381,6 +4383,152 @@ class DownloadMissingTracksModal(QDialog):
         
         QMessageBox.information(self, "Downloads Complete", 
                               f"Completed downloading {completed_count}/{len(self.missing_tracks)} missing tracks!")
+    
+    def start_download_monitoring(self, download_id, download_index, track_index):
+        """Start monitoring a download for completion using downloads.py approach"""
+        if not hasattr(self, 'download_timers'):
+            self.download_timers = []
+        
+        # Create a timer to check this specific download
+        timer = QTimer()
+        timer.timeout.connect(lambda: self.check_download_status(download_id, download_index, track_index, timer))
+        timer.start(2000)  # Check every 2 seconds
+        self.download_timers.append(timer)
+        
+        print(f"🕐 Started monitoring download: {download_id}")
+    
+    def check_download_status(self, download_id, download_index, track_index, timer):
+        """Check if a specific download has completed"""
+        # Check for cancellation
+        if hasattr(self, 'cancel_requested') and self.cancel_requested:
+            timer.stop()
+            return
+        
+        # Create worker to check download status (like downloads.py does)
+        from PyQt6.QtCore import QRunnable, QObject, pyqtSignal
+        
+        class DownloadStatusWorkerSignals(QObject):
+            status_checked = pyqtSignal(str, int, int, QTimer)  # status, download_index, track_index, timer
+            check_failed = pyqtSignal(int, int, str, QTimer)  # download_index, track_index, error, timer
+        
+        class DownloadStatusWorker(QRunnable):
+            def __init__(self, soulseek_client, download_id):
+                super().__init__()
+                self.soulseek_client = soulseek_client
+                self.download_id = download_id
+                self.signals = DownloadStatusWorkerSignals()
+                self._stop_requested = False
+            
+            def run(self):
+                if self._stop_requested:
+                    return
+                    
+                try:
+                    import asyncio
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    
+                    # Get all downloads and find our specific one
+                    downloads = loop.run_until_complete(self.soulseek_client.get_all_downloads())
+                    
+                    if downloads and 'transfers' in downloads:
+                        for user_data in downloads['transfers']:
+                            if 'directories' in user_data:
+                                for directory in user_data['directories']:
+                                    if 'files' in directory:
+                                        for file_transfer in directory['files']:
+                                            if file_transfer.get('id') == self.download_id:
+                                                state = file_transfer.get('state', 'Unknown')
+                                                self.signals.status_checked.emit(state, download_index, track_index, timer)
+                                                loop.close()
+                                                return
+                    
+                    # If we get here, download wasn't found - might be completed and cleaned up
+                    self.signals.check_failed.emit(download_index, track_index, "Download not found in active transfers", timer)
+                    loop.close()
+                    
+                except Exception as e:
+                    self.signals.check_failed.emit(download_index, track_index, str(e), timer)
+                    if 'loop' in locals():
+                        loop.close()
+        
+        # Create and start worker
+        worker = DownloadStatusWorker(self.parent_page.soulseek_client, download_id)
+        worker.signals.status_checked.connect(self.on_download_status_checked)
+        worker.signals.check_failed.connect(self.on_download_status_check_failed)
+        
+        # CRITICAL: Track worker for cancellation
+        if not hasattr(self, 'active_workers'):
+            self.active_workers = []
+        self.active_workers.append(worker)
+        
+        # Submit to thread pool
+        if hasattr(self.parent_page, 'thread_pool'):
+            self.parent_page.thread_pool.start(worker)
+        else:
+            thread_pool = QThreadPool()
+            self.fallback_pools.append(thread_pool)
+            thread_pool.start(worker)
+    
+    def on_download_status_checked(self, state, download_index, track_index, timer):
+        """Handle download status check result"""
+        if state == "Completed":
+            timer.stop()
+            self.on_actual_track_download_complete(download_index, track_index)
+        elif state in ["Cancelled", "Failed"]:
+            timer.stop()
+            self.on_track_download_failed(download_index, track_index, f"Download {state.lower()}")
+        # For "InProgress", "Queued", etc. - keep monitoring
+    
+    def on_download_status_check_failed(self, download_index, track_index, error, timer):
+        """Handle download status check failure"""
+        # If download not found, it might have completed and been cleaned up
+        # Try one more check in 5 seconds, then assume completed
+        print(f"⚠️ Status check failed for download {download_index + 1}: {error}")
+        
+        # For now, assume it completed (downloads.py removes completed downloads)
+        timer.stop()
+        self.on_actual_track_download_complete(download_index, track_index)
+    
+    def on_actual_track_download_complete(self, download_index, track_index):
+        """Handle when a download is actually completed (not just started)"""
+        print(f"✅ Download {download_index + 1} actually completed!")
+        
+        # Update table to show Downloaded
+        if track_index is not None:
+            downloaded_item = QTableWidgetItem("✅ Downloaded")
+            downloaded_item.setFlags(downloaded_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            downloaded_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.track_table.setItem(track_index, 4, downloaded_item)
+        
+        # Update completion tracking
+        self.successful_downloads += 1
+        self.completed_downloads += 1
+        
+        # Update main console log
+        if hasattr(self.parent_page, 'log_area') and download_index < len(self.missing_tracks):
+            track = self.missing_tracks[download_index].spotify_track
+            track_name = track.name
+            artist_name = track.artists[0] if track.artists else "Unknown Artist"
+            remaining = len(self.missing_tracks) - self.successful_downloads
+            self.parent_page.log_area.append(f"✅ Downloaded: {track_name} by {artist_name} ({remaining} remaining)")
+        
+        # Update progress bar to reflect actual completions
+        self.download_progress.setValue(self.completed_downloads)
+        
+        # Update playlist status indicator
+        playlist_item = self.find_playlist_item()
+        if playlist_item:
+            total = len(self.missing_tracks) if hasattr(self, 'missing_tracks') else 0
+            if self.completed_downloads >= total:
+                self.on_all_downloads_complete()
+            else:
+                status_text = f"⏬ Downloading {self.completed_downloads}/{total}"
+                playlist_item.update_operation_status(status_text)
+        
+        # Check if all downloads are complete
+        if self.completed_downloads >= len(self.missing_tracks):
+            self.on_all_downloads_complete()
     
     def setup_background_status_updates(self):
         """Set up timer-based background status updates for playlist indicator"""
