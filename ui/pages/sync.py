@@ -2765,39 +2765,33 @@ class DownloadMissingTracksModal(QDialog):
         # Check if track name is a single word (no spaces)
         is_single_word = len(track_name.strip().split()) == 1
         
+        # NEW STRATEGY per user request: 
+        # 1. "Virtual Mage Orbit Love" (Artist + Track)
+        # 2. "Orbit Love Virtual M" (Track + Shortened Artist) 
+        # 3. "Orbit Love" (Track only)
+        
+        # Strategy 1: Artist + Track (recommended format: "Virtual Mage Orbit Love")
+        if artist_name:
+            queries.append(f"{artist_name} {track_name}".strip())
+        
+        # Strategy 2: Track + Shortened Artist (fallback: "Orbit Love Virtual M")
+        if artist_name:
+            artist_words = artist_name.split()
+            if len(artist_words) > 1:
+                # For multi-word artists: Take first word + first letter of second word
+                short_artist = artist_words[0] + " " + artist_words[1][0] if len(artist_words[1]) > 0 else artist_words[0]
+            else:
+                # For single-word artists: Truncate to ~7 characters
+                short_artist = artist_words[0][:7] if len(artist_words[0]) > 7 else artist_words[0]
+            
+            queries.append(f"{track_name} {short_artist}".strip())
+        
+        # Strategy 3: Track only (final fallback: "Orbit Love")
+        queries.append(track_name.strip())
+        
+        # Legacy single-word handling for backward compatibility
         if is_single_word:
-            # For single-word tracks (like "Aether"), always include artist to be more specific
-            print(f"🎯 Single-word track detected: '{track_name}' - including artist name for specificity")
-            
-            # Strategy 1: Track + full artist name (most specific)
-            if artist_name:
-                queries.append(f"{track_name} {artist_name}".strip())
-            
-            # Strategy 2: Track + shortened artist (remove common articles and prefixes)
-            shortened_artist = self.shorten_artist_name(artist_name)
-            if shortened_artist and shortened_artist != artist_name:
-                queries.append(f"{track_name} {shortened_artist}".strip())
-            
-            # Strategy 3: Track + first word of artist (for multi-word artists)
-            first_word = artist_name.split()[0] if artist_name else ""
-            if first_word and len(first_word) > 2:
-                queries.append(f"{track_name} {first_word}".strip())
-            
-            # Strategy 4: Track name only (fallback for single words)
-            queries.append(track_name.strip())
-            
-        else:
-            # For multi-word tracks, use original logic (track name only often works well)
-            
-            # Strategy 1: Track name only (often most effective for popular multi-word tracks)
-            queries.append(track_name.strip())
-            
-            # Strategy 2: Track name + shortened artist (remove common articles and prefixes)
-            shortened_artist = self.shorten_artist_name(artist_name)
-            if shortened_artist and shortened_artist != artist_name:
-                queries.append(f"{track_name} {shortened_artist}".strip())
-            
-            # Strategy 3: Track name + first word of artist (for multi-word artists)
+            print(f"🎯 Single-word track detected: '{track_name}' - using enhanced search strategy")
             first_word = artist_name.split()[0] if artist_name else ""
             if first_word and len(first_word) > 2:
                 queries.append(f"{track_name} {first_word}".strip())
@@ -3118,8 +3112,9 @@ class DownloadMissingTracksModal(QDialog):
                 if hasattr(self.parent_page, 'log_area'):
                     self.parent_page.log_area.append(f"   🎯 Best match (1/{len(valid_candidates)}): {best_match.filename}")
                 
-                # Start download with the best match
-                self.start_download_with_match(best_match, spotify_track, track_index, table_index)
+                # NEW: Start with pre-download Spotify validation instead of direct download
+                print(f"🔍 Starting pre-download validation for: {best_match.filename}")
+                self.validate_slskd_result_with_spotify(best_match, spotify_track, track_index, table_index, valid_candidates)
                 return
         
         # Check if this query returned zero results and try word removal fallback
@@ -4174,6 +4169,307 @@ class DownloadMissingTracksModal(QDialog):
         # Start Spotify validation worker
         self.start_spotify_validation_worker(track_index, table_index, original_track)
     
+    def validate_slskd_result_with_spotify(self, slskd_result, original_spotify_track, track_index, table_index, valid_candidates):
+        """
+        Pre-download validation: Extract track title from slskd result and validate with Spotify API
+        
+        Flow:
+        1. Extract track title from slskd result filename
+        2. Search Spotify API with extracted title  
+        3. Compare Spotify API results with original playlist track artist
+        4. If validation passes: use Spotify metadata for download
+        5. If validation fails: try next candidate or fail gracefully
+        """
+        print(f"🔍 PRE-DOWNLOAD VALIDATION: {slskd_result.filename}")
+        
+        # Extract track title from slskd result filename using existing parsing logic
+        extracted_title = self.extract_track_title_from_filename(slskd_result.filename)
+        extracted_artist = getattr(slskd_result, 'artist', '') or self.extract_artist_from_filename(slskd_result.filename)
+        
+        print(f"   📄 Extracted from slskd: '{extracted_title}' by '{extracted_artist}'")
+        
+        # Get the actual Spotify track from TrackAnalysisResult
+        spotify_track = original_spotify_track.spotify_track if hasattr(original_spotify_track, 'spotify_track') else original_spotify_track
+        print(f"   📋 Original playlist: '{spotify_track.name}' by '{spotify_track.artists[0] if spotify_track.artists else 'Unknown'}'")
+        
+        # Start validation worker
+        self.start_pre_download_validation_worker(
+            slskd_result, spotify_track, extracted_title, extracted_artist,
+            track_index, table_index, valid_candidates
+        )
+    
+    def extract_track_title_from_filename(self, filename):
+        """Extract track title from slskd result filename using existing parsing logic"""
+        if not filename:
+            return ""
+        
+        # Use existing normalize_track_title logic but keep more information
+        title = filename
+        
+        # Remove file extension
+        import re
+        title = re.sub(r'\.(flac|mp3|aac|alac|ape|ogg|m4a)$', '', title, flags=re.IGNORECASE)
+        
+        # Remove track numbers from beginning first (before artist-track parsing)
+        title = re.sub(r'^(\d{1,4}[-.\s]*)', '', title)
+        
+        # Handle "Artist - Track" format (most common)
+        if ' - ' in title:
+            parts = title.split(' - ')
+            if len(parts) >= 2:
+                # Second part is usually the track title
+                title = parts[1].strip()
+                # If there are more parts, include them (could be track title with dashes)
+                if len(parts) > 2:
+                    title = ' - '.join(parts[1:]).strip()
+        
+        # Remove common quality indicators  
+        title = re.sub(r'\[(320|256|192|128)k?bps?\]', '', title, flags=re.IGNORECASE)
+        title = re.sub(r'\[flac\]', '', title, flags=re.IGNORECASE)
+        title = re.sub(r'\[24bit\]', '', title, flags=re.IGNORECASE)
+        title = re.sub(r'\[hi-?res\]', '', title, flags=re.IGNORECASE)
+        
+        # Clean up whitespace
+        title = re.sub(r'\s+', ' ', title).strip()
+        
+        return title
+    
+    def extract_artist_from_filename(self, filename):
+        """Extract artist name from slskd result filename"""
+        if not filename:
+            return ""
+        
+        import re
+        
+        # Remove file extension
+        title = re.sub(r'\.(flac|mp3|aac|alac|ape|ogg|m4a)$', '', filename, flags=re.IGNORECASE)
+        
+        # Handle "Artist - Track" format (most common)
+        if ' - ' in title:
+            parts = title.split(' - ')
+            if len(parts) >= 2:
+                # First part is usually the artist
+                artist = parts[0].strip()
+                return artist
+        
+        # If no clear artist-track separation, return empty (will rely on slskd result.artist field)
+        return ""
+
+    def start_pre_download_validation_worker(self, slskd_result, original_spotify_track, extracted_title, extracted_artist, track_index, table_index, valid_candidates):
+        """Start background worker for pre-download Spotify API validation"""
+        from PyQt6.QtCore import QRunnable, QObject, pyqtSignal
+        
+        class PreDownloadValidationSignals(QObject):
+            validation_completed = pyqtSignal(bool, object, str, int, int, list)  # is_valid, spotify_metadata, reason, track_index, table_index, valid_candidates
+            validation_failed = pyqtSignal(str, int, int, object, list)  # error, track_index, table_index, original_track, valid_candidates
+        
+        class PreDownloadValidationWorker(QRunnable):
+            def __init__(self, spotify_client, slskd_result, original_spotify_track, extracted_title, extracted_artist):
+                super().__init__()
+                self.spotify_client = spotify_client
+                self.slskd_result = slskd_result
+                self.original_spotify_track = original_spotify_track
+                self.extracted_title = extracted_title
+                self.extracted_artist = extracted_artist
+                self.signals = PreDownloadValidationSignals()
+            
+            def run(self):
+                try:
+                    # Use multiple search strategies for better results
+                    spotify_results = []
+                    
+                    # Strategy 1: Artist + Track (recommended format: "Virtual Mage Orbit Love")
+                    if self.extracted_artist:
+                        search_query_1 = f"{self.extracted_artist} {self.extracted_title}"
+                        print(f"🔍 Spotify API search (Strategy 1): '{search_query_1}'")
+                        spotify_results = self.spotify_client.search_tracks(search_query_1, limit=10)
+                    
+                    # Strategy 2: Track + Shortened Artist (fallback: "Orbit Love Virtual M")
+                    if not spotify_results and self.extracted_artist:
+                        artist_words = self.extracted_artist.split()
+                        if len(artist_words) > 1:
+                            short_artist = artist_words[0] + " " + artist_words[1][0] if len(artist_words[1]) > 0 else artist_words[0]
+                        else:
+                            short_artist = artist_words[0][:7] if len(artist_words[0]) > 7 else artist_words[0]
+                        
+                        search_query_2 = f"{self.extracted_title} {short_artist}"
+                        print(f"🔍 Spotify API search (Strategy 2): '{search_query_2}'")
+                        spotify_results = self.spotify_client.search_tracks(search_query_2, limit=10)
+                    
+                    # Strategy 3: Track only (final fallback: "Orbit Love")
+                    if not spotify_results:
+                        search_query_3 = self.extracted_title
+                        print(f"🔍 Spotify API search (Strategy 3): '{search_query_3}'")
+                        spotify_results = self.spotify_client.search_tracks(search_query_3, limit=10)
+                    
+                    if not spotify_results:
+                        self.signals.validation_completed.emit(False, None, "No Spotify API results found with any search strategy", track_index, table_index, valid_candidates)
+                        return
+                    
+                    # Get original playlist track artist for comparison
+                    original_artist = self.original_spotify_track.artists[0] if self.original_spotify_track.artists else ""
+                    original_artist_clean = original_artist.lower().strip()
+                    
+                    print(f"🔍 Comparing against original artist: '{original_artist}'")
+                    
+                    # Check if any Spotify result matches the original playlist track artist
+                    best_spotify_match = None
+                    for result in spotify_results:
+                        if result.artists:
+                            spotify_api_artist = result.artists[0].lower().strip()
+                            
+                            # Exact artist match gives highest confidence
+                            if spotify_api_artist == original_artist_clean:
+                                print(f"✅ PERFECT MATCH: Spotify API confirms '{result.name}' by '{result.artists[0]}'")
+                                best_spotify_match = result
+                                break
+                            
+                            # Partial artist match (for cases like "Virtual Mage" vs "Virtual Mage Official")
+                            elif original_artist_clean in spotify_api_artist or spotify_api_artist in original_artist_clean:
+                                print(f"✅ PARTIAL MATCH: Spotify API found '{result.name}' by '{result.artists[0]}' (close to '{original_artist}')")
+                                if not best_spotify_match:  # Take first partial match if no exact match
+                                    best_spotify_match = result
+                    
+                    if best_spotify_match:
+                        # Validation passed - return Spotify metadata for proper folder organization
+                        self.signals.validation_completed.emit(True, best_spotify_match, f"Validated via Spotify API: {best_spotify_match.artists[0]}", track_index, table_index, valid_candidates)
+                    else:
+                        # No artist match found
+                        found_artists = [r.artists[0] if r.artists else "Unknown" for r in spotify_results[:3]]
+                        reason = f"Artist mismatch. Expected: '{original_artist}', Spotify API returned: {found_artists}"
+                        self.signals.validation_completed.emit(False, None, reason, track_index, table_index, valid_candidates)
+                    
+                except Exception as e:
+                    self.signals.validation_failed.emit(str(e), track_index, table_index, self.original_spotify_track, valid_candidates)
+        
+        # Create and start validation worker
+        spotify_client = getattr(self.parent_page, 'spotify_client', None)
+        if not spotify_client:
+            print("❌ No Spotify client available for pre-download validation")
+            self.on_predownload_validation_failed("No Spotify client available", track_index, table_index, original_spotify_track, valid_candidates)
+            return
+        
+        worker = PreDownloadValidationWorker(spotify_client, slskd_result, original_spotify_track, extracted_title, extracted_artist)
+        worker.signals.validation_completed.connect(self.on_predownload_validation_completed)
+        worker.signals.validation_failed.connect(self.on_predownload_validation_failed)
+        
+        # Use thread pool for background execution
+        from PyQt6.QtCore import QThreadPool
+        thread_pool = QThreadPool.globalInstance()
+        thread_pool.start(worker)
+    
+    def on_predownload_validation_completed(self, is_valid, spotify_metadata, reason, track_index, table_index, valid_candidates):
+        """Handle pre-download Spotify validation completion"""
+        print(f"🔍 Pre-download validation result for track {track_index + 1}: {'✅ VALID' if is_valid else '❌ INVALID'}")
+        print(f"   Reason: {reason}")
+        
+        if is_valid and spotify_metadata:
+            # Validation passed - proceed with download using Spotify metadata
+            print(f"✅ Validation passed! Using Spotify metadata for download: '{spotify_metadata.name}' by '{spotify_metadata.artists[0] if spotify_metadata.artists else 'Unknown'}'")
+            
+            # Get the original slskd result (first candidate that was being validated)  
+            original_slskd_result = valid_candidates[0] if valid_candidates else None
+            if not original_slskd_result:
+                print("❌ No slskd result available for download")
+                self.try_next_candidate_or_fail(track_index, table_index, valid_candidates, "No slskd result available")
+                return
+            
+            # Start download with validated Spotify metadata
+            self.start_download_with_validated_spotify_metadata(original_slskd_result, spotify_metadata, track_index, table_index)
+            
+        else:
+            # Validation failed - try next candidate from valid_candidates list
+            print(f"❌ Validation failed: {reason}")
+            self.try_next_candidate_or_fail(track_index, table_index, valid_candidates, reason)
+    
+    def on_predownload_validation_failed(self, error, track_index, table_index, original_track, valid_candidates):
+        """Handle pre-download Spotify validation error"""
+        print(f"❌ Pre-download validation error for track {track_index + 1}: {error}")
+        
+        # Try next candidate or fail gracefully
+        self.try_next_candidate_or_fail(track_index, table_index, valid_candidates, f"Validation error: {error}")
+    
+    def try_next_candidate_or_fail(self, track_index, table_index, valid_candidates, reason):
+        """Try next candidate from valid_candidates list or fail gracefully"""
+        # Remove the failed candidate 
+        if valid_candidates and len(valid_candidates) > 1:
+            failed_candidate = valid_candidates.pop(0)  # Remove first (failed) candidate
+            print(f"🔄 Trying next candidate. Remaining candidates: {len(valid_candidates)}")
+            
+            # Try validation with next candidate
+            next_candidate = valid_candidates[0]
+            track_analysis_result = self.missing_tracks[track_index] if track_index < len(self.missing_tracks) else None
+            
+            if track_analysis_result:
+                print(f"🔄 Retrying with next candidate: {next_candidate.filename}")
+                self.validate_slskd_result_with_spotify(next_candidate, track_analysis_result, track_index, table_index, valid_candidates)
+                return
+        
+        # No more candidates available - mark as failed
+        print(f"❌ All candidates failed for track {track_index + 1}: {reason}")
+        self.on_track_download_failed(track_index, table_index, reason)
+    
+    def start_download_with_validated_spotify_metadata(self, slskd_result, spotify_metadata, track_index, table_index):
+        """Start download using validated Spotify metadata for proper folder organization"""
+        print(f"🚀 Starting validated download: '{spotify_metadata.name}' by '{spotify_metadata.artists[0] if spotify_metadata.artists else 'Unknown'}'")
+        
+        # Create a Spotify-based search result that combines slskd download details with Spotify metadata
+        # This ensures the download uses validated Spotify metadata for folder structure
+        spotify_based_result = self.create_spotify_based_search_result_from_validation(slskd_result, spotify_metadata)
+        
+        # Update table to show downloading status
+        if table_index is not None and table_index < self.track_table.rowCount():
+            downloading_item = QTableWidgetItem("⏬ Downloading")
+            downloading_item.setFlags(downloading_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            downloading_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.track_table.setItem(table_index, 4, downloading_item)
+        
+        # Log the download start
+        if hasattr(self.parent_page, 'log_area'):
+            self.parent_page.log_area.append(f"🎵 Downloading: {spotify_based_result.filename} (validated)")
+        
+        # Use downloads.py infrastructure for the actual download with validated metadata
+        self.start_matched_download_via_infrastructure(spotify_based_result, track_index, table_index)
+        
+        # Move to next track search
+        self.advance_to_next_track()
+    
+    def create_spotify_based_search_result_from_validation(self, slskd_result, spotify_metadata):
+        """Create SpotifyBasedSearchResult from validation results"""
+        from types import SimpleNamespace
+        
+        # Extract Spotify metadata
+        spotify_title = spotify_metadata.name
+        spotify_artist = spotify_metadata.artists[0] if spotify_metadata.artists else "Unknown Artist"
+        spotify_album_name = getattr(spotify_metadata, 'album', spotify_title)  # album is already a string in Track object
+        spotify_duration = getattr(spotify_metadata, 'duration_ms', 0) // 1000 if hasattr(spotify_metadata, 'duration_ms') else 0
+        
+        # Create hybrid result with slskd download details + Spotify metadata for organization
+        class SpotifyBasedSearchResult:
+            def __init__(self):
+                # Soulseek download details (for actual download)
+                self.filename = getattr(slskd_result, 'filename', f"{spotify_title}.flac")
+                self.username = getattr(slskd_result, 'username', getattr(slskd_result, 'user', 'unknown_user'))
+                self.size = getattr(slskd_result, 'size', 50000000)
+                self.bit_rate = getattr(slskd_result, 'bit_rate', 1411)  
+                self.sample_rate = getattr(slskd_result, 'sample_rate', 44100)
+                self.duration = getattr(slskd_result, 'duration', spotify_duration)
+                self.quality = getattr(slskd_result, 'quality', getattr(slskd_result, 'format', 'flac'))
+                
+                # Spotify metadata (for folder organization)
+                self.spotify_title = spotify_title
+                self.spotify_artist = spotify_artist  
+                self.spotify_album = spotify_album_name
+                self.spotify_duration = spotify_duration
+                self.spotify_id = getattr(spotify_metadata, 'id', None)
+                
+                # For compatibility with existing infrastructure
+                self.title = spotify_title
+                self.artist = spotify_artist
+                self.album = spotify_album_name
+        
+        return SpotifyBasedSearchResult()
+
     def start_spotify_validation_worker(self, track_index, table_index, original_track):
         """Start background worker to validate track via Spotify API"""
         from PyQt6.QtCore import QRunnable, QObject, pyqtSignal
