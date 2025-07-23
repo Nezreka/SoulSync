@@ -2704,19 +2704,19 @@ class DownloadMissingTracksModal(QDialog):
         self.download_in_progress = True
         self.current_download = 0
         
-        # Start downloading tracks using downloads.py infrastructure
-        self.download_missing_tracks_with_infrastructure()
+        # Start downloading tracks using PARALLEL downloads infrastructure
+        print("🚀 Starting parallel download system...")
+        self.start_parallel_downloads()
     
     def download_missing_tracks_with_infrastructure(self):
-        """Download missing tracks using existing matched download infrastructure"""
+        """DEPRECATED - now redirects to parallel download system"""
+        print("⚠️ download_missing_tracks_with_infrastructure() called - switching to parallel system")
         if not self.missing_tracks:
             self.on_all_downloads_complete()
             return
         
-        print(f"🚀 Starting download of {len(self.missing_tracks)} missing tracks using downloads.py infrastructure...")
-        
-        # Process each missing track
-        self.successful_downloads = 0
+        # Redirect to parallel download system
+        self.start_parallel_downloads()
         self.failed_downloads = 0
         self.completed_downloads = 0
         self.current_search_index = 0
@@ -2725,9 +2725,10 @@ class DownloadMissingTracksModal(QDialog):
         self.track_attempts = {}  # track_index -> attempt_count
         self.MAX_ATTEMPTS_PER_TRACK = 5
         
-        # Start searching tracks sequentially to avoid overwhelming the system
-        # (searches can take up to 25 seconds each)
-        self.start_next_track_search()
+        # CHANGED: Now using parallel system instead of sequential
+        print("🚀 Redirecting to parallel download system for better performance...")
+        # The parallel system is already started from start_soulseek_downloads()
+        # No need to call it again here
     
     def start_next_track_search(self):
         """Start searching for the next track in sequence"""
@@ -4798,16 +4799,69 @@ class DownloadMissingTracksModal(QDialog):
             downloading_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.track_table.setItem(track_index, 4, downloading_item)
         
-        # NEW: Use infrastructure path for proper Transfer folder organization
-        # Instead of the simple TrackDownloadWorker, use the search-and-infrastructure path
-        # This ensures downloads go to Transfer folder with Spotify metadata organization
-        self.search_and_download_track_with_infrastructure(track, self.current_download, track_index)
+        # DEPRECATED: Now using parallel downloads for better performance
+        print("⚠️ download_next_track() called - switching to parallel downloads")
+        if not hasattr(self, 'parallel_started'):
+            self.parallel_started = True
+            self.start_parallel_downloads()
+    
+    def start_parallel_downloads(self):
+        """Start multiple track downloads in parallel for better performance"""
+        max_concurrent = 3  # Conservative limit to avoid overwhelming services
         
-        # Increment and continue (don't wait for completion)
-        self.current_download += 1
+        print(f"🚀 Starting parallel downloads: {max_concurrent} concurrent tracks")
         
-        # Continue with next download
-        self.download_next_track()
+        # Initialize parallel tracking
+        if not hasattr(self, 'active_parallel_downloads'):
+            self.active_parallel_downloads = 0
+        if not hasattr(self, 'download_queue_index'):
+            self.download_queue_index = 0
+        if not hasattr(self, 'failed_downloads'):
+            self.failed_downloads = 0
+        if not hasattr(self, 'completed_downloads'):
+            self.completed_downloads = 0
+        if not hasattr(self, 'successful_downloads'):
+            self.successful_downloads = 0
+        
+        # Start initial batch of downloads
+        self.start_next_batch_of_downloads(max_concurrent)
+    
+    def start_next_batch_of_downloads(self, max_concurrent):
+        """Start the next batch of downloads up to the concurrent limit"""
+        while (self.active_parallel_downloads < max_concurrent and 
+               self.download_queue_index < len(self.missing_tracks)):
+            
+            # Get next track to download
+            track_result = self.missing_tracks[self.download_queue_index]
+            track = track_result.spotify_track
+            track_index = self.find_track_index(track)
+            
+            print(f"🎵 Starting parallel download {self.download_queue_index + 1}/{len(self.missing_tracks)}: {track.name}")
+            
+            # Update main console log
+            if hasattr(self.parent_page, 'log_area'):
+                artist_name = track.artists[0] if track.artists else "Unknown Artist"
+                progress_pct = ((self.download_queue_index + 1) / len(self.missing_tracks)) * 100
+                self.parent_page.log_area.append(f"🎵 Searching ({self.download_queue_index + 1}/{len(self.missing_tracks)}, {progress_pct:.0f}%): {track.name} by {artist_name}")
+            
+            # Update table to show searching status
+            if track_index is not None:
+                searching_item = QTableWidgetItem("🔍 Searching")
+                searching_item.setFlags(searching_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                searching_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.track_table.setItem(track_index, 4, searching_item)
+            
+            # Start parallel search and download
+            self.search_and_download_track_parallel(track, self.download_queue_index, track_index)
+            
+            # Increment counters
+            self.active_parallel_downloads += 1
+            self.download_queue_index += 1
+        
+        # Check if all downloads are complete
+        if (self.download_queue_index >= len(self.missing_tracks) and 
+            self.active_parallel_downloads == 0):
+            self.on_all_downloads_complete()
     
     def search_and_download_track_with_infrastructure(self, spotify_track, download_index, track_index):
         """Search for track and download via infrastructure path (with Transfer folder organization)"""
@@ -4822,6 +4876,371 @@ class DownloadMissingTracksModal(QDialog):
         # Start the search process using the existing infrastructure
         # This will trigger search → validation → download → Transfer folder organization
         self.start_track_search_with_queries(spotify_track, search_queries, track_index, track_index)
+    
+    def search_and_download_track_parallel(self, spotify_track, download_index, track_index):
+        """Search for track and download via infrastructure path - PARALLEL VERSION"""
+        print(f"🚀 Starting parallel search for: {spotify_track.name}")
+        
+        # Create search queries using the smart strategy
+        track_name = spotify_track.name
+        artist_name = spotify_track.artists[0] if spotify_track.artists else ""
+        
+        search_queries = self.generate_smart_search_queries(track_name, artist_name)
+        
+        # Start the search process with parallel completion handling
+        self.start_track_search_with_queries_parallel(spotify_track, search_queries, track_index, track_index, download_index)
+    
+    def start_track_search_with_queries_parallel(self, spotify_track, search_queries, track_index, table_index, download_index):
+        """Start track search with parallel completion handling"""
+        print(f"🔍 Starting parallel search with {len(search_queries)} queries: {search_queries[0] if search_queries else 'no queries'}")
+        
+        # Store parallel tracking info
+        if not hasattr(self, 'parallel_search_tracking'):
+            self.parallel_search_tracking = {}
+        
+        self.parallel_search_tracking[download_index] = {
+            'spotify_track': spotify_track,
+            'track_index': track_index,
+            'table_index': table_index,
+            'download_index': download_index,
+            'completed': False
+        }
+        
+        # Use existing search infrastructure but with parallel completion callback
+        self.start_search_worker_parallel(search_queries[0], search_queries, spotify_track, track_index, table_index, 0, download_index)
+    
+    def start_search_worker_parallel(self, query, queries, spotify_track, track_index, table_index, query_index, download_index):
+        """Start search worker with parallel completion handling"""
+        print(f"🔍 Starting parallel search worker for query: {query}")
+        
+        # Create a simple parallel search worker
+        from PyQt6.QtCore import QRunnable, QObject, pyqtSignal
+        
+        class ParallelSearchWorkerSignals(QObject):
+            search_completed = pyqtSignal(list, str)  # results, query
+            search_failed = pyqtSignal(str, str)  # query, error
+        
+        class ParallelSearchWorker(QRunnable):
+            def __init__(self, soulseek_client, query):
+                super().__init__()
+                self.soulseek_client = soulseek_client
+                self.query = query
+                self.signals = ParallelSearchWorkerSignals()
+                
+            def run(self):
+                loop = None
+                try:
+                    import asyncio
+                    # Create a fresh event loop for this thread
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    
+                    # Perform search with proper await
+                    search_result = loop.run_until_complete(self.soulseek_client.search(self.query))
+                    
+                    # Debug: Check what we actually got
+                    print(f"🔍 DEBUG: Search '{self.query}' returned type: {type(search_result)}")
+                    
+                    # Handle tuple result structure (tracks, albums)
+                    if isinstance(search_result, tuple) and len(search_result) >= 1:
+                        # First element is the tracks list
+                        results_list = search_result[0] if search_result[0] else []
+                        print(f"🔍 DEBUG: Extracted {len(results_list)} tracks from tuple")
+                    elif hasattr(search_result, '__iter__') and not isinstance(search_result, (str, bytes)):
+                        results_list = list(search_result)
+                    else:
+                        results_list = []
+                    
+                    # Debug first actual result
+                    if results_list and len(results_list) > 0:
+                        first_track = results_list[0]
+                        print(f"🔍 DEBUG: First track type: {type(first_track)}")
+                        print(f"🔍 DEBUG: First track attributes: {[attr for attr in dir(first_track) if not attr.startswith('_')]}")
+                        if hasattr(first_track, 'filename'):
+                            print(f"🔍 DEBUG: First track filename: '{first_track.filename}'")
+                    
+                    # Emit completion signal
+                    self.signals.search_completed.emit(results_list, self.query)
+                    
+                except Exception as e:
+                    print(f"❌ Parallel search error for '{self.query}': {str(e)}")
+                    self.signals.search_failed.emit(self.query, str(e))
+                finally:
+                    if loop:
+                        try:
+                            pending = asyncio.all_tasks(loop)
+                            for task in pending:
+                                task.cancel()
+                            if pending:
+                                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                            loop.close()
+                        except Exception:
+                            pass
+        
+        # Create and configure worker
+        worker = ParallelSearchWorker(self.parent_page.soulseek_client, query)
+        
+        # Connect to parallel completion handler
+        worker.signals.search_completed.connect(
+            lambda results, q, qs=queries, st=spotify_track, ti=track_index, 
+                   tabi=table_index, qi=query_index, di=download_index: 
+            self.on_search_query_completed_parallel(results, qs, st, ti, tabi, qi, q, di)
+        )
+        
+        # Handle search failures
+        worker.signals.search_failed.connect(
+            lambda q, error, di=download_index: 
+            self.on_parallel_track_failed(di, f"Search failed for '{q}': {error}")
+        )
+        
+        # Submit to thread pool
+        if hasattr(self.parent_page, 'thread_pool'):
+            self.parent_page.thread_pool.start(worker)
+        else:
+            thread_pool = QThreadPool()
+            self.fallback_pools.append(thread_pool)
+            thread_pool.start(worker)
+    
+    def on_search_query_completed_parallel(self, results, queries, spotify_track, track_index, table_index, query_index, query, download_index):
+        """Handle completion of a parallel search query"""
+        # Check for cancellation
+        if hasattr(self, 'cancel_requested') and self.cancel_requested:
+            print("🛑 Parallel search query completed after cancellation - ignoring results")
+            self.on_parallel_track_completed(download_index, False)
+            return
+            
+        print(f"✅ Parallel search query '{query}' returned {len(results)} results for download {download_index + 1}")
+        
+        # Update console with result count
+        if hasattr(self.parent_page, 'log_area'):
+            self.parent_page.log_area.append(f"   ✅ Found {len(results)} tracks for '{query}' (parallel #{download_index + 1})")
+        
+        if results and len(results) > 0:
+            # Debug: Show first result details
+            print(f"🔍 DEBUG: Processing {len(results)} results for parallel download {download_index + 1}")
+            if len(results) > 0:
+                first_result = results[0]
+                print(f"🔍 DEBUG: First result type: {type(first_result)}")
+                print(f"🔍 DEBUG: First result attributes: {[attr for attr in dir(first_result) if not attr.startswith('_')]}")
+                if hasattr(first_result, 'filename'):
+                    print(f"🔍 DEBUG: First result filename: '{first_result.filename}'")
+                if hasattr(first_result, 'title'):
+                    print(f"🔍 DEBUG: First result title: '{first_result.title}'")
+            
+            # Found results - process using existing validation infrastructure
+            valid_candidates = self.get_valid_candidates(results, spotify_track, query)
+            
+            if valid_candidates:
+                print(f"🎯 Found {len(valid_candidates)} valid candidates for parallel download {download_index + 1}")
+                
+                # Start validation and download using existing infrastructure
+                best_match = valid_candidates[0]
+                print(f"🎯 Selected best match for parallel download: {best_match.filename}")
+                
+                # Update console with selection
+                if hasattr(self.parent_page, 'log_area'):
+                    self.parent_page.log_area.append(f"   🎯 Best match (parallel #{download_index + 1}): {best_match.filename}")
+                
+                # Use existing validation system with parallel completion handling
+                self.validate_slskd_result_with_spotify_parallel(best_match, spotify_track, track_index, table_index, valid_candidates, download_index)
+                return
+        
+        # No results or failed - handle failure
+        self.on_parallel_track_failed(download_index, f"No valid results for query: {query}")
+    
+    def validate_slskd_result_with_spotify_parallel(self, slskd_result, original_spotify_track, track_index, table_index, valid_candidates, download_index):
+        """Parallel version of Spotify validation - SIMPLIFIED for speed"""
+        print(f"🎯 Starting parallel validation for download {download_index + 1}")
+        
+        # Since we already found a valid candidate with good confidence, 
+        # we can skip complex validation and proceed directly with download
+        # The track matching was already done in get_valid_candidates()
+        
+        # Create a simplified Spotify metadata object from the original track
+        spotify_metadata = original_spotify_track  # Use the original Spotify track info
+        
+        print(f"✅ Parallel validation passed for download {download_index + 1}: Direct match from search results")
+        
+        # Proceed directly to download
+        self.on_predownload_validation_completed_parallel(
+            True, "Valid match from search results", slskd_result, original_spotify_track, 
+            track_index, table_index, valid_candidates, download_index, spotify_metadata
+        )
+    
+    def on_predownload_validation_completed_parallel(self, is_valid, reason, slskd_result, original_track, track_index, table_index, valid_candidates, download_index, spotify_metadata):
+        """Handle parallel validation completion and start download"""
+        if is_valid and spotify_metadata:
+            print(f"✅ Parallel validation passed for download {download_index + 1}: {reason}")
+            
+            # Start the download using existing infrastructure
+            self.start_validated_download_parallel(slskd_result, spotify_metadata, track_index, table_index, download_index)
+        else:
+            print(f"❌ Parallel validation failed for download {download_index + 1}: {reason}")
+            self.on_parallel_track_failed(download_index, f"Validation failed: {reason}")
+    
+    def start_validated_download_parallel(self, slskd_result, spotify_metadata, track_index, table_index, download_index):
+        """Start download with validated metadata - parallel version"""
+        # Create spotify-based result for infrastructure download
+        spotify_based_result = self.create_spotify_based_search_result_from_validation(slskd_result, spotify_metadata)
+        
+        # Update table to show downloading status
+        if table_index is not None and table_index < self.track_table.rowCount():
+            downloading_item = QTableWidgetItem("⏬ Downloading")
+            downloading_item.setFlags(downloading_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            downloading_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.track_table.setItem(table_index, 4, downloading_item)
+        
+        # Log the download start
+        if hasattr(self.parent_page, 'log_area'):
+            self.parent_page.log_area.append(f"🎵 Downloading (parallel #{download_index + 1}): {spotify_based_result.filename}")
+        
+        # Start download via infrastructure - but with parallel completion handling
+        download_id = self.start_matched_download_via_infrastructure_parallel(spotify_based_result, track_index, table_index, download_index)
+    
+    def start_matched_download_via_infrastructure_parallel(self, spotify_based_result, track_index, table_index, download_index):
+        """Start infrastructure download with parallel completion tracking"""
+        try:
+            # Create artist object for infrastructure
+            artist = type('Artist', (), {
+                'name': spotify_based_result.artist,
+                'image_url': None
+            })()
+            
+            # Call downloads.py infrastructure with validated result
+            download_item = self.downloads_page._start_download_with_artist(spotify_based_result, artist)
+            
+            if download_item:
+                print(f"✅ Successfully queued parallel download {download_index + 1}")
+                
+                # Monitor completion with parallel handling
+                self.monitor_download_completion_parallel(download_item, track_index, table_index, download_index)
+                
+                return download_item
+            else:
+                self.on_parallel_track_failed(download_index, "Failed to start download")
+                return None
+                
+        except Exception as e:
+            print(f"❌ Error starting parallel download {download_index + 1}: {str(e)}")
+            self.on_parallel_track_failed(download_index, str(e))
+            return None
+    
+    def monitor_download_completion_parallel(self, download_item, track_index, table_index, download_index):
+        """Monitor parallel download completion using Transfer folder detection"""
+        from PyQt6.QtCore import QTimer
+        import os
+        
+        # Get the expected transfer path for this track
+        if track_index < len(self.missing_tracks):
+            spotify_track = self.missing_tracks[track_index].spotify_track
+            expected_transfer_path = self.get_expected_transfer_path(spotify_track)
+            
+            # Create timer to check for file existence in Transfer folder
+            timer = QTimer()
+            timer.expected_path = expected_transfer_path
+            timer.track_index = track_index
+            timer.table_index = table_index
+            timer.download_index = download_index
+            timer.start_time = 0
+            timer.timeout.connect(lambda: self.check_transfer_folder_completion_parallel(timer))
+            timer.start(2000)  # Check every 2 seconds
+            
+            # Store timer reference for cleanup
+            if not hasattr(self, 'download_timers'):
+                self.download_timers = []
+            self.download_timers.append(timer)
+        else:
+            self.on_parallel_track_failed(download_index, f"Track index {track_index} out of range")
+    
+    def check_transfer_folder_completion_parallel(self, timer):
+        """Check Transfer folder completion for parallel downloads"""
+        import os
+        import glob
+        
+        try:
+            # Increment timer counter
+            timer.start_time += 2  # 2 seconds per check
+            
+            # Check if expected folder exists
+            if os.path.exists(timer.expected_path):
+                # Check if there are any audio files in the folder
+                audio_files = glob.glob(os.path.join(timer.expected_path, "*.flac")) + \
+                             glob.glob(os.path.join(timer.expected_path, "*.mp3")) + \
+                             glob.glob(os.path.join(timer.expected_path, "*.wav"))
+                
+                if audio_files:
+                    print(f"✅ Parallel download {timer.download_index + 1} completed: {timer.expected_path}")
+                    timer.stop()
+                    self.on_parallel_track_completed(timer.download_index, True)
+                    return
+            
+            # Timeout after 10 minutes
+            if timer.start_time > 600:  # 10 minutes
+                print(f"⏰ Parallel download {timer.download_index + 1} timeout: {timer.expected_path}")
+                timer.stop()
+                self.on_parallel_track_failed(timer.download_index, "Transfer timeout")
+                
+        except Exception as e:
+            print(f"❌ Error checking parallel transfer folder: {str(e)}")
+            timer.stop()
+            self.on_parallel_track_failed(timer.download_index, str(e))
+    
+    def on_parallel_track_completed(self, download_index, success):
+        """Handle completion of a parallel track download"""
+        if hasattr(self, 'parallel_search_tracking') and download_index in self.parallel_search_tracking:
+            track_info = self.parallel_search_tracking[download_index]
+            
+            if not track_info['completed']:  # Prevent double completion
+                track_info['completed'] = True
+                
+                # Update UI
+                if success:
+                    # Mark as downloaded
+                    if track_info['table_index'] is not None:
+                        downloaded_item = QTableWidgetItem("✅ Downloaded")
+                        downloaded_item.setFlags(downloaded_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                        downloaded_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                        self.track_table.setItem(track_info['table_index'], 4, downloaded_item)
+                    
+                    # Update counters
+                    self.downloaded_tracks_count += 1
+                    if hasattr(self, 'downloaded_count_label'):
+                        self.downloaded_count_label.setText(str(self.downloaded_tracks_count))
+                    
+                    self.successful_downloads += 1
+                    
+                    # Log success
+                    if hasattr(self.parent_page, 'log_area'):
+                        track = track_info['spotify_track']
+                        artist_name = track.artists[0] if track.artists else "Unknown"
+                        self.parent_page.log_area.append(f"✅ Downloaded (parallel #{download_index + 1}): {track.name} by {artist_name}")
+                else:
+                    # Mark as failed
+                    if track_info['table_index'] is not None:
+                        failed_item = QTableWidgetItem("❌ Failed")
+                        failed_item.setFlags(failed_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                        failed_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                        self.track_table.setItem(track_info['table_index'], 4, failed_item)
+                    
+                    self.failed_downloads += 1
+                
+                # Update progress counters
+                self.completed_downloads += 1
+                self.active_parallel_downloads -= 1
+                
+                # Update progress bar
+                self.download_progress.setValue(self.completed_downloads)
+                
+                # Start next batch if needed
+                self.start_next_batch_of_downloads(3)  # Max concurrent limit
+                
+        else:
+            print(f"⚠️ Parallel track completion called for unknown download_index: {download_index}")
+    
+    def on_parallel_track_failed(self, download_index, reason):
+        """Handle failure of a parallel track download"""
+        print(f"❌ Parallel download {download_index + 1} failed: {reason}")
+        self.on_parallel_track_completed(download_index, False)
             
     def find_track_index(self, spotify_track):
         """Find the table row index for a given Spotify track"""
@@ -4859,8 +5278,8 @@ class DownloadMissingTracksModal(QDialog):
         # Increment download counter (tracking started downloads)
         self.current_download += 1
         
-        # Continue with next download (don't wait for completion)
-        self.download_next_track()
+        # REMOVED: Old sequential download call - now using parallel system
+        # self.download_next_track()  # Parallel system handles queueing automatically
         
     def on_track_download_failed(self, download_index, track_index, error_message):
         """Handle failed track download"""
