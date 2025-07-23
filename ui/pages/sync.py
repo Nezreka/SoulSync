@@ -1600,6 +1600,23 @@ class SyncPage(QWidget):
         # Log area
         self.log_area = QTextEdit()
         self.log_area.setMinimumHeight(80)  # Set minimum height instead of maximum
+        
+        # Override append method to limit to 200 lines
+        original_append = self.log_area.append
+        def limited_append(text):
+            original_append(text)
+            # Keep only last 200 lines
+            text_content = self.log_area.toPlainText()
+            lines = text_content.split('\n')
+            if len(lines) > 200:
+                trimmed_lines = lines[-200:]
+                self.log_area.setPlainText('\n'.join(trimmed_lines))
+                # Move cursor to end
+                cursor = self.log_area.textCursor()
+                cursor.movePosition(cursor.MoveOperation.End)
+                self.log_area.setTextCursor(cursor)
+        self.log_area.append = limited_append
+        
         self.log_area.setStyleSheet("""
             QTextEdit {
                 background: #181818;
@@ -1856,8 +1873,10 @@ class DownloadMissingTracksModal(QDialog):
         self.total_tracks = len(playlist.tracks)
         self.matched_tracks_count = 0
         self.tracks_to_download_count = 0
+        self.downloaded_tracks_count = 0
         self.analysis_complete = False
         self.download_in_progress = False
+        
         
         print(f"📊 Total tracks: {self.total_tracks}")
         
@@ -1976,9 +1995,13 @@ class DownloadMissingTracksModal(QDialog):
         # To Download
         self.download_card = self.create_compact_counter_card("⬇️ Missing", "0", "#ff6b6b")
         
+        # Downloaded
+        self.downloaded_card = self.create_compact_counter_card("✅ Downloaded", "0", "#4CAF50")
+        
         dashboard_layout.addWidget(self.total_card)
         dashboard_layout.addWidget(self.matched_card)
         dashboard_layout.addWidget(self.download_card)
+        dashboard_layout.addWidget(self.downloaded_card)
         dashboard_layout.addStretch()
         
         header_layout.addLayout(title_section)
@@ -2058,6 +2081,8 @@ class DownloadMissingTracksModal(QDialog):
             self.matched_count_label = count_label
         elif "Missing" in title:
             self.download_count_label = count_label
+        elif "Downloaded" in title:
+            self.downloaded_count_label = count_label
             
         return card
         
@@ -4003,52 +4028,111 @@ class DownloadMissingTracksModal(QDialog):
                 self.track_download_items = getattr(self, 'track_download_items', {})
                 self.track_download_items[download_item] = (track_index, table_index)
                 
-                # Monitor download completion
+                # Monitor download completion - but don't validate until actual completion
                 self.monitor_download_completion(download_item, track_index, table_index)
+                
+                # Return download item for tracking
+                return download_item
             else:
                 # Download failed to start
                 self.on_track_download_failed_infrastructure(track_index, table_index, "Failed to start download")
+                return None
                 
         except Exception as e:
             print(f"❌ Error starting download via infrastructure: {str(e)}")
             self.on_track_download_failed_infrastructure(track_index, table_index, str(e))
+            return None
     
     def monitor_download_completion(self, download_item, track_index, table_index):
-        """Monitor download completion using QTimer"""
+        """Monitor download completion by checking Transfer folder for completed files"""
         from PyQt6.QtCore import QTimer
+        import os
         
-        # Create timer to check download status
-        timer = QTimer()
-        timer.timeout.connect(lambda: self.check_download_status(download_item, track_index, table_index, timer))
-        timer.start(1000)  # Check every second
-        
-        # Store timer reference for cleanup
-        if not hasattr(self, 'download_timers'):
-            self.download_timers = []
-        self.download_timers.append(timer)
+        # Get the expected transfer path for this track
+        if track_index < len(self.missing_tracks):
+            spotify_track = self.missing_tracks[track_index].spotify_track
+            expected_transfer_path = self.get_expected_transfer_path(spotify_track)
+            
+            # Create timer to check for file existence in Transfer folder
+            timer = QTimer()
+            timer.expected_path = expected_transfer_path
+            timer.track_index = track_index
+            timer.table_index = table_index
+            timer.start_time = 0
+            timer.timeout.connect(lambda: self.check_transfer_folder_completion(timer))
+            timer.start(2000)  # Check every 2 seconds (less frequent than queue checking)
+            
+            # Store timer reference for cleanup
+            if not hasattr(self, 'download_timers'):
+                self.download_timers = []
+            self.download_timers.append(timer)
+        else:
+            print(f"❌ Track index {track_index} out of range for monitoring")
     
-    def check_download_status(self, download_item, track_index, table_index, timer):
-        """Check if download is complete"""
+    def get_expected_transfer_path(self, spotify_track):
+        """Get the expected path where this track should appear in Transfer folder"""
+        import os
+        
+        # Use the first artist for folder structure
+        artist_name = spotify_track.artists[0] if spotify_track.artists else "Unknown Artist"
+        track_name = spotify_track.name
+        
+        # Clean names for file system
+        clean_artist = self.sanitize_filename(artist_name)
+        clean_track = self.sanitize_filename(track_name)
+        
+        # Expected pattern: Transfer/ARTIST_NAME/ARTIST_NAME - TRACK_NAME/
+        # The actual filename will vary, so we'll check for the folder existence
+        expected_folder = os.path.join("Transfer", clean_artist, f"{clean_artist} - {clean_track}")
+        
+        return expected_folder
+    
+    def sanitize_filename(self, filename):
+        """Clean filename for cross-platform compatibility"""
+        import re
+        # Remove or replace invalid characters
+        filename = re.sub(r'[<>:"/\\|?*]', '', filename)
+        filename = filename.strip()
+        return filename
+    
+    def check_transfer_folder_completion(self, timer):
+        """Check if the expected file/folder exists in Transfer directory"""
+        import os
+        import glob
+        
         try:
-            # Check if download item still exists and get its status
-            if hasattr(download_item, 'download_id') and download_item.download_id:
-                # Use async function to get download status properly
-                self.check_download_status_async(download_item, track_index, table_index, timer)
-                return
+            # Increment timer counter
+            timer.start_time += 2  # 2 seconds per check
             
-            # Check if timer has been running too long (timeout after 5 minutes)
-            if not hasattr(timer, 'start_time'):
-                timer.start_time = 0
-            timer.start_time += 1
+            # Check if expected folder exists
+            if os.path.exists(timer.expected_path):
+                # Check if there are any audio files in the folder
+                audio_files = glob.glob(os.path.join(timer.expected_path, "*.flac")) + \
+                             glob.glob(os.path.join(timer.expected_path, "*.mp3")) + \
+                             glob.glob(os.path.join(timer.expected_path, "*.wav"))
+                
+                if audio_files:
+                    print(f"✅ Transfer folder completion detected: {timer.expected_path}")
+                    timer.stop()
+                    self.on_track_download_complete_infrastructure(timer.track_index, timer.table_index)
+                    return
             
-            if timer.start_time > 300:  # 5 minutes timeout
+            # Timeout after 10 minutes
+            if timer.start_time > 600:  # 10 minutes
+                print(f"⏰ Transfer folder check timeout for: {timer.expected_path}")
                 timer.stop()
-                self.on_track_download_failed_infrastructure(track_index, table_index, "Download timeout")
+                self.on_track_download_failed_infrastructure(timer.track_index, timer.table_index, "Transfer timeout")
                 
         except Exception as e:
-            print(f"❌ Error checking download status: {str(e)}")
+            print(f"❌ Error checking transfer folder: {str(e)}")
             timer.stop()
-            self.on_track_download_failed_infrastructure(track_index, table_index, str(e))
+            self.on_track_download_failed_infrastructure(timer.track_index, timer.table_index, str(e))
+    
+    def check_download_status(self, download_item, track_index, table_index, timer):
+        """DEPRECATED: Old download status checking - now using Transfer folder detection"""
+        # This method is kept for compatibility but not used anymore
+        print("⚠️ Using deprecated download status checking - should use Transfer folder detection")
+        timer.stop()
     
     def check_download_status_async(self, download_item, track_index, table_index, timer):
         """Check download status using proper async handling"""
@@ -4138,22 +4222,39 @@ class DownloadMissingTracksModal(QDialog):
         self.on_track_download_failed_infrastructure(track_index, table_index, f"Status check failed: {error}")
     
     def on_track_download_complete_infrastructure(self, track_index, table_index):
-        """Handle successful track download via infrastructure - with Spotify validation"""
-        print(f"🔍 Download {track_index + 1} completed, starting Spotify validation...")
+        """Handle successful track download via infrastructure - ALREADY VALIDATED PRE-DOWNLOAD"""
+        print(f"✅ Download {track_index + 1} completed via infrastructure (pre-validated)")
         
-        # Get the original track for validation
-        if track_index < len(self.missing_tracks):
-            original_track = self.missing_tracks[track_index].spotify_track
-            self.validate_downloaded_track(track_index, table_index, original_track)
-        else:
-            print(f"❌ Track index {track_index} out of range, marking as failed")
-            self.on_track_download_failed_infrastructure(track_index, table_index, "Track index out of range")
+        # These downloads were already validated before starting, so mark as completed immediately
+        if table_index is not None:
+            downloaded_item = QTableWidgetItem("✅ Downloaded")
+            downloaded_item.setFlags(downloaded_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            downloaded_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.track_table.setItem(table_index, 4, downloaded_item)
+        
+        # Update console log
+        if hasattr(self.parent_page, 'log_area') and track_index < len(self.missing_tracks):
+            track = self.missing_tracks[track_index].spotify_track
+            track_name = track.name
+            artist_name = track.artists[0] if track.artists else "Unknown"
+            self.parent_page.log_area.append(f"✅ Downloaded & validated: {track_name} by {artist_name}")
+        
+        # Update counters (these tracks were pre-validated, so count as successful)
+        self.downloaded_tracks_count += 1
+        if hasattr(self, 'downloaded_count_label'):
+            self.downloaded_count_label.setText(str(self.downloaded_tracks_count))
+        
+        self.successful_downloads += 1
+        self.completed_downloads += 1
+        
+        # Update progress and continue
+        self.advance_to_next_track()
     
     def validate_downloaded_track(self, track_index, table_index, original_track):
         """Validate that downloaded track matches original Spotify track via API lookup"""
-        print(f"🎯 Validating: {original_track.name} by {original_track.artists[0] if original_track.artists else 'Unknown'}")
+        print(f"🎯 Starting validation: {original_track.name} by {original_track.artists[0] if original_track.artists else 'Unknown'}")
         
-        # Update table to show validation in progress
+        # Update table to show validation in progress - ONLY when download is actually complete
         if table_index is not None:
             validating_item = QTableWidgetItem("🔍 Validating")
             validating_item.setFlags(validating_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
@@ -4417,7 +4518,7 @@ class DownloadMissingTracksModal(QDialog):
         # This ensures the download uses validated Spotify metadata for folder structure
         spotify_based_result = self.create_spotify_based_search_result_from_validation(slskd_result, spotify_metadata)
         
-        # Update table to show downloading status
+        # Update table to show downloading status (don't mark as downloaded yet)
         if table_index is not None and table_index < self.track_table.rowCount():
             downloading_item = QTableWidgetItem("⏬ Downloading")
             downloading_item.setFlags(downloading_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
@@ -4429,7 +4530,10 @@ class DownloadMissingTracksModal(QDialog):
             self.parent_page.log_area.append(f"🎵 Downloading: {spotify_based_result.filename} (validated)")
         
         # Use downloads.py infrastructure for the actual download with validated metadata
-        self.start_matched_download_via_infrastructure(spotify_based_result, track_index, table_index)
+        download_id = self.start_matched_download_via_infrastructure(spotify_based_result, track_index, table_index)
+        
+        # The download is already being monitored by the existing monitor_download_completion method
+        # No additional tracking needed here
         
         # Move to next track search
         self.advance_to_next_track()
@@ -4469,6 +4573,7 @@ class DownloadMissingTracksModal(QDialog):
                 self.album = spotify_album_name
         
         return SpotifyBasedSearchResult()
+    
 
     def start_spotify_validation_worker(self, track_index, table_index, original_track):
         """Start background worker to validate track via Spotify API"""
@@ -4565,6 +4670,11 @@ class DownloadMissingTracksModal(QDialog):
                 downloaded_item.setFlags(downloaded_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 downloaded_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.track_table.setItem(table_index, 4, downloaded_item)
+                
+            # Update downloaded counter in dashboard
+            self.downloaded_tracks_count += 1
+            if hasattr(self, 'downloaded_count_label'):
+                self.downloaded_count_label.setText(str(self.downloaded_tracks_count))
                 
             # Update progress
             self.completed_downloads += 1
@@ -4688,21 +4798,30 @@ class DownloadMissingTracksModal(QDialog):
             downloading_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.track_table.setItem(track_index, 4, downloading_item)
         
-        # Create download worker
-        worker = TrackDownloadWorker(track, self.parent_page.soulseek_client, self.current_download, track_index)
-        worker.signals.download_started.connect(self.on_track_download_started)
-        worker.signals.download_failed.connect(self.on_track_download_failed)
+        # NEW: Use infrastructure path for proper Transfer folder organization
+        # Instead of the simple TrackDownloadWorker, use the search-and-infrastructure path
+        # This ensures downloads go to Transfer folder with Spotify metadata organization
+        self.search_and_download_track_with_infrastructure(track, self.current_download, track_index)
         
-        # Track worker for cleanup
-        self.active_workers.append(worker)
+        # Increment and continue (don't wait for completion)
+        self.current_download += 1
         
-        # Submit to thread pool
-        if hasattr(self.parent_page, 'thread_pool'):
-            self.parent_page.thread_pool.start(worker)
-        else:
-            thread_pool = QThreadPool()
-            self.fallback_pools.append(thread_pool)
-            thread_pool.start(worker)
+        # Continue with next download
+        self.download_next_track()
+    
+    def search_and_download_track_with_infrastructure(self, spotify_track, download_index, track_index):
+        """Search for track and download via infrastructure path (with Transfer folder organization)"""
+        print(f"🔍 Starting search + infrastructure download for: {spotify_track.name}")
+        
+        # Create search queries using the smart strategy
+        track_name = spotify_track.name
+        artist_name = spotify_track.artists[0] if spotify_track.artists else ""
+        
+        search_queries = self.generate_smart_search_queries(track_name, artist_name)
+        
+        # Start the search process using the existing infrastructure
+        # This will trigger search → validation → download → Transfer folder organization
+        self.start_track_search_with_queries(spotify_track, search_queries, track_index, track_index)
             
     def find_track_index(self, spotify_track):
         """Find the table row index for a given Spotify track"""
@@ -4914,44 +5033,19 @@ class DownloadMissingTracksModal(QDialog):
         self.on_actual_track_download_complete(download_index, track_index)
     
     def on_actual_track_download_complete(self, download_index, track_index):
-        """Handle when a download is actually completed (not just started)"""
-        print(f"✅ Download {download_index + 1} actually completed!")
+        """Handle when a download is actually completed - NOW ONLY USED FOR PRE-VALIDATION SYSTEM"""
+        print(f"🔍 Download {download_index + 1} completed, will validate via Spotify validation system")
         
-        # Update table to show Downloaded
-        if track_index is not None:
-            downloaded_item = QTableWidgetItem("✅ Downloaded")
-            downloaded_item.setFlags(downloaded_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            downloaded_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.track_table.setItem(track_index, 4, downloaded_item)
+        # Don't mark as downloaded here - let the validation system handle it
+        # Just update internal tracking that the download file is ready for validation
+        if track_index is not None and track_index < self.track_table.rowCount():
+            validating_item = QTableWidgetItem("🔍 Validating")
+            validating_item.setFlags(validating_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            validating_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.track_table.setItem(track_index, 4, validating_item)
         
-        # Update completion tracking
-        self.successful_downloads += 1
-        self.completed_downloads += 1
-        
-        # Update main console log
-        if hasattr(self.parent_page, 'log_area') and download_index < len(self.missing_tracks):
-            track = self.missing_tracks[download_index].spotify_track
-            track_name = track.name
-            artist_name = track.artists[0] if track.artists else "Unknown Artist"
-            remaining = len(self.missing_tracks) - self.successful_downloads
-            self.parent_page.log_area.append(f"✅ Downloaded: {track_name} by {artist_name} ({remaining} remaining)")
-        
-        # Update progress bar to reflect actual completions
-        self.download_progress.setValue(self.completed_downloads)
-        
-        # Update playlist status indicator
-        playlist_item = self.find_playlist_item()
-        if playlist_item:
-            total = len(self.missing_tracks) if hasattr(self, 'missing_tracks') else 0
-            if self.completed_downloads >= total:
-                self.on_all_downloads_complete()
-            else:
-                status_text = f"⏬ Downloading {self.completed_downloads}/{total}"
-                playlist_item.update_operation_status(status_text)
-        
-        # Check if all downloads are complete
-        if self.completed_downloads >= len(self.missing_tracks):
-            self.on_all_downloads_complete()
+        # The actual completion tracking is now handled by on_validation_completed()
+        # which properly waits for Spotify validation before marking as downloaded
     
     def setup_background_status_updates(self):
         """Set up timer-based background status updates for playlist indicator"""
