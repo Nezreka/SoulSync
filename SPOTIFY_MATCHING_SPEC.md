@@ -394,6 +394,44 @@ Playlist → Spotify Tracks → Plex Analysis → Track Table Updates → Missin
 3. **Enhance track title parsing** for better matching accuracy
 4. **Implement confidence thresholds** for auto vs manual matching
 
+### 🚨 CRITICAL ISSUE: INCORRECT FILE NAMING AND FOLDER STRUCTURE
+
+#### **Current Problem - DOWNLOAD MISSING TRACKS**
+The current "Download Missing Tracks" implementation has a **CRITICAL FLAW** in how it handles file naming and folder organization:
+
+**❌ CURRENT WRONG BEHAVIOR:**
+1. System searches slskd for tracks based on Spotify playlist track names
+2. When match is found, uses **PLAYLIST TRACK METADATA** for folder/file naming
+3. **RESULT:** Can download wrong song but rename it correctly, making it appear successful
+4. **EXAMPLE:** Downloads "Random Song.flac" → renames to "Orbit Love by Virtual Mage" in correct folder
+
+**✅ REQUIRED CORRECT BEHAVIOR (Like Matched Downloads):**
+1. Find slskd track result using playlist search
+2. Extract **ACTUAL TRACK TITLE** from the slskd result filename/metadata
+3. Search **SPOTIFY API** with the slskd track title to find correct artist
+4. Use **SPOTIFY API RESPONSE** metadata for folder/file naming (not playlist metadata)
+5. **RESULT:** File naming reflects what was actually downloaded
+
+#### **Implementation Flow - Download Missing Tracks Should Work Like Matched Downloads:**
+```
+Playlist Track → slskd Search → slskd Result Found → 
+Extract slskd Track Title → Spotify API Search(slskd_title) → 
+Spotify Match → Use Spotify Metadata for Naming → Download + Organize
+```
+
+**This matches exactly how the main downloads page "matched downloads" work:**
+- User clicks "Matched Download" on slskd result
+- System extracts track title from slskd result  
+- Searches Spotify API with extracted title
+- Uses Spotify API response for folder structure and metadata
+- Downloads and organizes with correct naming
+
+#### **Why This Is Critical:**
+- **Data Integrity:** File names must reflect actual downloaded content
+- **Consistency:** Must match behavior of existing matched download system
+- **User Trust:** Prevents false positive downloads that appear successful but are wrong
+- **Library Organization:** Ensures Transfer folder contains accurately named content
+
 ### 🤔 FUTURE CONSIDERATIONS (May Be Overkill):
 
 #### **Advanced Spotify API Validation**
@@ -401,4 +439,4 @@ Playlist → Spotify Tracks → Plex Analysis → Track Table Updates → Missin
 **Flow:** slskd result → extract metadata → Spotify API lookup → compare to original → approve/reject
 **Pros:** Ultimate validation accuracy, consistent with matched download system
 **Cons:** Extra API calls, rate limiting concerns, added complexity, slower performance
-**Decision:** Current strict title+artist matching may be sufficient - monitor for false positives
+**Decision:** ~~Current strict title+artist matching may be sufficient~~ **REQUIRED** - This is exactly what matched downloads do and what Download Missing Tracks should do
