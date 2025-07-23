@@ -2,11 +2,12 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                            QFrame, QPushButton, QListWidget, QListWidgetItem,
                            QProgressBar, QTextEdit, QCheckBox, QComboBox,
                            QScrollArea, QSizePolicy, QMessageBox, QDialog,
-                           QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView)
+                           QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QLineEdit)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QPropertyAnimation, QEasingCurve, QRunnable, QThreadPool, QObject
 from PyQt6.QtGui import QFont
 from dataclasses import dataclass
 from typing import List, Optional
+from core.soulseek_client import TrackResult
 
 @dataclass
 class TrackAnalysisResult:
@@ -1951,6 +1952,253 @@ class SyncPage(QWidget):
                 self.playlist_layout.removeItem(item)
     
 
+class ManualMatchModal(QDialog):
+    """Modal for manually searching and downloading a failed track."""
+    
+    track_resolved = pyqtSignal(object)
+
+    def __init__(self, failed_tracks, parent_modal):
+        super().__init__(parent_modal)
+        self.parent_modal = parent_modal
+        self.soulseek_client = parent_modal.parent_page.soulseek_client
+        self.downloads_page = parent_modal.downloads_page
+        
+        self.failed_tracks = list(failed_tracks) # Use a copy of the list
+        self.current_track_index = 0  # Track current position
+        self.current_track_info = None
+        self.search_worker = None
+        
+        self.setWindowTitle("Manual Track Correction")
+        self.setMinimumSize(900, 700)
+        self.setup_ui()
+        self.load_current_track()
+
+    def setup_ui(self):
+        self.setStyleSheet("""
+            QDialog { background-color: #1e1e1e; }
+            QLabel { color: #ffffff; font-size: 14px; }
+            QPushButton {
+                background-color: #1db954; color: #000000; border: none;
+                border-radius: 6px; font-size: 13px; font-weight: bold;
+                padding: 10px 20px; min-width: 80px;
+            }
+            QPushButton:hover { background-color: #1ed760; }
+            QPushButton:disabled { background-color: #404040; color: #888888; }
+            QLineEdit {
+                background: #404040; border: 1px solid #606060; border-radius: 6px;
+                padding: 10px; color: #ffffff; font-size: 13px;
+            }
+            QScrollArea { border: none; }
+        """)
+        self.main_layout = QVBoxLayout(self)
+        self.main_layout.setContentsMargins(20, 20, 20, 20)
+        self.main_layout.setSpacing(15)
+
+        info_frame = QFrame()
+        info_frame.setStyleSheet("background-color: #2d2d2d; border-radius: 8px; padding: 15px;")
+        info_layout = QVBoxLayout(info_frame)
+        self.info_label = QLabel("Loading track...")
+        self.info_label.setFont(QFont("Arial", 16, QFont.Weight.Bold))
+        self.info_label.setWordWrap(True)
+        info_layout.addWidget(self.info_label)
+        self.main_layout.addWidget(info_frame)
+
+        search_layout = QHBoxLayout()
+        self.search_input = QLineEdit()
+        self.search_input.returnPressed.connect(self.perform_manual_search)
+        self.search_btn = QPushButton("Search")
+        self.search_btn.clicked.connect(self.perform_manual_search)
+        search_layout.addWidget(self.search_input)
+        search_layout.addWidget(self.search_btn)
+        self.main_layout.addLayout(search_layout)
+
+        self.results_scroll = QScrollArea()
+        self.results_scroll.setWidgetResizable(True)
+        self.results_widget = QWidget()
+        self.results_layout = QVBoxLayout(self.results_widget)
+        self.results_layout.setSpacing(8)
+        self.results_scroll.setWidget(self.results_widget)
+        self.main_layout.addWidget(self.results_scroll, 1)
+
+        # Navigation and control buttons
+        nav_layout = QHBoxLayout()
+        
+        self.prev_btn = QPushButton("← Previous")
+        self.prev_btn.clicked.connect(self.load_previous_track)
+        
+        self.track_position_label = QLabel()
+        self.track_position_label.setStyleSheet("color: #ffffff; font-weight: bold;")
+        
+        self.next_btn = QPushButton("Next →")
+        self.next_btn.clicked.connect(self.load_next_track)
+        
+        self.close_btn = QPushButton("Close")
+        self.close_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #616161; color: #ffffff;
+            }
+            QPushButton:hover {
+                background-color: #757575;
+            }
+        """)
+        self.close_btn.clicked.connect(self.reject)
+        
+        nav_layout.addWidget(self.prev_btn)
+        nav_layout.addStretch()
+        nav_layout.addWidget(self.track_position_label)
+        nav_layout.addStretch()
+        nav_layout.addWidget(self.next_btn)
+        nav_layout.addWidget(self.close_btn)
+        
+        self.main_layout.addLayout(nav_layout)
+
+    def load_current_track(self):
+        """Load the track at current_track_index"""
+        self.clear_results()
+        if not self.failed_tracks:
+            QMessageBox.information(self, "Complete", "All failed tracks have been addressed.")
+            self.accept()
+            return
+
+        # Update navigation buttons and position label
+        self.update_navigation_state()
+        
+        self.current_track_info = self.failed_tracks[self.current_track_index]
+        spotify_track = self.current_track_info['spotify_track']
+        artist = spotify_track.artists[0] if spotify_track.artists else "Unknown"
+        
+        self.info_label.setText(f"Could not find: <b>{spotify_track.name}</b><br>by {artist}")
+        self.search_input.setText(f"{artist} {spotify_track.name}")
+        
+        # Display cached results first, as requested
+        cached_candidates = self.current_track_info.get('candidates', [])
+        if cached_candidates:
+            self.results_layout.addWidget(QLabel("Showing results from initial search. Or, perform a new search above."))
+            for result in cached_candidates:
+                self.results_layout.addWidget(self.create_result_widget(result))
+        else:
+            self.perform_manual_search() # If no cache, search automatically
+    
+    def load_next_track(self):
+        """Navigate to next track"""
+        if self.current_track_index < len(self.failed_tracks) - 1:
+            self.current_track_index += 1
+            self.load_current_track()
+    
+    def load_previous_track(self):
+        """Navigate to previous track"""
+        if self.current_track_index > 0:
+            self.current_track_index -= 1
+            self.load_current_track()
+    
+    def update_navigation_state(self):
+        """Update navigation buttons and position label"""
+        total_tracks = len(self.failed_tracks)
+        current_pos = self.current_track_index + 1
+        
+        self.track_position_label.setText(f"Track {current_pos} of {total_tracks}")
+        
+        # Enable/disable navigation buttons
+        self.prev_btn.setEnabled(self.current_track_index > 0)
+        self.next_btn.setEnabled(self.current_track_index < total_tracks - 1)
+
+    def perform_manual_search(self):
+        query = self.search_input.text().strip()
+        if not query: return
+        self.clear_results()
+        
+        self.results_layout.addWidget(QLabel(f"Searching for '{query}'..."))
+        self.search_btn.setText("Searching...")
+        self.search_btn.setEnabled(False)
+
+        worker = self.parent_modal.start_search_worker_parallel(
+            query, [query], self.current_track_info['spotify_track'], 
+            self.current_track_info['track_index'], self.current_track_info['table_index'], 
+            0, self.current_track_info['download_index']
+        )
+        if worker:
+            worker.signals.search_completed.connect(self.on_manual_search_completed)
+            worker.signals.search_failed.connect(self.on_manual_search_failed)
+        else:
+            self.search_btn.setText("Search")
+            self.search_btn.setEnabled(True)
+            self.clear_results()
+            self.results_layout.addWidget(QLabel("Error: Could not start search worker"))
+
+    def on_manual_search_completed(self, results, query):
+        self.search_btn.setText("Search")
+        self.search_btn.setEnabled(True)
+        self.clear_results()
+
+        if not results:
+            self.results_layout.addWidget(QLabel("No results found for this query."))
+            return
+
+        for result in results:
+            self.results_layout.addWidget(self.create_result_widget(result))
+
+    def on_manual_search_failed(self, query, error):
+        self.search_btn.setText("Search")
+        self.search_btn.setEnabled(True)
+        self.clear_results()
+        self.results_layout.addWidget(QLabel(f"Search failed: {error}"))
+
+    def create_result_widget(self, result):
+        widget = QFrame()
+        widget.setStyleSheet("background-color: #3a3a3a; border-radius: 6px; padding: 10px;")
+        layout = QHBoxLayout(widget)
+        
+        # Display filename and path structure
+        path_parts = result.filename.replace('\\', '/').split('/')
+        filename = path_parts[-1]
+        path_structure = '/'.join(path_parts[:-1])
+        
+        info_text = f"<b>{filename}</b><br><i style='color:#aaaaaa;'>{path_structure}</i><br>Quality: {result.quality.upper()}, Size: {result.size // 1024} KB"
+        info_label = QLabel(info_text)
+        info_label.setWordWrap(True)
+        
+        select_btn = QPushButton("Select")
+        select_btn.setFixedWidth(100)
+        select_btn.clicked.connect(lambda: self.on_selection_made(result))
+        
+        layout.addWidget(info_label, 1)
+        layout.addWidget(select_btn)
+        return widget
+
+    def on_selection_made(self, slskd_result):
+        print(f"Manual selection made: {slskd_result.filename}")
+        
+        # This starts the download via the main modal's infrastructure
+        self.parent_modal.start_validated_download_parallel(
+            slskd_result, 
+            self.current_track_info['spotify_track'], 
+            self.current_track_info['track_index'], 
+            self.current_track_info['table_index'], 
+            self.current_track_info['download_index']
+        )
+        
+        self.track_resolved.emit(self.current_track_info)
+        
+        # Remove the resolved track from the list
+        self.failed_tracks.pop(self.current_track_index)
+        
+        # Adjust current index if we removed the last track
+        if self.current_track_index >= len(self.failed_tracks) and self.current_track_index > 0:
+            self.current_track_index -= 1
+        
+        # Load the current track (or close if no more tracks)
+        if self.failed_tracks:
+            self.load_current_track()
+        else:
+            QMessageBox.information(self, "Complete", "All failed tracks have been addressed.")
+            self.accept()
+
+    def clear_results(self):
+        while self.results_layout.count():
+            child = self.results_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+
 
 class DownloadMissingTracksModal(QDialog):
     """Enhanced modal for downloading missing tracks with live progress tracking"""
@@ -1970,6 +2218,10 @@ class DownloadMissingTracksModal(QDialog):
         self.downloaded_tracks_count = 0
         self.analysis_complete = False
         self.download_in_progress = False
+        
+        # --- ADD THIS LINE ---
+        self.permanently_failed_tracks = [] 
+        # --- END OF ADDITION ---
         
         print(f"📊 Total tracks: {self.total_tracks}")
         
@@ -2552,6 +2804,27 @@ class DownloadMissingTracksModal(QDialog):
         layout = QHBoxLayout(button_frame)
         layout.setSpacing(15)
         layout.setContentsMargins(0, 10, 0, 0)
+
+        # --- ADD THE NEW BUTTON DEFINITION HERE ---
+        self.correct_failed_btn = QPushButton("🔧 Correct Failed Matches")
+        self.correct_failed_btn.setFixedSize(220, 40) # Slightly wider for counter text
+        self.correct_failed_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #ffc107; /* Amber color */
+                color: #000000;
+                border: none;
+                border-radius: 6px;
+                font-size: 13px;
+                font-weight: bold;
+                padding: 10px 20px;
+            }
+            QPushButton:hover {
+                background-color: #ffca28;
+            }
+        """)
+        self.correct_failed_btn.clicked.connect(self.on_correct_failed_matches_clicked)
+        self.correct_failed_btn.hide() # Initially hidden
+        # --- END OF ADDITION ---
         
         # Begin Search button
         self.begin_search_btn = QPushButton("Begin Search")
@@ -2606,6 +2879,9 @@ class DownloadMissingTracksModal(QDialog):
         layout.addStretch()
         layout.addWidget(self.begin_search_btn)
         layout.addWidget(self.cancel_btn)
+        # --- ADD THE BUTTON TO THE LAYOUT ---
+        layout.addWidget(self.correct_failed_btn)
+        # --- END OF ADDITION ---
         layout.addWidget(self.close_btn)
         
         return button_frame
@@ -5149,6 +5425,8 @@ class DownloadMissingTracksModal(QDialog):
             thread_pool = QThreadPool()
             self.fallback_pools.append(thread_pool)
             thread_pool.start(worker)
+        
+        return worker
     
     def on_search_query_completed_parallel(self, results, queries, spotify_track, track_index, table_index, query_index, query, download_index):
         """Handle completion of a parallel search query"""
@@ -5685,7 +5963,52 @@ class DownloadMissingTracksModal(QDialog):
     def on_parallel_track_failed(self, download_index, reason):
         """Handle failure of a parallel track download"""
         print(f"❌ Parallel download {download_index + 1} failed: {reason}")
+        
+        if hasattr(self, 'parallel_search_tracking') and download_index in self.parallel_search_tracking:
+            track_info = self.parallel_search_tracking[download_index]
+            
+            # --- NEW LOGIC TO TRACK PERMANENT FAILURES ---
+            # Add the failed track to our list for manual correction
+            if track_info not in self.permanently_failed_tracks:
+                self.permanently_failed_tracks.append(track_info)
+            self.update_failed_matches_button() # Update the button visibility and count
+            # --- END OF NEW LOGIC ---
+
         self.on_parallel_track_completed(download_index, False)
+    
+    def update_failed_matches_button(self):
+        """Shows, hides, and updates the counter on the 'Correct Failed Matches' button."""
+        count = len(self.permanently_failed_tracks)
+        if count > 0:
+            self.correct_failed_btn.setText(f"🔧 Correct {count} Failed Match{'es' if count > 1 else ''}")
+            self.correct_failed_btn.show()
+        else:
+            self.correct_failed_btn.hide()
+
+    def on_correct_failed_matches_clicked(self):
+        """Opens the modal to manually correct failed downloads."""
+        if not self.permanently_failed_tracks:
+            return
+
+        # Create and show the modal
+        manual_modal = ManualMatchModal(self.permanently_failed_tracks, self)
+        manual_modal.track_resolved.connect(self.on_manual_match_resolved)
+        manual_modal.exec()
+
+    def on_manual_match_resolved(self, resolved_track_info):
+        """
+        Handles a track being successfully resolved by the ManualMatchModal.
+        """
+        # The download has already been started by the manual modal.
+        # We just need to update our internal state.
+        
+        # Find the original failed track in our list and remove it
+        original_failed_track = next((t for t in self.permanently_failed_tracks if t['download_index'] == resolved_track_info['download_index']), None)
+        if original_failed_track:
+            self.permanently_failed_tracks.remove(original_failed_track)
+        
+        # Update the button counter
+        self.update_failed_matches_button()
             
     def find_track_index(self, spotify_track):
         """Find the table row index for a given Spotify track"""
