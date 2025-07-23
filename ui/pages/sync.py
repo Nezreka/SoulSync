@@ -223,6 +223,100 @@ class TrackDownloadWorker(QRunnable):
         except Exception as e:
             self.signals.download_failed.emit(self.download_index, self.track_index, str(e))
 
+class SyncStatusProcessingWorkerSignals(QObject):
+    """Defines the signals available from the SyncStatusProcessingWorker."""
+    completed = pyqtSignal(list)
+    error = pyqtSignal(str)
+
+class SyncStatusProcessingWorker(QRunnable):
+    """
+    Runs download status processing in a background thread for the sync modal.
+    It checks the slskd API and returns a list of updates for the main thread.
+    """
+    def __init__(self, soulseek_client, download_items_data):
+        super().__init__()
+        self.signals = SyncStatusProcessingWorkerSignals()
+        self.soulseek_client = soulseek_client
+        self.download_items_data = download_items_data
+
+    def run(self):
+        """The main logic of the background worker."""
+        try:
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+            transfers_data = loop.run_until_complete(
+                self.soulseek_client._make_request('GET', 'transfers/downloads')
+            )
+            loop.close()
+
+            results = []
+            if not transfers_data:
+                self.signals.completed.emit([])
+                return
+
+            all_transfers = [
+                file for user_data in transfers_data if 'directories' in user_data
+                for directory in user_data['directories'] if 'files' in directory
+                for file in directory['files']
+            ]
+
+            transfers_by_id = {t['id']: t for t in all_transfers}
+            
+            for item_data in self.download_items_data:
+                matching_transfer = transfers_by_id.get(item_data['download_id'])
+
+                if not matching_transfer:
+                    import os
+                    dl_filename = os.path.basename(item_data['file_path']).lower()
+                    for t in all_transfers:
+                        if os.path.basename(t.get('filename', '')).lower() == dl_filename:
+                            matching_transfer = t
+                            break
+
+                if matching_transfer:
+                    state = matching_transfer.get('state', 'Unknown')
+                    progress = matching_transfer.get('percentComplete', 0)
+                    new_status = 'queued'
+
+                    # Correct order of checks: Terminal states first.
+                    if 'Cancelled' in state or 'Canceled' in state:
+                        new_status = 'cancelled'
+                    elif 'Failed' in state or 'Errored' in state:
+                        new_status = 'failed'
+                    elif 'Completed' in state or 'Succeeded' in state:
+                        new_status = 'completed'
+                    elif 'InProgress' in state:
+                        new_status = 'downloading'
+                    else:
+                        new_status = 'queued'
+
+                    payload = {
+                        'widget_id': item_data['widget_id'], # This will be the download_index
+                        'status': new_status,
+                        'progress': int(progress),
+                        'transfer_id': matching_transfer.get('id'),
+                        'username': matching_transfer.get('username')
+                    }
+                    results.append(payload)
+                else:
+                    # Handle downloads that disappear from the API
+                    item_data['api_missing_count'] = item_data.get('api_missing_count', 0) + 1
+                    if item_data['api_missing_count'] >= 3:
+                        payload = {
+                            'widget_id': item_data['widget_id'],
+                            'status': 'failed',
+                            'transfer_id': item_data['download_id'],
+                        }
+                        results.append(payload)
+
+            self.signals.completed.emit(results)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self.signals.error.emit(str(e))
+
 class PlaylistLoaderThread(QThread):
     playlist_loaded = pyqtSignal(object)  # Single playlist
     loading_finished = pyqtSignal(int)  # Total count
@@ -1863,7 +1957,7 @@ class DownloadMissingTracksModal(QDialog):
     
     def __init__(self, playlist, parent_page, sync_modal, downloads_page):
         print(f"🏗️ Initializing DownloadMissingTracksModal...")
-        super().__init__(sync_modal)  # Set sync modal as parent
+        super().__init__(sync_modal)
         self.playlist = playlist
         self.parent_page = parent_page
         self.sync_modal = sync_modal
@@ -1877,7 +1971,6 @@ class DownloadMissingTracksModal(QDialog):
         self.analysis_complete = False
         self.download_in_progress = False
         
-        
         print(f"📊 Total tracks: {self.total_tracks}")
         
         # Track analysis results
@@ -1887,11 +1980,23 @@ class DownloadMissingTracksModal(QDialog):
         # Worker tracking
         self.active_workers = []
         self.fallback_pools = []
+
+        # --- NEW CODE FOR STATUS POLLING ---
+        self.download_status_pool = QThreadPool()
+        self.download_status_pool.setMaxThreadCount(1)
+        self._is_status_update_running = False
+
+        self.download_status_timer = QTimer(self)
+        self.download_status_timer.timeout.connect(self.poll_all_download_statuses)
+        self.download_status_timer.start(2000) # Check statuses every 2 seconds
+
+        self.active_downloads = [] # This will hold info about tracks being downloaded
+        # --- END OF NEW CODE ---
         
         print("🎨 Setting up UI...")
         self.setup_ui()
         print("✅ Modal initialization complete")
-        
+
     def setup_ui(self):
         """Set up the enhanced modal UI"""
         self.setWindowTitle(f"Download Missing Tracks - {self.playlist.name}")
@@ -4112,6 +4217,7 @@ class DownloadMissingTracksModal(QDialog):
         else:
             print(f"❌ Track index {track_index} out of range for monitoring")
     
+    
     def get_expected_transfer_path(self, spotify_track):
         """Get the expected path where this track should appear in Transfer folder"""
         import os
@@ -5149,20 +5255,26 @@ class DownloadMissingTracksModal(QDialog):
     def start_matched_download_via_infrastructure_parallel(self, spotify_based_result, track_index, table_index, download_index):
         """Start infrastructure download with parallel completion tracking"""
         try:
-            # Create artist object for infrastructure
             artist = type('Artist', (), {
                 'name': spotify_based_result.artist,
                 'image_url': None
             })()
             
-            # Call downloads.py infrastructure with validated result
             download_item = self.downloads_page._start_download_with_artist(spotify_based_result, artist)
             
             if download_item:
                 print(f"✅ Successfully queued parallel download {download_index + 1}")
                 
-                # Monitor completion with parallel handling
-                self.monitor_download_completion_parallel(download_item, track_index, table_index, download_index)
+                # --- THIS IS THE NEW PART ---
+                # Add this download to our active list for status monitoring
+                self.active_downloads.append({
+                    'download_index': download_index,
+                    'track_index': track_index,
+                    'table_index': table_index,
+                    'download_id': download_item.download_id,
+                    'slskd_result': spotify_based_result, # The result object for matching
+                })
+                # --- END OF NEW PART ---
                 
                 return download_item
             else:
@@ -5174,135 +5286,83 @@ class DownloadMissingTracksModal(QDialog):
             self.on_parallel_track_failed(download_index, str(e))
             return None
     
-    def monitor_download_completion_parallel(self, download_item, track_index, table_index, download_index):
-        """Monitor parallel download completion using the same system as regular downloads"""
-        from PyQt6.QtCore import QTimer
+    def poll_all_download_statuses(self):
+        """
+        Starts the background worker to process download statuses without blocking the UI.
+        This is called by the new QTimer.
+        """
+        if self._is_status_update_running or not self.active_downloads:
+            return
+
+        self._is_status_update_running = True
         
-        # Store download tracking info
-        if not hasattr(self, 'parallel_download_tracking'):
-            self.parallel_download_tracking = {}
-        
-        self.parallel_download_tracking[download_index] = {
-            'download_id': download_item.download_id,
-            'track_index': track_index,
-            'table_index': table_index,
-            'download_index': download_index,
-            'completed': False,
-            'last_seen_state': None,
-            'stuck_state_count': 0  # Track how long it's been in same state
-        }
-        
-        # Create timer to check download status via slskd API (same as regular downloads)
-        timer = QTimer()
-        timer.download_id = download_item.download_id
-        timer.track_index = track_index
-        timer.table_index = table_index
-        timer.download_index = download_index
-        timer.start_time = 0
-        timer.timeout.connect(lambda: self.check_download_status_parallel(timer))
-        timer.start(1000)  # Check every 1 second for faster error detection
-        
-        # Store timer reference for cleanup
-        if not hasattr(self, 'download_timers'):
-            self.download_timers = []
-        self.download_timers.append(timer)
-    
-    def check_download_status_parallel(self, timer):
-        """Check parallel download status using hybrid API + Transfer folder approach"""
-        try:
-            # Increment timer counter  
-            timer.start_time += 1  # 1 second per check
+        items_to_check = []
+        for download_info in self.active_downloads[:]: # Iterate over a copy
+             items_to_check.append({
+                'widget_id': download_info['download_index'],
+                'download_id': download_info['download_id'],
+                'file_path': download_info['slskd_result'].filename,
+                'status': 'downloading',
+             })
+
+        if not items_to_check:
+            self._is_status_update_running = False
+            return
+
+        worker = SyncStatusProcessingWorker(
+            soulseek_client=self.parent_page.soulseek_client,
+            download_items_data=items_to_check
+        )
+        worker.signals.completed.connect(self._handle_processed_status_updates)
+        worker.signals.error.connect(lambda e: print(f"Status Worker Error: {e}"))
+        self.download_status_pool.start(worker)
+
+    def _handle_processed_status_updates(self, results):
+        """
+        This runs on the main thread and applies status updates from the background worker.
+        This is where the retry logic is triggered.
+        """
+        for result in results:
+            download_index = result['widget_id']
+            new_status = result['status']
             
-            # Check if this download was already completed
-            if (hasattr(self, 'parallel_download_tracking') and 
-                timer.download_index in self.parallel_download_tracking and
-                self.parallel_download_tracking[timer.download_index]['completed']):
-                timer.stop()
-                return
-            
-            download_found_in_api = False
-            
-            # Step 1: Try to find download in slskd API
-            if hasattr(self.parent_page, 'soulseek_client') and self.parent_page.soulseek_client:
-                try:
-                    all_downloads = self.parent_page.soulseek_client.get_all_downloads()
-                    
-                    # Find our download by ID
-                    for download in all_downloads:
-                        if hasattr(download, 'id') and download.id == timer.download_id:
-                            download_found_in_api = True
-                            state = getattr(download, 'state', 'Unknown')
-                            
-                            # Check for stuck downloads by tracking state changes
-                            tracking_info = self.parallel_download_tracking.get(timer.download_index, {})
-                            last_state = tracking_info.get('last_seen_state')
-                            
-                            if last_state == state:
-                                # Same state as last check - increment stuck counter
-                                tracking_info['stuck_state_count'] = tracking_info.get('stuck_state_count', 0) + 1
-                            else:
-                                # State changed - reset stuck counter
-                                tracking_info['stuck_state_count'] = 0
-                                tracking_info['last_seen_state'] = state
-                                print(f"🔍 Parallel download {timer.download_index + 1} state: {state}")
-                            
-                            if state == "Completed":
-                                print(f"✅ Parallel download {timer.download_index + 1} completed via API")
-                                timer.stop()
-                                self.on_parallel_track_completed(timer.download_index, True)
-                                return
-                            elif state in ["Cancelled", "Failed"]:
-                                print(f"❌ Parallel download {timer.download_index + 1} failed via API: {state}")
-                                timer.stop()
-                                # Try to retry with different source instead of marking as failed
-                                self.retry_parallel_download_with_fallback(timer.download_index, f"Download {state.lower()}")
-                                return
-                            elif state in ["InProgress", "Queued"] and tracking_info.get('stuck_state_count', 0) > 30:
-                                # Been in same state for 30+ seconds - likely stuck
-                                print(f"⚠️ Download {timer.download_index + 1} stuck in {state} for {tracking_info['stuck_state_count']}s - initiating retry")
-                                timer.stop()
-                                self.retry_parallel_download_with_fallback(timer.download_index, f"Stuck in {state}")
-                                return
-                            # For other states, continue monitoring
-                            break
-                        
-                except Exception as api_error:
-                    print(f"⚠️ API error checking parallel download {timer.download_index + 1}: {api_error}")
-                    # Continue to Transfer folder check
-            
-            # Step 2: If not found in API, check Transfer folder (likely completed & cleaned up)
-            if not download_found_in_api:
-                print(f"🔍 Parallel download {timer.download_index + 1} not in API - checking Transfer folder...")
+            download_info = next((d for d in self.active_downloads if d['download_index'] == download_index), None)
+            if not download_info:
+                continue
+
+            if result.get('transfer_id'):
+                download_info['download_id'] = result['transfer_id']
+
+            if new_status in ['failed', 'cancelled']:
+                print(f"Track {download_index} failed/cancelled. Triggering retry...")
+                self.track_table.setItem(download_info['table_index'], 4, QTableWidgetItem("🔄 Retrying..."))
                 
-                if self.check_transfer_folder_for_parallel_download(timer.download_index):
-                    print(f"✅ Parallel download {timer.download_index + 1} found in Transfer folder")
-                    timer.stop()
-                    self.on_parallel_track_completed(timer.download_index, True)
-                    return
-                else:
-                    # Not in API and not in Transfer folder - this might indicate a problem
-                    if timer.start_time > 30:  # After 30 seconds, start checking more aggressively
-                        print(f"⏳ Parallel download {timer.download_index + 1} not in API or Transfer folder (monitoring {timer.start_time}s)")
-                        
-                        # After 90 seconds with no progress, assume it's stuck/failed
-                        if timer.start_time > 90:  # 90 seconds - much faster than 10 minutes
-                            print(f"⚠️ Download {timer.download_index + 1} appears stuck after {timer.start_time}s - initiating retry")
-                            timer.stop()
-                            self.retry_parallel_download_with_fallback(timer.download_index, "Download appears stuck/failed")
-                            return
-            
-            # Final timeout after 3 minutes (much more aggressive)
-            if timer.start_time > 180:  # 3 minutes - downloads should not take this long
-                print(f"⏰ Parallel download {timer.download_index + 1} final timeout after {timer.start_time}s")
-                timer.stop()
-                # Try to retry with different source instead of marking as failed
-                self.retry_parallel_download_with_fallback(timer.download_index, "Final timeout")
+                # Remove from active list so we don't check it again
+                self.active_downloads.remove(download_info)
                 
-        except Exception as e:
-            print(f"❌ Error checking parallel download status: {str(e)}")
-            timer.stop()
-            self.on_parallel_track_failed(timer.download_index, str(e))
-    
+                # This is the crucial part: call your retry logic
+                self.on_parallel_track_failed(download_index, f"Download {new_status}")
+                self.retry_parallel_download_with_fallback(download_index, f"Download {new_status}")
+
+            elif new_status == 'completed':
+                print(f"Track {download_index} completed successfully.")
+                self.track_table.setItem(download_info['table_index'], 4, QTableWidgetItem("✅ Downloaded"))
+                
+                # Remove from active downloads list
+                self.active_downloads.remove(download_info)
+
+                # Signal completion to the parallel download manager
+                self.on_parallel_track_completed(download_index, success=True)
+
+            elif new_status == 'downloading':
+                 progress = result.get('progress', 0)
+                 self.track_table.setItem(download_info['table_index'], 4, QTableWidgetItem(f"⏬ Downloading ({progress}%)"))
+
+            elif new_status == 'queued':
+                 self.track_table.setItem(download_info['table_index'], 4, QTableWidgetItem("... Queued"))
+
+        self._is_status_update_running = False
+
     def check_transfer_folder_for_parallel_download(self, download_index):
         """Check if a parallel download completed and exists in Transfer folder"""
         try:
