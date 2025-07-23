@@ -5187,7 +5187,9 @@ class DownloadMissingTracksModal(QDialog):
             'track_index': track_index,
             'table_index': table_index,
             'download_index': download_index,
-            'completed': False
+            'completed': False,
+            'last_seen_state': None,
+            'stuck_state_count': 0  # Track how long it's been in same state
         }
         
         # Create timer to check download status via slskd API (same as regular downloads)
@@ -5198,7 +5200,7 @@ class DownloadMissingTracksModal(QDialog):
         timer.download_index = download_index
         timer.start_time = 0
         timer.timeout.connect(lambda: self.check_download_status_parallel(timer))
-        timer.start(2000)  # Check every 2 seconds
+        timer.start(1000)  # Check every 1 second for faster error detection
         
         # Store timer reference for cleanup
         if not hasattr(self, 'download_timers'):
@@ -5209,7 +5211,7 @@ class DownloadMissingTracksModal(QDialog):
         """Check parallel download status using hybrid API + Transfer folder approach"""
         try:
             # Increment timer counter  
-            timer.start_time += 2  # 2 seconds per check
+            timer.start_time += 1  # 1 second per check
             
             # Check if this download was already completed
             if (hasattr(self, 'parallel_download_tracking') and 
@@ -5231,7 +5233,18 @@ class DownloadMissingTracksModal(QDialog):
                             download_found_in_api = True
                             state = getattr(download, 'state', 'Unknown')
                             
-                            print(f"🔍 Parallel download {timer.download_index + 1} API status: {state}")
+                            # Check for stuck downloads by tracking state changes
+                            tracking_info = self.parallel_download_tracking.get(timer.download_index, {})
+                            last_state = tracking_info.get('last_seen_state')
+                            
+                            if last_state == state:
+                                # Same state as last check - increment stuck counter
+                                tracking_info['stuck_state_count'] = tracking_info.get('stuck_state_count', 0) + 1
+                            else:
+                                # State changed - reset stuck counter
+                                tracking_info['stuck_state_count'] = 0
+                                tracking_info['last_seen_state'] = state
+                                print(f"🔍 Parallel download {timer.download_index + 1} state: {state}")
                             
                             if state == "Completed":
                                 print(f"✅ Parallel download {timer.download_index + 1} completed via API")
@@ -5244,7 +5257,13 @@ class DownloadMissingTracksModal(QDialog):
                                 # Try to retry with different source instead of marking as failed
                                 self.retry_parallel_download_with_fallback(timer.download_index, f"Download {state.lower()}")
                                 return
-                            # For "InProgress", "Queued" etc., continue monitoring
+                            elif state in ["InProgress", "Queued"] and tracking_info.get('stuck_state_count', 0) > 30:
+                                # Been in same state for 30+ seconds - likely stuck
+                                print(f"⚠️ Download {timer.download_index + 1} stuck in {state} for {tracking_info['stuck_state_count']}s - initiating retry")
+                                timer.stop()
+                                self.retry_parallel_download_with_fallback(timer.download_index, f"Stuck in {state}")
+                                return
+                            # For other states, continue monitoring
                             break
                         
                 except Exception as api_error:
@@ -5261,16 +5280,23 @@ class DownloadMissingTracksModal(QDialog):
                     self.on_parallel_track_completed(timer.download_index, True)
                     return
                 else:
-                    # Not in API and not in Transfer folder - continue monitoring (might still be downloading)
-                    if timer.start_time > 60:  # After 1 minute, start logging this situation
+                    # Not in API and not in Transfer folder - this might indicate a problem
+                    if timer.start_time > 30:  # After 30 seconds, start checking more aggressively
                         print(f"⏳ Parallel download {timer.download_index + 1} not in API or Transfer folder (monitoring {timer.start_time}s)")
+                        
+                        # After 90 seconds with no progress, assume it's stuck/failed
+                        if timer.start_time > 90:  # 90 seconds - much faster than 10 minutes
+                            print(f"⚠️ Download {timer.download_index + 1} appears stuck after {timer.start_time}s - initiating retry")
+                            timer.stop()
+                            self.retry_parallel_download_with_fallback(timer.download_index, "Download appears stuck/failed")
+                            return
             
-            # Timeout after 10 minutes - try retry instead of failing
-            if timer.start_time > 600:  # 10 minutes
-                print(f"⏰ Parallel download {timer.download_index + 1} timeout after {timer.start_time}s")
+            # Final timeout after 3 minutes (much more aggressive)
+            if timer.start_time > 180:  # 3 minutes - downloads should not take this long
+                print(f"⏰ Parallel download {timer.download_index + 1} final timeout after {timer.start_time}s")
                 timer.stop()
                 # Try to retry with different source instead of marking as failed
-                self.retry_parallel_download_with_fallback(timer.download_index, "Download timeout")
+                self.retry_parallel_download_with_fallback(timer.download_index, "Final timeout")
                 
         except Exception as e:
             print(f"❌ Error checking parallel download status: {str(e)}")
