@@ -5183,8 +5183,7 @@ class DownloadMissingTracksModal(QDialog):
                 self.validate_slskd_result_with_spotify_parallel(best_match, spotify_track, track_index, table_index, valid_candidates, download_index)
                 return
         
-        self.on_parallel_track_failed(download_index, f"No valid results for query: {query}") 
-
+        self.on_parallel_track_failed(download_index, f"No valid results for query: {query}")
 
     def validate_slskd_result_with_spotify_parallel(self, slskd_result, original_spotify_track, track_index, table_index, valid_candidates, download_index):
         """Parallel version of Spotify validation - SIMPLIFIED for speed"""
@@ -5309,8 +5308,11 @@ class DownloadMissingTracksModal(QDialog):
     def _handle_processed_status_updates(self, results):
         """
         This runs on the main thread and applies status updates from the background worker.
-        This is where the retry logic is triggered.
+        This is where the retry logic is triggered. Now includes a queue timeout.
         """
+        import time
+        QUEUE_TIMEOUT_SECONDS = 90  # 90 seconds
+
         for result in results:
             download_index = result['widget_id']
             new_status = result['status']
@@ -5322,26 +5324,35 @@ class DownloadMissingTracksModal(QDialog):
             if result.get('transfer_id'):
                 download_info['download_id'] = result['transfer_id']
 
-            if new_status in ['failed', 'cancelled']:
-                print(f"Track {download_index} failed/cancelled. Triggering retry...")
+            # --- NEW QUEUE TIMEOUT LOGIC ---
+            is_stuck_in_queue = False
+            if new_status == 'queued':
+                if 'queued_start_time' not in download_info:
+                    download_info['queued_start_time'] = time.time()
+                
+                time_in_queue = time.time() - download_info['queued_start_time']
+                if time_in_queue > QUEUE_TIMEOUT_SECONDS:
+                    is_stuck_in_queue = True
+                    print(f"⏰ Download {download_index} is stuck in queue for {time_in_queue:.0f}s. Failing.")
+            else:
+                # Reset timer if it's no longer queued
+                if 'queued_start_time' in download_info:
+                    del download_info['queued_start_time']
+            # --- END OF NEW LOGIC ---
+
+            if new_status in ['failed', 'cancelled'] or is_stuck_in_queue:
+                failure_reason = "Stuck in queue" if is_stuck_in_queue else f"Download {new_status}"
+                print(f"Track {download_index} failed/cancelled. Reason: {failure_reason}. Triggering retry...")
                 self.track_table.setItem(download_info['table_index'], 4, QTableWidgetItem("🔄 Retrying..."))
                 
-                # Remove from active list so we don't check it again
                 self.active_downloads.remove(download_info)
-                
-                # CRITICAL FIX: Do NOT call on_parallel_track_failed here.
-                # The retry logic now takes responsibility for the download slot.
-                # It will call on_parallel_track_failed itself only if all retries are exhausted.
-                self.retry_parallel_download_with_fallback(download_index, f"Download {new_status}")
+                self.retry_parallel_download_with_fallback(download_index, failure_reason)
 
             elif new_status == 'completed':
                 print(f"Track {download_index} completed successfully.")
                 self.track_table.setItem(download_info['table_index'], 4, QTableWidgetItem("✅ Downloaded"))
                 
-                # Remove from active downloads list
                 self.active_downloads.remove(download_info)
-
-                # Signal completion to the parallel download manager
                 self.on_parallel_track_completed(download_index, success=True)
 
             elif new_status == 'downloading':
@@ -5352,7 +5363,6 @@ class DownloadMissingTracksModal(QDialog):
                  self.track_table.setItem(download_info['table_index'], 4, QTableWidgetItem("... Queued"))
 
         self._is_status_update_running = False
-
 
     def check_transfer_folder_for_parallel_download(self, download_index):
         """Check if a parallel download completed and exists in Transfer folder"""
