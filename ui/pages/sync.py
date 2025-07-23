@@ -2784,12 +2784,54 @@ class DownloadMissingTracksModal(QDialog):
         # Try each search query until we find good results
         self.try_search_queries(search_queries, spotify_track, track_index, table_index, 0)
     
+    def clean_track_name_for_search(self, track_name):
+        """Clean track name by removing parentheses content and extra information"""
+        import re
+        
+        cleaned_name = track_name
+        
+        # Remove content in parentheses - covers feat., remix, remaster, etc.
+        # Examples: "(feat. Artist)", "(Remix)", "(Remastered)", "(Live)", "(Radio Edit)"
+        cleaned_name = re.sub(r'\s*\([^)]*\)', '', cleaned_name)
+        
+        # Remove content in square brackets - covers similar extras
+        # Examples: "[feat. Artist]", "[Remix]", "[Explicit]"
+        cleaned_name = re.sub(r'\s*\[[^\]]*\]', '', cleaned_name)
+        
+        # Remove common standalone suffixes that appear after dashes
+        # Examples: " - Remix", " - Radio Edit", " - Extended Version"
+        suffixes_to_remove = [
+            r'\s*-\s*remix\s*$',
+            r'\s*-\s*radio\s+edit\s*$', 
+            r'\s*-\s*extended\s+version\s*$',
+            r'\s*-\s*remaster\s*$',
+            r'\s*-\s*remastered\s*$',
+            r'\s*-\s*live\s*$',
+            r'\s*-\s*acoustic\s*$',
+            r'\s*-\s*instrumental\s*$'
+        ]
+        
+        for suffix_pattern in suffixes_to_remove:
+            cleaned_name = re.sub(suffix_pattern, '', cleaned_name, flags=re.IGNORECASE)
+        
+        # Clean up extra whitespace
+        cleaned_name = ' '.join(cleaned_name.split())
+        
+        # Log cleaning if significant changes were made
+        if cleaned_name != track_name:
+            print(f"🧹 Cleaned track name: '{track_name}' → '{cleaned_name}'")
+        
+        return cleaned_name
+
     def generate_smart_search_queries(self, artist_name, track_name):
         """Generate multiple search query variations with special handling for single-word tracks"""
+        # Clean the track name first to remove parentheses content
+        clean_track_name = self.clean_track_name_for_search(track_name)
+        
         queries = []
         
         # Check if track name is a single word (no spaces)
-        is_single_word = len(track_name.strip().split()) == 1
+        is_single_word = len(clean_track_name.strip().split()) == 1
         
         # NEW STRATEGY per user request: 
         # 1. "Virtual Mage Orbit Love" (Artist + Track)
@@ -2798,7 +2840,7 @@ class DownloadMissingTracksModal(QDialog):
         
         # Strategy 1: Artist + Track (recommended format: "Virtual Mage Orbit Love")
         if artist_name:
-            queries.append(f"{artist_name} {track_name}".strip())
+            queries.append(f"{artist_name} {clean_track_name}".strip())
         
         # Strategy 2: Track + Shortened Artist (fallback: "Orbit Love Virtual M")
         if artist_name:
@@ -2810,10 +2852,10 @@ class DownloadMissingTracksModal(QDialog):
                 # For single-word artists: Truncate to ~7 characters
                 short_artist = artist_words[0][:7] if len(artist_words[0]) > 7 else artist_words[0]
             
-            queries.append(f"{track_name} {short_artist}".strip())
+            queries.append(f"{clean_track_name} {short_artist}".strip())
         
         # Strategy 3: Track only (final fallback: "Orbit Love")
-        queries.append(track_name.strip())
+        queries.append(clean_track_name.strip())
         
         # Legacy single-word handling for backward compatibility
         if is_single_word:
@@ -4903,7 +4945,8 @@ class DownloadMissingTracksModal(QDialog):
             'track_index': track_index,
             'table_index': table_index,
             'download_index': download_index,
-            'completed': False
+            'completed': False,
+            'used_sources': set()  # Track sources to avoid retrying same ones
         }
         
         # Use existing search infrastructure but with parallel completion callback
@@ -5080,6 +5123,12 @@ class DownloadMissingTracksModal(QDialog):
     
     def start_validated_download_parallel(self, slskd_result, spotify_metadata, track_index, table_index, download_index):
         """Start download with validated metadata - parallel version"""
+        # Track the source being used to avoid retrying it
+        if hasattr(self, 'parallel_search_tracking') and download_index in self.parallel_search_tracking:
+            source_key = f"{getattr(slskd_result, 'username', getattr(slskd_result, 'user', 'unknown'))}_{getattr(slskd_result, 'filename', 'unknown')}"
+            self.parallel_search_tracking[download_index]['used_sources'].add(source_key)
+            print(f"🔒 Marked source as used: {source_key}")
+        
         # Create spotify-based result for infrastructure download
         spotify_based_result = self.create_spotify_based_search_result_from_validation(slskd_result, spotify_metadata)
         
@@ -5126,67 +5175,497 @@ class DownloadMissingTracksModal(QDialog):
             return None
     
     def monitor_download_completion_parallel(self, download_item, track_index, table_index, download_index):
-        """Monitor parallel download completion using Transfer folder detection"""
+        """Monitor parallel download completion using the same system as regular downloads"""
         from PyQt6.QtCore import QTimer
-        import os
         
-        # Get the expected transfer path for this track
-        if track_index < len(self.missing_tracks):
-            spotify_track = self.missing_tracks[track_index].spotify_track
-            expected_transfer_path = self.get_expected_transfer_path(spotify_track)
-            
-            # Create timer to check for file existence in Transfer folder
-            timer = QTimer()
-            timer.expected_path = expected_transfer_path
-            timer.track_index = track_index
-            timer.table_index = table_index
-            timer.download_index = download_index
-            timer.start_time = 0
-            timer.timeout.connect(lambda: self.check_transfer_folder_completion_parallel(timer))
-            timer.start(2000)  # Check every 2 seconds
-            
-            # Store timer reference for cleanup
-            if not hasattr(self, 'download_timers'):
-                self.download_timers = []
-            self.download_timers.append(timer)
-        else:
-            self.on_parallel_track_failed(download_index, f"Track index {track_index} out of range")
+        # Store download tracking info
+        if not hasattr(self, 'parallel_download_tracking'):
+            self.parallel_download_tracking = {}
+        
+        self.parallel_download_tracking[download_index] = {
+            'download_id': download_item.download_id,
+            'track_index': track_index,
+            'table_index': table_index,
+            'download_index': download_index,
+            'completed': False
+        }
+        
+        # Create timer to check download status via slskd API (same as regular downloads)
+        timer = QTimer()
+        timer.download_id = download_item.download_id
+        timer.track_index = track_index
+        timer.table_index = table_index
+        timer.download_index = download_index
+        timer.start_time = 0
+        timer.timeout.connect(lambda: self.check_download_status_parallel(timer))
+        timer.start(2000)  # Check every 2 seconds
+        
+        # Store timer reference for cleanup
+        if not hasattr(self, 'download_timers'):
+            self.download_timers = []
+        self.download_timers.append(timer)
     
-    def check_transfer_folder_completion_parallel(self, timer):
-        """Check Transfer folder completion for parallel downloads"""
-        import os
-        import glob
-        
+    def check_download_status_parallel(self, timer):
+        """Check parallel download status using hybrid API + Transfer folder approach"""
         try:
-            # Increment timer counter
+            # Increment timer counter  
             timer.start_time += 2  # 2 seconds per check
             
-            # Check if expected folder exists
-            if os.path.exists(timer.expected_path):
-                # Check if there are any audio files in the folder
-                audio_files = glob.glob(os.path.join(timer.expected_path, "*.flac")) + \
-                             glob.glob(os.path.join(timer.expected_path, "*.mp3")) + \
-                             glob.glob(os.path.join(timer.expected_path, "*.wav"))
+            # Check if this download was already completed
+            if (hasattr(self, 'parallel_download_tracking') and 
+                timer.download_index in self.parallel_download_tracking and
+                self.parallel_download_tracking[timer.download_index]['completed']):
+                timer.stop()
+                return
+            
+            download_found_in_api = False
+            
+            # Step 1: Try to find download in slskd API
+            if hasattr(self.parent_page, 'soulseek_client') and self.parent_page.soulseek_client:
+                try:
+                    all_downloads = self.parent_page.soulseek_client.get_all_downloads()
+                    
+                    # Find our download by ID
+                    for download in all_downloads:
+                        if hasattr(download, 'id') and download.id == timer.download_id:
+                            download_found_in_api = True
+                            state = getattr(download, 'state', 'Unknown')
+                            
+                            print(f"🔍 Parallel download {timer.download_index + 1} API status: {state}")
+                            
+                            if state == "Completed":
+                                print(f"✅ Parallel download {timer.download_index + 1} completed via API")
+                                timer.stop()
+                                self.on_parallel_track_completed(timer.download_index, True)
+                                return
+                            elif state in ["Cancelled", "Failed"]:
+                                print(f"❌ Parallel download {timer.download_index + 1} failed via API: {state}")
+                                timer.stop()
+                                # Try to retry with different source instead of marking as failed
+                                self.retry_parallel_download_with_fallback(timer.download_index, f"Download {state.lower()}")
+                                return
+                            # For "InProgress", "Queued" etc., continue monitoring
+                            break
+                        
+                except Exception as api_error:
+                    print(f"⚠️ API error checking parallel download {timer.download_index + 1}: {api_error}")
+                    # Continue to Transfer folder check
+            
+            # Step 2: If not found in API, check Transfer folder (likely completed & cleaned up)
+            if not download_found_in_api:
+                print(f"🔍 Parallel download {timer.download_index + 1} not in API - checking Transfer folder...")
                 
-                if audio_files:
-                    print(f"✅ Parallel download {timer.download_index + 1} completed: {timer.expected_path}")
+                if self.check_transfer_folder_for_parallel_download(timer.download_index):
+                    print(f"✅ Parallel download {timer.download_index + 1} found in Transfer folder")
                     timer.stop()
                     self.on_parallel_track_completed(timer.download_index, True)
                     return
+                else:
+                    # Not in API and not in Transfer folder - continue monitoring (might still be downloading)
+                    if timer.start_time > 60:  # After 1 minute, start logging this situation
+                        print(f"⏳ Parallel download {timer.download_index + 1} not in API or Transfer folder (monitoring {timer.start_time}s)")
             
-            # Timeout after 10 minutes
+            # Timeout after 10 minutes - try retry instead of failing
             if timer.start_time > 600:  # 10 minutes
-                print(f"⏰ Parallel download {timer.download_index + 1} timeout: {timer.expected_path}")
+                print(f"⏰ Parallel download {timer.download_index + 1} timeout after {timer.start_time}s")
                 timer.stop()
-                self.on_parallel_track_failed(timer.download_index, "Transfer timeout")
+                # Try to retry with different source instead of marking as failed
+                self.retry_parallel_download_with_fallback(timer.download_index, "Download timeout")
                 
         except Exception as e:
-            print(f"❌ Error checking parallel transfer folder: {str(e)}")
+            print(f"❌ Error checking parallel download status: {str(e)}")
             timer.stop()
             self.on_parallel_track_failed(timer.download_index, str(e))
     
+    def check_transfer_folder_for_parallel_download(self, download_index):
+        """Check if a parallel download completed and exists in Transfer folder"""
+        try:
+            # Get track info for this download
+            if not (hasattr(self, 'parallel_search_tracking') and 
+                    download_index in self.parallel_search_tracking):
+                print(f"❌ No tracking info for parallel download {download_index + 1}")
+                return False
+            
+            track_info = self.parallel_search_tracking[download_index]
+            spotify_track = track_info['spotify_track']
+            
+            # Get expected Transfer folder path
+            artist_name = spotify_track.artists[0] if spotify_track.artists else "Unknown Artist"
+            track_name = spotify_track.name
+            
+            # Clean names for file system
+            clean_artist = self.sanitize_filename(artist_name)
+            clean_track = self.sanitize_filename(track_name)
+            
+            # Check multiple possible folder structures that matched downloads might use
+            possible_paths = [
+                # Singles: Transfer/ARTIST/ARTIST - TRACK/
+                f"Transfer/{clean_artist}/{clean_artist} - {clean_track}",
+                # Albums: Transfer/ARTIST/ARTIST - ALBUM/  
+                f"Transfer/{clean_artist}/{clean_artist} - {getattr(spotify_track, 'album', clean_track)}",
+                # Fallback: Transfer/ARTIST/
+                f"Transfer/{clean_artist}"
+            ]
+            
+            import os
+            import glob
+            
+            for folder_path in possible_paths:
+                if os.path.exists(folder_path):
+                    # Look for audio files in this folder
+                    audio_extensions = ["*.flac", "*.mp3", "*.wav", "*.m4a", "*.ogg"]
+                    audio_files = []
+                    
+                    for ext in audio_extensions:
+                        audio_files.extend(glob.glob(os.path.join(folder_path, ext)))
+                        # Also check subdirectories one level deep
+                        audio_files.extend(glob.glob(os.path.join(folder_path, "*", ext)))
+                    
+                    if audio_files:
+                        print(f"🎵 Found {len(audio_files)} audio file(s) in {folder_path}")
+                        return True
+            
+            print(f"🔍 No audio files found in Transfer folders for: {clean_artist} - {clean_track}")
+            return False
+            
+        except Exception as e:
+            print(f"❌ Error checking Transfer folder for parallel download {download_index + 1}: {str(e)}")
+            return False
+    
+    def retry_parallel_download_with_fallback(self, download_index, reason):
+        """Retry a failed parallel download with different source and quality fallback"""
+        try:
+            print(f"🔄 Retrying parallel download {download_index + 1} - reason: {reason}")
+            
+            # Get track info
+            if not (hasattr(self, 'parallel_search_tracking') and 
+                    download_index in self.parallel_search_tracking):
+                print(f"❌ No tracking info for retry of download {download_index + 1}")
+                self.on_parallel_track_failed(download_index, f"Retry failed: {reason}")
+                return
+                
+            track_info = self.parallel_search_tracking[download_index]
+            track_index = track_info['track_index']
+            table_index = track_info['table_index']
+            spotify_track = track_info['spotify_track']
+            
+            # Initialize retry tracking if not exists
+            if 'retry_count' not in track_info:
+                track_info['retry_count'] = 0
+                track_info['used_sources'] = set()  # Track used sources to avoid repeats
+                
+            track_info['retry_count'] += 1
+            
+            # Max 2 retries per track
+            if track_info['retry_count'] > 2:
+                print(f"❌ Max retries exceeded for parallel download {download_index + 1}")
+                self.on_parallel_track_failed(download_index, f"Max retries exceeded after {reason}")
+                return
+            
+            print(f"🔄 Retry attempt {track_info['retry_count']}/2 for: {spotify_track.name}")
+            
+            # Update UI to show retrying
+            if table_index is not None and table_index < self.track_table.rowCount():
+                retrying_item = QTableWidgetItem(f"🔄 Retry {track_info['retry_count']}")
+                retrying_item.setFlags(retrying_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                retrying_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.track_table.setItem(table_index, 4, retrying_item)
+            
+            # Start retry search with fallback quality preferences
+            self.start_retry_search_worker(download_index, track_index, table_index, spotify_track, track_info)
+            
+        except Exception as e:
+            print(f"❌ Error setting up retry for parallel download {download_index + 1}: {str(e)}")
+            self.on_parallel_track_failed(download_index, f"Retry setup failed: {str(e)}")
+    
+    def start_retry_search_worker(self, download_index, track_index, table_index, spotify_track, track_info):
+        """Start background worker to search for alternative sources with quality fallback"""
+        from PyQt6.QtCore import QRunnable, QObject, pyqtSignal
+        
+        class RetrySearchWorkerSignals(QObject):
+            retry_results_ready = pyqtSignal(int, int, int, list, object)  # download_index, track_index, table_index, results, track_info
+            retry_search_failed = pyqtSignal(int, int, int, str, object)  # download_index, track_index, table_index, error, track_info
+        
+        class RetrySearchWorker(QRunnable):
+            def __init__(self, soulseek_client, spotify_track, track_info):
+                super().__init__()
+                self.soulseek_client = soulseek_client
+                self.spotify_track = spotify_track
+                self.track_info = track_info
+                self.signals = RetrySearchWorkerSignals()
+            
+            def clean_track_name_for_retry_search(self, track_name):
+                """Clean track name for retry searches (same as main cleaning)"""
+                import re
+                
+                cleaned_name = track_name
+                
+                # Remove content in parentheses - covers feat., remix, remaster, etc.
+                cleaned_name = re.sub(r'\s*\([^)]*\)', '', cleaned_name)
+                
+                # Remove content in square brackets
+                cleaned_name = re.sub(r'\s*\[[^\]]*\]', '', cleaned_name)
+                
+                # Remove common standalone suffixes after dashes
+                suffixes_to_remove = [
+                    r'\s*-\s*remix\s*$', r'\s*-\s*radio\s+edit\s*$', r'\s*-\s*extended\s+version\s*$',
+                    r'\s*-\s*remaster\s*$', r'\s*-\s*remastered\s*$', r'\s*-\s*live\s*$',
+                    r'\s*-\s*acoustic\s*$', r'\s*-\s*instrumental\s*$'
+                ]
+                
+                for suffix_pattern in suffixes_to_remove:
+                    cleaned_name = re.sub(suffix_pattern, '', cleaned_name, flags=re.IGNORECASE)
+                
+                # Clean up extra whitespace
+                cleaned_name = ' '.join(cleaned_name.split())
+                
+                # Log retry cleaning if significant changes were made
+                if cleaned_name != track_name:
+                    print(f"🧹 Retry cleaned: '{track_name}' → '{cleaned_name}'")
+                
+                return cleaned_name
+            
+            def run(self):
+                try:
+                    print(f"🔍 Retry search for: {self.spotify_track.name} by {self.spotify_track.artists[0] if self.spotify_track.artists else 'Unknown'}")
+                    
+                    # Create search queries with quality fallback preferences
+                    raw_track_name = self.spotify_track.name
+                    artist_name = self.spotify_track.artists[0] if self.spotify_track.artists else ""
+                    
+                    # Clean track name for better search results
+                    track_name = self.clean_track_name_for_retry_search(raw_track_name)
+                    
+                    # Search strategies with quality preferences (try FLAC first, then MP3)
+                    search_queries = []
+                    
+                    # For retry attempts, be more flexible with formats
+                    if self.track_info['retry_count'] == 1:
+                        # First retry: still prefer FLAC but accept MP3
+                        search_queries = [
+                            f"{track_name} flac",
+                            f"{artist_name} {track_name} flac", 
+                            f"{track_name} mp3",
+                            f"{artist_name} {track_name} mp3",
+                            f"{track_name}",  # Any format
+                        ]
+                    else:
+                        # Second retry: accept any quality, focus on different sources
+                        search_queries = [
+                            f"{track_name} mp3",
+                            f"{artist_name} {track_name}",
+                            f"{track_name}",
+                            # Try with fewer keywords if artist name is complex
+                            f"{track_name} {artist_name.split()[0]}" if len(artist_name.split()) > 1 else f"{track_name}",
+                        ]
+                    
+                    all_results = []
+                    
+                    # Search with each query
+                    for query in search_queries:
+                        if len(all_results) >= 20:  # Limit total results
+                            break
+                            
+                        try:
+                            print(f"   🔍 Retry query: '{query}'")
+                            search_result = self.soulseek_client.search(query, timeout=30)
+                            
+                            if search_result and len(search_result) > 0:
+                                # Handle tuple format (tracks, albums)
+                                results_list = search_result[0] if isinstance(search_result, tuple) else search_result
+                                
+                                if results_list:
+                                    # Filter out sources we already tried
+                                    filtered_results = []
+                                    for result in results_list[:10]:  # Top 10 per query
+                                        source_key = f"{getattr(result, 'username', getattr(result, 'user', 'unknown'))}_{getattr(result, 'filename', 'unknown')}"
+                                        if source_key not in self.track_info.get('used_sources', set()):
+                                            filtered_results.append(result)
+                                    
+                                    all_results.extend(filtered_results)
+                                    print(f"   ✅ Found {len(filtered_results)} new sources from '{query}'")
+                        
+                        except Exception as search_error:
+                            print(f"   ❌ Retry search query failed '{query}': {search_error}")
+                            continue
+                    
+                    if all_results:
+                        print(f"🎯 Retry search found {len(all_results)} alternative sources")
+                        self.signals.retry_results_ready.emit(download_index, track_index, table_index, all_results, self.track_info)
+                    else:
+                        print(f"❌ Retry search found no alternative sources")
+                        self.signals.retry_search_failed.emit(download_index, track_index, table_index, "No alternative sources found", self.track_info)
+                        
+                except Exception as e:
+                    print(f"❌ Retry search worker error: {str(e)}")
+                    self.signals.retry_search_failed.emit(download_index, track_index, table_index, str(e), self.track_info)
+        
+        # Create and start worker
+        worker = RetrySearchWorker(self.parent_page.soulseek_client, spotify_track, track_info)
+        worker.signals.retry_results_ready.connect(self.handle_retry_search_results)
+        worker.signals.retry_search_failed.connect(self.handle_retry_search_failed)
+        
+        # Store worker reference
+        self.active_workers.append(worker)
+        
+        # Submit to thread pool
+        if hasattr(self.parent_page, 'thread_pool'):
+            self.parent_page.thread_pool.start(worker)
+        else:
+            from PyQt6.QtCore import QThreadPool
+            thread_pool = QThreadPool()
+            self.fallback_pools.append(thread_pool)
+            thread_pool.start(worker)
+    
+    def handle_retry_search_results(self, download_index, track_index, table_index, results, track_info):
+        """Handle retry search results and start best alternative download"""
+        try:
+            print(f"🎯 Processing {len(results)} retry search results for download {download_index + 1}")
+            
+            if not results:
+                self.handle_retry_search_failed(download_index, track_index, table_index, "No results found", track_info)
+                return
+            
+            # Score and select best alternative (avoid previously used sources)
+            best_result = self.select_best_retry_result(results, track_info)
+            
+            if not best_result:
+                self.handle_retry_search_failed(download_index, track_index, table_index, "No suitable alternatives", track_info)
+                return
+            
+            # Mark this source as used
+            source_key = f"{getattr(best_result, 'username', getattr(best_result, 'user', 'unknown'))}_{getattr(best_result, 'filename', 'unknown')}"
+            track_info.setdefault('used_sources', set()).add(source_key)
+            
+            print(f"🚀 Starting retry download with: {getattr(best_result, 'filename', 'unknown')} from {getattr(best_result, 'username', getattr(best_result, 'user', 'unknown'))}")
+            
+            # Update UI to show downloading retry
+            if table_index is not None and table_index < self.track_table.rowCount():
+                downloading_item = QTableWidgetItem(f"⏬ Retry {track_info['retry_count']}")
+                downloading_item.setFlags(downloading_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                downloading_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.track_table.setItem(table_index, 4, downloading_item)
+            
+            # Start the retry download using validation process (like original)
+            # We need to validate the retry result against Spotify first
+            original_track = track_info['spotify_track']
+            self.validate_slskd_result_with_spotify_parallel(best_result, original_track, track_index, table_index, download_index)
+            
+            print(f"✅ Retry validation started for download {download_index + 1}")
+                
+        except Exception as e:
+            print(f"❌ Error handling retry search results: {str(e)}")
+            self.handle_retry_search_failed(download_index, track_index, table_index, str(e), track_info)
+    
+    def handle_retry_search_failed(self, download_index, track_index, table_index, error, track_info):
+        """Handle failed retry search - mark download as permanently failed"""
+        print(f"❌ Retry search failed for download {download_index + 1}: {error}")
+        
+        # If we've exhausted retries, mark as permanently failed
+        if track_info.get('retry_count', 0) >= 2:
+            print(f"💀 Permanently failing download {download_index + 1} after {track_info.get('retry_count', 0)} retries")
+            self.on_parallel_track_failed(download_index, f"All retries exhausted: {error}")
+        else:
+            # Try one more retry with even more relaxed criteria
+            self.retry_parallel_download_with_fallback(download_index, f"Retry search failed: {error}")
+    
+    def select_best_retry_result(self, results, track_info):
+        """Select best result from retry search, avoiding used sources and preferring quality"""
+        try:
+            used_sources = track_info.get('used_sources', set())
+            spotify_track = track_info['spotify_track']
+            
+            # Score each result
+            scored_results = []
+            
+            for result in results:
+                source_key = f"{getattr(result, 'username', getattr(result, 'user', 'unknown'))}_{getattr(result, 'filename', 'unknown')}"
+                
+                # Skip if we already tried this source
+                if source_key in used_sources:
+                    continue
+                    
+                score = self.calculate_retry_result_score(result, spotify_track, track_info['retry_count'])
+                if score > 0:
+                    scored_results.append((score, result))
+            
+            if not scored_results:
+                return None
+                
+            # Sort by score (highest first) and return best
+            scored_results.sort(key=lambda x: x[0], reverse=True)
+            best_score, best_result = scored_results[0]
+            
+            print(f"📊 Selected retry result (score: {best_score}): {getattr(best_result, 'filename', 'unknown')}")
+            return best_result
+            
+        except Exception as e:
+            print(f"❌ Error selecting best retry result: {str(e)}")
+            return results[0] if results else None
+    
+    def calculate_retry_result_score(self, result, spotify_track, retry_count):
+        """Calculate score for retry result with quality fallback preferences"""
+        try:
+            score = 0
+            filename = getattr(result, 'filename', '').lower()
+            
+            # Basic track name matching (required)
+            track_name_lower = spotify_track.name.lower()
+            if track_name_lower in filename:
+                score += 150
+            else:
+                return 0  # Must contain track name
+            
+            # Artist matching (helpful but not required for retries)
+            artist_name = spotify_track.artists[0] if spotify_track.artists else ""
+            if artist_name.lower() in filename:
+                score += 50
+            
+            # Quality scoring with fallback preferences
+            if retry_count == 1:
+                # First retry: still prefer FLAC but accept MP3
+                if 'flac' in filename:
+                    score += 40
+                elif 'mp3' in filename:
+                    score += 25
+                elif any(fmt in filename for fmt in ['wav', 'm4a', 'ogg']):
+                    score += 30
+            else:
+                # Second retry: be more lenient, accept any decent quality
+                if any(fmt in filename for fmt in ['flac', 'mp3', 'wav', 'm4a']):
+                    score += 20
+                    
+            # Bitrate preferences (for retries, accept lower quality)
+            if retry_count == 1:
+                if any(br in filename for br in ['320', '1411', '44100']):
+                    score += 15
+            else:
+                if any(br in filename for br in ['320', '256', '192', '1411']):
+                    score += 10
+                    
+            # Duration matching (if available)
+            if hasattr(result, 'duration') and hasattr(spotify_track, 'duration_ms'):
+                result_duration = getattr(result, 'duration', 0)
+                spotify_duration = spotify_track.duration_ms // 1000
+                if result_duration and spotify_duration:
+                    duration_diff = abs(result_duration - spotify_duration)
+                    if duration_diff <= 5:  # Within 5 seconds
+                        score += 25
+                    elif duration_diff <= 15:  # Within 15 seconds
+                        score += 15
+                        
+            return score
+            
+        except Exception as e:
+            print(f"❌ Error calculating retry score: {str(e)}")
+            return 1  # Minimal score to keep it in consideration
+    
     def on_parallel_track_completed(self, download_index, success):
         """Handle completion of a parallel track download"""
+        # Mark in download tracking
+        if hasattr(self, 'parallel_download_tracking') and download_index in self.parallel_download_tracking:
+            self.parallel_download_tracking[download_index]['completed'] = True
+        
         if hasattr(self, 'parallel_search_tracking') and download_index in self.parallel_search_tracking:
             track_info = self.parallel_search_tracking[download_index]
             
@@ -5714,6 +6193,12 @@ class DownloadMissingTracksModal(QDialog):
             self.track_search_results.clear()
         if hasattr(self, 'track_candidate_index'):
             self.track_candidate_index.clear()
+        
+        # Reset parallel tracking
+        if hasattr(self, 'parallel_download_tracking'):
+            self.parallel_download_tracking.clear()
+        if hasattr(self, 'parallel_search_tracking'):
+            self.parallel_search_tracking.clear()
         
         # Reset playlist status indicator
         playlist_item = self.find_playlist_item()
