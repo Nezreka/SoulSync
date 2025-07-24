@@ -811,7 +811,9 @@ class PlaylistDetailsModal(QDialog):
 
         playlist_item_widget.download_modal = modal
 
-        self.parent_page.on_download_process_started(self.playlist.id, playlist_item_widget)
+        # --- FIX ---
+        # The call to on_download_process_started has been removed from here
+        # and moved to the modal's "Begin Search" button.
 
         self.accept()
         modal.show()
@@ -1425,18 +1427,22 @@ class SyncPage(QWidget):
         playlist_item_widget.show_operation_status()
         self.refresh_btn.setEnabled(False)
         self.refresh_btn.setText("🔄 Working...")
-        # Connect the finished signal from the modal
-        playlist_item_widget.download_modal.process_finished.connect(
-            lambda: self.on_download_process_finished(playlist_id)
-        )
+        # --- FIX: Connect the finished signal from the modal ---
+        # This ensures that when the modal is finished (or cancelled), the cleanup function is called.
+        if playlist_item_widget.download_modal:
+            playlist_item_widget.download_modal.process_finished.connect(
+                lambda: self.on_download_process_finished(playlist_id)
+            )
 
     def on_download_process_finished(self, playlist_id):
         """Re-enables refresh button if no other downloads are active."""
-        print(f"Download process finished for playlist: {playlist_id}.")
+        print(f"Download process finished or cancelled for playlist: {playlist_id}.")
         if playlist_id in self.active_download_processes:
             playlist_item_widget = self.active_download_processes.pop(playlist_id)
-            playlist_item_widget.download_modal = None
-            playlist_item_widget.hide_operation_status()
+            # --- FIX: Reset the UI state of the playlist item ---
+            if playlist_item_widget:
+                playlist_item_widget.download_modal = None
+                playlist_item_widget.hide_operation_status()
 
         if not self.active_download_processes:
             print("All download processes finished. Re-enabling refresh.")
@@ -2833,6 +2839,10 @@ class DownloadMissingTracksModal(QDialog):
 
     def on_begin_search_clicked(self):
         """Handle Begin Search button click - starts Plex analysis"""
+        # --- FIX: Trigger the UI change on the main page ---
+        # This is the correct point to signal that the process has started.
+        self.parent_page.on_download_process_started(self.playlist.id, self.playlist_item)
+
         self.begin_search_btn.hide()
         self.cancel_btn.show()
         self.analysis_progress.setVisible(True)
@@ -2840,6 +2850,7 @@ class DownloadMissingTracksModal(QDialog):
         self.analysis_progress.setValue(0)
         self.download_in_progress = True # Set flag
         self.start_plex_analysis()
+
         
     def start_plex_analysis(self):
         """Start Plex analysis using existing worker"""
@@ -3179,24 +3190,66 @@ class DownloadMissingTracksModal(QDialog):
             f"Completed downloading {self.successful_downloads}/{len(self.missing_tracks)} missing tracks!")
     
     def on_cancel_clicked(self):
-        """Handle Cancel button - cancels operations and closes modal"""
+        """Handle Cancel button - cancels operations, emits finished signal, and closes modal."""
+        # --- FIX: The full cancellation logic is now centralized here. ---
         self.cancel_operations()
-        self.reject()
+        self.process_finished.emit() # Signal the main page to clean up and reset the button.
+        self.reject() # Close the modal.
         
     def on_close_clicked(self):
         self.reject()
         
     def cancel_operations(self):
-        """Cancel any ongoing operations"""
-        self.cancel_requested = True
+        """Cancel any ongoing operations, including active slskd downloads."""
+        print("🛑 Cancelling all operations for this playlist...")
+        self.cancel_requested = True # Flag to stop any new workers from starting.
+
+        # --- FIX: Actively cancel downloads on the slskd server ---
+        if self.active_downloads:
+            print(f"Requesting cancellation for {len(self.active_downloads)} active download(s)...")
+            
+            import asyncio
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+
+            soulseek_client = self.parent_page.soulseek_client
+            
+            # Create tasks to cancel all active downloads concurrently
+            tasks = []
+            for download_info in self.active_downloads:
+                download_id = download_info.get('download_id')
+                # Assumes the soulseek_client has a method to make raw API calls.
+                # A DELETE request is standard for cancellation in RESTful APIs like slskd's.
+                if download_id and hasattr(soulseek_client, '_make_request'):
+                    tasks.append(
+                        soulseek_client._make_request('DELETE', f'transfers/downloads/{download_id}')
+                    )
+            
+            if tasks:
+                try:
+                    # Wait for all cancellation requests to be sent
+                    loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
+                    print("All cancellation requests sent to slskd.")
+                except Exception as e:
+                    print(f"An error occurred while sending cancellation requests: {e}")
+
+        # Cancel background workers (like the initial Plex analysis)
         for worker in self.active_workers:
-            if hasattr(worker, 'cancel'): worker.cancel()
+            if hasattr(worker, 'cancel'):
+                worker.cancel()
         self.active_workers.clear()
+
+        # Clean up any fallback thread pools
         for pool in self.fallback_pools:
             pool.waitForDone(1000)
         self.fallback_pools.clear()
+
+        # Stop the status polling timer to prevent further checks
         self.download_status_timer.stop()
-        print("🛑 All operations cancelled successfully")
+        print("🛑 Modal operations cancelled successfully.")
         
     def closeEvent(self, event):
         """
