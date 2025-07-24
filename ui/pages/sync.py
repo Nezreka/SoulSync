@@ -2972,14 +2972,42 @@ class DownloadMissingTracksModal(QDialog):
             self.on_parallel_track_failed(download_index, f"No valid results after trying all {len(queries)} queries.")
 
     def start_validated_download_parallel(self, slskd_result, spotify_metadata, track_index, table_index, download_index):
-        """Start download with validated metadata - parallel version"""
+        """
+        Start download with validated metadata. This is used for both initial downloads
+        and for manual retries from the 'Correct Failed Matches' modal.
+        """
         track_info = self.parallel_search_tracking[download_index]
+
+        # --- FIX ---
+        # If this track was previously marked as 'completed' (e.g., from a failure),
+        # we need to reset its state to allow the new download attempt to be tracked correctly.
+        if track_info.get('completed', False):
+            print(f"🔄 Resetting state for manually retried track (index: {download_index}).")
+            track_info['completed'] = False
+            
+            # Decrement the failed count since we are retrying it.
+            if self.failed_downloads > 0:
+                self.failed_downloads -= 1
+            
+            # This download is now active again. The counter was decremented when it failed,
+            # so we increment it here to reflect its new active status.
+            self.active_parallel_downloads += 1
+            
+            # The 'completed_downloads' counter was incremented when the track originally failed.
+            # We decrement it here so the overall progress calculation remains accurate when
+            # this new download attempt completes.
+            if self.completed_downloads > 0:
+                self.completed_downloads -= 1
+
+        # Add the new download source to the used sources to prevent retrying with the same user/file
         source_key = f"{getattr(slskd_result, 'username', 'unknown')}_{slskd_result.filename}"
         track_info['used_sources'].add(source_key)
         
+        # Update UI to show the new download has been queued
         spotify_based_result = self.create_spotify_based_search_result_from_validation(slskd_result, spotify_metadata)
-        self.track_table.setItem(table_index, 4, QTableWidgetItem("⏬ Downloading..."))
+        self.track_table.setItem(table_index, 4, QTableWidgetItem("... Queued"))
         
+        # Start the actual download process
         self.start_matched_download_via_infrastructure_parallel(spotify_based_result, track_index, table_index, download_index)
     
     def start_matched_download_via_infrastructure_parallel(self, spotify_based_result, track_index, table_index, download_index):
@@ -3085,12 +3113,14 @@ class DownloadMissingTracksModal(QDialog):
     def on_parallel_track_completed(self, download_index, success):
         """Handle completion of a parallel track download"""
         track_info = self.parallel_search_tracking.get(download_index)
-        if not track_info or track_info['completed']: return
+        if not track_info or track_info.get('completed', False): return
         
         track_info['completed'] = True
         if success:
             self.track_table.setItem(track_info['table_index'], 4, QTableWidgetItem("✅ Downloaded"))
             self.downloaded_tracks_count += 1
+            # --- FIX ---
+            # Corrected the label update to use the incremented counter variable.
             self.downloaded_count_label.setText(str(self.downloaded_tracks_count))
             self.successful_downloads += 1
         else:
