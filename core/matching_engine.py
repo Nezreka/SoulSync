@@ -24,6 +24,7 @@ class MusicMatchingEngine:
     def __init__(self):
         # More comprehensive patterns to strip extra info from titles
         self.title_patterns = [
+            # Patterns inside parentheses or brackets
             r'\(feat\.?.*\)',
             r'\[feat\.?.*\]',
             r'\(with.*\)',
@@ -35,11 +36,16 @@ class MusicMatchingEngine:
             r'\(radio edit\)',
             r'\(album version\)',
             r'\(original mix\)',
+            # Patterns after a hyphen
             r'-\s*single version',
             r'-\s*remaster.*',
             r'-\s*live.*',
             r'-\s*remix',
             r'-\s*radio edit',
+            # NEW: Patterns in the open title string (not in brackets)
+            r'\s+feat\.?.*',
+            r'\s+ft\.?.*',
+            r'\s+featuring.*'
         ]
         
         self.artist_patterns = [
