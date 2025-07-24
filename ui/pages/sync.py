@@ -8,6 +8,31 @@ from PyQt6.QtGui import QFont
 from dataclasses import dataclass
 from typing import List, Optional
 from core.soulseek_client import TrackResult
+import re
+
+def clean_track_name_for_search(track_name):
+    """
+    Cleans a track name for searching by removing text in parentheses and brackets.
+    If cleaning the name results in an empty string, the original name is returned.
+    """
+    if not track_name or not isinstance(track_name, str):
+        return track_name
+
+    # Remove content in parentheses, e.g., (feat. Artist), (Remix)
+    cleaned_name = re.sub(r'\s*\([^)]*\)', '', track_name).strip()
+    # Remove content in square brackets, e.g., [Live], [Explicit]
+    cleaned_name = re.sub(r'\s*\[[^\]]*\]', '', cleaned_name).strip()
+    
+    # If cleaning results in an empty string (e.g., track name was only "(Intro)"),
+    # return the original track name to avoid an empty search.
+    if not cleaned_name:
+        return track_name
+        
+    # Log cleaning if significant changes were made
+    if cleaned_name != track_name:
+        print(f"🧹 Cleaned track name for search: '{track_name}' -> '{cleaned_name}'")
+    
+    return cleaned_name
 
 @dataclass
 class TrackAnalysisResult:
@@ -2182,7 +2207,10 @@ class ManualMatchModal(QDialog):
         spotify_track = self.current_track_info['spotify_track']
         artist = spotify_track.artists[0] if spotify_track.artists else "Unknown"
         
+        # Use the original track name for the info label
         self.info_label.setText(f"Could not find: <b>{spotify_track.name}</b><br>by {artist}")
+        
+        # Use the ORIGINAL, UNCLEANED track name for the initial search query
         self.search_input.setText(f"{artist} {spotify_track.name}")
         
         self.search_delay_timer.start(1000)
@@ -3352,98 +3380,61 @@ class DownloadMissingTracksModal(QDialog):
         # Try each search query until we find good results
         self.try_search_queries(search_queries, spotify_track, track_index, table_index, 0)
     
-    def clean_track_name_for_search(self, track_name):
-        """Clean track name by removing parentheses content and extra information"""
-        import re
-        
-        cleaned_name = track_name
-        
-        # Remove content in parentheses - covers feat., remix, remaster, etc.
-        # Examples: "(feat. Artist)", "(Remix)", "(Remastered)", "(Live)", "(Radio Edit)"
-        cleaned_name = re.sub(r'\s*\([^)]*\)', '', cleaned_name)
-        
-        # Remove content in square brackets - covers similar extras
-        # Examples: "[feat. Artist]", "[Remix]", "[Explicit]"
-        cleaned_name = re.sub(r'\s*\[[^\]]*\]', '', cleaned_name)
-        
-        # Remove common standalone suffixes that appear after dashes
-        # Examples: " - Remix", " - Radio Edit", " - Extended Version"
-        suffixes_to_remove = [
-            r'\s*-\s*remix\s*$',
-            r'\s*-\s*radio\s+edit\s*$', 
-            r'\s*-\s*extended\s+version\s*$',
-            r'\s*-\s*remaster\s*$',
-            r'\s*-\s*remastered\s*$',
-            r'\s*-\s*live\s*$',
-            r'\s*-\s*acoustic\s*$',
-            r'\s*-\s*instrumental\s*$'
-        ]
-        
-        for suffix_pattern in suffixes_to_remove:
-            cleaned_name = re.sub(suffix_pattern, '', cleaned_name, flags=re.IGNORECASE)
-        
-        # Clean up extra whitespace
-        cleaned_name = ' '.join(cleaned_name.split())
-        
-        # Log cleaning if significant changes were made
-        if cleaned_name != track_name:
-            print(f"🧹 Cleaned track name: '{track_name}' → '{cleaned_name}'")
-        
-        return cleaned_name
 
     def generate_smart_search_queries(self, artist_name, track_name):
-        """Generate multiple search query variations with special handling for single-word tracks"""
-        # Clean the track name first to remove parentheses content
-        clean_track_name = self.clean_track_name_for_search(track_name)
+        """
+        Generate multiple search query variations in a specific fallback order.
+        1. Full original query.
+        2. Query with cleaned track name (parentheses removed).
+        3. Query with cleaned track name and a shortened artist name.
+        4. Query with only the cleaned track name.
+        """
+        import re
         
         queries = []
         
-        # Check if track name is a single word (no spaces)
-        is_single_word = len(clean_track_name.strip().split()) == 1
-        
-        # NEW STRATEGY per user request: 
-        # 1. "Virtual Mage Orbit Love" (Artist + Track)
-        # 2. "Orbit Love Virtual M" (Track + Shortened Artist) 
-        # 3. "Orbit Love" (Track only)
-        
-        # Strategy 1: Artist + Track (recommended format: "Virtual Mage Orbit Love")
+        # --- Attempt 1: Full Original Query ---
         if artist_name:
-            queries.append(f"{artist_name} {clean_track_name}".strip())
+            queries.append(f"{artist_name} {track_name}".strip())
         
-        # Strategy 2: Track + Shortened Artist (fallback: "Orbit Love Virtual M")
+        # --- Clean the track name for subsequent fallbacks ---
+        cleaned_name = re.sub(r'\s*\([^)]*\)', '', track_name).strip()
+        cleaned_name = re.sub(r'\s*\[[^\]]*\]', '', cleaned_name).strip()
+        
+        # If cleaning resulted in an empty string, just use the original name
+        if not cleaned_name:
+            cleaned_name = track_name
+
+        # --- Attempt 2: Artist + Cleaned Track Name ---
+        # Add this only if the cleaning actually changed the name
+        if cleaned_name.lower() != track_name.lower():
+            if artist_name:
+                queries.append(f"{artist_name} {cleaned_name}".strip())
+
+        # --- Attempt 3: Cleaned Track Name + Shortened Artist ---
         if artist_name:
             artist_words = artist_name.split()
             if len(artist_words) > 1:
-                # For multi-word artists: Take first word + first letter of second word
+                # For multi-word artists: "Virtual Mage" -> "Virtual M"
                 short_artist = artist_words[0] + " " + artist_words[1][0] if len(artist_words[1]) > 0 else artist_words[0]
             else:
                 # For single-word artists: Truncate to ~7 characters
                 short_artist = artist_words[0][:7] if len(artist_words[0]) > 7 else artist_words[0]
             
-            queries.append(f"{clean_track_name} {short_artist}".strip())
-        
-        # Strategy 3: Track only (final fallback: "Orbit Love")
-        queries.append(clean_track_name.strip())
-        
-        # Legacy single-word handling for backward compatibility
-        if is_single_word:
-            print(f"🎯 Single-word track detected: '{track_name}' - using enhanced search strategy")
-            first_word = artist_name.split()[0] if artist_name else ""
-            if first_word and len(first_word) > 2:
-                queries.append(f"{track_name} {first_word}".strip())
-            
-            # Strategy 4: Track name + full artist name (traditional approach)
-            if artist_name:
-                queries.append(f"{track_name} {artist_name}".strip())
-        
-        # Remove duplicates while preserving order
+            queries.append(f"{cleaned_name} {short_artist}".strip())
+
+        # --- Attempt 4: Cleaned Track Name Only ---
+        queries.append(cleaned_name.strip())
+
+        # --- Finalize: Remove duplicates while preserving the fallback order ---
         unique_queries = []
         for query in queries:
             if query and query not in unique_queries:
                 unique_queries.append(query)
         
+        print(f"🧠 Generated {len(unique_queries)} smart queries for '{track_name}'. Sequence: {unique_queries}")
         return unique_queries
-    
+
     def shorten_artist_name(self, artist_name):
         """Remove common articles and prefixes that cause search issues"""
         if not artist_name:
@@ -5515,97 +5506,78 @@ class DownloadMissingTracksModal(QDialog):
             'table_index': table_index,
             'download_index': download_index,
             'completed': False,
-            'used_sources': set()  # Track sources to avoid retrying same ones
+            'used_sources': set()
         }
         
-        # Use existing search infrastructure but with parallel completion callback
-        self.start_search_worker_parallel(search_queries[0], search_queries, spotify_track, track_index, table_index, 0, download_index)
-    
-    def start_search_worker_parallel(self, query, queries, spotify_track, track_index, table_index, query_index, download_index):
-        """Start search worker with parallel completion handling"""
-        print(f"🔍 Starting parallel search worker for query: {query}")
-        
+        # CORRECTED CALL: Removed the extra 'search_queries[0]' argument.
+        self.start_search_worker_parallel(search_queries, spotify_track, track_index, table_index, 0, download_index)    
+
+    def start_search_worker_parallel(self, queries, spotify_track, track_index, table_index, query_index, download_index):
+        """
+        Start search worker with parallel completion handling.
+        This now iterates through the list of queries.
+        """
+        # Check if we have exhausted all queries for this track
+        if query_index >= len(queries):
+            print(f"❌ All {len(queries)} search queries failed for download {download_index + 1}")
+            self.on_parallel_track_failed(download_index, "All search strategies failed")
+            return
+
+        query = queries[query_index]
+        print(f"🔍 Starting parallel search worker for query {query_index + 1}/{len(queries)}: '{query}'")
+
         # Create a simple parallel search worker
         from PyQt6.QtCore import QRunnable, QObject, pyqtSignal
-        
+
         class ParallelSearchWorkerSignals(QObject):
             search_completed = pyqtSignal(list, str)  # results, query
             search_failed = pyqtSignal(str, str)  # query, error
-        
+
         class ParallelSearchWorker(QRunnable):
             def __init__(self, soulseek_client, query):
                 super().__init__()
                 self.soulseek_client = soulseek_client
                 self.query = query
                 self.signals = ParallelSearchWorkerSignals()
-                
+
             def run(self):
                 loop = None
                 try:
                     import asyncio
-                    # Create a fresh event loop for this thread
                     loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(loop)
-                    
-                    # Perform search with proper await
                     search_result = loop.run_until_complete(self.soulseek_client.search(self.query))
                     
-                    # Debug: Check what we actually got
-                    print(f"🔍 DEBUG: Search '{self.query}' returned type: {type(search_result)}")
-                    
-                    # Handle tuple result structure (tracks, albums)
                     if isinstance(search_result, tuple) and len(search_result) >= 1:
-                        # First element is the tracks list
                         results_list = search_result[0] if search_result[0] else []
-                        print(f"🔍 DEBUG: Extracted {len(results_list)} tracks from tuple")
-                    elif hasattr(search_result, '__iter__') and not isinstance(search_result, (str, bytes)):
-                        results_list = list(search_result)
                     else:
                         results_list = []
                     
-                    # Debug first actual result
-                    if results_list and len(results_list) > 0:
-                        first_track = results_list[0]
-                        print(f"🔍 DEBUG: First track type: {type(first_track)}")
-                        print(f"🔍 DEBUG: First track attributes: {[attr for attr in dir(first_track) if not attr.startswith('_')]}")
-                        if hasattr(first_track, 'filename'):
-                            print(f"🔍 DEBUG: First track filename: '{first_track.filename}'")
-                    
-                    # Emit completion signal
                     self.signals.search_completed.emit(results_list, self.query)
-                    
                 except Exception as e:
-                    print(f"❌ Parallel search error for '{self.query}': {str(e)}")
                     self.signals.search_failed.emit(self.query, str(e))
                 finally:
                     if loop:
                         try:
-                            pending = asyncio.all_tasks(loop)
-                            for task in pending:
-                                task.cancel()
-                            if pending:
-                                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
                             loop.close()
                         except Exception:
                             pass
         
-        # Create and configure worker
         worker = ParallelSearchWorker(self.parent_page.soulseek_client, query)
         
-        # Connect to parallel completion handler
+        # Connect to the completion handler, passing all necessary context
         worker.signals.search_completed.connect(
             lambda results, q, qs=queries, st=spotify_track, ti=track_index, 
                    tabi=table_index, qi=query_index, di=download_index: 
             self.on_search_query_completed_parallel(results, qs, st, ti, tabi, qi, q, di)
         )
         
-        # Handle search failures
         worker.signals.search_failed.connect(
-            lambda q, error, di=download_index: 
-            self.on_parallel_track_failed(di, f"Search failed for '{q}': {error}")
+            lambda q, error, qs=queries, st=spotify_track, ti=track_index, 
+                   tabi=table_index, qi=query_index, di=download_index:
+            self.on_search_query_completed_parallel([], qs, st, ti, tabi, qi, q, di) # Treat failure as empty result
         )
         
-        # Submit to thread pool
         if hasattr(self.parent_page, 'thread_pool'):
             self.parent_page.thread_pool.start(worker)
         else:
@@ -5614,11 +5586,13 @@ class DownloadMissingTracksModal(QDialog):
             thread_pool.start(worker)
         
         return worker
-    
+
     def on_search_query_completed_parallel(self, results, queries, spotify_track, track_index, table_index, query_index, query, download_index):
-        """Handle completion of a parallel search query"""
+        """
+        Handle completion of a parallel search query. If it fails, it will now
+        trigger the next query in the list.
+        """
         if hasattr(self, 'cancel_requested') and self.cancel_requested:
-            print("🛑 Parallel search query completed after cancellation - ignoring results")
             self.on_parallel_track_completed(download_index, False)
             return
             
@@ -5632,23 +5606,23 @@ class DownloadMissingTracksModal(QDialog):
             
             if valid_candidates:
                 print(f"🎯 Found {len(valid_candidates)} valid candidates for parallel download {download_index + 1}")
-                
-                # --- NEW CODE: Cache the candidates and the original spotify track ---
-                if hasattr(self, 'parallel_search_tracking') and download_index in self.parallel_search_tracking:
-                    self.parallel_search_tracking[download_index]['candidates'] = valid_candidates
-                    self.parallel_search_tracking[download_index]['spotify_track'] = spotify_track
-                # --- END OF NEW CODE ---
-
                 best_match = valid_candidates[0]
-                print(f"🎯 Selected best match for parallel download: {best_match.filename}")
-                
-                if hasattr(self.parent_page, 'log_area'):
-                    self.parent_page.log_area.append(f"   🎯 Best match (parallel #{download_index + 1}): {best_match.filename}")
-                
                 self.validate_slskd_result_with_spotify_parallel(best_match, spotify_track, track_index, table_index, valid_candidates, download_index)
                 return
-        
-        self.on_parallel_track_failed(download_index, f"No valid results for query: {query}")
+
+        # --- THIS IS THE NEW RETRY LOGIC ---
+        # If we are here, the current query failed. Try the next one.
+        next_query_index = query_index + 1
+        if next_query_index < len(queries):
+            print(f"🔄 No valid results for '{query}'. Trying next query...")
+            if hasattr(self.parent_page, 'log_area'):
+                self.parent_page.log_area.append(f"   🔄 No valid results for '{query}'. Trying next query...")
+            # Call the search worker again with the next query index
+            self.start_search_worker_parallel(queries, spotify_track, track_index, table_index, next_query_index, download_index)
+        else:
+            # All queries have been tried and failed
+            print(f"❌ All {len(queries)} search queries failed for download {download_index + 1}")
+            self.on_parallel_track_failed(download_index, f"No valid results after trying all {len(queries)} queries.")
 
     def validate_slskd_result_with_spotify_parallel(self, slskd_result, original_spotify_track, track_index, table_index, valid_candidates, download_index):
         """Parallel version of Spotify validation - SIMPLIFIED for speed"""
