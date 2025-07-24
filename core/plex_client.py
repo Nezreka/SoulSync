@@ -24,11 +24,22 @@ class PlexTrackInfo:
     
     @classmethod
     def from_plex_track(cls, track: PlexTrack) -> 'PlexTrackInfo':
+        # Gracefully handle tracks that might be missing artist or album metadata in Plex
+        try:
+            artist_title = track.artist().title if track.artist() else "Unknown Artist"
+        except (NotFound, AttributeError):
+            artist_title = "Unknown Artist"
+            
+        try:
+            album_title = track.album().title if track.album() else "Unknown Album"
+        except (NotFound, AttributeError):
+            album_title = "Unknown Album"
+
         return cls(
             id=str(track.ratingKey),
             title=track.title,
-            artist=track.artist().title if track.artist() else "Unknown Artist",
-            album=track.album().title if track.album() else "Unknown Album",
+            artist=artist_title,
+            album=album_title,
             duration=track.duration,
             track_number=track.trackNumber,
             year=track.year,
@@ -92,8 +103,8 @@ class PlexClient:
         
         try:
             if config.get('token'):
-                # Use shorter timeout (5 seconds) to prevent app freezing
-                self.server = PlexServer(config['base_url'], config['token'], timeout=5)
+                # Use a longer timeout (15 seconds) to prevent read timeouts on slow servers
+                self.server = PlexServer(config['base_url'], config['token'], timeout=15)
             else:
                 logger.error("Plex token not configured")
                 return
@@ -237,24 +248,50 @@ class PlexClient:
             logger.error(f"Error searching for track '{title}' by '{artist}': {e}")
             return None
     
-    def search_tracks(self, query: str, limit: int = 20) -> List[PlexTrackInfo]:
+    def search_tracks(self, title: str, artist: str, limit: int = 10) -> List[PlexTrackInfo]:
+        """
+        Searches for tracks in the Plex music library using a more robust, two-step method
+        that is more compatible with different Plex server versions.
+        """
         if not self.music_library:
             return []
-        
+
         try:
-            results = self.music_library.search(query, limit=limit)
-            tracks = []
+            # Step 1: Search for the artist first. This is generally reliable.
+            artist_results = self.music_library.searchArtists(title=artist, limit=1)
             
-            for result in results:
-                if isinstance(result, PlexTrack):
-                    tracks.append(PlexTrackInfo.from_plex_track(result))
+            results = []
+            if artist_results:
+                # If artist is found, get all their tracks and filter by title in Python.
+                # This avoids the API filter issue entirely.
+                plex_artist = artist_results[0]
+                all_artist_tracks = plex_artist.tracks()
+                
+                # Use a case-insensitive substring match to find potential tracks.
+                # The matching engine will do the final, more precise comparison.
+                lower_title = title.lower()
+                for track in all_artist_tracks:
+                    if lower_title in track.title.lower():
+                        results.append(track)
+            else:
+                # Fallback: If the artist wasn't found, search for the track title
+                # across the entire library. This is less precise but better than nothing.
+                logger.debug(f"Artist '{artist}' not found. Falling back to title search for '{title}'.")
+                results = self.music_library.searchTracks(title=title, limit=limit)
+
+            tracks = []
+            for result in results[:limit]: # Apply limit after filtering
+                tracks.append(PlexTrackInfo.from_plex_track(result))
+        
+            if tracks:
+                logger.debug(f"Plex search for '{title}' by '{artist}' found {len(tracks)} potential matches.")
             
             return tracks
             
         except Exception as e:
-            logger.error(f"Error searching tracks: {e}")
+            logger.error(f"Error searching Plex tracks for '{title}': {e}")
             return []
-    
+
     def get_library_stats(self) -> Dict[str, int]:
         if not self.music_library:
             return {}
