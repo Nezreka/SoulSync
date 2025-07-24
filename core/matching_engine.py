@@ -42,7 +42,7 @@ class MusicMatchingEngine:
             r'-\s*live.*',
             r'-\s*remix',
             r'-\s*radio edit',
-            # NEW: Patterns in the open title string (not in brackets)
+            # Patterns in the open title string (not in brackets)
             r'\s+feat\.?.*',
             r'\s+ft\.?.*',
             r'\s+featuring.*'
@@ -97,14 +97,6 @@ class MusicMatchingEngine:
         
         return self.normalize_string(cleaned)
     
-    def extract_main_artist(self, artists: List[str]) -> str:
-        """Extracts and cleans the primary artist from a list."""
-        if not artists:
-            return ""
-        
-        main_artist = artists[0]
-        return self.clean_artist(main_artist)
-    
     def similarity_score(self, str1: str, str2: str) -> float:
         """Calculates similarity score between two strings."""
         if not str1 or not str2:
@@ -128,19 +120,35 @@ class MusicMatchingEngine:
     def calculate_match_confidence(self, spotify_track: SpotifyTrack, plex_track: PlexTrackInfo) -> Tuple[float, str]:
         """Calculates a confidence score for a potential match with weighted factors."""
         
-        # Clean titles and artists for comparison
         spotify_title_cleaned = self.clean_title(spotify_track.name)
         plex_title_cleaned = self.clean_title(plex_track.title)
 
-        spotify_main_artist_cleaned = self.extract_main_artist(spotify_track.artists)
-        plex_artist_normalized = self.normalize_string(plex_track.artist)
+        # --- Enhanced Artist Scoring ---
+        # Get a list of all cleaned artist names from Spotify
+        spotify_artists_cleaned = [self.clean_artist(a) for a in spotify_track.artists if a]
+        plex_artist_cleaned = self.clean_artist(plex_track.artist)
+        plex_artist_normalized = self.normalize_string(plex_track.artist) # For substring check
 
-        # --- Calculate individual scores ---
+        # Calculate the best possible artist score by checking each Spotify artist against the Plex artist
+        best_artist_score = 0.0
+        for spotify_artist in spotify_artists_cleaned:
+            # First, check for a direct substring match, which is a very strong signal
+            if spotify_artist in plex_artist_normalized:
+                score = 1.0
+            else:
+                # Otherwise, calculate similarity on the cleaned versions
+                score = self.similarity_score(spotify_artist, plex_artist_cleaned)
+            
+            if score > best_artist_score:
+                best_artist_score = score
+                # If we get a perfect match, we can stop early
+                if best_artist_score == 1.0:
+                    break
+        
+        artist_score = best_artist_score
+        
+        # --- Calculate other scores ---
         title_score = self.similarity_score(spotify_title_cleaned, plex_title_cleaned)
-        
-        # Artist score: check if main Spotify artist is in the Plex artist string
-        artist_score = 1.0 if spotify_main_artist_cleaned in plex_artist_normalized else self.similarity_score(spotify_main_artist_cleaned, self.clean_artist(plex_track.artist))
-        
         duration_score = self.duration_similarity(spotify_track.duration_ms, plex_track.duration if plex_track.duration else 0)
         
         # --- Weighted confidence calculation ---
