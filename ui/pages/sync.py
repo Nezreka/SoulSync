@@ -811,9 +811,12 @@ class PlaylistDetailsModal(QDialog):
 
         playlist_item_widget.download_modal = modal
 
-        # --- FIX ---
-        # The call to on_download_process_started has been removed from here
-        # and moved to the modal's "Begin Search" button.
+        # --- FIX: Connect the cleanup signal immediately upon creation. ---
+        # This ensures that when the modal closes for any reason, the SyncPage
+        # is notified and can run its cleanup logic.
+        modal.process_finished.connect(
+            lambda: self.parent_page.on_download_process_finished(self.playlist.id)
+        )
 
         self.accept()
         modal.show()
@@ -2456,7 +2459,11 @@ class DownloadMissingTracksModal(QDialog):
         self.tracks_to_download_count = 0
         self.downloaded_tracks_count = 0
         self.analysis_complete = False
+        
+        # --- FIX: Initialize attributes to prevent crash on close ---
         self.download_in_progress = False
+        self.cancel_requested = False
+        
         self.permanently_failed_tracks = [] 
         
         print(f"📊 Total tracks: {self.total_tracks}")
