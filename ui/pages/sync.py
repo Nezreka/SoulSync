@@ -1953,76 +1953,131 @@ class SyncPage(QWidget):
     
 
 class ManualMatchModal(QDialog):
-    """Modal for manually searching and downloading a failed track."""
-    
+    """
+    A completely redesigned modal for manually searching and resolving a failed track download.
+    Features controlled searching, cancellation, and a UI consistent with the main application.
+    This version dynamically updates its track list from the parent modal and has a live-updating count.
+    """
     track_resolved = pyqtSignal(object)
 
-    def __init__(self, failed_tracks, parent_modal):
+    def __init__(self, parent_modal):
+        """Initializes the modal with a direct reference to the parent."""
         super().__init__(parent_modal)
         self.parent_modal = parent_modal
         self.soulseek_client = parent_modal.parent_page.soulseek_client
         self.downloads_page = parent_modal.downloads_page
         
-        self.failed_tracks = list(failed_tracks) # Use a copy of the list
-        self.current_track_index = 0  # Track current position
+        self.failed_tracks = []
+        self.current_track_index = 0
         self.current_track_info = None
         self.search_worker = None
-        
-        self.setWindowTitle("Manual Track Correction")
-        self.setMinimumSize(900, 700)
+        self.thread_pool = QThreadPool.globalInstance()
+
+        # Timer to delay automatic search
+        self.search_delay_timer = QTimer(self)
+        self.search_delay_timer.setSingleShot(True)
+        self.search_delay_timer.timeout.connect(self.perform_manual_search)
+
+        # Timer to periodically check for updates to the total failed track count
+        self.live_update_timer = QTimer(self)
+        self.live_update_timer.timeout.connect(self._check_and_update_count)
+        self.live_update_timer.start(1000) # Check every second
+
         self.setup_ui()
         self.load_current_track()
 
     def setup_ui(self):
+        """Set up the visually redesigned UI."""
+        self.setWindowTitle("Manual Track Correction")
+        self.setMinimumSize(900, 700)
         self.setStyleSheet("""
-            QDialog { background-color: #1e1e1e; }
+            QDialog { background-color: #1e1e1e; color: #ffffff; }
             QLabel { color: #ffffff; font-size: 14px; }
-            QPushButton {
-                background-color: #1db954; color: #000000; border: none;
-                border-radius: 6px; font-size: 13px; font-weight: bold;
-                padding: 10px 20px; min-width: 80px;
-            }
-            QPushButton:hover { background-color: #1ed760; }
-            QPushButton:disabled { background-color: #404040; color: #888888; }
             QLineEdit {
-                background: #404040; border: 1px solid #606060; border-radius: 6px;
-                padding: 10px; color: #ffffff; font-size: 13px;
+                background-color: #3a3a3a;
+                border: 1px solid #555555;
+                border-radius: 6px;
+                padding: 10px;
+                color: #ffffff;
+                font-size: 13px;
             }
-            QScrollArea { border: none; }
+            QScrollArea { border: none; background-color: #2d2d2d; }
+            QWidget#resultsWidget { background-color: #2d2d2d; }
         """)
-        self.main_layout = QVBoxLayout(self)
-        self.main_layout.setContentsMargins(20, 20, 20, 20)
-        self.main_layout.setSpacing(15)
+        
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(15)
 
+        # --- Failed Track Info Card ---
         info_frame = QFrame()
-        info_frame.setStyleSheet("background-color: #2d2d2d; border-radius: 8px; padding: 15px;")
+        info_frame.setStyleSheet("""
+            QFrame {
+                background-color: #2d2d2d;
+                border: 1px solid #444444;
+                border-radius: 8px;
+                padding: 15px;
+            }
+        """)
         info_layout = QVBoxLayout(info_frame)
         self.info_label = QLabel("Loading track...")
         self.info_label.setFont(QFont("Arial", 16, QFont.Weight.Bold))
+        self.info_label.setStyleSheet("color: #ffc107;") # Amber color for warning
         self.info_label.setWordWrap(True)
         info_layout.addWidget(self.info_label)
-        self.main_layout.addWidget(info_frame)
+        main_layout.addWidget(info_frame)
 
-        search_layout = QHBoxLayout()
+        # --- Search Input and Controls ---
+        search_frame = QFrame()
+        search_layout = QHBoxLayout(search_frame)
+        search_layout.setContentsMargins(0,0,0,0)
+        search_layout.setSpacing(10)
+
         self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Enter a new search query or use the suggestion...")
         self.search_input.returnPressed.connect(self.perform_manual_search)
+
         self.search_btn = QPushButton("Search")
         self.search_btn.clicked.connect(self.perform_manual_search)
-        search_layout.addWidget(self.search_input)
-        search_layout.addWidget(self.search_btn)
-        self.main_layout.addLayout(search_layout)
+        self.search_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #1db954; color: #000000; border: none;
+                border-radius: 6px; font-size: 13px; font-weight: bold;
+                padding: 10px 20px;
+            }
+            QPushButton:hover { background-color: #1ed760; }
+        """)
 
+        self.cancel_search_btn = QPushButton("Cancel")
+        self.cancel_search_btn.clicked.connect(self.cancel_current_search)
+        self.cancel_search_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #d32f2f; color: #ffffff; border: none;
+                border-radius: 6px; font-size: 13px; font-weight: bold;
+                padding: 10px 20px;
+            }
+            QPushButton:hover { background-color: #f44336; }
+        """)
+        self.cancel_search_btn.hide() # Initially hidden
+
+        search_layout.addWidget(self.search_input, 1)
+        search_layout.addWidget(self.search_btn)
+        search_layout.addWidget(self.cancel_search_btn)
+        main_layout.addWidget(search_frame)
+
+        # --- Search Results Area ---
         self.results_scroll = QScrollArea()
         self.results_scroll.setWidgetResizable(True)
         self.results_widget = QWidget()
+        self.results_widget.setObjectName("resultsWidget")
         self.results_layout = QVBoxLayout(self.results_widget)
         self.results_layout.setSpacing(8)
+        self.results_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.results_scroll.setWidget(self.results_widget)
-        self.main_layout.addWidget(self.results_scroll, 1)
+        main_layout.addWidget(self.results_scroll, 1)
 
-        # Navigation and control buttons
+        # --- Navigation and Close Buttons ---
         nav_layout = QHBoxLayout()
-        
         self.prev_btn = QPushButton("← Previous")
         self.prev_btn.clicked.connect(self.load_previous_track)
         
@@ -2034,15 +2089,14 @@ class ManualMatchModal(QDialog):
         
         self.close_btn = QPushButton("Close")
         self.close_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #616161; color: #ffffff;
-            }
-            QPushButton:hover {
-                background-color: #757575;
-            }
+            QPushButton { background-color: #616161; color: #ffffff; }
+            QPushButton:hover { background-color: #757575; }
         """)
         self.close_btn.clicked.connect(self.reject)
         
+        for btn in [self.prev_btn, self.next_btn, self.close_btn]:
+            btn.setFixedSize(120, 40)
+
         nav_layout.addWidget(self.prev_btn)
         nav_layout.addStretch()
         nav_layout.addWidget(self.track_position_label)
@@ -2050,17 +2104,78 @@ class ManualMatchModal(QDialog):
         nav_layout.addWidget(self.next_btn)
         nav_layout.addWidget(self.close_btn)
         
-        self.main_layout.addLayout(nav_layout)
+        main_layout.addLayout(nav_layout)
+
+    def _check_and_update_count(self):
+        """
+        Periodically called by a timer to check if the total number of failed
+        tracks has changed and updates the navigation label if needed.
+        """
+        try:
+            live_total = len(self.parent_modal.permanently_failed_tracks)
+            
+            # Extract the current total from the label text "Track X of Y"
+            parts = self.track_position_label.text().split(' of ')
+            if len(parts) == 2:
+                displayed_total = int(parts[1])
+                if live_total != displayed_total:
+                    # If the total has changed, refresh the navigation state
+                    self.update_navigation_state()
+            else:
+                # If the label is not in the expected format, update it anyway
+                self.update_navigation_state()
+        except (ValueError, IndexError):
+            # Handle cases where the label text is not yet set or in an unexpected format
+            self.update_navigation_state()
+
+
+    def _update_track_list(self):
+        """
+        Syncs the modal's internal track list with the parent's live list,
+        preserving the user's current position.
+        """
+        live_failed_tracks = self.parent_modal.permanently_failed_tracks
+        
+        current_track_id = None
+        if self.current_track_info:
+            current_track_id = self.current_track_info.get('download_index')
+
+        self.failed_tracks = list(live_failed_tracks)
+
+        if not self.failed_tracks:
+            return
+
+        new_index = -1
+        if current_track_id is not None:
+            for i, track in enumerate(self.failed_tracks):
+                if track.get('download_index') == current_track_id:
+                    new_index = i
+                    break
+        
+        if new_index != -1:
+            self.current_track_index = new_index
+        else:
+            # If the current track was resolved, stay at the same index
+            # but check bounds against the new list length.
+            if self.current_track_index >= len(self.failed_tracks):
+                self.current_track_index = len(self.failed_tracks) - 1
+        
+        if self.current_track_index < 0:
+            self.current_track_index = 0
 
     def load_current_track(self):
-        """Load the track at current_track_index"""
+        """Loads the current failed track's info and intelligently triggers a search."""
+        self.cancel_current_search()
         self.clear_results()
+        
+        # Sync with the parent modal's live list of failed tracks
+        self._update_track_list()
+
         if not self.failed_tracks:
             QMessageBox.information(self, "Complete", "All failed tracks have been addressed.")
             self.accept()
             return
 
-        # Update navigation buttons and position label
         self.update_navigation_state()
         
         self.current_track_info = self.failed_tracks[self.current_track_index]
@@ -2070,95 +2185,123 @@ class ManualMatchModal(QDialog):
         self.info_label.setText(f"Could not find: <b>{spotify_track.name}</b><br>by {artist}")
         self.search_input.setText(f"{artist} {spotify_track.name}")
         
-        # Display cached results first, as requested
-        cached_candidates = self.current_track_info.get('candidates', [])
-        if cached_candidates:
-            self.results_layout.addWidget(QLabel("Showing results from initial search. Or, perform a new search above."))
-            for result in cached_candidates:
-                self.results_layout.addWidget(self.create_result_widget(result))
-        else:
-            self.perform_manual_search() # If no cache, search automatically
-    
+        self.search_delay_timer.start(1000)
+
     def load_next_track(self):
-        """Navigate to next track"""
-        if self.current_track_index < len(self.failed_tracks) - 1:
+        """Navigate to the next failed track."""
+        if self.current_track_index < len(self.parent_modal.permanently_failed_tracks) - 1:
             self.current_track_index += 1
             self.load_current_track()
     
     def load_previous_track(self):
-        """Navigate to previous track"""
+        """Navigate to the previous failed track."""
         if self.current_track_index > 0:
             self.current_track_index -= 1
             self.load_current_track()
     
     def update_navigation_state(self):
-        """Update navigation buttons and position label"""
-        total_tracks = len(self.failed_tracks)
-        current_pos = self.current_track_index + 1
+        """Update the 'Track X of Y' label and enable/disable nav buttons."""
+        total_tracks = len(self.parent_modal.permanently_failed_tracks)
+        
+        # Ensure current_track_index is valid even if list shrinks
+        if self.current_track_index >= total_tracks:
+            self.current_track_index = max(0, total_tracks - 1)
+
+        current_pos = self.current_track_index + 1 if total_tracks > 0 else 0
         
         self.track_position_label.setText(f"Track {current_pos} of {total_tracks}")
-        
-        # Enable/disable navigation buttons
         self.prev_btn.setEnabled(self.current_track_index > 0)
         self.next_btn.setEnabled(self.current_track_index < total_tracks - 1)
 
     def perform_manual_search(self):
+        """Initiates a search for the current query, cancelling any existing search."""
+        self.search_delay_timer.stop()
+        self.cancel_current_search()
+
         query = self.search_input.text().strip()
         if not query: return
+
         self.clear_results()
-        
-        self.results_layout.addWidget(QLabel(f"Searching for '{query}'..."))
-        self.search_btn.setText("Searching...")
-        self.search_btn.setEnabled(False)
+        self.results_layout.addWidget(QLabel(f"<h3>Searching for '{query}'...</h3>"))
+        self.search_btn.hide()
+        self.cancel_search_btn.show()
 
-        worker = self.parent_modal.start_search_worker_parallel(
-            query, [query], self.current_track_info['spotify_track'], 
-            self.current_track_info['track_index'], self.current_track_info['table_index'], 
-            0, self.current_track_info['download_index']
-        )
-        if worker:
-            worker.signals.search_completed.connect(self.on_manual_search_completed)
-            worker.signals.search_failed.connect(self.on_manual_search_failed)
-        else:
-            self.search_btn.setText("Search")
-            self.search_btn.setEnabled(True)
-            self.clear_results()
-            self.results_layout.addWidget(QLabel("Error: Could not start search worker"))
+        self.search_worker = self.SearchWorker(self.soulseek_client, query)
+        self.search_worker.signals.completed.connect(self.on_manual_search_completed)
+        self.search_worker.signals.failed.connect(self.on_manual_search_failed)
+        self.thread_pool.start(self.search_worker)
 
-    def on_manual_search_completed(self, results, query):
-        self.search_btn.setText("Search")
-        self.search_btn.setEnabled(True)
+    def cancel_current_search(self):
+        """Stops the currently running search worker."""
+        if self.search_worker:
+            self.search_worker.cancel()
+            self.search_worker = None
+        self.search_btn.show()
+        self.cancel_search_btn.hide()
+
+    def on_manual_search_completed(self, results):
+        """Handles successful search results."""
+        if not self.search_worker or self.search_worker.is_cancelled:
+            return
+
+        self.cancel_current_search()
         self.clear_results()
 
         if not results:
-            self.results_layout.addWidget(QLabel("No results found for this query."))
+            self.results_layout.addWidget(QLabel("<h3>No results found for this query.</h3>"))
             return
 
         for result in results:
             self.results_layout.addWidget(self.create_result_widget(result))
 
-    def on_manual_search_failed(self, query, error):
-        self.search_btn.setText("Search")
-        self.search_btn.setEnabled(True)
-        self.clear_results()
-        self.results_layout.addWidget(QLabel(f"Search failed: {error}"))
+    def on_manual_search_failed(self, error):
+        """Handles a failed search attempt."""
+        if not self.search_worker or self.search_worker.is_cancelled:
+            return
 
-    def create_result_widget(self, result):
+        self.cancel_current_search()
+        self.clear_results()
+        self.results_layout.addWidget(QLabel(f"<h3>Search failed:</h3><p>{error}</p>"))
+
+    def create_result_widget(self, result: TrackResult):
+        """Creates a styled widget for a single search result."""
         widget = QFrame()
-        widget.setStyleSheet("background-color: #3a3a3a; border-radius: 6px; padding: 10px;")
+        widget.setStyleSheet("""
+            QFrame {
+                background-color: #3a3a3a;
+                border: 1px solid #555555;
+                border-radius: 6px;
+                padding: 10px;
+            }
+            QFrame:hover {
+                border: 1px solid #1db954;
+            }
+        """)
         layout = QHBoxLayout(widget)
         
-        # Display filename and path structure
         path_parts = result.filename.replace('\\', '/').split('/')
         filename = path_parts[-1]
         path_structure = '/'.join(path_parts[:-1])
         
-        info_text = f"<b>{filename}</b><br><i style='color:#aaaaaa;'>{path_structure}</i><br>Quality: {result.quality.upper()}, Size: {result.size // 1024} KB"
+        size_kb = result.size // 1024
+        info_text = (f"<b>{filename}</b><br>"
+                     f"<i style='color:#aaaaaa;'>{path_structure}</i><br>"
+                     f"Quality: <b>{result.quality.upper()}</b>, "
+                     f"Size: <b>{size_kb:,} KB</b>, "
+                     f"User: <b>{result.username}</b>")
         info_label = QLabel(info_text)
         info_label.setWordWrap(True)
         
         select_btn = QPushButton("Select")
         select_btn.setFixedWidth(100)
+        select_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #1db954; color: #000000;
+            }
+            QPushButton:hover {
+                background-color: #1ed760;
+            }
+        """)
         select_btn.clicked.connect(lambda: self.on_selection_made(result))
         
         layout.addWidget(info_label, 1)
@@ -2166,9 +2309,12 @@ class ManualMatchModal(QDialog):
         return widget
 
     def on_selection_made(self, slskd_result):
+        """
+        Handles user selecting a track. The parent modal removes the track from the
+        live list, and this modal will sync with that change on the next load.
+        """
         print(f"Manual selection made: {slskd_result.filename}")
         
-        # This starts the download via the main modal's infrastructure
         self.parent_modal.start_validated_download_parallel(
             slskd_result, 
             self.current_track_info['spotify_track'], 
@@ -2179,25 +2325,66 @@ class ManualMatchModal(QDialog):
         
         self.track_resolved.emit(self.current_track_info)
         
-        # Remove the resolved track from the list
-        self.failed_tracks.pop(self.current_track_index)
-        
-        # Adjust current index if we removed the last track
-        if self.current_track_index >= len(self.failed_tracks) and self.current_track_index > 0:
-            self.current_track_index -= 1
-        
-        # Load the current track (or close if no more tracks)
-        if self.failed_tracks:
-            self.load_current_track()
-        else:
-            QMessageBox.information(self, "Complete", "All failed tracks have been addressed.")
-            self.accept()
+        self.load_current_track()
 
     def clear_results(self):
+        """Removes all widgets from the results layout."""
         while self.results_layout.count():
             child = self.results_layout.takeAt(0)
             if child.widget():
                 child.widget().deleteLater()
+
+    def closeEvent(self, event):
+        """Ensures any running search is cancelled when the modal is closed."""
+        self.cancel_current_search()
+        self.search_delay_timer.stop()
+        self.live_update_timer.stop() # Stop the live update timer
+        super().closeEvent(event)
+
+    # --- Inner classes for self-contained search worker ---
+    class SearchWorkerSignals(QObject):
+        completed = pyqtSignal(list)
+        failed = pyqtSignal(str)
+
+    class SearchWorker(QRunnable):
+        def __init__(self, soulseek_client, query):
+            super().__init__()
+            self.soulseek_client = soulseek_client
+            self.query = query
+            self.signals = ManualMatchModal.SearchWorkerSignals()
+            self.is_cancelled = False
+
+        def cancel(self):
+            self.is_cancelled = True
+
+        def run(self):
+            if self.is_cancelled:
+                return
+            
+            loop = None
+            try:
+                import asyncio
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+
+                search_result = loop.run_until_complete(self.soulseek_client.search(self.query))
+                
+                if self.is_cancelled:
+                    return
+
+                if isinstance(search_result, tuple) and len(search_result) >= 1:
+                    results_list = search_result[0] if search_result[0] else []
+                else:
+                    results_list = []
+
+                self.signals.completed.emit(results_list)
+
+            except Exception as e:
+                if not self.is_cancelled:
+                    self.signals.failed.emit(str(e))
+            finally:
+                if loop:
+                    loop.close()
 
 
 class DownloadMissingTracksModal(QDialog):
@@ -5991,7 +6178,7 @@ class DownloadMissingTracksModal(QDialog):
             return
 
         # Create and show the modal
-        manual_modal = ManualMatchModal(self.permanently_failed_tracks, self)
+        manual_modal = ManualMatchModal(self)
         manual_modal.track_resolved.connect(self.on_manual_match_resolved)
         manual_modal.exec()
 
