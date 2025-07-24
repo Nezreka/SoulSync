@@ -117,9 +117,10 @@ class MusicMatchingEngine:
         artist_score = self.similarity_score(spotify_artist, plex_artist)
         album_score = self.similarity_score(spotify_album, plex_album)
         
+        # CORRECTED: Plex duration is already in milliseconds.
         duration_score = self.duration_similarity(
             spotify_track.duration_ms, 
-            plex_track.duration * 1000 if plex_track.duration else 0
+            plex_track.duration if plex_track.duration else 0
         )
         
         if title_score >= 0.9 and artist_score >= 0.9 and album_score >= 0.8:

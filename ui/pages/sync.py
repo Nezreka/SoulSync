@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import List, Optional
 from core.soulseek_client import TrackResult
 import re
+from core.matching_engine import MusicMatchingEngine
 
 def clean_track_name_for_search(track_name):
     """
@@ -59,6 +60,8 @@ class PlaylistTrackAnalysisWorker(QRunnable):
         self.plex_client = plex_client
         self.signals = PlaylistTrackAnalysisWorkerSignals()
         self._cancelled = False
+        # Instantiate the matching engine once per worker for efficiency
+        self.matching_engine = MusicMatchingEngine()
     
     def cancel(self):
         """Cancel the analysis operation"""
@@ -95,7 +98,8 @@ class PlaylistTrackAnalysisWorker(QRunnable):
                     # Check if track exists in Plex
                     try:
                         plex_match, confidence = self._check_track_in_plex(track)
-                        if plex_match and confidence >= 0.8:  # High confidence threshold
+                        # Use the 0.8 confidence threshold
+                        if plex_match and confidence >= 0.8:
                             result.exists_in_plex = True
                             result.plex_match = plex_match
                             result.confidence = confidence
@@ -110,77 +114,43 @@ class PlaylistTrackAnalysisWorker(QRunnable):
                 
         except Exception as e:
             if not self._cancelled:
+                import traceback
+                traceback.print_exc()
                 self.signals.analysis_failed.emit(str(e))
     
     def _check_track_in_plex(self, spotify_track):
-        """Check if a Spotify track exists in Plex with confidence scoring"""
+        """
+        Check if a Spotify track exists in Plex by searching Plex and using the
+        MusicMatchingEngine to find the best match.
+        """
         try:
-            # Search Plex for similar tracks
-            # Use first artist for search
+            # Use the first artist for the primary search query
             artist_name = spotify_track.artists[0] if spotify_track.artists else ""
-            search_query = f"{artist_name} {spotify_track.name}".strip()
             
-            # Get potential matches from Plex
-            plex_tracks = self.plex_client.search_tracks(search_query, limit=10)
+            # Use the cleaned track name to get a broader set of potential matches from Plex
+            search_title = clean_track_name_for_search(spotify_track.name)
             
-            if not plex_tracks:
+            # Call the updated search_tracks with separate artist and title
+            potential_plex_matches = self.plex_client.search_tracks(
+                title=search_title, 
+                artist=artist_name, 
+                limit=10
+            )
+            
+            if not potential_plex_matches:
                 return None, 0.0
             
-            # Find best match using confidence scoring
-            best_match = None
-            best_confidence = 0.0
+            # Use the matching engine to find the best match among the candidates.
+            match_result = self.matching_engine.find_best_match(spotify_track, potential_plex_matches)
             
-            for plex_track in plex_tracks:
-                confidence = self._calculate_track_confidence(spotify_track, plex_track)
-                if confidence > best_confidence:
-                    best_confidence = confidence
-                    best_match = plex_track
-            
-            return best_match, best_confidence
+            # Return the best Plex track found and its confidence score.
+            return match_result.plex_track, match_result.confidence
             
         except Exception as e:
+            import traceback
             print(f"Error checking track in Plex: {e}")
+            traceback.print_exc()
             return None, 0.0
-    
-    def _calculate_track_confidence(self, spotify_track, plex_track):
-        """Calculate confidence score between Spotify and Plex tracks"""
-        try:
-            # Basic string similarity for now (can be enhanced with existing matching engine)
-            import re
-            
-            def normalize_string(s):
-                return re.sub(r'[^a-zA-Z0-9\s]', '', s.lower()).strip()
-            
-            # Normalize track titles
-            spotify_title = normalize_string(spotify_track.name)
-            plex_title = normalize_string(plex_track.title)
-            
-            # Normalize artist names
-            spotify_artist = normalize_string(spotify_track.artists[0]) if spotify_track.artists else ""
-            plex_artist = normalize_string(plex_track.artist)
-            
-            # Simple similarity scoring
-            title_similarity = 1.0 if spotify_title == plex_title else 0.0
-            artist_similarity = 1.0 if spotify_artist == plex_artist else 0.0
-            
-            # Weight title more heavily
-            confidence = (title_similarity * 0.7) + (artist_similarity * 0.3)
-            
-            # Duration check (allow 10% variance)
-            if hasattr(spotify_track, 'duration_ms') and hasattr(plex_track, 'duration'):
-                spotify_duration = spotify_track.duration_ms / 1000
-                plex_duration = plex_track.duration / 1000 if plex_track.duration else 0
-                
-                if plex_duration > 0:
-                    duration_diff = abs(spotify_duration - plex_duration) / max(spotify_duration, plex_duration)
-                    if duration_diff <= 0.1:  # Within 10%
-                        confidence += 0.1  # Bonus for duration match
-            
-            return min(confidence, 1.0)  # Cap at 1.0
-            
-        except Exception as e:
-            print(f"Error calculating track confidence: {e}")
-            return 0.0
 
 class TrackDownloadWorkerSignals(QObject):
     """Signals for track download worker"""
