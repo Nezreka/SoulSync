@@ -24,18 +24,9 @@ class MusicMatchingEngine:
     def __init__(self):
         # More comprehensive patterns to strip extra info from titles
         self.title_patterns = [
-            # Patterns inside parentheses or brackets
-            r'\(feat\.?.*\)',
-            r'\[feat\.?.*\]',
-            r'\(with.*\)',
-            r'\(ft\.?.*\)',
-            r'\[ft\.?.*\]',
-            r'\(remix\)',
-            r'\(live\)',
-            r'\(acoustic\)',
-            r'\(radio edit\)',
-            r'\(album version\)',
-            r'\(original mix\)',
+            # NEW: General patterns to remove all content in brackets/parentheses first
+            r'\(.*\)',
+            r'\[.*\]',
             # Patterns after a hyphen
             r'-\s*single version',
             r'-\s*remaster.*',
@@ -124,24 +115,19 @@ class MusicMatchingEngine:
         plex_title_cleaned = self.clean_title(plex_track.title)
 
         # --- Enhanced Artist Scoring ---
-        # Get a list of all cleaned artist names from Spotify
         spotify_artists_cleaned = [self.clean_artist(a) for a in spotify_track.artists if a]
         plex_artist_cleaned = self.clean_artist(plex_track.artist)
-        plex_artist_normalized = self.normalize_string(plex_track.artist) # For substring check
+        plex_artist_normalized = self.normalize_string(plex_track.artist)
 
-        # Calculate the best possible artist score by checking each Spotify artist against the Plex artist
         best_artist_score = 0.0
         for spotify_artist in spotify_artists_cleaned:
-            # First, check for a direct substring match, which is a very strong signal
             if spotify_artist in plex_artist_normalized:
                 score = 1.0
             else:
-                # Otherwise, calculate similarity on the cleaned versions
                 score = self.similarity_score(spotify_artist, plex_artist_cleaned)
             
             if score > best_artist_score:
                 best_artist_score = score
-                # If we get a perfect match, we can stop early
                 if best_artist_score == 1.0:
                     break
         
@@ -152,13 +138,16 @@ class MusicMatchingEngine:
         duration_score = self.duration_similarity(spotify_track.duration_ms, plex_track.duration if plex_track.duration else 0)
         
         # --- Weighted confidence calculation ---
-        # Weights: Title (50%), Artist (30%), Duration (20%)
         confidence = (title_score * 0.5) + (artist_score * 0.3) + (duration_score * 0.2)
+        
+        # --- NEW: Add confidence boost for exact title matches ---
+        if spotify_title_cleaned == plex_title_cleaned and len(spotify_title_cleaned) > 0:
+            confidence = max(confidence, 0.85) # Boost to at least 0.85 for exact titles
         
         # Determine match type based on scores
         if title_score > 0.95 and artist_score > 0.9 and duration_score > 0.9:
             match_type = "perfect_match"
-            confidence = max(confidence, 0.98) # Boost confidence for perfect matches
+            confidence = max(confidence, 0.98)
         elif title_score > 0.85 and artist_score > 0.8:
             match_type = "high_confidence"
         elif title_score > 0.75:
