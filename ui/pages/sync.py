@@ -2778,50 +2778,59 @@ class DownloadMissingTracksModal(QDialog):
         return f"{seconds // 60}:{seconds % 60:02d}"
         
     def create_buttons(self):
-        """Create improved button section"""
-        button_frame = QFrame(styleSheet="background-color: transparent; padding: 10px;")
-        layout = QHBoxLayout(button_frame)
-        layout.setSpacing(15)
-        layout.setContentsMargins(0, 10, 0, 0)
+            """Create improved button section"""
+            button_frame = QFrame(styleSheet="background-color: transparent; padding: 10px;")
+            layout = QHBoxLayout(button_frame)
+            layout.setSpacing(15)
+            layout.setContentsMargins(0, 10, 0, 0)
 
-        self.correct_failed_btn = QPushButton("🔧 Correct Failed Matches")
-        self.correct_failed_btn.setFixedWidth(220)
-        self.correct_failed_btn.setStyleSheet("""
-            QPushButton { background-color: #ffc107; color: #000000; }
-            QPushButton:hover { background-color: #ffca28; }
-        """)
-        self.correct_failed_btn.clicked.connect(self.on_correct_failed_matches_clicked)
-        self.correct_failed_btn.hide()
+            self.correct_failed_btn = QPushButton("🔧 Correct Failed Matches")
+            self.correct_failed_btn.setFixedWidth(220)
+            self.correct_failed_btn.setStyleSheet("""
+                QPushButton { background-color: #ffc107; color: #000000; border-radius: 20px; font-weight: bold; }
+                QPushButton:hover { background-color: #ffca28; }
+            """)
+            self.correct_failed_btn.clicked.connect(self.on_correct_failed_matches_clicked)
+            self.correct_failed_btn.hide()
+            
+            self.begin_search_btn = QPushButton("Begin Search")
+            self.begin_search_btn.setFixedSize(160, 40)
+            # THIS IS THE FIX: The specific stylesheet for this button is restored below
+            self.begin_search_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #1db954; color: #000000; border: none;
+                    border-radius: 20px; font-size: 14px; font-weight: bold;
+                }
+                QPushButton:hover { background-color: #1ed760; }
+            """)
+            self.begin_search_btn.clicked.connect(self.on_begin_search_clicked)
+            
+            self.cancel_btn = QPushButton("Cancel")
+            self.cancel_btn.setFixedSize(110, 40)
+            self.cancel_btn.setStyleSheet("""
+                QPushButton { background-color: #d32f2f; color: #ffffff; border-radius: 20px;}
+                QPushButton:hover { background-color: #f44336; }
+            """)
+            self.cancel_btn.clicked.connect(self.on_cancel_clicked)
+            self.cancel_btn.hide()
+            
+            self.close_btn = QPushButton("Close")
+            self.close_btn.setFixedSize(110, 40)
+            self.close_btn.setStyleSheet("""
+                QPushButton { background-color: #616161; color: #ffffff; border-radius: 20px;}
+                QPushButton:hover { background-color: #757575; }
+            """)
+            self.close_btn.clicked.connect(self.on_close_clicked)
+            
+            layout.addStretch()
+            layout.addWidget(self.begin_search_btn)
+            layout.addWidget(self.cancel_btn)
+            layout.addWidget(self.correct_failed_btn)
+            layout.addWidget(self.close_btn)
+            
+            return button_frame
         
-        self.begin_search_btn = QPushButton("Begin Search")
-        self.begin_search_btn.setFixedSize(160, 40)
-        self.begin_search_btn.clicked.connect(self.on_begin_search_clicked)
-        
-        self.cancel_btn = QPushButton("Cancel")
-        self.cancel_btn.setFixedSize(110, 40)
-        self.cancel_btn.setStyleSheet("""
-            QPushButton { background-color: #d32f2f; color: #ffffff; }
-            QPushButton:hover { background-color: #f44336; }
-        """)
-        self.cancel_btn.clicked.connect(self.on_cancel_clicked)
-        self.cancel_btn.hide()
-        
-        self.close_btn = QPushButton("Close")
-        self.close_btn.setFixedSize(110, 40)
-        self.close_btn.setStyleSheet("""
-            QPushButton { background-color: #616161; color: #ffffff; }
-            QPushButton:hover { background-color: #757575; }
-        """)
-        self.close_btn.clicked.connect(self.on_close_clicked)
-        
-        layout.addStretch()
-        layout.addWidget(self.begin_search_btn)
-        layout.addWidget(self.cancel_btn)
-        layout.addWidget(self.correct_failed_btn)
-        layout.addWidget(self.close_btn)
-        
-        return button_frame
-        
+
     def on_begin_search_clicked(self):
         """Handle Begin Search button click - starts Plex analysis"""
         self.begin_search_btn.hide()
