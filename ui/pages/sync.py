@@ -2526,7 +2526,7 @@ class DownloadMissingTracksModal(QDialog):
         self.setWindowTitle(f"Download Missing Tracks - {self.playlist.name}")
         self.resize(1200, 900)
         self.setWindowFlags(Qt.WindowType.Window)
-        self.setWindowFlags(Qt.WindowType.Dialog)
+        # self.setWindowFlags(Qt.WindowType.Dialog)
         
         self.setStyleSheet("""
             QDialog { background-color: #1e1e1e; color: #ffffff; }
