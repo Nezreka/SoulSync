@@ -796,61 +796,26 @@ class PlaylistDetailsModal(QDialog):
     def on_download_missing_tracks_clicked(self):
         """Handle Download Missing Tracks button click"""
         print("🔄 Download Missing Tracks button clicked!")
-        
-        if not self.playlist:
-            print("❌ No playlist selected")
-            QMessageBox.warning(self, "Error", "No playlist selected")
-            return
-            
-        if not self.playlist.tracks:
-            print("❌ Playlist tracks not loaded")
+
+        if not self.playlist or not self.playlist.tracks:
             QMessageBox.warning(self, "Error", "Playlist tracks not loaded")
             return
-        
-        print(f"✅ Playlist: {self.playlist.name} with {len(self.playlist.tracks)} tracks")
-        
-        # Get access to parent's Plex and Soulseek clients through parent reference
-        if not hasattr(self.parent_page, 'plex_client'):
-            print("❌ Plex client not available")
-            QMessageBox.warning(self, "Service Unavailable", 
-                              "Plex client not available. Please check your configuration.")
+
+        playlist_item_widget = self.parent_page.find_playlist_item_widget(self.playlist.id)
+        if not playlist_item_widget:
+            QMessageBox.critical(self, "Error", "Could not find the associated playlist item on the main page.")
             return
-        
-        if not hasattr(self.parent_page, 'soulseek_client') or not self.parent_page.soulseek_client:
-            print("❌ Soulseek client not available")
-            QMessageBox.warning(self, "Service Unavailable", 
-                              "Soulseek client not available. Please check your configuration.")
-            return
-        
-        print("✅ Plex and Soulseek clients available")
-            
-        # Create and show the enhanced download missing tracks modal
-        try:
-            print("🚀 Creating modal...")
-            modal = DownloadMissingTracksModal(self.playlist, self.parent_page, self, self.parent_page.downloads_page)
-            print("✅ Modal created successfully")
-            
-            # Store modal reference to prevent garbage collection
-            self.download_modal = modal
-            
-            # Find and store modal reference in playlist item for reopening
-            playlist_item = self.find_playlist_item_from_sync_modal()
-            if playlist_item:
-                playlist_item.set_download_modal(modal)
-            
-            print("🖥️ Closing current sync modal...")
-            self.accept()  # Close the current sync modal
-            
-            print("🖥️ Showing download modal...")
-            result = modal.exec()
-            print(f"✅ Modal closed with result: {result}")
-            
-        except Exception as e:
-            print(f"❌ Exception creating modal: {e}")
-            import traceback
-            traceback.print_exc()
-            QMessageBox.critical(self, "Modal Error", f"Failed to open download modal: {str(e)}")
-    
+
+        print("🚀 Creating DownloadMissingTracksModal...")
+        modal = DownloadMissingTracksModal(self.playlist, playlist_item_widget, self.parent_page, self.parent_page.downloads_page)
+
+        playlist_item_widget.download_modal = modal
+
+        self.parent_page.on_download_process_started(self.playlist.id, playlist_item_widget)
+
+        self.accept()
+        modal.show()
+
     def find_playlist_item_from_sync_modal(self):
         """Find the PlaylistItem widget for this playlist from sync modal"""
         if not hasattr(self.parent_page, 'current_playlists'):
@@ -1164,8 +1129,9 @@ class PlaylistItem(QFrame):
         self.name = name
         self.track_count = track_count
         self.sync_status = sync_status
-        self.playlist = playlist  # Store playlist object reference
+        self.playlist = playlist
         self.is_selected = False
+        self.download_modal = None # This line is new
         self.setup_ui()
     
     def setup_ui(self):
@@ -1241,7 +1207,7 @@ class PlaylistItem(QFrame):
         # Action button or status indicator
         self.action_btn = QPushButton("Sync / Download")
         self.action_btn.setFixedSize(120, 30)  # Slightly wider for longer text
-        self.action_btn.clicked.connect(self.on_view_details_clicked)
+        self.action_btn.clicked.connect(self.on_action_clicked)
         self.action_btn.setStyleSheet("""
             QPushButton {
                 background: transparent;
@@ -1288,17 +1254,34 @@ class PlaylistItem(QFrame):
         layout.addWidget(self.action_btn)
         layout.addWidget(self.status_label)
     
+
+    def show_operation_status(self, status_text="View Progress"):
+        """Changes the button to show an operation is in progress."""
+        self.status_label.setText(status_text)
+        self.status_label.show()
+        self.action_btn.hide()
+
+    def hide_operation_status(self):
+        """Resets the button to its default state."""
+        self.status_label.hide()
+        self.action_btn.show()
+
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self.checkbox.setChecked(not self.checkbox.isChecked())
         super().mousePressEvent(event)
     
-    def on_view_details_clicked(self):
-        """Handle View Details button click"""
-        if self.playlist:
+    def on_action_clicked(self):
+        """
+        If a download is in progress, show the modal. Otherwise, open details.
+        """
+        if self.download_modal:
+            self.download_modal.show()
+            self.download_modal.activateWindow()
+        else:
             self.view_details_clicked.emit(self.playlist)
     
-    def show_operation_status(self, status_text):
+    def show_operation_status(self, status_text="View Progress"):
         """Show operation status and hide action button"""
         self.status_label.setText(status_text)
         self.status_label.show()
@@ -1411,7 +1394,7 @@ class SyncPage(QWidget):
         self.downloads_page = downloads_page
         self.current_playlists = []
         self.playlist_loader = None
-        
+        self.active_download_processes = {}
         # Track cache for performance
         self.track_cache = {}  # playlist_id -> tracks
         
@@ -1424,6 +1407,42 @@ class SyncPage(QWidget):
         # Don't auto-load on startup, but do auto-load when page becomes visible
         self.show_initial_state()
         self.playlists_loaded = False
+    
+    # Add these three methods inside the SyncPage class
+    def find_playlist_item_widget(self, playlist_id):
+        """Finds the PlaylistItem widget in the UI that corresponds to a given playlist ID."""
+        for i in range(self.playlist_layout.count()):
+            item = self.playlist_layout.itemAt(i)
+            widget = item.widget()
+            if isinstance(widget, PlaylistItem) and widget.playlist.id == playlist_id:
+                return widget
+        return None
+
+    def on_download_process_started(self, playlist_id, playlist_item_widget):
+        """Disables refresh button and updates the playlist item UI."""
+        print(f"Download process started for playlist: {playlist_id}. Disabling refresh.")
+        self.active_download_processes[playlist_id] = playlist_item_widget
+        playlist_item_widget.show_operation_status()
+        self.refresh_btn.setEnabled(False)
+        self.refresh_btn.setText("🔄 Working...")
+        # Connect the finished signal from the modal
+        playlist_item_widget.download_modal.process_finished.connect(
+            lambda: self.on_download_process_finished(playlist_id)
+        )
+
+    def on_download_process_finished(self, playlist_id):
+        """Re-enables refresh button if no other downloads are active."""
+        print(f"Download process finished for playlist: {playlist_id}.")
+        if playlist_id in self.active_download_processes:
+            playlist_item_widget = self.active_download_processes.pop(playlist_id)
+            playlist_item_widget.download_modal = None
+            playlist_item_widget.hide_operation_status()
+
+        if not self.active_download_processes:
+            print("All download processes finished. Re-enabling refresh.")
+            self.refresh_btn.setEnabled(True)
+            self.refresh_btn.setText("🔄 Refresh")
+    
     
     def showEvent(self, event):
         """Auto-load playlists when page becomes visible (but not during app startup)"""
@@ -2417,13 +2436,12 @@ class ManualMatchModal(QDialog):
 
 class DownloadMissingTracksModal(QDialog):
     """Enhanced modal for downloading missing tracks with live progress tracking"""
-    
-    def __init__(self, playlist, parent_page, sync_modal, downloads_page):
-        print(f"🏗️ Initializing DownloadMissingTracksModal...")
-        super().__init__(sync_modal)
+    process_finished = pyqtSignal()
+    def __init__(self, playlist, playlist_item, parent_page, downloads_page):
+        super().__init__(parent_page)
         self.playlist = playlist
+        self.playlist_item = playlist_item
         self.parent_page = parent_page
-        self.sync_modal = sync_modal
         self.downloads_page = downloads_page
         
         # State tracking
@@ -2507,7 +2525,7 @@ class DownloadMissingTracksModal(QDialog):
         """Set up the enhanced modal UI"""
         self.setWindowTitle(f"Download Missing Tracks - {self.playlist.name}")
         self.resize(1200, 900)
-        self.setModal(True)
+        self.setWindowFlags(Qt.WindowType.Window)
         self.setWindowFlags(Qt.WindowType.Dialog)
         
         self.setStyleSheet("""
@@ -2811,6 +2829,7 @@ class DownloadMissingTracksModal(QDialog):
         self.analysis_progress.setVisible(True)
         self.analysis_progress.setMaximum(self.total_tracks)
         self.analysis_progress.setValue(0)
+        self.download_in_progress = True # Set flag
         self.start_plex_analysis()
         
     def start_plex_analysis(self):
@@ -3141,10 +3160,20 @@ class DownloadMissingTracksModal(QDialog):
         print("🛑 All operations cancelled successfully")
         
     def closeEvent(self, event):
-        """Handle modal close event"""
-        self.download_status_timer.stop()
-        self.cancel_operations()
-        event.accept()
+        """
+        Override close event. If the user clicks the 'X', we just hide the window.
+        The window is only truly closed (and destroyed) when the process is finished
+        or explicitly cancelled.
+        """
+        if self.cancel_requested or not self.download_in_progress:
+            # If cancelled or finished, let it close for real.
+            self.cancel_operations()
+            self.process_finished.emit()
+            event.accept()
+        else:
+            # If downloads are running, just hide the window.
+            self.hide()
+            event.ignore()
 
     # Inner class for the search worker
     class ParallelSearchWorker(QRunnable):
