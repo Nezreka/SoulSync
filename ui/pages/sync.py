@@ -509,7 +509,7 @@ class PlaylistDetailsModal(QDialog):
     
     def setup_ui(self):
         self.setWindowTitle(f"Playlist Details - {self.playlist.name}")
-        self.setFixedSize(900, 700)
+        self.setFixedSize(1200, 800)
         self.setStyleSheet("""
             QDialog {
                 background: #191414;
@@ -518,8 +518,8 @@ class PlaylistDetailsModal(QDialog):
         """)
         
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(30, 30, 30, 30)
-        main_layout.setSpacing(20)
+        main_layout.setContentsMargins(32, 32, 32, 32)
+        main_layout.setSpacing(24)
         
         # Header section
         header = self.create_header()
@@ -537,58 +537,56 @@ class PlaylistDetailsModal(QDialog):
     
     def create_header(self):
         header = QFrame()
+        header.setFixedHeight(120)
         header.setStyleSheet("""
             QFrame {
                 background: #282828;
-                border-radius: 12px;
+                border-radius: 16px;
                 border: 1px solid #404040;
             }
         """)
         
         layout = QVBoxLayout(header)
-        layout.setContentsMargins(25, 20, 25, 20)
-        layout.setSpacing(10)
+        layout.setContentsMargins(32, 24, 32, 24)
+        layout.setSpacing(12)
         
-        # Playlist name
+        # Playlist name - larger, more prominent
         name_label = QLabel(self.playlist.name)
-        name_label.setFont(QFont("Arial", 20, QFont.Weight.Bold))
+        name_label.setFont(QFont("SF Pro Display", 24, QFont.Weight.Bold))
         name_label.setStyleSheet("color: #ffffff; border: none; background: transparent;")
         
-        # Playlist info
+        # Playlist info in a more compact horizontal layout
         info_layout = QHBoxLayout()
-        info_layout.setSpacing(20)
+        info_layout.setSpacing(24)
         
-        # Track count
+        # Track count with icon-like styling
         track_count = QLabel(f"{self.playlist.total_tracks} tracks")
-        track_count.setFont(QFont("Arial", 12))
+        track_count.setFont(QFont("SF Pro Text", 14, QFont.Weight.Medium))
         track_count.setStyleSheet("color: #b3b3b3; border: none; background: transparent;")
         
-        # Owner
+        # Owner with subtle separator
         owner = QLabel(f"by {self.playlist.owner}")
-        owner.setFont(QFont("Arial", 12))
+        owner.setFont(QFont("SF Pro Text", 14))
         owner.setStyleSheet("color: #b3b3b3; border: none; background: transparent;")
         
-        # Public/Private status
+        # Status with accent color
         visibility = "Public" if self.playlist.public else "Private"
         if self.playlist.collaborative:
             visibility = "Collaborative"
         status = QLabel(visibility)
-        status.setFont(QFont("Arial", 12))
-        status.setStyleSheet("color: #1db954; border: none; background: transparent;")
+        status.setFont(QFont("SF Pro Text", 14, QFont.Weight.Medium))
+        status.setStyleSheet("""
+            color: #1db954; 
+            border: none; 
+            background: rgba(29, 185, 84, 0.1);
+            padding: 4px 12px;
+            border-radius: 12px;
+        """)
         
         info_layout.addWidget(track_count)
         info_layout.addWidget(owner)
         info_layout.addWidget(status)
         info_layout.addStretch()
-        
-        # Description (if available)
-        if self.playlist.description:
-            desc_label = QLabel(self.playlist.description)
-            desc_label.setFont(QFont("Arial", 11))
-            desc_label.setStyleSheet("color: #b3b3b3; border: none; background: transparent;")
-            desc_label.setWordWrap(True)
-            desc_label.setMaximumHeight(60)
-            layout.addWidget(desc_label)
         
         layout.addWidget(name_label)
         layout.addLayout(info_layout)
@@ -600,21 +598,16 @@ class PlaylistDetailsModal(QDialog):
         container.setStyleSheet("""
             QFrame {
                 background: #282828;
-                border-radius: 12px;
+                border-radius: 16px;
                 border: 1px solid #404040;
             }
         """)
         
         layout = QVBoxLayout(container)
-        layout.setContentsMargins(25, 20, 25, 20)
-        layout.setSpacing(15)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
         
-        # Section title
-        title = QLabel("Tracks")
-        title.setFont(QFont("Arial", 16, QFont.Weight.Bold))
-        title.setStyleSheet("color: #ffffff; border: none; background: transparent;")
-        
-        # Track table
+        # Track table with professional styling
         self.track_table = QTableWidget()
         self.track_table.setColumnCount(4)
         self.track_table.setHorizontalHeaderLabels(["Track", "Artist", "Album", "Duration"])
@@ -623,160 +616,198 @@ class PlaylistDetailsModal(QDialog):
         track_count = len(self.playlist.tracks) if self.playlist.tracks else 1
         self.track_table.setRowCount(track_count)
         
-        # Style the table
+        # Professional table styling
         self.track_table.setStyleSheet("""
             QTableWidget {
-                background: #181818;
-                border: 1px solid #404040;
-                border-radius: 8px;
-                gridline-color: #404040;
+                background: #282828;
+                border: none;
+                border-radius: 16px;
+                gridline-color: transparent;
                 color: #ffffff;
-                font-size: 11px;
+                font-size: 13px;
+                selection-background-color: rgba(29, 185, 84, 0.2);
             }
             QTableWidget::item {
-                padding: 8px;
-                border-bottom: 1px solid #333333;
+                padding: 16px 24px;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+                background: transparent;
+            }
+            QTableWidget::item:hover {
+                background: rgba(255, 255, 255, 0.02);
             }
             QTableWidget::item:selected {
-                background: #1db954;
-                color: #000000;
+                background: rgba(29, 185, 84, 0.15);
+                color: #ffffff;
+            }
+            QHeaderView {
+                background: transparent;
+                border: none;
             }
             QHeaderView::section {
-                background: #404040;
-                color: #ffffff;
-                padding: 10px;
+                background: transparent;
+                color: #b3b3b3;
+                padding: 16px 24px;
                 border: none;
-                font-weight: bold;
-                font-size: 11px;
+                border-bottom: 2px solid rgba(255, 255, 255, 0.1);
+                font-weight: 600;
+                font-size: 12px;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+            }
+            QHeaderView::section:hover {
+                background: rgba(255, 255, 255, 0.02);
             }
         """)
         
-        # Populate table
+        # Populate table with proper styling
         if self.playlist.tracks:
             for row, track in enumerate(self.playlist.tracks):
-                # Track name
+                # Track name with proper styling
                 track_item = QTableWidgetItem(track.name)
                 track_item.setFlags(track_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                track_item.setFont(QFont("SF Pro Text", 13, QFont.Weight.Medium))
                 self.track_table.setItem(row, 0, track_item)
                 
-                # Artist(s)
+                # Artist(s) with subtle styling
                 artists = ", ".join(track.artists)
                 artist_item = QTableWidgetItem(artists)
                 artist_item.setFlags(artist_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                artist_item.setFont(QFont("SF Pro Text", 13))
                 self.track_table.setItem(row, 1, artist_item)
                 
-                # Album
+                # Album with subtle styling
                 album_item = QTableWidgetItem(track.album)
                 album_item.setFlags(album_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                album_item.setFont(QFont("SF Pro Text", 13))
                 self.track_table.setItem(row, 2, album_item)
                 
-                # Duration
+                # Duration with monospace font
                 duration = self.format_duration(track.duration_ms)
                 duration_item = QTableWidgetItem(duration)
                 duration_item.setFlags(duration_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                duration_item.setFont(QFont("SF Mono", 12))
                 self.track_table.setItem(row, 3, duration_item)
         else:
             # Show placeholder while tracks are being loaded
-            placeholder_item = QTableWidgetItem("Tracks will load momentarily...")
+            placeholder_item = QTableWidgetItem("Loading tracks...")
             placeholder_item.setFlags(placeholder_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             self.track_table.setItem(0, 0, placeholder_item)
             self.track_table.setSpan(0, 0, 1, 4)
         
-        # Set optimal column widths with proportional sizing
+        # Professional column configuration
         header = self.track_table.horizontalHeader()
+        header.setVisible(True)
+        header.show()
         header.setStretchLastSection(False)
+        header.setHighlightSections(False)
+        header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         
-        # Calculate available width (modal is 900px, account for margins/scrollbar)
-        available_width = 850
+        # Calculate available width (modal is 1200px, account for margins)
+        available_width = 1136  # 1200 - 64px margins
         
-        # Set proportional widths: Track(40%), Artist(25%), Album(25%), Duration(10%)
-        track_width = int(available_width * 0.40)    # ~340px
-        artist_width = int(available_width * 0.25)   # ~212px  
-        album_width = int(available_width * 0.25)    # ~212px
-        duration_width = 80                          # Fixed 80px
+        # Professional proportional widths
+        track_width = int(available_width * 0.35)    # ~398px
+        artist_width = int(available_width * 0.28)   # ~318px  
+        album_width = int(available_width * 0.28)    # ~318px
+        duration_width = 100                         # Fixed 100px
         
-        # Apply column widths with interactive resize capability
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)  # Track name
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)  # Artist
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)  # Album
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)        # Duration
+        # Apply column widths with proper resize modes
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
         
         self.track_table.setColumnWidth(0, track_width)
         self.track_table.setColumnWidth(1, artist_width)
         self.track_table.setColumnWidth(2, album_width)
         self.track_table.setColumnWidth(3, duration_width)
         
-        # Set minimum widths to prevent columns from becoming too narrow
-        header.setMinimumSectionSize(100)  # Minimum 100px for any column
+        # Set minimum widths for professional look
+        header.setMinimumSectionSize(120)
         
-        # Hide row numbers
+        # Hide row numbers and configure table behavior
         self.track_table.verticalHeader().setVisible(False)
+        self.track_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.track_table.setAlternatingRowColors(False)
         
-        layout.addWidget(title)
         layout.addWidget(self.track_table)
         
         return container
     
     def create_buttons(self):
         button_layout = QHBoxLayout()
-        button_layout.setSpacing(15)
+        button_layout.setSpacing(16)
+        button_layout.setContentsMargins(0, 0, 0, 0)
         
-        # Close button
+        # Close button with subtle styling
         close_btn = QPushButton("Close")
-        close_btn.setFixedSize(100, 40)
+        close_btn.setFixedSize(100, 44)
         close_btn.clicked.connect(self.close)
         close_btn.setStyleSheet("""
             QPushButton {
-                background: #404040;
-                border: none;
-                border-radius: 20px;
+                background: rgba(255, 255, 255, 0.05);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 22px;
                 color: #ffffff;
-                font-size: 12px;
-                font-weight: bold;
+                font-size: 13px;
+                font-weight: 600;
+                font-family: 'SF Pro Text';
             }
             QPushButton:hover {
-                background: #505050;
+                background: rgba(255, 255, 255, 0.08);
+                border-color: rgba(255, 255, 255, 0.15);
+            }
+            QPushButton:pressed {
+                background: rgba(255, 255, 255, 0.02);
             }
         """)
         
-        # Sync button
-        sync_btn = QPushButton("Sync This Playlist")
-        sync_btn.setFixedSize(150, 40)
-        sync_btn.setStyleSheet("""
-            QPushButton {
-                background: #1db954;
-                border: none;
-                border-radius: 20px;
-                color: #000000;
-                font-size: 12px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background: #1ed760;
-            }
-        """)
-        
-        # Download missing tracks button
+        # Download missing tracks button with outline style
         download_btn = QPushButton("Download Missing Tracks")
-        download_btn.setFixedSize(180, 40)
+        download_btn.setFixedSize(200, 44)
         download_btn.setStyleSheet("""
             QPushButton {
                 background: transparent;
                 border: 1px solid #1db954;
-                border-radius: 20px;
+                border-radius: 22px;
                 color: #1db954;
-                font-size: 12px;
-                font-weight: bold;
+                font-size: 13px;
+                font-weight: 600;
+                font-family: 'SF Pro Text';
             }
             QPushButton:hover {
-                background: rgba(29, 185, 84, 0.1);
+                background: rgba(29, 185, 84, 0.08);
+                border-color: #1ed760;
+                color: #1ed760;
+            }
+            QPushButton:pressed {
+                background: rgba(29, 185, 84, 0.15);
             }
         """)
         
-        # Connect download missing tracks button
-        download_btn.clicked.connect(self.on_download_missing_tracks_clicked)
+        # Sync button with primary styling
+        sync_btn = QPushButton("Sync This Playlist")
+        sync_btn.setFixedSize(160, 44)
+        sync_btn.setStyleSheet("""
+            QPushButton {
+                background: #1db954;
+                border: none;
+                border-radius: 22px;
+                color: #ffffff;
+                font-size: 13px;
+                font-weight: 600;
+                font-family: 'SF Pro Text';
+            }
+            QPushButton:hover {
+                background: #1ed760;
+            }
+            QPushButton:pressed {
+                background: #169c46;
+            }
+        """)
         
-        # Connect sync button
+        # Connect button signals
+        download_btn.clicked.connect(self.on_download_missing_tracks_clicked)
         sync_btn.clicked.connect(self.on_sync_playlist_clicked)
         
         button_layout.addStretch()
