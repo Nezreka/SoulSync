@@ -120,28 +120,71 @@ class PlaylistTrackAnalysisWorker(QRunnable):
     
     def _check_track_in_plex(self, spotify_track):
         """
-        Check if a Spotify track exists in Plex by searching Plex and using the
-        MusicMatchingEngine to find the best match.
+        Check if a Spotify track exists in Plex by trying several search strategies
+        and using the MusicMatchingEngine to find the best match.
         """
         try:
             # Use the first artist for the primary search query
             artist_name = spotify_track.artists[0] if spotify_track.artists else ""
+            original_title = spotify_track.name
+
+            # --- Generate a list of search queries, from most specific to most broad ---
+            search_queries = []
+
+            # Strategy 1: Original, unmodified title. Catches exact matches.
+            search_queries.append(original_title)
+
+            # Strategy 2: Title with content after a hyphen removed.
+            # e.g., "Song Title - Remaster" -> "Song Title"
+            if " - " in original_title:
+                title_before_hyphen = original_title.split(' - ')[0].strip()
+                if title_before_hyphen:
+                    search_queries.append(title_before_hyphen)
+
+            # Strategy 3: Title with parenthetical/bracketed content removed.
+            # (Uses the simple cleaner from this file for an intermediate search)
+            cleaned_for_search = clean_track_name_for_search(original_title)
+            if cleaned_for_search.lower() != original_title.lower():
+                search_queries.append(cleaned_for_search)
             
-            # Use the cleaned track name to get a broader set of potential matches from Plex
-            search_title = clean_track_name_for_search(spotify_track.name)
+            # Strategy 4: A "base" title with all extra info removed (remixes, feats, etc.)
+            # using the more aggressive cleaning from the matching engine.
+            base_title = self.matching_engine.clean_title(original_title)
+            if base_title.lower() != cleaned_for_search.lower() and base_title.lower() != original_title.lower():
+                search_queries.append(base_title)
+                
+            # Remove duplicate queries that might have resulted from the cleaning steps, preserving order.
+            unique_queries = list(dict.fromkeys(search_queries))
             
-            # Call the updated search_tracks with separate artist and title
-            potential_plex_matches = self.plex_client.search_tracks(
-                title=search_title, 
-                artist=artist_name, 
-                limit=10
-            )
+            print(f"🧠 Generated search queries for '{original_title}': {unique_queries}")
+
+            # --- Execute searches and collect all potential matches ---
+            all_potential_matches = []
+            found_match_ids = set()
+
+            for query_title in unique_queries:
+                if self._cancelled:
+                    return None, 0.0
+
+                # Call the updated search_tracks with the query title and artist
+                potential_plex_matches = self.plex_client.search_tracks(
+                    title=query_title, 
+                    artist=artist_name, 
+                    limit=15 # Increased limit to get more candidates
+                )
+                
+                for track in potential_plex_matches:
+                    if track.id not in found_match_ids:
+                        all_potential_matches.append(track)
+                        found_match_ids.add(track.id)
             
-            if not potential_plex_matches:
+            if not all_potential_matches:
+                print(f"❌ No Plex candidates found for '{original_title}' after trying all strategies.")
                 return None, 0.0
             
-            # Use the matching engine to find the best match among the candidates.
-            match_result = self.matching_engine.find_best_match(spotify_track, potential_plex_matches)
+            # --- Use the matching engine to find the best match among ALL candidates ---
+            print(f"✅ Found {len(all_potential_matches)} potential Plex matches for '{original_title}'. Scoring now...")
+            match_result = self.matching_engine.find_best_match(spotify_track, all_potential_matches)
             
             # Return the best Plex track found and its confidence score.
             return match_result.plex_track, match_result.confidence
