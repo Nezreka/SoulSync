@@ -1440,12 +1440,19 @@ class SyncPage(QWidget):
     def on_download_process_finished(self, playlist_id):
         """Re-enables refresh button if no other downloads are active."""
         print(f"Download process finished or cancelled for playlist: {playlist_id}.")
+        
+        # Clear download modal reference even if not in active_download_processes
+        playlist_item_widget = None
         if playlist_id in self.active_download_processes:
             playlist_item_widget = self.active_download_processes.pop(playlist_id)
-            # --- FIX: Reset the UI state of the playlist item ---
-            if playlist_item_widget:
-                playlist_item_widget.download_modal = None
-                playlist_item_widget.hide_operation_status()
+        else:
+            # Find the playlist item widget even if not in active processes
+            playlist_item_widget = self.find_playlist_item_widget(playlist_id)
+        
+        # --- FIX: Reset the UI state of the playlist item ---
+        if playlist_item_widget:
+            playlist_item_widget.download_modal = None
+            playlist_item_widget.hide_operation_status()
 
         if not self.active_download_processes:
             print("All download processes finished. Re-enabling refresh.")
@@ -3204,6 +3211,10 @@ class DownloadMissingTracksModal(QDialog):
         self.reject() # Close the modal.
         
     def on_close_clicked(self):
+        # Use same logic as closeEvent - emit process_finished when no download is active
+        if self.cancel_requested or not self.download_in_progress:
+            self.cancel_operations()
+            self.process_finished.emit()
         self.reject()
         
     def cancel_operations(self):
