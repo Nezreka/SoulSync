@@ -121,72 +121,65 @@ class PlaylistTrackAnalysisWorker(QRunnable):
     def _check_track_in_plex(self, spotify_track):
         """
         Check if a Spotify track exists in Plex by trying several search strategies
-        and using the MusicMatchingEngine to find the best match.
+        across ALL artists associated with the track.
         """
         try:
-            # Use the first artist for the primary search query
-            artist_name = spotify_track.artists[0] if spotify_track.artists else ""
             original_title = spotify_track.name
-
-            # --- Generate a list of search queries, from most specific to most broad ---
-            search_queries = []
-
-            # Strategy 1: Original, unmodified title. Catches exact matches.
-            search_queries.append(original_title)
-
-            # Strategy 2: Title with content after a hyphen removed.
-            # e.g., "Song Title - Remaster" -> "Song Title"
-            if " - " in original_title:
-                title_before_hyphen = original_title.split(' - ')[0].strip()
-                if title_before_hyphen:
-                    search_queries.append(title_before_hyphen)
-
-            # Strategy 3: Title with parenthetical/bracketed content removed.
-            # (Uses the simple cleaner from this file for an intermediate search)
-            cleaned_for_search = clean_track_name_for_search(original_title)
+            
+            # --- Generate a list of title variations ---
+            title_variations = []
+            title_variations.append(original_title) # Strategy 1: Original title
+            if " - " in original_title: # Strategy 2: Strip content after hyphen
+                title_variations.append(original_title.split(' - ')[0].strip())
+            
+            cleaned_for_search = clean_track_name_for_search(original_title) # Strategy 3: Strip parenthetical content
             if cleaned_for_search.lower() != original_title.lower():
-                search_queries.append(cleaned_for_search)
-            
-            # Strategy 4: A "base" title with all extra info removed (remixes, feats, etc.)
-            # using the more aggressive cleaning from the matching engine.
-            base_title = self.matching_engine.clean_title(original_title)
-            if base_title.lower() != cleaned_for_search.lower() and base_title.lower() != original_title.lower():
-                search_queries.append(base_title)
-                
-            # Remove duplicate queries that might have resulted from the cleaning steps, preserving order.
-            unique_queries = list(dict.fromkeys(search_queries))
-            
-            print(f"🧠 Generated search queries for '{original_title}': {unique_queries}")
+                title_variations.append(cleaned_for_search)
 
-            # --- Execute searches and collect all potential matches ---
+            base_title = self.matching_engine.clean_title(original_title) # Strategy 4: Aggressively cleaned title
+            if base_title.lower() not in [t.lower() for t in title_variations]:
+                title_variations.append(base_title)
+
+            unique_title_variations = list(dict.fromkeys(title_variations))
+            
+            # --- Execute searches for EACH artist and collect all potential matches ---
             all_potential_matches = []
             found_match_ids = set()
+            
+            # Use all artists from Spotify, not just the first one
+            artists_to_search = spotify_track.artists if spotify_track.artists else [""]
 
-            for query_title in unique_queries:
-                if self._cancelled:
-                    return None, 0.0
-
-                # Call the updated search_tracks with the query title and artist
-                potential_plex_matches = self.plex_client.search_tracks(
-                    title=query_title, 
-                    artist=artist_name, 
-                    limit=15 # Increased limit to get more candidates
-                )
+            for artist_name in artists_to_search:
+                if self._cancelled: return None, 0.0
                 
-                for track in potential_plex_matches:
-                    if track.id not in found_match_ids:
-                        all_potential_matches.append(track)
-                        found_match_ids.add(track.id)
+                print(f"🎤 Searching for artist: '{artist_name}'")
+                for query_title in unique_title_variations:
+                    if self._cancelled: return None, 0.0
+
+                    potential_plex_matches = self.plex_client.search_tracks(
+                        title=query_title, 
+                        artist=artist_name, 
+                        limit=15
+                    )
+                    
+                    for track in potential_plex_matches:
+                        if track.id not in found_match_ids:
+                            all_potential_matches.append(track)
+                            found_match_ids.add(track.id)
             
             if not all_potential_matches:
-                print(f"❌ No Plex candidates found for '{original_title}' after trying all strategies.")
+                print(f"❌ No Plex candidates found for '{original_title}' after trying all artists and title variations.")
                 return None, 0.0
             
             # --- Use the matching engine to find the best match among ALL candidates ---
             print(f"✅ Found {len(all_potential_matches)} potential Plex matches for '{original_title}'. Scoring now...")
             match_result = self.matching_engine.find_best_match(spotify_track, all_potential_matches)
             
-            # Return the best Plex track found and its confidence score.
+            if match_result.is_match:
+                print(f"✔️ Best match for '{original_title}': '{match_result.plex_track.title}' with confidence {match_result.confidence:.2f}")
+            else:
+                print(f"⚠️ No confident match found for '{original_title}'. Best attempt scored {match_result.confidence:.2f}.")
+
             return match_result.plex_track, match_result.confidence
             
         except Exception as e:
