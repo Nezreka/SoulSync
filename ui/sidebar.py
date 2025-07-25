@@ -885,7 +885,7 @@ class ModernSidebar(QWidget):
         layout.setSpacing(3)
         
         # App name
-        app_name = QLabel("NewMusic")
+        app_name = QLabel("SoulSync")
         app_name.setFont(QFont("Arial", 19, QFont.Weight.Bold))
         app_name.setStyleSheet("color: #ffffff; letter-spacing: -0.5px;")
         
