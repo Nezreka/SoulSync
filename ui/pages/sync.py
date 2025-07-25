@@ -5,6 +5,9 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                            QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QLineEdit)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QPropertyAnimation, QEasingCurve, QRunnable, QThreadPool, QObject
 from PyQt6.QtGui import QFont
+import os
+import json
+from datetime import datetime
 from dataclasses import dataclass
 from typing import List, Optional
 from core.soulseek_client import TrackResult
@@ -12,6 +15,9 @@ import re
 import asyncio
 from core.matching_engine import MusicMatchingEngine
 
+# Define constants for storage
+STORAGE_DIR = "storage"
+STATUS_FILE = os.path.join(STORAGE_DIR, "sync_status.json")
 
 class EllipsisLabel(QLabel):
     """A label that shows ellipsis for long text and tooltip on hover"""
@@ -47,6 +53,31 @@ class EllipsisLabel(QLabel):
                 self.setToolTip(self.full_text)
             else:
                 self.setToolTip("")
+
+def load_sync_status():
+    """Loads the sync status from the JSON file."""
+    if not os.path.exists(STATUS_FILE):
+        return {}
+    try:
+        with open(STATUS_FILE, 'r') as f:
+            # Return empty dict if file is empty
+            content = f.read()
+            if not content:
+                return {}
+            return json.loads(content)
+    except (json.JSONDecodeError, FileNotFoundError):
+        # If file is corrupted or not found, return an empty dict
+        print(f"Warning: Could not read or parse {STATUS_FILE}. Starting with a clean slate.")
+        return {}
+
+def save_sync_status(data):
+    """Saves the sync status to the JSON file."""
+    try:
+        os.makedirs(STORAGE_DIR, exist_ok=True)
+        with open(STATUS_FILE, 'w') as f:
+            json.dump(data, f, indent=4)
+    except Exception as e:
+        print(f"Error saving sync status to {STATUS_FILE}: {e}")
 
 def clean_track_name_for_search(track_name):
     """
@@ -496,7 +527,7 @@ class TrackLoadingWorker(QRunnable):
 class SyncWorkerSignals(QObject):
     """Signals for sync worker"""
     progress = pyqtSignal(object)  # SyncProgress
-    finished = pyqtSignal(object)  # SyncResult
+    finished = pyqtSignal(object, object)  # SyncResult, snapshot_id (can be None)
     error = pyqtSignal(str)
 
 class SyncWorker(QRunnable):
@@ -529,6 +560,7 @@ class SyncWorker(QRunnable):
     
     def run(self):
         """Execute the sync operation"""
+        snapshot_id = None # Define snapshot_id in the outer scope
         try:
             if self._cancelled:
                 return
@@ -550,8 +582,26 @@ class SyncWorker(QRunnable):
                     self.sync_service.sync_playlist(self.playlist, download_missing=False)
                 )
                 
+                # --- THE FIX ---
+                # After sync, fetch the new snapshot_id directly from Spotify
+                # to ensure we have the most up-to-date value.
+                try:
+                    if hasattr(self.sync_service, 'spotify_client') and self.sync_service.spotify_client:
+                        # Assuming a synchronous method to get a single playlist's metadata
+                        updated_playlist = self.sync_service.spotify_client.get_playlist(self.playlist.id)
+                        if updated_playlist:
+                            snapshot_id = updated_playlist.snapshot_id
+                            print(f"DEBUG: Successfully fetched new snapshot_id: {snapshot_id}")
+                        else:
+                            print(f"WARNING: get_playlist returned None for {self.playlist.name}")
+                    else:
+                        print("WARNING: Could not get snapshot_id, spotify_client not found on sync_service.")
+                except Exception as e:
+                    print(f"WARNING: Could not fetch updated snapshot_id for {self.playlist.name}: {e}")
+                
                 if not self._cancelled:
-                    self.signals.finished.emit(result)
+                    # Emit the result and the (potentially new) snapshot_id
+                    self.signals.finished.emit(result, snapshot_id)
                     
             finally:
                 loop.close()
@@ -1458,7 +1508,7 @@ class PlaylistItem(QFrame):
         self.sync_status = sync_status
         self.playlist = playlist
         self.is_selected = False
-        self.download_modal = None # This line is new
+        self.download_modal = None
         
         # Sync state tracking
         self.is_syncing = False
@@ -1518,16 +1568,14 @@ class PlaylistItem(QFrame):
             }
         """)
         
-        # Make the entire item clickable
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)  # Enable styled background
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         
         layout = QHBoxLayout(self)
         layout.setContentsMargins(20, 15, 20, 15)
         layout.setSpacing(15)
         
-        # Checkbox
         self.checkbox = QCheckBox()
         self.checkbox.clicked.connect(self.on_checkbox_clicked)
         self.checkbox.setStyleSheet("""
@@ -1547,16 +1595,13 @@ class PlaylistItem(QFrame):
             }
         """)
         
-        # Content layout
         content_layout = QVBoxLayout()
         content_layout.setSpacing(5)
         
-        # Playlist name
         name_label = QLabel(self.name)
         name_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
         name_label.setStyleSheet("color: #ffffff;")
         
-        # Track count and status
         info_layout = QHBoxLayout()
         info_layout.setSpacing(20)
         
@@ -1564,25 +1609,25 @@ class PlaylistItem(QFrame):
         track_label.setFont(QFont("Arial", 10))
         track_label.setStyleSheet("color: #b3b3b3;")
         
-        status_label = QLabel(self.sync_status)
-        status_label.setFont(QFont("Arial", 10))
-        if self.sync_status == "Synced":
-            status_label.setStyleSheet("color: #1db954;")
+        # **FIX**: Renamed this to `sync_status_label` to avoid conflicts
+        self.sync_status_label = QLabel(self.sync_status)
+        self.sync_status_label.setFont(QFont("Arial", 10))
+        if "Synced" in self.sync_status:
+            self.sync_status_label.setStyleSheet("color: #1db954;")
         elif self.sync_status == "Needs Sync":
-            status_label.setStyleSheet("color: #ffa500;")
+            self.sync_status_label.setStyleSheet("color: #ffa500;")
         else:
-            status_label.setStyleSheet("color: #e22134;")
+            self.sync_status_label.setStyleSheet("color: #e22134;")
         
         info_layout.addWidget(track_label)
-        info_layout.addWidget(status_label)
+        info_layout.addWidget(self.sync_status_label)
         info_layout.addStretch()
         
         content_layout.addWidget(name_label)
         content_layout.addLayout(info_layout)
         
-        # Action button or status indicator
         self.action_btn = QPushButton("Sync / Download")
-        self.action_btn.setFixedSize(120, 30)  # Slightly wider for longer text
+        self.action_btn.setFixedSize(120, 30)
         self.action_btn.clicked.connect(self.on_action_clicked)
         self.action_btn.setStyleSheet("""
             QPushButton {
@@ -1599,10 +1644,10 @@ class PlaylistItem(QFrame):
             }
         """)
         
-        # Status label (hidden by default)
-        self.status_label = QPushButton()
-        self.status_label.setFixedSize(120, 30)
-        self.status_label.setStyleSheet("""
+        # **FIX**: Renamed this to `operation_status_button` to avoid conflicts
+        self.operation_status_button = QPushButton()
+        self.operation_status_button.setFixedSize(120, 30)
+        self.operation_status_button.setStyleSheet("""
             QPushButton {
                 background: #1db954;
                 border: 1px solid #169441;
@@ -1618,13 +1663,10 @@ class PlaylistItem(QFrame):
                 cursor: pointer;
             }
         """)
-        self.status_label.clicked.connect(self.on_status_clicked)
-        self.status_label.hide()
+        self.operation_status_button.clicked.connect(self.on_status_clicked)
+        self.operation_status_button.hide()
         
-        # Store reference to the download modal
         self.download_modal = None
-        
-        # Create compact sync status display (hidden by default)
         self.sync_status_widget = self.create_compact_sync_status()
         
         layout.addWidget(self.checkbox)
@@ -1632,65 +1674,52 @@ class PlaylistItem(QFrame):
         layout.addStretch()
         layout.addWidget(self.sync_status_widget)
         layout.addWidget(self.action_btn)
-        layout.addWidget(self.status_label)
+        layout.addWidget(self.operation_status_button)
         
-        # Install event filter to capture mouse events on child widgets
         self.installEventFilter(self)
         for child in self.findChildren(QWidget):
-            if child != self.action_btn and child != self.status_label:
+            if child != self.action_btn and child != self.operation_status_button:
                 child.installEventFilter(self)
     
     def eventFilter(self, source, event):
         """Filter events to handle clicks anywhere on the item"""
         if event.type() == event.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
-            # Don't handle if it's the action button or status label
-            if source == self.action_btn or source == self.status_label:
-                return False  # Let the button handle its own click
+            # **FIX**: Updated to check for the correctly named button
+            if source == self.action_btn or source == self.operation_status_button:
+                return False
             
-            # Handle click as playlist selection toggle
             print(f"Event filter caught click on {source} in playlist {self.name}")
             self.toggle_selection()
-            return True  # Event handled
+            return True
         
         return super().eventFilter(source, event)
     
     def toggle_selection(self):
         """Toggle the selection state of this playlist item immediately"""
-        # Skip if already processing to prevent double-clicks
         if self._pending_click:
             return
             
         self._pending_click = True
         
-        # Get current state from SyncPage (source of truth)
         sync_page = self
         while sync_page and not isinstance(sync_page, SyncPage):
             sync_page = sync_page.parent()
         
         if sync_page and self.playlist and self.playlist.id:
-            # Check actual selection state from parent
             currently_selected = self.playlist.id in sync_page.selected_playlists
-            
-            # Toggle selection in parent
             sync_page.toggle_playlist_selection(self.playlist.id)
-            
-            # Update our local state to match parent
             new_state = self.playlist.id in sync_page.selected_playlists
             self.is_selected = new_state
             
-            # Update checkbox to match (without triggering signal)
             self.checkbox.blockSignals(True)
             self.checkbox.setChecked(new_state)
             self.checkbox.blockSignals(False)
             
-            # Update visual style
             self.update_selection_style()
-            
             print(f"Processed click for {self.name}: {currently_selected} -> {new_state}")
         else:
             print(f"Could not process click for {self.name} - missing sync page or playlist ID")
         
-        # Clear pending flag after a short delay to prevent rapid double-clicks
         QTimer.singleShot(25, lambda: setattr(self, '_pending_click', False))
     
     def mousePressEvent(self, event):
@@ -1707,26 +1736,22 @@ class PlaylistItem(QFrame):
             sync_page = sync_page.parent()
         
         if sync_page and self.playlist and self.playlist.id:
-            # Get actual state from parent
             actual_selected = self.playlist.id in sync_page.selected_playlists
             
-            # Update our state to match
             if self.is_selected != actual_selected:
                 print(f"Syncing state for {self.name}: {self.is_selected} -> {actual_selected}")
                 self.is_selected = actual_selected
                 
-                # Update checkbox (without triggering signal)
                 self.checkbox.blockSignals(True)
                 self.checkbox.setChecked(actual_selected)
                 self.checkbox.blockSignals(False)
                 
-                # Update visual style
                 self.update_selection_style()
     
     def create_compact_sync_status(self):
         """Create compact sync status display for playlist item"""
         sync_status = QFrame()
-        sync_status.setFixedHeight(36)  # Increased from 30 to 36
+        sync_status.setFixedHeight(36)
         sync_status.setStyleSheet("""
             QFrame {
                 background: rgba(29, 185, 84, 0.1);
@@ -1734,35 +1759,30 @@ class PlaylistItem(QFrame):
                 border-radius: 15px;
             }
         """)
-        sync_status.hide()  # Hidden by default
+        sync_status.hide()
         
         layout = QHBoxLayout(sync_status)
-        layout.setContentsMargins(8, 6, 8, 6)  # Increased margins for better text visibility
+        layout.setContentsMargins(8, 6, 8, 6)
         layout.setSpacing(6)
         
-        # Total tracks
         self.item_total_tracks_label = QLabel("♪ 0")
         self.item_total_tracks_label.setFont(QFont("SF Pro Text", 9, QFont.Weight.Medium))
         self.item_total_tracks_label.setStyleSheet("color: #ffa500; background: transparent; border: none;")
         
-        # Matched tracks
         self.item_matched_tracks_label = QLabel("✓ 0")
         self.item_matched_tracks_label.setFont(QFont("SF Pro Text", 9, QFont.Weight.Medium))
         self.item_matched_tracks_label.setStyleSheet("color: #1db954; background: transparent; border: none;")
         
-        # Failed tracks
         self.item_failed_tracks_label = QLabel("✗ 0")
         self.item_failed_tracks_label.setFont(QFont("SF Pro Text", 9, QFont.Weight.Medium))
         self.item_failed_tracks_label.setStyleSheet("color: #e22134; background: transparent; border: none;")
         
-        # Percentage
         self.item_percentage_label = QLabel("0%")
         self.item_percentage_label.setFont(QFont("SF Pro Text", 9, QFont.Weight.Bold))
         self.item_percentage_label.setStyleSheet("color: #1db954; background: transparent; border: none;")
         
         layout.addWidget(self.item_total_tracks_label)
         
-        # Separator 1
         item_sep1 = QLabel("/")
         item_sep1.setFont(QFont("SF Pro Text", 9, QFont.Weight.Medium))
         item_sep1.setStyleSheet("color: #666666; background: transparent; border: none;")
@@ -1770,7 +1790,6 @@ class PlaylistItem(QFrame):
         
         layout.addWidget(self.item_matched_tracks_label)
         
-        # Separator 2
         item_sep2 = QLabel("/")
         item_sep2.setFont(QFont("SF Pro Text", 9, QFont.Weight.Medium))
         item_sep2.setStyleSheet("color: #666666; background: transparent; border: none;")
@@ -1778,7 +1797,6 @@ class PlaylistItem(QFrame):
         
         layout.addWidget(self.item_failed_tracks_label)
         
-        # Separator 3
         item_sep3 = QLabel("/")
         item_sep3.setFont(QFont("SF Pro Text", 9, QFont.Weight.Medium))
         item_sep3.setStyleSheet("color: #666666; background: transparent; border: none;")
@@ -1806,7 +1824,6 @@ class PlaylistItem(QFrame):
             else:
                 self.item_percentage_label.setText("0%")
             
-            # Show/hide based on sync state
             if total_tracks > 0 or self.is_syncing:
                 self.sync_status_widget.show()
             else:
@@ -1814,44 +1831,29 @@ class PlaylistItem(QFrame):
 
     def show_operation_status(self, status_text="View Progress"):
         """Changes the button to show an operation is in progress."""
-        self.status_label.setText(status_text)
-        self.status_label.show()
+        # **FIX**: Updated to use the correctly named button
+        self.operation_status_button.setText(status_text)
+        self.operation_status_button.show()
         self.action_btn.hide()
 
     def hide_operation_status(self):
         """Resets the button to its default state."""
-        self.status_label.hide()
+        # **FIX**: Updated to use the correctly named button
+        self.operation_status_button.hide()
         self.action_btn.show()
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.checkbox.setChecked(not self.checkbox.isChecked())
-        super().mousePressEvent(event)
     
     def on_action_clicked(self):
-        """
-        If a download is in progress, show the modal. Otherwise, open details.
-        """
+        """If a download is in progress, show the modal. Otherwise, open details."""
         if self.download_modal:
             self.download_modal.show()
             self.download_modal.activateWindow()
         else:
             self.view_details_clicked.emit(self.playlist)
     
-    def show_operation_status(self, status_text="View Progress"):
-        """Show operation status and hide action button"""
-        self.status_label.setText(status_text)
-        self.status_label.show()
-        self.action_btn.hide()
-    
-    def hide_operation_status(self):
-        """Hide operation status and show action button"""
-        self.status_label.hide()
-        self.action_btn.show()
-    
     def update_operation_status(self, status_text):
         """Update the operation status text"""
-        self.status_label.setText(status_text)
+        # **FIX**: Updated to use the correctly named button
+        self.operation_status_button.setText(status_text)
     
     def set_download_modal(self, modal):
         """Store reference to the download modal"""
@@ -1863,7 +1865,6 @@ class PlaylistItem(QFrame):
             self.download_modal.show()
             self.download_modal.activateWindow()
             self.download_modal.raise_()
-
 class SyncOptionsPanel(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1949,6 +1950,7 @@ class SyncPage(QWidget):
         self.plex_client = plex_client
         self.soulseek_client = soulseek_client
         self.downloads_page = downloads_page
+        self.sync_statuses = load_sync_status()
         self.current_playlists = []
         self.playlist_loader = None
         self.active_download_processes = {}
@@ -1974,6 +1976,30 @@ class SyncPage(QWidget):
         self.show_initial_state()
         self.playlists_loaded = False
     
+
+    def _update_and_save_sync_status(self, playlist_id, result, snapshot_id):
+        """Updates the sync status for a given playlist and saves to file."""
+        # THE FIX: This function will now run even if there are failed tracks,
+        # ensuring the sync time and snapshot_id are always recorded.
+        playlist_obj = next((p for p in self.current_playlists if p.id == playlist_id), None)
+        
+        if playlist_obj:
+            now = datetime.now()
+            self.sync_statuses[playlist_id] = {
+                'name': playlist_obj.name,
+                'owner': playlist_obj.owner,
+                'snapshot_id': snapshot_id,
+                'last_synced': now.isoformat()
+            }
+            save_sync_status(self.sync_statuses)
+            
+            # This now targets the correct label for real-time UI updates
+            playlist_item = self.find_playlist_item_widget(playlist_id)
+            if playlist_item and hasattr(playlist_item, 'sync_status_label'):
+                new_status_text = f"Synced: {now.strftime('%b %d, %H:%M')}"
+                playlist_item.sync_status_label.setText(new_status_text)
+                playlist_item.sync_status_label.setStyleSheet("color: #1db954;")
+
     def is_playlist_syncing(self, playlist_id):
         """Check if a playlist is currently syncing"""
         return playlist_id in self.active_sync_workers
@@ -2004,7 +2030,8 @@ class SyncPage(QWidget):
         )
         
         # Connect worker signals
-        sync_worker.signals.finished.connect(lambda result: self.on_sync_finished(playlist.id, result))
+        sync_worker.signals.finished.connect(lambda result, sid: self.on_sync_finished(playlist.id, result, sid))
+
         sync_worker.signals.error.connect(lambda error: self.on_sync_error(playlist.id, error))
         sync_worker.signals.progress.connect(lambda progress: self.on_sync_progress(playlist.id, progress))
         
@@ -2047,7 +2074,7 @@ class SyncPage(QWidget):
         )
         
         # Connect worker signals for sequential sync
-        sync_worker.signals.finished.connect(lambda result: self.on_sequential_sync_finished(playlist.id, result))
+        sync_worker.signals.finished.connect(lambda result, sid: self.on_sequential_sync_finished(playlist.id, result, sid))
         sync_worker.signals.error.connect(lambda error: self.on_sequential_sync_error(playlist.id, error))
         sync_worker.signals.progress.connect(lambda progress: self.on_sync_progress(playlist.id, progress))
         
@@ -2135,45 +2162,49 @@ class SyncPage(QWidget):
         self.process_next_in_sync_queue()
     
     def process_next_in_sync_queue(self):
-        """Process the next playlist in the sequential sync queue"""
+        """Process the next playlist in the sequential sync queue."""
         print(f"DEBUG: process_next_in_sync_queue - queue length: {len(self.sequential_sync_queue)}, is_syncing: {self.is_sequential_syncing}")
         
-        if not self.sequential_sync_queue or not self.is_sequential_syncing:
-            # Sync queue complete
-            print("DEBUG: Sequential sync queue is empty or syncing stopped - completing")
+        if self.sequential_sync_queue and self.is_sequential_syncing:
+            # Get next playlist to sync
+            next_playlist = self.sequential_sync_queue.pop(0)
+            print(f"DEBUG: Starting sync for next playlist: {next_playlist.name}")
+            
+            # Start sync for this playlist
+            if not self.start_sequential_playlist_sync(next_playlist):
+                # If sync failed to start, immediately process the next one
+                print("DEBUG: Sync failed to start, moving to next playlist")
+                self.process_next_in_sync_queue()
+        else:
+            # If queue is empty or sync was cancelled, call the final completion handler
+            print("DEBUG: Sequential sync queue is empty or syncing stopped - calling completion handler.")
             self.on_sequential_sync_complete()
-            return
-        
-        # Get next playlist to sync
-        next_playlist = self.sequential_sync_queue.pop(0)
-        print(f"DEBUG: Starting sync for next playlist: {next_playlist.name}")
-        
-        # Start sync for this playlist using dedicated sequential sync method
-        success = self.start_sequential_playlist_sync(next_playlist)
-        print(f"DEBUG: start_sequential_playlist_sync returned: {success}")
-        if not success:
-            # If sync failed to start, move to next
-            print("DEBUG: Sync failed to start, moving to next playlist")
-            self.process_next_in_sync_queue()
     
     def on_sequential_sync_complete(self):
-        """Handle completion of sequential sync"""
-        print("DEBUG: Sequential sync complete - resetting button state")
+        """Handle completion of the entire sequential sync process."""
+        # Ensure this runs only once at the very end
+        if not self.is_sequential_syncing:
+            return
+
+        print("DEBUG: Sequential sync process complete. Resetting all states.")
         self.is_sequential_syncing = False
         self.sequential_sync_queue.clear()
-        self.start_sync_btn.setText("Start Sync")
-        self.update_selection_ui()  # Re-enable if playlists still selected
+        self.sequential_sync_worker = None # Ensure worker is cleared
         
-        # Update refresh button state since sequential sync is complete
+        # Reset the button text and state authoritatively
+        self.start_sync_btn.setText("Start Sync")
+        
+        # Update the entire UI based on the new, correct state
+        self.update_selection_ui()
         self.update_refresh_button_state()
     
-    def on_sequential_sync_finished(self, playlist_id, result):
+    def on_sequential_sync_finished(self, playlist_id, result, snapshot_id):
         """Handle completion of individual playlist in sequential sync"""
         print(f"DEBUG: Sequential sync finished for playlist {playlist_id}")
-        
+
         # Clear sequential sync worker
         self.sequential_sync_worker = None
-        
+
         # Update playlist item status
         playlist_item = self.find_playlist_item_widget(playlist_id)
         if playlist_item:
@@ -2183,18 +2214,16 @@ class SyncPage(QWidget):
                 result.matched_tracks,
                 result.failed_tracks
             )
-            
+
             # Hide status widget after completion with delay
             QTimer.singleShot(3000, lambda: playlist_item.sync_status_widget.hide() if playlist_item.sync_status_widget else None)
-        
+
         # Update any open modals
         self.update_open_modals_completion(playlist_id, result)
-        
-        # Continue sequential sync to next playlist
-        if self.is_sequential_syncing:
-            print(f"DEBUG: Sequential sync continuing to next playlist")
-            self.process_next_in_sync_queue()
-        
+
+        # Pass the snapshot_id to the save function
+        self._update_and_save_sync_status(playlist_id, result, snapshot_id)
+
         # Log completion
         if hasattr(self, 'log_area'):
             success_rate = result.success_rate
@@ -2202,6 +2231,12 @@ class SyncPage(QWidget):
             if result.failed_tracks > 0:
                 msg += f", {result.failed_tracks} failed"
             self.log_area.append(msg)
+            
+        # **THE FIX**: Defer processing the next item to allow the event loop to catch up.
+        # This ensures UI updates (like the status label) are processed before moving on.
+        if self.is_sequential_syncing:
+            print(f"DEBUG: Scheduling next playlist in sequence.")
+            QTimer.singleShot(10, self.process_next_in_sync_queue)
     
     def on_sequential_sync_error(self, playlist_id, error_msg):
         """Handle error in individual playlist during sequential sync"""
@@ -2220,14 +2255,14 @@ class SyncPage(QWidget):
         # Update any open modals
         self.update_open_modals_error(playlist_id, error_msg)
         
-        # Continue sequential sync even on error
-        if self.is_sequential_syncing:
-            print(f"DEBUG: Sequential sync continuing to next playlist despite error")
-            self.process_next_in_sync_queue()
-        
         # Log error
         if hasattr(self, 'log_area'):
             self.log_area.append(f"❌ Sequential sync failed: {error_msg}")
+
+        # **THE FIX**: Defer processing the next item to allow the event loop to catch up.
+        if self.is_sequential_syncing:
+            print(f"DEBUG: Scheduling next playlist in sequence despite error.")
+            QTimer.singleShot(10, self.process_next_in_sync_queue)
     
     def get_all_playlist_items(self):
         """Get all PlaylistItem widgets from the playlist layout"""
@@ -2276,12 +2311,12 @@ class SyncPage(QWidget):
         # Update any open modal for this playlist
         self.update_open_modals_progress(playlist_id, progress)
     
-    def on_sync_finished(self, playlist_id, result):
+    def on_sync_finished(self, playlist_id, result, snapshot_id):
         """Handle sync completion"""
         # Remove from active workers
         if playlist_id in self.active_sync_workers:
             del self.active_sync_workers[playlist_id]
-        
+
         # Update playlist item status
         playlist_item = self.find_playlist_item_widget(playlist_id)
         if playlist_item:
@@ -2291,23 +2326,26 @@ class SyncPage(QWidget):
                 result.matched_tracks,
                 result.failed_tracks
             )
-            
+
             # Hide status widget after completion with delay
             QTimer.singleShot(3000, lambda: playlist_item.sync_status_widget.hide() if playlist_item.sync_status_widget else None)
-        
+
         # Update any open modals
         self.update_open_modals_completion(playlist_id, result)
-        
+
+        # Pass the snapshot_id to the save function
+        self._update_and_save_sync_status(playlist_id, result, snapshot_id)
+
         # Continue sequential sync if in progress
         if self.is_sequential_syncing:
             print(f"DEBUG: Sync finished for {playlist_id}, continuing sequential sync")
             self.process_next_in_sync_queue()
         else:
             print(f"DEBUG: Sync finished for {playlist_id}, not in sequential sync mode")
-        
+
         # Update refresh button state since a sync completed
         self.update_refresh_button_state()
-        
+
         # Log completion
         if hasattr(self, 'log_area'):
             success_rate = result.success_rate
@@ -2797,8 +2835,22 @@ class SyncPage(QWidget):
     
     def add_playlist_to_ui(self, playlist):
         """Add a single playlist to the UI as it's loaded"""
-        # Simple sync status (placeholder for now)
-        sync_status = "Never Synced"  # TODO: Check actual sync status
+        sync_info = self.sync_statuses.get(playlist.id)
+        sync_status = "Never Synced"
+        if sync_info and 'last_synced' in sync_info:
+            # Defensively get snapshot_id from both the current playlist object and the stored data
+            current_snapshot_id = getattr(playlist, 'snapshot_id', None)
+            stored_snapshot_id = sync_info.get('snapshot_id')
+
+            # If we have both IDs, we can check for changes. Otherwise, we can't be sure.
+            if current_snapshot_id and stored_snapshot_id and current_snapshot_id != stored_snapshot_id:
+                sync_status = "Needs Sync"
+            else:
+                try:
+                    last_synced_dt = datetime.fromisoformat(sync_info['last_synced'])
+                    sync_status = f"Synced: {last_synced_dt.strftime('%b %d, %H:%M')}"
+                except (ValueError, KeyError):
+                    sync_status = "Synced (legacy)"
         item = PlaylistItem(playlist.name, playlist.total_tracks, sync_status, playlist, self)
         item.view_details_clicked.connect(self.show_playlist_details)
         
