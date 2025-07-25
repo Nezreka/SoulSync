@@ -822,7 +822,8 @@ class PlaylistDetailsModal(QDialog):
             self.failed_tracks_label.setText(f"✗ {failed_tracks}")
             
             if total_tracks > 0:
-                percentage = int((matched_tracks / total_tracks) * 100)
+                processed_tracks = matched_tracks + failed_tracks
+                percentage = int((processed_tracks / total_tracks) * 100)
                 self.percentage_label.setText(f"{percentage}%")
             else:
                 self.percentage_label.setText("0%")
@@ -1799,7 +1800,8 @@ class PlaylistItem(QFrame):
             self.item_failed_tracks_label.setText(f"✗ {failed_tracks}")
             
             if total_tracks > 0:
-                percentage = int((matched_tracks / total_tracks) * 100)
+                processed_tracks = matched_tracks + failed_tracks
+                percentage = int((processed_tracks / total_tracks) * 100)
                 self.item_percentage_label.setText(f"{percentage}%")
             else:
                 self.item_percentage_label.setText("0%")
