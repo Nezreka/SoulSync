@@ -290,682 +290,272 @@ class ThreadSafeQueueManager:
             download_item.download_id = new_id
 
 class SpotifyMatchingModal(QDialog):
-    """Modal for selecting Spotify artist match before download - full app container size"""
+    """A redesigned modal for matching downloads to Spotify artists and albums."""
     
-    artist_selected = pyqtSignal(Artist)  # Emitted when user selects an artist
-    album_selected = pyqtSignal(object)  # Emitted when user selects an album (for album workflow)
-    cancelled = pyqtSignal()  # Emitted when modal is cancelled or closed without selection
+    match_confirmed = pyqtSignal(Artist, Album)
+    cancelled = pyqtSignal()
     
-    def __init__(self, track_result: TrackResult, spotify_client: SpotifyClient, matching_engine: MusicMatchingEngine, parent=None, is_album=False, album_result=None):
+    def __init__(self, original_result: object, spotify_client: SpotifyClient, matching_engine: MusicMatchingEngine, parent=None, is_album=False, album_result=None):
         super().__init__(parent)
-        self.track_result = track_result
+        self.original_result = original_result
         self.spotify_client = spotify_client
         self.matching_engine = matching_engine
-        self.selected_artist = None
-        self.selected_album = None
         self.is_album = is_album
-        self.album_result = album_result  # Store album result for display
-        self.artist_image_cache = {}  # Cache for artist images
+        self.album_result = album_result
         
-        self.setWindowTitle("Select Artist Match" if not is_album else "Select Album Match")
+        self.selected_artist: Optional[Artist] = None
+        self.selected_album: Optional[Album] = None
+        
+        self.setWindowTitle("Match Download to Spotify")
         self.setModal(True)
+        self.resize(1100, 750)
         
-        # Full app container size for better visibility
-        if parent:
-            self.resize(parent.size())
-        else:
-            self.resize(1200, 800)  # Fallback size
-        
-        # Modern dark theme styling
         self.setStyleSheet("""
-            QDialog {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #1e1e1e, stop:1 #121212);
-                border: none;
-            }
-            QLabel {
-                color: white;
-                font-weight: 500;
-            }
+            QDialog { background-color: #121212; border: none; }
+            QLabel { color: #FFFFFF; }
             QPushButton {
-                background: rgba(30, 215, 96, 0.8);
-                border: none;
-                border-radius: 12px;
-                color: white;
-                padding: 12px 24px;
-                font-weight: 600;
-                font-size: 14px;
+                background-color: #1DB954; color: #FFFFFF; border: none;
+                border-radius: 15px; padding: 10px 20px; font-size: 14px; font-weight: 600;
             }
-            QPushButton:hover {
-                background: rgba(30, 215, 96, 1.0);
-                transform: translateY(-1px);
-            }
-            QPushButton:pressed {
-                background: rgba(25, 170, 75, 1.0);
-            }
-            QPushButton#cancel, QPushButton#skip {
-                background: rgba(64, 64, 64, 0.8);
-                border: 1px solid #666;
-                color: #ccc;
-            }
-            QPushButton#cancel:hover, QPushButton#skip:hover {
-                background: rgba(100, 100, 100, 0.8);
-                border: 1px solid #888;
-            }
+            QPushButton:hover { background-color: #1ED760; }
+            QPushButton:disabled { background-color: #2A2A2A; color: #535353; }
+            QPushButton#cancel, QPushButton#skip { background-color: #535353; }
+            QPushButton#cancel:hover, QPushButton#skip:hover { background-color: #6A6A6A; }
             QLineEdit {
-                background: rgba(40, 40, 40, 0.8);
-                border: 2px solid #333;
-                border-radius: 12px;
-                color: white;
-                padding: 15px;
-                font-size: 16px;
+                background-color: #2A2A2A; border: 2px solid #535353; border-radius: 15px;
+                color: white; padding: 12px; font-size: 14px;
             }
-            QLineEdit:focus {
-                border: 2px solid #1ed760;
+            QLineEdit:focus { border: 2px solid #1DB954; }
+            QFrame#card {
+                background-color: #1E1E1E; border: 2px solid #2A2A2A; border-radius: 12px;
             }
+            QFrame#card:hover { border: 2px solid #1DB954; background-color: #282828; }
         """)
         
-        # Stage tracking for album workflow
-        self.current_stage = "artist"  # "artist" or "album"
-        
+        self.current_stage = "artist"
         self.setup_ui()
-        self.generate_auto_suggestions()
-    
+        self.generate_auto_artist_suggestions()
+
     def setup_ui(self):
-        """Setup the modal UI with full container size and spacious layout"""
         main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(20, 20, 20, 20)
         main_layout.setSpacing(15)
-        main_layout.setContentsMargins(20, 15, 20, 20)
+
+        self.header_label = QLabel("Step 1: Select the correct Artist")
+        self.header_label.setStyleSheet("font-size: 22px; font-weight: bold; color: #1DB954;")
+        main_layout.addWidget(self.header_label)
+
+        auto_title = QLabel("Top Suggestions")
+        auto_title.setStyleSheet("font-size: 16px; color: #B3B3B3;")
+        self.auto_suggestions_layout = QHBoxLayout()
+        self.auto_suggestions_layout.setSpacing(20)
         
-        # Close button (X) in top right
-        close_layout = QHBoxLayout()
-        close_layout.addStretch()
-        close_btn = QPushButton("✕")
-        close_btn.setObjectName("cancel")
-        close_btn.setFixedSize(40, 40)
-        close_btn.clicked.connect(self.reject)
-        close_btn.setStyleSheet("""
-            QPushButton {
-                background: rgba(255, 255, 255, 0.1);
-                border: none;
-                border-radius: 20px;
-                color: #ffffff;
-                font-size: 18px;
-                font-weight: bold;
-                text-align: center;
-            }
-            QPushButton:hover {
-                background: rgba(255, 255, 255, 0.2);
-                color: #ffffff;
-            }
-            QPushButton:pressed {
-                background: rgba(255, 255, 255, 0.3);
-            }
-        """)
-        close_layout.addWidget(close_btn)
-        main_layout.addLayout(close_layout)
+        main_layout.addWidget(auto_title)
+        main_layout.addLayout(self.auto_suggestions_layout)
         
-        # Ultra-compact header section
-        header_layout = QHBoxLayout()
-        header_layout.setSpacing(15)
-        
-        title_text = "Select Artist Match" if self.current_stage == "artist" else "Select Album"
-        self.header_label = QLabel(title_text)
-        self.header_label.setStyleSheet("font-size: 18px; color: #1ed760; font-weight: 600;")
-        header_layout.addWidget(self.header_label)
-        
-        # Add separator
-        separator = QLabel("•")
-        separator.setStyleSheet("font-size: 14px; color: #666;")
-        header_layout.addWidget(separator)
-        
-        # Display album title for albums, track title for singles (without "by artist")
-        if self.is_album and self.album_result and self.album_result.album_title:
-            display_text = self.album_result.album_title
-        else:
-            display_text = self.track_result.title
-        
-        track_info = QLabel(display_text)
-        track_info.setStyleSheet("font-size: 14px; color: #aaa;")
-        header_layout.addWidget(track_info)
-        
-        header_layout.addStretch()
-        
-        # Create a container widget for the header to control its height
-        header_widget = QWidget()
-        header_widget.setFixedHeight(45)
-        header_widget.setLayout(header_layout)
-        main_layout.addWidget(header_widget)
-        
-        # Content area with optimized spacing - give more space to auto-matching
-        content_layout = QVBoxLayout()
-        content_layout.setSpacing(15)
-        
-        # Auto-matching section (expanded - 65% of space)
-        self.auto_section_widget = QWidget()
-        auto_section_layout = QVBoxLayout(self.auto_section_widget)
-        auto_section_layout.setSpacing(15)
-        auto_section_layout.setContentsMargins(0, 0, 0, 0)
-        
-        auto_title = QLabel("🎯 Auto-Matched Suggestions")
-        auto_title.setStyleSheet("font-size: 20px; color: #1ed760; font-weight: 600;")
-        auto_section_layout.addWidget(auto_title)
-        
-        # Horizontal layout for top 3 artist cards with tighter spacing
-        self.auto_artists_layout = QHBoxLayout()
-        self.auto_artists_layout.setSpacing(20)
-        auto_section_layout.addLayout(self.auto_artists_layout)
-        
-        # Ensure auto section gets more space
-        self.auto_section_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        content_layout.addWidget(self.auto_section_widget, 65)  # 65% weight
-        
-        # Manual search section (compact - 35% of space)
-        self.manual_section_widget = QWidget()
-        manual_section_layout = QVBoxLayout(self.manual_section_widget)
-        manual_section_layout.setSpacing(12)
-        manual_section_layout.setContentsMargins(0, 0, 0, 0)
-        
-        self.manual_title = QLabel("🔍 Manual Search")
-        self.manual_title.setStyleSheet("font-size: 18px; color: #1ed760; font-weight: 600;")
-        manual_section_layout.addWidget(self.manual_title)
-        
-        # Search input - more compact
+        manual_title = QLabel("Or, Search Manually")
+        manual_title.setStyleSheet("font-size: 16px; color: #B3B3B3; margin-top: 15px;")
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Type artist name to search..." if self.current_stage == "artist" else "Search for album...")
+        self.search_input.setPlaceholderText("Manually search for an artist...")
         self.search_input.textChanged.connect(self.on_search_text_changed)
-        self.search_input.setFixedHeight(50)
-        manual_section_layout.addWidget(self.search_input)
-        
-        # Horizontal layout for manual search results with tighter spacing
         self.manual_results_layout = QHBoxLayout()
         self.manual_results_layout.setSpacing(20)
-        manual_section_layout.addLayout(self.manual_results_layout)
-        
-        # Manual section gets less space
-        self.manual_section_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        content_layout.addWidget(self.manual_section_widget, 35)  # 35% weight
-        
-        main_layout.addLayout(content_layout)
-        
-        # Streamlined button area - single row, compact
+
+        main_layout.addWidget(manual_title)
+        main_layout.addWidget(self.search_input)
+        main_layout.addLayout(self.manual_results_layout)
+        main_layout.addStretch()
+
         button_layout = QHBoxLayout()
-        button_layout.setSpacing(15)
-        button_layout.setContentsMargins(0, 10, 0, 0)
-        
-        # Confirm button (initially hidden, shown when artist/album selected)
         self.confirm_btn = QPushButton("Confirm Selection")
-        self.confirm_btn.setFixedHeight(40)
         self.confirm_btn.clicked.connect(self.confirm_selection)
-        self.confirm_btn.hide()
-        button_layout.addWidget(self.confirm_btn)
-        
-        cancel_btn = QPushButton("Cancel")
-        cancel_btn.setObjectName("cancel")
-        cancel_btn.setFixedHeight(40)
-        cancel_btn.clicked.connect(self.reject)
-        button_layout.addWidget(cancel_btn)
-        
-        button_layout.addStretch()
-        
+        self.confirm_btn.setEnabled(False)
+
         skip_btn = QPushButton("Skip Matching")
         skip_btn.setObjectName("skip")
-        skip_btn.setFixedHeight(40)
         skip_btn.clicked.connect(self.skip_matching)
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setObjectName("cancel")
+        cancel_btn.clicked.connect(self.reject)
+
         button_layout.addWidget(skip_btn)
-        
-        # Create a container for the button area to control its height
-        button_widget = QWidget()
-        button_widget.setFixedHeight(60)
-        button_widget.setLayout(button_layout)
-        main_layout.addWidget(button_widget)
-        
-        # Search timer for debouncing
+        button_layout.addStretch()
+        button_layout.addWidget(self.confirm_btn)
+        button_layout.addWidget(cancel_btn)
+        main_layout.addLayout(button_layout)
+
         self.search_timer = QTimer()
         self.search_timer.setSingleShot(True)
-        self.search_timer.timeout.connect(self.perform_search)
-    
-    def generate_auto_suggestions(self):
-        """Generate automatic artist suggestions based on track metadata"""
-        # Clear existing suggestions
-        self.clear_layout(self.auto_artists_layout)
-        
-        # Add loading indicators
-        for i in range(3):
-            loading_card = self.create_loading_card(f"Finding match {i+1}...")
-            self.auto_artists_layout.addWidget(loading_card)
-        
-        # Start background search
-        try:
-            has_thread_pool = hasattr(self.parent(), 'api_thread_pool') and self.parent().api_thread_pool
-            print(f"🔄 [DEBUG] Thread pool available: {has_thread_pool}")
-            
-            # Temporarily force thread approach to debug UI issue
-            print(f"🔄 [DEBUG] FORCING thread approach for debugging")
-            self.suggestion_thread = ArtistSuggestionThread(self.track_result, self.spotify_client, self.matching_engine, self.is_album, self.album_result)
-            self.suggestion_thread.suggestions_ready.connect(self.display_auto_suggestions)
-            self.suggestion_thread.start()
-        except Exception as e:
-            print(f"❌ Error starting auto suggestion search: {e}")
-            # Show no results if search fails
-            self.display_auto_suggestions([])
-    
-    def _generate_suggestions_worker(self):
-        """Worker function for generating suggestions in thread pool"""
-        try:
-            # Create suggestion thread instance for logic reuse
-            thread = ArtistSuggestionThread(self.track_result, self.spotify_client, self.matching_engine, self.is_album, self.album_result)
-            suggestions = thread.generate_artist_suggestions()
-            return suggestions
-        except Exception as e:
-            print(f"❌ Error generating suggestions: {e}")
-            return []
-    
-    def _on_suggestions_ready(self, future):
-        """Callback when suggestions are ready from thread pool"""
-        try:
-            suggestions = future.result()
-            print(f"🔄 [DEBUG] _on_suggestions_ready called with {len(suggestions) if suggestions else 0} suggestions")
-            # Use QTimer to safely update UI from worker thread
-            QTimer.singleShot(0, lambda: self.display_auto_suggestions(suggestions))
-        except Exception as e:
-            print(f"❌ Error in suggestion callback: {e}")
-            QTimer.singleShot(0, lambda: self.display_auto_suggestions([]))
-    
-    def display_auto_suggestions(self, suggestions: List[ArtistMatch]):
-        """Display the top 3 auto suggestions horizontally"""
-        print(f"🎨 [DEBUG] display_auto_suggestions called with {len(suggestions) if suggestions else 0} suggestions")
-        if suggestions:
-            for i, suggestion in enumerate(suggestions[:3]):
-                print(f"    {i+1}. {suggestion.artist.name} ({suggestion.confidence:.2f})")
-        
-        self.clear_layout(self.auto_artists_layout)
-        
+        self.search_timer.timeout.connect(self.perform_manual_search)
+
+    def generate_auto_artist_suggestions(self):
+        self._clear_layout(self.auto_suggestions_layout)
+        self._show_loading_cards(self.auto_suggestions_layout, "Finding artist...")
+        self.suggestion_thread = ArtistSuggestionThread(
+            self.original_result, self.spotify_client, self.matching_engine, self.is_album, self.album_result
+        )
+        self.suggestion_thread.suggestions_ready.connect(self.display_artist_suggestions)
+        self.suggestion_thread.start()
+
+    def generate_auto_album_suggestions(self):
+        self._clear_layout(self.auto_suggestions_layout)
+        self._show_loading_cards(self.auto_suggestions_layout, "Finding album...")
+
+        # Use the correct result object for album suggestions.
+        # If it's an album download, use the full album_result for context.
+        # Otherwise, use the original_result (a single track).
+        context_result = self.album_result if self.is_album and self.album_result else self.original_result
+
+        self.album_suggestion_thread = AlbumSuggestionThread(
+            self.selected_artist, context_result, self.spotify_client, self.matching_engine
+        )
+        self.album_suggestion_thread.suggestions_ready.connect(self.display_album_suggestions)
+        self.album_suggestion_thread.start()
+
+    def display_artist_suggestions(self, suggestions: List[ArtistMatch]):
+        self._clear_layout(self.auto_suggestions_layout)
         if not suggestions:
-            no_results = QLabel("No automatic matches found")
-            no_results.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            no_results.setStyleSheet("color: #666; padding: 40px; font-size: 18px;")
-            self.auto_artists_layout.addWidget(no_results)
+            self.auto_suggestions_layout.addWidget(QLabel("No automatic artist matches found."))
             return
-        
-        # Show top 3 suggestions side by side
-        for i, suggestion in enumerate(suggestions[:3]):
-            print(f"🎨 [DEBUG] Creating artist card for: {suggestion.artist.name}")
-            artist_card = self.create_artist_card(suggestion.artist, suggestion.confidence, suggestion.match_reason, is_auto=True)
-            self.auto_artists_layout.addWidget(artist_card)
-            print(f"🎨 [DEBUG] Added artist card to layout")
-        
-        # Add stretch to center the cards if less than 3
-        if len(suggestions) < 3:
-            self.auto_artists_layout.addStretch()
-    
+        self.auto_suggestions_layout.addStretch()
+        for suggestion in suggestions[:4]:
+            self.auto_suggestions_layout.addWidget(self.create_artist_card(suggestion.artist, suggestion.confidence))
+        self.auto_suggestions_layout.addStretch()
+
+    def display_album_suggestions(self, suggestions: List[AlbumMatch]):
+        self._clear_layout(self.auto_suggestions_layout)
+        if not suggestions:
+            self.auto_suggestions_layout.addWidget(QLabel(f"No automatic album matches found for {self.selected_artist.name}."))
+            return
+        self.auto_suggestions_layout.addStretch()
+        for suggestion in suggestions[:4]:
+            self.auto_suggestions_layout.addWidget(self.create_album_card(suggestion.album, suggestion.confidence))
+        self.auto_suggestions_layout.addStretch()
+
     def on_search_text_changed(self):
-        """Handle search text changes with debouncing"""
         self.search_timer.stop()
         if len(self.search_input.text().strip()) >= 2:
-            self.search_timer.start(500)  # 500ms delay
-        else:
-            self.clear_layout(self.manual_results_layout)
-    
-    def perform_search(self):
-        """Perform manual artist or album search depending on current stage"""
+            self.search_timer.start(400)
+
+    def perform_manual_search(self):
         query = self.search_input.text().strip()
-        if not query:
-            return
+        if not query: return
         
-        self.clear_layout(self.manual_results_layout)
+        self._clear_layout(self.manual_results_layout)
         
-        # Add loading cards
-        for i in range(3):
-            loading_text = "Searching artists..." if self.current_stage == "artist" else "Searching albums..."
-            loading_card = self.create_loading_card(loading_text)
-            self.manual_results_layout.addWidget(loading_card)
-        
-        # Start appropriate search in background
         if self.current_stage == "artist":
-            self.search_thread = ArtistSearchThread(query, self.spotify_client, self.matching_engine, self.track_result)
-            self.search_thread.search_results.connect(self.display_search_results)
-        else:  # album stage
+            self._show_loading_cards(self.manual_results_layout, "Searching artists...")
+            self.search_thread = ArtistSearchThread(query, self.spotify_client, self.matching_engine, self.original_result)
+            self.search_thread.search_results.connect(self.display_manual_artist_results)
+            self.search_thread.start()
+        else:
+            self._show_loading_cards(self.manual_results_layout, "Searching albums...")
             self.search_thread = AlbumSearchThread(query, self.selected_artist, self.spotify_client, self.matching_engine)
-            self.search_thread.search_results.connect(self.display_album_results)
-        
-        self.search_thread.start()
-    
-    def display_search_results(self, results: List[ArtistMatch]):
-        """Display manual search results horizontally"""
-        self.clear_layout(self.manual_results_layout)
-        
+            self.search_thread.search_results.connect(self.display_manual_album_results)
+            self.search_thread.start()
+
+    def display_manual_artist_results(self, results: List[ArtistMatch]):
+        self._clear_layout(self.manual_results_layout)
         if not results:
-            no_results = QLabel("No artists found")
-            no_results.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            no_results.setStyleSheet("color: #666; padding: 40px; font-size: 18px;")
-            self.manual_results_layout.addWidget(no_results)
+            self.manual_results_layout.addWidget(QLabel("No artists found."))
             return
-        
-        # Show top 3 results side by side
-        for i, result in enumerate(results[:3]):
-            artist_card = self.create_artist_card(result.artist, result.confidence, result.match_reason, is_auto=False)
-            self.manual_results_layout.addWidget(artist_card)
-        
-        if len(results) < 3:
-            self.manual_results_layout.addStretch()
-    
-    def display_album_results(self, results: List[AlbumMatch]):
-        """Display manual album search results horizontally"""
-        self.clear_layout(self.manual_results_layout)
-        
+        self.manual_results_layout.addStretch()
+        for result in results[:4]:
+            self.manual_results_layout.addWidget(self.create_artist_card(result.artist, result.confidence))
+        self.manual_results_layout.addStretch()
+
+    def display_manual_album_results(self, results: List[AlbumMatch]):
+        self._clear_layout(self.manual_results_layout)
         if not results:
-            no_results = QLabel("No albums found")
-            no_results.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            no_results.setStyleSheet("color: #666; padding: 40px; font-size: 18px;")
-            self.manual_results_layout.addWidget(no_results)
+            self.manual_results_layout.addWidget(QLabel("No albums found."))
             return
-        
-        # Show top 3 results side by side
-        for i, result in enumerate(results[:3]):
-            album_card = self.create_album_card(result.album, result.confidence, result.match_reason)
-            self.manual_results_layout.addWidget(album_card)
-        
-        if len(results) < 3:
-            self.manual_results_layout.addStretch()
-    
-    def create_loading_card(self, text: str) -> QWidget:
-        """Create a loading card placeholder"""
-        card = QFrame()
-        card.setFixedSize(300, 200)
-        card.setStyleSheet("""
-            QFrame {
-                background: rgba(40, 40, 40, 0.6);
-                border: 2px solid #333;
-                border-radius: 15px;
-            }
-        """)
-        
-        layout = QVBoxLayout(card)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        loading_label = QLabel("🔄")
-        loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        loading_label.setStyleSheet("font-size: 32px; color: #1ed760;")
-        layout.addWidget(loading_label)
-        
-        text_label = QLabel(text)
-        text_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        text_label.setStyleSheet("color: #ccc; font-size: 14px; margin-top: 10px;")
-        layout.addWidget(text_label)
-        
-        return card
-    
-    def create_artist_card(self, artist: Artist, confidence: float, reason: str = "", is_auto: bool = False) -> QWidget:
-        """Create a beautiful artist card with image background"""
-        card = QFrame()
-        card.setFixedSize(280, 180)
-        card.setStyleSheet("""
-            QFrame {
-                background: rgba(30, 30, 30, 0.9);
-                border: 2px solid #444;
-                border-radius: 15px;
-            }
-            QFrame:hover {
-                border: 3px solid #1ed760;
-                background: rgba(30, 215, 96, 0.1);
-                transform: translateY(-2px);
-            }
-        """)
-        
-        layout = QVBoxLayout(card)
-        layout.setSpacing(8)
-        layout.setContentsMargins(15, 15, 15, 15)
-        
-        # Artist image (will be enhanced with actual images later)
-        image_container = QFrame()
-        image_container.setFixedSize(90, 90)
-        image_container.setStyleSheet("""
-            QFrame {
-                background: rgba(30, 215, 96, 0.2);
-                border: 2px solid #1ed760;
-                border-radius: 50px;
-            }
-        """)
-        
-        image_layout = QVBoxLayout(image_container)
-        image_layout.setContentsMargins(0, 0, 0, 0)
-        
-        # Try to load artist image or use placeholder
-        image_label = QLabel("🎤")
-        image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        image_label.setStyleSheet("font-size: 36px; color: #1ed760; background: transparent; border: none;")
-        image_layout.addWidget(image_label)
-        
-        # Center the image
-        image_wrapper = QHBoxLayout()
-        image_wrapper.addStretch()
-        image_wrapper.addWidget(image_container)
-        image_wrapper.addStretch()
-        layout.addLayout(image_wrapper)
-        
-        # Artist name
-        name_label = QLabel(artist.name)
-        name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        name_label.setStyleSheet("font-size: 18px; font-weight: bold; color: white;")
-        layout.addWidget(name_label)
-        
-        # Confidence score
-        confidence_text = f"{confidence:.0%} match"
-        confidence_label = QLabel(confidence_text)
-        confidence_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        confidence_color = "#1ed760" if confidence >= 0.7 else "#ffa500" if confidence >= 0.4 else "#ff6b6b"
-        confidence_label.setStyleSheet(f"font-size: 14px; color: {confidence_color}; font-weight: 600;")
-        layout.addWidget(confidence_label)
-        
-        layout.addStretch()
-        
-        # Make the card clickable
-        card.mousePressEvent = lambda event: self.select_artist(artist)
-        
-        # Load artist image in background if available
-        if hasattr(artist, 'image_url') and artist.image_url:
-            self.load_artist_image(artist.image_url, image_label)
-        
-        return card
-    
-    def create_album_card(self, album: Album, confidence: float, reason: str = "") -> QWidget:
-        """Create a beautiful album card with image background"""
-        card = QFrame()
-        card.setFixedSize(300, 200)
-        card.setStyleSheet("""
-            QFrame {
-                background: rgba(30, 30, 30, 0.9);
-                border: 2px solid #444;
-                border-radius: 15px;
-            }
-            QFrame:hover {
-                border: 3px solid #1ed760;
-                background: rgba(30, 215, 96, 0.1);
-                transform: translateY(-2px);
-            }
-        """)
-        
-        layout = QVBoxLayout(card)
-        layout.setSpacing(10)
-        layout.setContentsMargins(20, 20, 20, 20)
-        
-        # Album image
-        image_container = QFrame()
-        image_container.setFixedSize(100, 100)
-        image_container.setStyleSheet("""
-            QFrame {
-                background: rgba(30, 215, 96, 0.2);
-                border: 2px solid #1ed760;
-                border-radius: 15px;
-            }
-        """)
-        
-        image_layout = QVBoxLayout(image_container)
-        image_layout.setContentsMargins(0, 0, 0, 0)
-        
-        # Try to load album image or use placeholder
-        image_label = QLabel("💿")
-        image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        image_label.setStyleSheet("font-size: 36px; color: #1ed760; background: transparent; border: none;")
-        image_layout.addWidget(image_label)
-        
-        # Center the image
-        image_wrapper = QHBoxLayout()
-        image_wrapper.addStretch()
-        image_wrapper.addWidget(image_container)
-        image_wrapper.addStretch()
-        layout.addLayout(image_wrapper)
-        
-        # Album name
-        name_label = QLabel(album.name)
-        name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        name_label.setStyleSheet("font-size: 16px; font-weight: bold; color: white;")
-        name_label.setWordWrap(True)
-        layout.addWidget(name_label)
-        
-        # Album info (year, track count)
-        year = album.release_date.split('-')[0] if album.release_date else "Unknown"
-        info_text = f"{year} • {album.total_tracks} tracks"
-        info_label = QLabel(info_text)
-        info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        info_label.setStyleSheet("font-size: 12px; color: #aaa;")
-        layout.addWidget(info_label)
-        
-        layout.addStretch()
-        
-        # Make the card clickable
-        card.mousePressEvent = lambda event: self.select_album(album)
-        
-        # Load album image in background if available
-        if album.image_url:
-            self.load_artist_image(album.image_url, image_label)  # Reuse image loading function
-        
-        return card
-    
-    def select_album(self, album: Album):
-        """Handle album selection"""
-        self.selected_album = album
-        self.show_confirm_button(f"Confirm: {album.name}")
-    
-    def load_artist_image(self, image_url: str, image_label: QLabel):
-        """Load artist image in background thread"""
-        # Check cache first
-        if image_url in self.artist_image_cache:
-            pixmap = self.artist_image_cache[image_url]
-            if pixmap:
-                scaled_pixmap = pixmap.scaled(100, 100, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
-                image_label.setPixmap(scaled_pixmap)
-                image_label.setText("")  # Clear emoji
-            return
-        
-        # Start image loading thread
-        if hasattr(self.parent(), 'api_thread_pool'):
-            future = self.parent().api_thread_pool.submit(self._load_image_worker, image_url)
-            future.add_done_callback(lambda f: self._on_image_loaded(f, image_label, image_url))
-        else:
-            # For now, keep emoji placeholder if no thread pool available
-            pass
-    
-    def _load_image_worker(self, image_url: str):
-        """Worker function to load image from URL"""
-        try:
-            import requests
-            from PyQt6.QtGui import QPixmap
-            
-            response = requests.get(image_url, timeout=5)
-            if response.status_code == 200:
-                pixmap = QPixmap()
-                pixmap.loadFromData(response.content)
-                return pixmap
-            return None
-        except Exception as e:
-            print(f"❌ Error loading artist image: {e}")
-            return None
-    
-    def _on_image_loaded(self, future, image_label: QLabel, image_url: str):
-        """Callback when image is loaded"""
-        try:
-            pixmap = future.result()
-            # Cache the result (even if None)
-            self.artist_image_cache[image_url] = pixmap
-            
-            if pixmap:
-                # Use QTimer to safely update UI from worker thread
-                def update_image():
-                    scaled_pixmap = pixmap.scaled(100, 100, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
-                    image_label.setPixmap(scaled_pixmap)
-                    image_label.setText("")  # Clear emoji
-                
-                QTimer.singleShot(0, update_image)
-        except Exception as e:
-            print(f"❌ Error in image callback: {e}")
-            # Keep emoji placeholder on error
-    
+        self.manual_results_layout.addStretch()
+        for result in results[:4]:
+            self.manual_results_layout.addWidget(self.create_album_card(result.album, result.confidence))
+        self.manual_results_layout.addStretch()
+
     def select_artist(self, artist: Artist):
-        """Handle artist selection"""
         self.selected_artist = artist
-        
-        if self.is_album:
-            # For albums, transition to album selection stage
-            self.transition_to_album_selection(artist)
-        else:
-            # For singles, show confirm button
-            self.show_confirm_button(f"Confirm: {artist.name}")
-    
-    def transition_to_album_selection(self, artist: Artist):
-        """Transition to album selection stage for album downloads"""
+        print(f"Artist selected: {artist.name}")
+        self.transition_to_album_stage()
+
+    def select_album(self, album: Album):
+        self.selected_album = album
+        print(f"Album selected: {album.name}")
+        self.confirm_btn.setEnabled(True)
+        self.confirm_btn.setText(f"Confirm: {album.name[:25]}...")
+
+    def transition_to_album_stage(self):
         self.current_stage = "album"
-        self.selected_artist = artist  # Store the selected artist
-        
-        # Update header
-        self.header_label.setText("Select Album")
-        
-        # Hide auto-matching section
-        self.auto_section_widget.hide()
-        
-        # Update manual search for albums
-        self.manual_title.setText(f"🔍 Search Albums by {artist.name}")
-        
-        self.search_input.setPlaceholderText(f"Search albums by {artist.name}...")
+        self.header_label.setText(f"Step 2: Select Album for {self.selected_artist.name}")
+        self.search_input.setPlaceholderText("Manually search for an album...")
         self.search_input.clear()
-        self.clear_layout(self.manual_results_layout)
-        
-        # Hide confirm button until album is selected
-        self.confirm_btn.hide()
-    
-    def show_confirm_button(self, text: str):
-        """Show the confirm button with selection text"""
-        self.confirm_btn.setText(text)
-        self.confirm_btn.show()
-    
+        self.confirm_btn.setEnabled(False)
+        self.confirm_btn.setText("Confirm Selection")
+        self._clear_layout(self.manual_results_layout)
+        self.generate_auto_album_suggestions()
+
     def confirm_selection(self):
-        """Confirm the selected artist or album"""
-        if self.current_stage == "artist" and self.selected_artist:
-            self.artist_selected.emit(self.selected_artist)
+        if self.selected_artist and self.selected_album:
+            self.match_confirmed.emit(self.selected_artist, self.selected_album)
             self.accept()
-        elif self.current_stage == "album" and self.selected_album:
-            self.album_selected.emit(self.selected_album)
-            self.accept()
-    
+
     def skip_matching(self):
-        """Skip matching and proceed with normal download"""
-        self.selected_artist = None
-        self.selected_album = None
-        self.skipped_matching = True  # Flag to indicate skip vs cancel
+        self.skipped_matching = True
         self.reject()
-    
+
     def reject(self):
-        """Override reject to distinguish cancel vs skip"""
         if not hasattr(self, 'skipped_matching'):
-            self.skipped_matching = False  # This was a cancel, not a skip
-        
-        # Emit cancelled signal to re-enable buttons
+            self.skipped_matching = False
         self.cancelled.emit()
         super().reject()
-    
-    def clear_layout(self, layout):
-        """Clear all widgets from a layout"""
+
+    def create_artist_card(self, artist: Artist, confidence: float) -> QFrame:
+        card = QFrame()
+        card.setObjectName("card")
+        card.setFixedSize(220, 130)
+        layout = QVBoxLayout(card)
+        name = QLabel(artist.name)
+        name.setWordWrap(True)
+        name.setStyleSheet("font-size: 16px; font-weight: bold;")
+        confidence_label = QLabel(f"{confidence:.0%} match")
+        confidence_label.setStyleSheet("color: #B3B3B3; font-size: 12px;")
+        layout.addWidget(name)
+        layout.addStretch()
+        layout.addWidget(confidence_label)
+        card.mousePressEvent = lambda event: self.select_artist(artist)
+        return card
+
+    def create_album_card(self, album: Album, confidence: float) -> QFrame:
+        card = QFrame()
+        card.setObjectName("card")
+        card.setFixedSize(220, 130)
+        layout = QVBoxLayout(card)
+        name = QLabel(album.name)
+        name.setWordWrap(True)
+        name.setStyleSheet("font-size: 14px; font-weight: bold;")
+        year = album.release_date.split('-')[0] if album.release_date else ""
+        details = QLabel(f"{album.album_type.title()} • {year}")
+        details.setStyleSheet("color: #B3B3B3; font-size: 12px;")
+        layout.addWidget(name)
+        layout.addWidget(details)
+        layout.addStretch()
+        card.mousePressEvent = lambda event: self.select_album(album)
+        return card
+
+    def _show_loading_cards(self, layout: QHBoxLayout, text: str):
+        layout.addStretch()
+        for _ in range(4):
+            loading_card = QFrame()
+            loading_card.setObjectName("card")
+            loading_card.setFixedSize(220, 130)
+            card_layout = QVBoxLayout(loading_card)
+            card_layout.addWidget(QLabel(text), 0, Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(loading_card)
+        layout.addStretch()
+
+    def _clear_layout(self, layout: QHBoxLayout):
         while layout.count():
             child = layout.takeAt(0)
             if child.widget():
@@ -1314,6 +904,120 @@ class AlbumSearchThread(QThread):
         except Exception as e:
             print(f"Error searching albums: {e}")
             self.search_results.emit([])
+
+class AlbumSuggestionThread(QThread):
+    """Background thread for generating automatic album suggestions for a given artist."""
+    
+    suggestions_ready = pyqtSignal(list)
+    
+    def __init__(self, selected_artist: Artist, original_result: object, spotify_client: SpotifyClient, matching_engine: MusicMatchingEngine):
+        super().__init__()
+        self.artist = selected_artist
+        self.original_result = original_result
+        self.spotify_client = spotify_client
+        self.matching_engine = matching_engine
+    
+    def run(self):
+        """Fetch albums for the artist and find the best matches."""
+        try:
+            import re # Import the regular expression module
+
+            target_album_name = ""
+            if isinstance(self.original_result, AlbumResult):
+                target_album_name = self.original_result.album_title
+                print(f"🎵 Album context for auto-match from AlbumResult: '{target_album_name}'")
+            elif hasattr(self.original_result, 'album') and self.original_result.album:
+                target_album_name = self.original_result.album
+                print(f"🎵 Album context for auto-match from TrackResult: '{target_album_name}'")
+            else:
+                target_album_name = self.original_result.title 
+                print(f"🎵 Album context for auto-match using fallback to track title: '{target_album_name}'")
+
+            if not target_album_name:
+                self.suggestions_ready.emit([])
+                return
+
+            # More aggressive cleaning for the search query.
+            # 1. Remove bracketed content like [flac], (Explicit), [2024], etc.
+            cleaned_search_term = re.sub(r'\s*[\[\(].*?[\]\)]', '', target_album_name).strip()
+            
+            # 2. Remove the artist's name from the string if it's present.
+            artist_pattern = r'^' + re.escape(self.artist.name) + r'\s*-\s*'
+            cleaned_search_term = re.sub(artist_pattern, '', cleaned_search_term, flags=re.IGNORECASE)
+            
+            # 3. Clean up any remaining leading/trailing dashes or spaces.
+            cleaned_search_term = cleaned_search_term.strip(' -')
+
+            print(f"🧹 Cleaned album search term: '{target_album_name}' -> '{cleaned_search_term}'")
+
+            search_query = f"artist:{self.artist.name} album:{cleaned_search_term}"
+            print(f"🔍 Searching Spotify for albums with query: '{search_query}'")
+            
+            spotify_albums = self.spotify_client.search_albums(search_query, limit=10)
+            print(f"📊 Found {len(spotify_albums)} potential albums from Spotify search.")
+
+            suggestions = []
+            for album in spotify_albums:
+                is_correct_artist = any(self.matching_engine.similarity_score(self.artist.name, art) > 0.85 for art in album.artists)
+                
+                if not is_correct_artist:
+                    print(f"⚠️ Skipping album '{album.name}' as artist does not match '{self.artist.name}'")
+                    continue
+
+                confidence = self.matching_engine.similarity_score(
+                    self.matching_engine.normalize_string(target_album_name),
+                    self.matching_engine.normalize_string(album.name)
+                )
+                
+                if self.matching_engine.normalize_string(cleaned_search_term) in self.matching_engine.normalize_string(album.name):
+                    confidence = max(confidence, 0.95)
+                
+                if confidence >= 0.5:
+                    print(f"✅ Found album match: '{album.name}' with confidence {confidence:.2f}")
+                    suggestions.append(AlbumMatch(
+                        album=album,
+                        confidence=confidence,
+                        match_reason="Direct album search"
+                    ))
+
+            # **IMPROVEMENT**: Intelligently de-duplicate results with the same name.
+            # This prefers versions marked as 'album' and those with more tracks.
+            unique_suggestions = {}
+            for suggestion in suggestions:
+                album_key = self.matching_engine.normalize_string(suggestion.album.name)
+                
+                if album_key not in unique_suggestions:
+                    unique_suggestions[album_key] = suggestion
+                else:
+                    existing_suggestion = unique_suggestions[album_key]
+                    is_new_better = False
+                    
+                    # Higher confidence is always better
+                    if suggestion.confidence > existing_suggestion.confidence:
+                        is_new_better = True
+                    elif suggestion.confidence == existing_suggestion.confidence:
+                        # 'album' type is preferred over 'single'
+                        if suggestion.album.album_type == 'album' and existing_suggestion.album.album_type != 'album':
+                            is_new_better = True
+                        # More tracks is better if types are the same
+                        elif suggestion.album.album_type == existing_suggestion.album.album_type and hasattr(suggestion.album, 'total_tracks') and hasattr(existing_suggestion.album, 'total_tracks') and suggestion.album.total_tracks > existing_suggestion.album.total_tracks:
+                            is_new_better = True
+
+                    if is_new_better:
+                        print(f"🔄 Replacing duplicate album '{album_key}' with a better version (type: {suggestion.album.album_type}, tracks: {getattr(suggestion.album, 'total_tracks', 'N/A')})")
+                        unique_suggestions[album_key] = suggestion
+            
+            final_suggestions = sorted(unique_suggestions.values(), key=lambda x: x.confidence, reverse=True)
+            
+            print(f"✅ Generated {len(final_suggestions)} final album suggestions.")
+            self.suggestions_ready.emit(final_suggestions[:4])
+
+        except Exception as e:
+            print(f"❌ Error generating album suggestions: {e}")
+            import traceback
+            traceback.print_exc()
+            self.suggestions_ready.emit([])
+
 
 class BouncingDotsWidget(QWidget):
     """Animated bouncing dots loading indicator"""
@@ -6984,82 +6688,61 @@ class DownloadsPage(QWidget):
                 break
     
     def start_matched_download(self, search_result):
-        """Start a matched download with Spotify integration"""
+        """Start a matched download for a single track using the new modal."""
         try:
-            # Check if Spotify client is authenticated
             if not self.spotify_client.is_authenticated():
-                print("❌ Spotify not authenticated. Using normal download.")
                 self.start_download(search_result)
                 return
-            
-            # Create and show the Spotify matching modal
+
             modal = SpotifyMatchingModal(search_result, self.spotify_client, self.matching_engine, self, is_album=False)
-            modal.artist_selected.connect(lambda artist: self._handle_matched_download(search_result, artist))
-            modal.cancelled.connect(lambda: self._handle_modal_cancelled(search_result))
+            # Use a lambda to pass the original search_result to the handler
+            modal.match_confirmed.connect(
+                lambda artist, album: self._handle_match_confirmed(search_result, artist, album, is_album_download=False)
+            )
             
-            # Show modal and handle result
-            result = modal.exec()
-            if result == QDialog.DialogCode.Accepted:
-                # Artist was selected, download will be handled by signal
-                pass
+            if modal.exec() == QDialog.DialogCode.Accepted:
+                print("✅ Match confirmed via modal.")
             elif hasattr(modal, 'skipped_matching') and modal.skipped_matching:
-                # User skipped matching, proceed with normal download
-                print("🔄 Spotify matching skipped, proceeding with normal download")
+                print("🔄 Matching skipped, proceeding with normal download.")
                 self.start_download(search_result)
             else:
-                # User cancelled, do nothing
-                print("🔄 Spotify matching cancelled by user")
+                print("🚫 Match process cancelled by user.")
                 
         except Exception as e:
-            print(f"❌ Error in matched download: {e}")
-            # Fallback to normal download
+            print(f"❌ Error in matched download process: {e}")
             self.start_download(search_result)
-    
+
     def start_matched_album_download(self, album_result):
-        """Start a matched album download with Spotify integration - ask for artist ONCE"""
+        """Start a matched download for a full album using the new modal."""
         try:
-            # Check if Spotify client is authenticated
             if not self.spotify_client.is_authenticated():
-                print("❌ Spotify not authenticated. Using normal album download.")
                 self.start_album_download(album_result)
                 return
-            
-            print(f"🎵 Starting matched album download: {album_result.album_title} by {album_result.artist}")
-            
-            # Disable album track buttons first
-            self.disable_album_track_buttons(album_result)
-            
-            # Show modal ONCE for the album using the first track as reference
-            if album_result.tracks:
-                first_track = album_result.tracks[0]
-                modal = SpotifyMatchingModal(first_track, self.spotify_client, self.matching_engine, self, is_album=True, album_result=album_result)
-                modal.setWindowTitle(f"Select Artist for Album: {album_result.album_title}")
-                
-                # Connect to album-specific handlers
-                modal.artist_selected.connect(lambda artist: self._handle_matched_album_download(album_result, artist))
-                modal.album_selected.connect(lambda album: self._handle_matched_album_download_with_album(album_result, modal.selected_artist, album))
-                modal.cancelled.connect(lambda: self._handle_album_modal_cancelled(album_result))
-                
-                # Show modal and handle result
-                result = modal.exec()
-                if result == QDialog.DialogCode.Accepted:
-                    # Artist was selected, download will be handled by signal
-                    print(f"✓ Artist selected for album download")
-                elif hasattr(modal, 'skipped_matching') and modal.skipped_matching:
-                    # User skipped matching, proceed with normal album download
-                    print("🔄 Album matching skipped, proceeding with normal album download")
-                    self.start_album_download(album_result)
-                else:
-                    # User cancelled, do nothing
-                    print("🔄 Album matching cancelled by user")
-            else:
-                print("❌ No tracks found in album")
+
+            # Use the first track as a reference for the modal
+            first_track = album_result.tracks[0] if album_result.tracks else None
+            if not first_track:
+                print("❌ Cannot start matched download for an empty album.")
                 self.start_album_download(album_result)
-            
+                return
+
+            modal = SpotifyMatchingModal(first_track, self.spotify_client, self.matching_engine, self, is_album=True, album_result=album_result)
+            modal.match_confirmed.connect(
+                lambda artist, album: self._handle_match_confirmed(album_result, artist, album, is_album_download=True)
+            )
+
+            if modal.exec() == QDialog.DialogCode.Accepted:
+                print("✅ Album match confirmed via modal.")
+            elif hasattr(modal, 'skipped_matching') and modal.skipped_matching:
+                print("🔄 Album matching skipped, proceeding with normal download.")
+                self.start_album_download(album_result)
+            else:
+                print("🚫 Album match process cancelled by user.")
+
         except Exception as e:
-            print(f"❌ Failed to start matched album download: {str(e)}")
-            # Fallback to normal album download
+            print(f"❌ Error in matched album download process: {e}")
             self.start_album_download(album_result)
+
     
     def _handle_matched_download(self, search_result, artist: Artist):
         """Handle the download after artist selection from modal"""
@@ -7083,6 +6766,37 @@ class DownloadsPage(QWidget):
             # Fallback to normal download
             self.start_download(search_result)
     
+    def _handle_match_confirmed(self, original_result, artist: Artist, album: Album, is_album_download=False):
+        """
+        Handles the final confirmed match from the modal for both single tracks and full albums.
+        """
+        try:
+            if is_album_download:
+                # This is a full album download
+                print(f"🎯 Confirmed album match: '{album.name}' by '{artist.name}'")
+                # Now, we process each track in the original album_result
+                for track in original_result.tracks:
+                    track.matched_artist = artist
+                    track.matched_album = album
+                    track.album = album.name # Overwrite album name for consistency
+                    self._start_download_with_artist(track, artist)
+            else:
+                # This is a single track download
+                print(f"🎯 Confirmed single track match: '{original_result.title}' -> Artist: '{artist.name}', Album: '{album.name}'")
+                original_result.matched_artist = artist
+                original_result.matched_album = album
+                original_result.album = album.name
+                self._start_download_with_artist(original_result, artist)
+
+        except Exception as e:
+            print(f"❌ Error handling confirmed match: {e}")
+            # Fallback to normal download
+            if is_album_download:
+                self.start_album_download(original_result)
+            else:
+                self.start_download(original_result)
+
+
     def _start_download_with_artist(self, search_result, artist: Artist):
         """Start download and immediately assign matched artist - no race conditions"""
         try:
