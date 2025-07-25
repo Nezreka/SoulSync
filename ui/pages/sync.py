@@ -2966,14 +2966,16 @@ class DownloadMissingTracksModal(QDialog):
         self.missing_tracks = [r for r in results if not r.exists_in_plex]
         print(f"✅ Analysis complete: {len(self.missing_tracks)} to download")
         if self.missing_tracks:
+            # --- FIX: This line was missing, which prevented downloads from starting. ---
             self.start_download_progress()
         else:
-            # --- FIX: Handle case where no tracks are missing ---
+            # Handle case where no tracks are missing
             self.download_in_progress = False # Mark process as finished
             self.cancel_btn.hide()
+            # The modal now stays open.
+            # The process_finished signal is still emitted to unlock the main UI.
+            self.process_finished.emit() 
             QMessageBox.information(self, "Analysis Complete", "All tracks already exist in Plex! No downloads needed.")
-            self.process_finished.emit() # Notify the parent page that the process is over
-            self.accept() # Close the modal
             
     def on_analysis_failed(self, error_message):
         print(f"❌ Analysis failed: {error_message}")
@@ -3337,11 +3339,11 @@ class DownloadMissingTracksModal(QDialog):
         self.download_in_progress = False
         print("🎉 All downloads completed!")
         self.cancel_btn.hide()
-        QMessageBox.information(self, "Downloads Complete", 
-            f"Completed downloading {self.successful_downloads}/{len(self.missing_tracks)} missing tracks!")
-        # --- FIX: Notify parent page that the process is over ---
+        # --- FIX: The modal now stays open for manual correction. ---
+        # The process_finished signal is still emitted to unlock the main UI.
         self.process_finished.emit()
-        self.accept() # Close the modal
+        QMessageBox.information(self, "Downloads Complete", 
+            f"Completed downloading {self.successful_downloads}/{len(self.missing_tracks)} missing tracks!\n\nYou can now manually correct any failed downloads or close this window.")
     
     def on_cancel_clicked(self):
         """Handle Cancel button - cancels operations, emits finished signal, and closes modal."""
