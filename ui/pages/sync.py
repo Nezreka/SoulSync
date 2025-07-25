@@ -4441,25 +4441,54 @@ class DownloadMissingTracksModal(QDialog):
 
     def get_valid_candidates(self, results, spotify_track, query):
         """
-        Scores and filters search results using the MusicMatchingEngine to find the best candidates.
-        This replaces the simple size-based sorting with intelligent, confidence-based scoring.
+        Scores and filters search results, then performs a strict artist verification
+        by checking the file path. This prevents downloading tracks from the wrong artist.
         """
         if not results:
             return []
 
-        # Use the new matching engine function to score, filter, and sort the results.
-        # This returns a list of SlskdTrack objects with a 'confidence' attribute,
-        # already sorted from best to worst and filtered by our confidence threshold.
-        confident_matches = self.matching_engine.find_best_slskd_matches(spotify_track, results)
+        # Step 1: Get initial confident matches based on title, bitrate, etc.
+        # This gives us a sorted list of potential candidates.
+        initial_candidates = self.matching_engine.find_best_slskd_matches(spotify_track, results)
 
-        if confident_matches:
-            best_confidence = confident_matches[0].confidence
-            print(f"✅ Found {len(confident_matches)} confident matches for '{spotify_track.name}'. Best score: {best_confidence:.2f} from query '{query}'")
+        if not initial_candidates:
+            print(f"⚠️ No initial candidates found for '{spotify_track.name}' from query '{query}'.")
+            return []
+            
+        print(f"✅ Found {len(initial_candidates)} initial candidates for '{spotify_track.name}'. Now verifying artist...")
+
+        # Step 2: Perform strict artist verification on the initial candidates.
+        verified_candidates = []
+        spotify_artist_name = spotify_track.artists[0] if spotify_track.artists else ""
+        
+        # **IMPROVEMENT**: More robust normalization for both artist name and file path.
+        # This removes all non-alphanumeric characters and converts to lowercase.
+        # e.g., "Virtual Mage" -> "virtualmage", "virtual-mage" -> "virtualmage"
+        normalized_spotify_artist = re.sub(r'[^a-zA-Z0-9]', '', spotify_artist_name).lower()
+
+        for candidate in initial_candidates:
+            # The 'filename' from Soulseek includes the full folder path.
+            slskd_full_path = candidate.filename
+            
+            # Apply the same robust normalization to the Soulseek path.
+            normalized_slskd_path = re.sub(r'[^a-zA-Z0-9]', '', slskd_full_path).lower()
+            
+            # **THE CRITICAL CHECK**: See if the cleaned artist's name is in the cleaned folder path.
+            if normalized_spotify_artist in normalized_slskd_path:
+                # Artist name was found in the path, this is a valid candidate.
+                print(f"✔️ Artist '{spotify_artist_name}' VERIFIED in path: '{slskd_full_path}'")
+                verified_candidates.append(candidate)
+            else:
+                # Artist name was NOT found. Discard this candidate.
+                print(f"❌ Artist '{spotify_artist_name}' NOT found in path: '{slskd_full_path}'. Discarding candidate.")
+
+        if verified_candidates:
+            best_confidence = verified_candidates[0].confidence
+            print(f"✅ Found {len(verified_candidates)} VERIFIED matches for '{spotify_track.name}'. Best score: {best_confidence:.2f}")
         else:
-            print(f"⚠️ No confident matches found for '{spotify_track.name}' from query '{query}'.")
+            print(f"⚠️ No verified matches found for '{spotify_track.name}' after checking file paths.")
 
-        return confident_matches
-
+        return verified_candidates
     def create_spotify_based_search_result_from_validation(self, slskd_result, spotify_metadata):
         """Create SpotifyBasedSearchResult from validation results"""
         class SpotifyBasedSearchResult:
