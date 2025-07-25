@@ -169,3 +169,15 @@ class MusicMatchingEngine:
             confidence=best_confidence,
             match_type=best_match_type
         )
+    
+    def generate_download_query(self, spotify_track: SpotifyTrack) -> str:
+        """Generate optimized search query for downloading tracks"""
+        # Use artist + track name for more precise matching
+        if spotify_track.artists:
+            # Use first artist and clean track name
+            artist = self.clean_artist(spotify_track.artists[0])
+            track = self.clean_title(spotify_track.name)
+            return f"{artist} {track}".strip()
+        else:
+            # Fallback to just track name if no artist
+            return self.clean_title(spotify_track.name)
