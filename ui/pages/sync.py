@@ -267,14 +267,16 @@ class TrackDownloadWorker(QRunnable):
             if self._cancelled or not self.soulseek_client:
                 return
             
-            # Create search queries - try track name first, then artist + track
+            # Create search queries - prioritize artist + track for better accuracy
             track_name = self.spotify_track.name
             artist_name = self.spotify_track.artists[0] if self.spotify_track.artists else ""
             
             search_queries = []
-            search_queries.append(track_name)  # Try track name only first
+            # Try artist + track first (more specific, less false matches)
             if artist_name:
-                search_queries.append(f"{artist_name} {track_name}")  # Then artist + track
+                search_queries.append(f"{artist_name} {track_name}")
+            # Fallback to track name only if artist search fails
+            search_queries.append(track_name)
             
             download_id = None
             
