@@ -278,13 +278,14 @@ class SyncStatusProcessingWorkerSignals(QObject):
 class SyncStatusProcessingWorker(QRunnable):
     """
     Runs download status processing in a background thread for the sync modal.
-    It checks the slskd API and returns a list of updates for the main thread.
+    It checks the slskd API and the file system to provide a reliable status.
     """
-    def __init__(self, soulseek_client, download_items_data):
+    def __init__(self, soulseek_client, download_items_data, transfers_directory):
         super().__init__()
         self.signals = SyncStatusProcessingWorkerSignals()
         self.soulseek_client = soulseek_client
         self.download_items_data = download_items_data
+        self.transfers_directory = transfers_directory  # NEW: Pass the transfers directory
 
     def run(self):
         """The main logic of the background worker."""
@@ -300,8 +301,7 @@ class SyncStatusProcessingWorker(QRunnable):
 
             results = []
             if not transfers_data:
-                self.signals.completed.emit([])
-                return
+                transfers_data = []
 
             all_transfers = [
                 file for user_data in transfers_data if 'directories' in user_data
@@ -314,20 +314,11 @@ class SyncStatusProcessingWorker(QRunnable):
             for item_data in self.download_items_data:
                 matching_transfer = transfers_by_id.get(item_data['download_id'])
 
-                if not matching_transfer:
-                    import os
-                    dl_filename = os.path.basename(item_data['file_path']).lower()
-                    for t in all_transfers:
-                        if os.path.basename(t.get('filename', '')).lower() == dl_filename:
-                            matching_transfer = t
-                            break
-
                 if matching_transfer:
                     state = matching_transfer.get('state', 'Unknown')
                     progress = matching_transfer.get('percentComplete', 0)
                     new_status = 'queued'
 
-                    # Correct order of checks: Terminal states first.
                     if 'Cancelled' in state or 'Canceled' in state:
                         new_status = 'cancelled'
                     elif 'Failed' in state or 'Errored' in state:
@@ -340,7 +331,7 @@ class SyncStatusProcessingWorker(QRunnable):
                         new_status = 'queued'
 
                     payload = {
-                        'widget_id': item_data['widget_id'], # This will be the download_index
+                        'widget_id': item_data['widget_id'],
                         'status': new_status,
                         'progress': int(progress),
                         'transfer_id': matching_transfer.get('id'),
@@ -348,21 +339,42 @@ class SyncStatusProcessingWorker(QRunnable):
                     }
                     results.append(payload)
                 else:
-                    # Handle downloads that disappear from the API
-                    item_data['api_missing_count'] = item_data.get('api_missing_count', 0) + 1
-                    if item_data['api_missing_count'] >= 3:
+                    # --- NEW LOGIC: Check file system for completed downloads ---
+                    # The download is no longer in the API. Check if the file exists.
+                    import os
+                    expected_filename = os.path.basename(item_data['file_path'])
+                    expected_filepath = os.path.join(self.transfers_directory, expected_filename)
+
+                    if os.path.exists(expected_filepath):
+                        # File exists! The download was successful.
+                        print(f"✅ Verified completed download via file system: {expected_filename}")
                         payload = {
                             'widget_id': item_data['widget_id'],
-                            'status': 'failed',
+                            'status': 'completed',
+                            'progress': 100,
                             'transfer_id': item_data['download_id'],
                         }
                         results.append(payload)
+                    else:
+                        # File doesn't exist. It might be a genuine failure.
+                        # Use the existing counter logic as a fallback.
+                        item_data['api_missing_count'] = item_data.get('api_missing_count', 0) + 1
+                        if item_data['api_missing_count'] >= 3: # After 3 checks (6 seconds)
+                            print(f"❌ Download {item_data['download_id']} failed (missing from API and file system).")
+                            payload = {
+                                'widget_id': item_data['widget_id'],
+                                'status': 'failed',
+                                'transfer_id': item_data['download_id'],
+                            }
+                            results.append(payload)
 
             self.signals.completed.emit(results)
         except Exception as e:
             import traceback
             traceback.print_exc()
             self.signals.error.emit(str(e))
+
+
 
 class PlaylistLoaderThread(QThread):
     playlist_loaded = pyqtSignal(object)  # Single playlist
@@ -3117,11 +3129,15 @@ class DownloadMissingTracksModal(QDialog):
         if not items_to_check:
             self._is_status_update_running = False
             return
-
-        worker = SyncStatusProcessingWorker(self.parent_page.soulseek_client, items_to_check)
+        
+        # NEW: Get the transfers directory and pass it to the worker
+        transfers_dir = self.downloads_page.transfers_directory
+        worker = SyncStatusProcessingWorker(self.parent_page.soulseek_client, items_to_check, transfers_dir)
+        
         worker.signals.completed.connect(self._handle_processed_status_updates)
         worker.signals.error.connect(lambda e: print(f"Status Worker Error: {e}"))
         self.download_status_pool.start(worker)
+
 
     def _handle_processed_status_updates(self, results):
         """Applies status updates and triggers retry logic."""
