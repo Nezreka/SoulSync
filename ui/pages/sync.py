@@ -2037,12 +2037,15 @@ class SyncPage(QWidget):
         """Update the selection info label and button state"""
         selected_count = len(self.selected_playlists)
         
-        print(f"Updating UI with {selected_count} selected playlists")
+        print(f"Updating UI with {selected_count} selected playlists, sequential syncing: {self.is_sequential_syncing}")
         
         if selected_count == 0:
             self.selection_info.setText("Select playlists to sync")
             self.start_sync_btn.setEnabled(False)
             print("Button disabled - no selection")
+        elif self.is_sequential_syncing:
+            # Don't change button state during sequential sync
+            print(f"Sequential sync in progress - keeping button as is")
         elif selected_count == 1:
             self.selection_info.setText("1 playlist selected")
             self.start_sync_btn.setEnabled(True)
@@ -2077,22 +2080,29 @@ class SyncPage(QWidget):
     
     def process_next_in_sync_queue(self):
         """Process the next playlist in the sequential sync queue"""
+        print(f"DEBUG: process_next_in_sync_queue - queue length: {len(self.sequential_sync_queue)}, is_syncing: {self.is_sequential_syncing}")
+        
         if not self.sequential_sync_queue or not self.is_sequential_syncing:
             # Sync queue complete
+            print("DEBUG: Sequential sync queue is empty or syncing stopped - completing")
             self.on_sequential_sync_complete()
             return
         
         # Get next playlist to sync
         next_playlist = self.sequential_sync_queue.pop(0)
+        print(f"DEBUG: Starting sync for next playlist: {next_playlist.name}")
         
         # Start sync for this playlist
         success = self.start_playlist_sync(next_playlist)
+        print(f"DEBUG: start_playlist_sync returned: {success}")
         if not success:
             # If sync failed to start, move to next
+            print("DEBUG: Sync failed to start, moving to next playlist")
             self.process_next_in_sync_queue()
     
     def on_sequential_sync_complete(self):
         """Handle completion of sequential sync"""
+        print("DEBUG: Sequential sync complete - resetting button state")
         self.is_sequential_syncing = False
         self.sequential_sync_queue.clear()
         self.start_sync_btn.setText("Start Sync")
@@ -2169,7 +2179,10 @@ class SyncPage(QWidget):
         
         # Continue sequential sync if in progress
         if self.is_sequential_syncing:
+            print(f"DEBUG: Sync finished for {playlist_id}, continuing sequential sync")
             self.process_next_in_sync_queue()
+        else:
+            print(f"DEBUG: Sync finished for {playlist_id}, not in sequential sync mode")
         
         # Log completion
         if hasattr(self, 'log_area'):
