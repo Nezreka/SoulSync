@@ -54,6 +54,7 @@ class PlaylistSyncService:
     
     def cancel_sync(self):
         """Cancel the current sync operation"""
+        logger.info("PlaylistSyncService.cancel_sync() called - setting cancellation flag")
         self._cancelled = True
         self.is_syncing = False
     
@@ -236,6 +237,7 @@ class PlaylistSyncService:
                 
                 for query_title in unique_title_variations:
                     if self._cancelled:
+                        logger.debug(f"Sync cancelled during track search for '{original_title}'")
                         return None, 0.0
                     
                     potential_plex_matches = self.plex_client.search_tracks(
@@ -243,6 +245,11 @@ class PlaylistSyncService:
                         artist=artist_name,
                         limit=15
                     )
+                    
+                    # Check cancellation after each search operation
+                    if self._cancelled:
+                        logger.debug(f"Sync cancelled after search for '{original_title}'")
+                        return None, 0.0
                     
                     for track in potential_plex_matches:
                         if track.id not in found_match_ids:
@@ -258,9 +265,22 @@ class PlaylistSyncService:
             
             # Fallback: Title-only search
             if not all_potential_matches:
+                if self._cancelled:
+                    logger.debug(f"Sync cancelled before title-only search for '{original_title}'")
+                    return None, 0.0
+                    
                 logger.debug(f"No artist-based matches found. Using title-only fallback for '{original_title}'")
                 for query_title in unique_title_variations:
+                    if self._cancelled:
+                        logger.debug(f"Sync cancelled during title-only search for '{original_title}'")
+                        return None, 0.0
+                        
                     title_only_matches = self.plex_client.search_tracks(title=query_title, artist="", limit=10)
+                    
+                    if self._cancelled:
+                        logger.debug(f"Sync cancelled after title-only search for '{original_title}'")
+                        return None, 0.0
+                        
                     for track in title_only_matches:
                         if track.id not in found_match_ids:
                             all_potential_matches.append(track)

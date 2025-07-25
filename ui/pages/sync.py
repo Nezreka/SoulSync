@@ -481,6 +481,13 @@ class SyncWorker(QRunnable):
         self._cancelled = True
         if hasattr(self.sync_service, 'cancel_sync'):
             self.sync_service.cancel_sync()
+        
+        # Clear the progress callback to stop further progress updates
+        if hasattr(self.sync_service, 'set_progress_callback'):
+            self.sync_service.set_progress_callback(None)
+        
+        # Log the cancellation request
+        print(f"DEBUG: SyncWorker.cancel() called for playlist {getattr(self.playlist, 'name', 'unknown')}")
     
     def run(self):
         """Execute the sync operation"""
@@ -554,19 +561,21 @@ class PlaylistDetailsModal(QDialog):
         super().closeEvent(event)
     
     def cleanup_workers(self):
-        """Clean up all active workers and thread pools"""
-        # Cancel active workers first
+        """Clean up all active workers and thread pools (except sync workers)"""
+        # Cancel active workers first, but skip sync workers to allow background sync
         for worker in self.active_workers:
             try:
-                if hasattr(worker, 'cancel'):
+                # Don't cancel sync workers - they should continue in background
+                if hasattr(worker, 'cancel') and not isinstance(worker, SyncWorker):
                     worker.cancel()
             except (RuntimeError, AttributeError):
                 pass
         
-        # Disconnect signals from active workers to prevent race conditions
+        # Disconnect signals from active workers to prevent race conditions (except sync workers)
         for worker in self.active_workers:
             try:
-                if hasattr(worker, 'signals'):
+                # Don't disconnect sync worker signals - they need to continue updating playlist items
+                if hasattr(worker, 'signals') and not isinstance(worker, SyncWorker):
                     # Disconnect track loading worker signals
                     try:
                         worker.signals.tracks_loaded.disconnect(self.on_tracks_loaded)
@@ -805,20 +814,22 @@ class PlaylistDetailsModal(QDialog):
     
     def restore_sync_state(self):
         """Restore sync state when modal is reopened"""
-        # Find corresponding playlist item to check if sync is ongoing
-        playlist_item = self.parent_page.find_playlist_item_widget(self.playlist.id)
-        if playlist_item and playlist_item.is_syncing:
+        # Check if sync is ongoing for this playlist
+        if self.parent_page and self.parent_page.is_playlist_syncing(self.playlist.id):
             self.is_syncing = True
             self.set_sync_button_state(True)
             
-            # Show sync status widget with current progress
-            if self.sync_status_widget:
-                self.sync_status_widget.show()
-                self.update_sync_status(
-                    playlist_item.sync_total_tracks,
-                    playlist_item.sync_matched_tracks,
-                    playlist_item.sync_failed_tracks
-                )
+            # Find playlist item to get current progress
+            playlist_item = self.parent_page.find_playlist_item_widget(self.playlist.id)
+            if playlist_item:
+                # Show sync status widget with current progress
+                if self.sync_status_widget:
+                    self.sync_status_widget.show()
+                    self.update_sync_status(
+                        playlist_item.sync_total_tracks,
+                        playlist_item.sync_matched_tracks,
+                        playlist_item.sync_failed_tracks
+                    )
     
     def create_track_list(self):
         container = QFrame()
@@ -1122,152 +1133,69 @@ class PlaylistDetailsModal(QDialog):
         self.start_sync()
 
     def start_sync(self):
-        """Start playlist sync operation"""
-        self.is_syncing = True
-        
-        # Update button state
-        self.set_sync_button_state(True)
-        
-        # Show sync status widget
-        if self.sync_status_widget:
-            self.sync_status_widget.show()
-            self.update_sync_status(len(self.playlist.tracks), 0, 0)
-        
-        # Find corresponding playlist item and update its status
-        playlist_item = self.parent_page.find_playlist_item_widget(self.playlist.id)
-        if playlist_item:
-            playlist_item.is_syncing = True
-            playlist_item.update_sync_status(len(self.playlist.tracks), 0, 0)
-        
-        # Create and configure sync worker
-        self.sync_worker = SyncWorker(
-            playlist=self.playlist,
-            sync_service=self.parent_page.sync_service,
-            progress_callback=self.on_sync_progress
-        )
-        
-        # Connect worker signals
-        self.sync_worker.signals.finished.connect(self.on_sync_finished)
-        self.sync_worker.signals.error.connect(self.on_sync_error)
-        
-        # Track worker for cleanup
-        self.active_workers.append(self.sync_worker)
-        
-        # Submit to thread pool
-        if hasattr(self.parent_page, 'thread_pool'):
-            self.parent_page.thread_pool.start(self.sync_worker)
-        else:
-            # Create and track fallback thread pool
-            thread_pool = QThreadPool()
-            self.fallback_pools.append(thread_pool)
-            thread_pool.start(self.sync_worker)
-        
-        # Log start of sync
-        if hasattr(self.parent_page, 'log_area'):
-            self.parent_page.log_area.append(f"🔄 Starting sync for playlist: {self.playlist.name}")
+        """Start playlist sync operation via parent page"""
+        if self.parent_page and self.parent_page.start_playlist_sync(self.playlist):
+            self.is_syncing = True
+            
+            # Update modal UI state
+            self.set_sync_button_state(True)
+            
+            # Show sync status widget
+            if self.sync_status_widget:
+                self.sync_status_widget.show()
+                self.update_sync_status(len(self.playlist.tracks), 0, 0)
 
     def cancel_sync(self):
-        """Cancel ongoing sync operation"""
-        if self.sync_worker:
-            self.sync_worker.cancel()
-        
-        self.is_syncing = False
-        
-        # Update button state
-        self.set_sync_button_state(False)
-        
-        # Hide sync status widget
-        if self.sync_status_widget:
-            self.sync_status_widget.hide()
-        
-        # Find corresponding playlist item and update its status
-        playlist_item = self.parent_page.find_playlist_item_widget(self.playlist.id)
-        if playlist_item:
-            playlist_item.is_syncing = False
-            if playlist_item.sync_status_widget:
-                playlist_item.sync_status_widget.hide()
+        """Cancel ongoing sync operation via parent page"""
+        if self.parent_page and self.parent_page.cancel_playlist_sync(self.playlist.id):
+            self.is_syncing = False
+            
+            # Update modal UI state
+            self.set_sync_button_state(False)
+            
+            # Hide sync status widget
+            if self.sync_status_widget:
+                self.sync_status_widget.hide()
 
-    def on_sync_progress(self, progress):
-        """Handle sync progress updates"""
-        # Update modal status display
-        self.update_sync_status(
-            progress.total_tracks,
-            progress.matched_tracks,
-            progress.failed_tracks
-        )
-        
-        # Find corresponding playlist item and update its status
-        playlist_item = self.parent_page.find_playlist_item_widget(self.playlist.id)
-        if playlist_item:
-            playlist_item.update_sync_status(
+    def on_sync_progress(self, playlist_id, progress):
+        """Handle sync progress updates (called from parent page)"""
+        if playlist_id == self.playlist.id:
+            # Update modal status display
+            self.update_sync_status(
                 progress.total_tracks,
                 progress.matched_tracks,
                 progress.failed_tracks
             )
 
-    def on_sync_finished(self, result):
-        """Handle sync completion"""
-        self.is_syncing = False
-        self.sync_worker = None
-        
-        # Update button state
-        self.set_sync_button_state(False)
-        
-        # Update final status
-        self.update_sync_status(
-            result.total_tracks,
-            result.matched_tracks,
-            result.failed_tracks
-        )
-        
-        # Find corresponding playlist item and update its status
-        playlist_item = self.parent_page.find_playlist_item_widget(self.playlist.id)
-        if playlist_item:
-            playlist_item.is_syncing = False
-            playlist_item.update_sync_status(
+    def on_sync_finished(self, playlist_id, result):
+        """Handle sync completion (called from parent page)"""
+        if playlist_id == self.playlist.id:
+            self.is_syncing = False
+            
+            # Update button state
+            self.set_sync_button_state(False)
+            
+            # Update final status
+            self.update_sync_status(
                 result.total_tracks,
                 result.matched_tracks,
                 result.failed_tracks
             )
-        
-        # Log completion
-        if hasattr(self.parent_page, 'log_area'):
-            success_rate = result.success_rate
-            msg = f"✅ Sync complete: {result.synced_tracks}/{result.total_tracks} tracks synced ({success_rate:.1f}%)"
-            if result.failed_tracks > 0:
-                msg += f", {result.failed_tracks} failed"
-            self.parent_page.log_area.append(msg)
-            
-            # Add detailed results
-            if result.errors:
-                for error in result.errors:
-                    self.parent_page.log_area.append(f"❌ Error: {error}")
 
-    def on_sync_error(self, error_msg):
-        """Handle sync error"""
-        self.is_syncing = False
-        self.sync_worker = None
-        
-        # Update button state
-        self.set_sync_button_state(False)
-        
-        # Hide sync status widget
-        if self.sync_status_widget:
-            self.sync_status_widget.hide()
-        
-        # Find corresponding playlist item and update its status
-        playlist_item = self.parent_page.find_playlist_item_widget(self.playlist.id)
-        if playlist_item:
-            playlist_item.is_syncing = False
-            if playlist_item.sync_status_widget:
-                playlist_item.sync_status_widget.hide()
-        
-        # Log error
-        if hasattr(self.parent_page, 'log_area'):
-            self.parent_page.log_area.append(f"❌ Sync failed: {error_msg}")
-        
-        # Show error message
-        QMessageBox.critical(self, "Sync Failed", f"Sync failed: {error_msg}")
+    def on_sync_error(self, playlist_id, error_msg):
+        """Handle sync error (called from parent page)"""
+        if playlist_id == self.playlist.id:
+            self.is_syncing = False
+            
+            # Update button state
+            self.set_sync_button_state(False)
+            
+            # Hide sync status widget
+            if self.sync_status_widget:
+                self.sync_status_widget.hide()
+            
+            # Show error message
+            QMessageBox.critical(self, "Sync Failed", f"Sync failed: {error_msg}")
     
     def start_playlist_missing_tracks_download(self):
         """Start the process of downloading missing tracks from playlist"""
@@ -1809,6 +1737,9 @@ class SyncPage(QWidget):
         # Track cache for performance
         self.track_cache = {}  # playlist_id -> tracks
         
+        # Sync worker management 
+        self.active_sync_workers = {}  # playlist_id -> SyncWorker
+        
         # Thread pool for async operations (like downloads.py)
         self.thread_pool = QThreadPool()
         self.thread_pool.setMaxThreadCount(3)  # Limit concurrent Spotify API calls
@@ -1818,6 +1749,180 @@ class SyncPage(QWidget):
         # Don't auto-load on startup, but do auto-load when page becomes visible
         self.show_initial_state()
         self.playlists_loaded = False
+    
+    def is_playlist_syncing(self, playlist_id):
+        """Check if a playlist is currently syncing"""
+        return playlist_id in self.active_sync_workers
+    
+    def get_playlist_sync_worker(self, playlist_id):
+        """Get the sync worker for a playlist if it exists"""
+        return self.active_sync_workers.get(playlist_id)
+    
+    def start_playlist_sync(self, playlist):
+        """Start sync for a playlist (called from modal)"""
+        if playlist.id in self.active_sync_workers:
+            # Already syncing
+            return False
+        
+        # Create sync service if not available
+        if not hasattr(self, 'sync_service'):
+            from services.sync_service import PlaylistSyncService
+            self.sync_service = PlaylistSyncService(
+                self.spotify_client,
+                self.plex_client,
+                self.soulseek_client
+            )
+        
+        # Create sync worker
+        sync_worker = SyncWorker(
+            playlist=playlist,
+            sync_service=self.sync_service
+        )
+        
+        # Connect worker signals
+        sync_worker.signals.finished.connect(lambda result: self.on_sync_finished(playlist.id, result))
+        sync_worker.signals.error.connect(lambda error: self.on_sync_error(playlist.id, error))
+        sync_worker.signals.progress.connect(lambda progress: self.on_sync_progress(playlist.id, progress))
+        
+        # Store the worker
+        self.active_sync_workers[playlist.id] = sync_worker
+        
+        # Start the worker
+        self.thread_pool.start(sync_worker)
+        
+        # Update playlist item status
+        playlist_item = self.find_playlist_item_widget(playlist.id)
+        if playlist_item:
+            playlist_item.is_syncing = True
+            playlist_item.update_sync_status(len(playlist.tracks), 0, 0)
+        
+        # Log start
+        if hasattr(self, 'log_area'):
+            self.log_area.append(f"🔄 Starting sync for playlist: {playlist.name}")
+        
+        return True
+    
+    def cancel_playlist_sync(self, playlist_id):
+        """Cancel sync for a playlist"""
+        if playlist_id in self.active_sync_workers:
+            worker = self.active_sync_workers[playlist_id]
+            worker.cancel()
+            
+            # Remove from active workers
+            del self.active_sync_workers[playlist_id]
+            
+            # Update playlist item status
+            playlist_item = self.find_playlist_item_widget(playlist_id)
+            if playlist_item:
+                playlist_item.is_syncing = False
+                if playlist_item.sync_status_widget:
+                    playlist_item.sync_status_widget.hide()
+            
+            # Log cancellation
+            if hasattr(self, 'log_area'):
+                self.log_area.append(f"🚫 Sync cancelled for playlist")
+            
+            return True
+        return False
+    
+    def on_sync_progress(self, playlist_id, progress):
+        """Handle sync progress updates"""
+        # Update playlist item status
+        playlist_item = self.find_playlist_item_widget(playlist_id)
+        if playlist_item:
+            playlist_item.update_sync_status(
+                progress.total_tracks,
+                progress.matched_tracks,
+                progress.failed_tracks
+            )
+        
+        # Update any open modal for this playlist
+        self.update_open_modals_progress(playlist_id, progress)
+    
+    def on_sync_finished(self, playlist_id, result):
+        """Handle sync completion"""
+        # Remove from active workers
+        if playlist_id in self.active_sync_workers:
+            del self.active_sync_workers[playlist_id]
+        
+        # Update playlist item status
+        playlist_item = self.find_playlist_item_widget(playlist_id)
+        if playlist_item:
+            playlist_item.is_syncing = False
+            playlist_item.update_sync_status(
+                result.total_tracks,
+                result.matched_tracks,
+                result.failed_tracks
+            )
+            
+            # Hide status widget after completion with delay
+            QTimer.singleShot(3000, lambda: playlist_item.sync_status_widget.hide() if playlist_item.sync_status_widget else None)
+        
+        # Update any open modals
+        self.update_open_modals_completion(playlist_id, result)
+        
+        # Log completion
+        if hasattr(self, 'log_area'):
+            success_rate = result.success_rate
+            msg = f"✅ Sync complete: {result.synced_tracks}/{result.total_tracks} tracks synced ({success_rate:.1f}%)"
+            if result.failed_tracks > 0:
+                msg += f", {result.failed_tracks} failed"
+            self.log_area.append(msg)
+    
+    def on_sync_error(self, playlist_id, error_msg):
+        """Handle sync error"""
+        # Remove from active workers
+        if playlist_id in self.active_sync_workers:
+            del self.active_sync_workers[playlist_id]
+        
+        # Update playlist item status
+        playlist_item = self.find_playlist_item_widget(playlist_id)
+        if playlist_item:
+            playlist_item.is_syncing = False
+            if playlist_item.sync_status_widget:
+                playlist_item.sync_status_widget.hide()
+        
+        # Update any open modals
+        self.update_open_modals_error(playlist_id, error_msg)
+        
+        # Log error
+        if hasattr(self, 'log_area'):
+            self.log_area.append(f"❌ Sync failed: {error_msg}")
+    
+    def update_open_modals_progress(self, playlist_id, progress):
+        """Update any open PlaylistDetailsModal for this playlist with sync progress"""
+        # Find all open PlaylistDetailsModal instances for this playlist
+        # We need to check all top-level widgets that might be modals
+        from PyQt6.QtWidgets import QApplication
+        for widget in QApplication.topLevelWidgets():
+            if (isinstance(widget, PlaylistDetailsModal) and 
+                hasattr(widget, 'playlist') and 
+                widget.playlist.id == playlist_id and
+                widget.isVisible()):
+                # Update the modal's progress display
+                widget.on_sync_progress(playlist_id, progress)
+    
+    def update_open_modals_completion(self, playlist_id, result):
+        """Update any open PlaylistDetailsModal for this playlist with sync completion"""
+        from PyQt6.QtWidgets import QApplication
+        for widget in QApplication.topLevelWidgets():
+            if (isinstance(widget, PlaylistDetailsModal) and 
+                hasattr(widget, 'playlist') and 
+                widget.playlist.id == playlist_id and
+                widget.isVisible()):
+                # Update the modal's completion display
+                widget.on_sync_finished(playlist_id, result)
+    
+    def update_open_modals_error(self, playlist_id, error_msg):
+        """Update any open PlaylistDetailsModal for this playlist with sync error"""
+        from PyQt6.QtWidgets import QApplication
+        for widget in QApplication.topLevelWidgets():
+            if (isinstance(widget, PlaylistDetailsModal) and 
+                hasattr(widget, 'playlist') and 
+                widget.playlist.id == playlist_id and
+                widget.isVisible()):
+                # Update the modal's error display
+                widget.on_sync_error(playlist_id, error_msg)
     
     # Add these three methods inside the SyncPage class
     def find_playlist_item_widget(self, playlist_id):
