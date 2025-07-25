@@ -4307,16 +4307,28 @@ class DownloadMissingTracksModal(QDialog):
         return None
         
     def on_all_downloads_complete(self):
-        """Handle completion of all downloads"""
-        self.download_in_progress = False
-        print("🎉 All downloads completed!")
-        self.cancel_btn.hide()
-        # --- FIX: The modal now stays open for manual correction. ---
-        # The process_finished signal is still emitted to unlock the main UI.
-        self.process_finished.emit()
-        QMessageBox.information(self, "Downloads Complete", 
-            f"Completed downloading {self.successful_downloads}/{len(self.missing_tracks)} missing tracks!\n\nYou can now manually correct any failed downloads or close this window.")
-    
+            """Handle completion of all downloads"""
+            self.download_in_progress = False
+            print("🎉 All downloads completed!")
+            self.cancel_btn.hide()
+            
+            # The process_finished signal is still emitted to unlock the main UI.
+            self.process_finished.emit()
+
+            # Determine the final message based on success or failure.
+            if self.permanently_failed_tracks:
+                final_message = f"Completed downloading {self.successful_downloads}/{len(self.missing_tracks)} missing tracks!\n\nYou can now manually correct any failed downloads or close this window."
+                
+                # If there are failures, ensure the modal is visible and bring it to the front.
+                if self.isHidden():
+                    self.show()
+                self.activateWindow()
+                self.raise_()
+            else:
+                final_message = f"Completed downloading {self.successful_downloads}/{len(self.missing_tracks)} missing tracks!\n\nAll tracks were downloaded successfully!"
+
+            QMessageBox.information(self, "Downloads Complete", final_message)
+
     def on_cancel_clicked(self):
         """Handle Cancel button - cancels operations, emits finished signal, and closes modal."""
         # --- FIX: The full cancellation logic is now centralized here. ---
