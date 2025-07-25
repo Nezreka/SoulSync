@@ -729,17 +729,17 @@ class PlaylistDetailsModal(QDialog):
         layout.setSpacing(12)
         
         # Total tracks
-        self.total_tracks_label = QLabel("📀 0")
+        self.total_tracks_label = QLabel("🎵 0")
         self.total_tracks_label.setFont(QFont("SF Pro Text", 12, QFont.Weight.Medium))
         self.total_tracks_label.setStyleSheet("color: #ffffff; background: transparent; border: none;")
         
         # Matched tracks
-        self.matched_tracks_label = QLabel("✅ 0")
+        self.matched_tracks_label = QLabel("✓ 0")
         self.matched_tracks_label.setFont(QFont("SF Pro Text", 12, QFont.Weight.Medium))
         self.matched_tracks_label.setStyleSheet("color: #1db954; background: transparent; border: none;")
         
         # Failed tracks
-        self.failed_tracks_label = QLabel("❌ 0")
+        self.failed_tracks_label = QLabel("✗ 0")
         self.failed_tracks_label.setFont(QFont("SF Pro Text", 12, QFont.Weight.Medium))
         self.failed_tracks_label.setStyleSheet("color: #e22134; background: transparent; border: none;")
         
@@ -758,9 +758,9 @@ class PlaylistDetailsModal(QDialog):
     def update_sync_status(self, total_tracks=0, matched_tracks=0, failed_tracks=0):
         """Update sync status display"""
         if self.sync_status_widget:
-            self.total_tracks_label.setText(f"📀 {total_tracks}")
-            self.matched_tracks_label.setText(f"✅ {matched_tracks}")
-            self.failed_tracks_label.setText(f"❌ {failed_tracks}")
+            self.total_tracks_label.setText(f"🎵 {total_tracks}")
+            self.matched_tracks_label.setText(f"✓ {matched_tracks}")
+            self.failed_tracks_label.setText(f"✗ {failed_tracks}")
             
             if total_tracks > 0:
                 percentage = int((matched_tracks / total_tracks) * 100)
@@ -1545,17 +1545,17 @@ class PlaylistItem(QFrame):
         layout.setSpacing(6)
         
         # Total tracks
-        self.item_total_tracks_label = QLabel("📀 0")
+        self.item_total_tracks_label = QLabel("🎵 0")
         self.item_total_tracks_label.setFont(QFont("SF Pro Text", 9, QFont.Weight.Medium))
         self.item_total_tracks_label.setStyleSheet("color: #ffffff; background: transparent; border: none;")
         
         # Matched tracks
-        self.item_matched_tracks_label = QLabel("✅ 0")
+        self.item_matched_tracks_label = QLabel("✓ 0")
         self.item_matched_tracks_label.setFont(QFont("SF Pro Text", 9, QFont.Weight.Medium))
         self.item_matched_tracks_label.setStyleSheet("color: #1db954; background: transparent; border: none;")
         
         # Failed tracks
-        self.item_failed_tracks_label = QLabel("❌ 0")
+        self.item_failed_tracks_label = QLabel("✗ 0")
         self.item_failed_tracks_label.setFont(QFont("SF Pro Text", 9, QFont.Weight.Medium))
         self.item_failed_tracks_label.setStyleSheet("color: #e22134; background: transparent; border: none;")
         
