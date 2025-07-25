@@ -2019,6 +2019,9 @@ class SyncPage(QWidget):
         if hasattr(self, 'log_area'):
             self.log_area.append(f"🔄 Starting sync for playlist: {playlist.name}")
         
+        # Update refresh button state since we now have an active sync
+        self.update_refresh_button_state()
+        
         return True
     
     def toggle_playlist_selection(self, playlist_id):
@@ -2075,6 +2078,9 @@ class SyncPage(QWidget):
         self.start_sync_btn.setText("Syncing...")
         self.start_sync_btn.setEnabled(False)
         
+        # Disable refresh button during sequential sync
+        self.update_refresh_button_state()
+        
         # Start first sync
         self.process_next_in_sync_queue()
     
@@ -2107,6 +2113,9 @@ class SyncPage(QWidget):
         self.sequential_sync_queue.clear()
         self.start_sync_btn.setText("Start Sync")
         self.update_selection_ui()  # Re-enable if playlists still selected
+        
+        # Update refresh button state since sequential sync is complete
+        self.update_refresh_button_state()
     
     def get_all_playlist_items(self):
         """Get all PlaylistItem widgets from the playlist layout"""
@@ -2184,6 +2193,9 @@ class SyncPage(QWidget):
         else:
             print(f"DEBUG: Sync finished for {playlist_id}, not in sequential sync mode")
         
+        # Update refresh button state since a sync completed
+        self.update_refresh_button_state()
+        
         # Log completion
         if hasattr(self, 'log_area'):
             success_rate = result.success_rate
@@ -2211,6 +2223,9 @@ class SyncPage(QWidget):
         # Continue sequential sync if in progress (even on error)
         if self.is_sequential_syncing:
             self.process_next_in_sync_queue()
+        
+        # Update refresh button state since a sync completed (with error)
+        self.update_refresh_button_state()
         
         # Log error
         if hasattr(self, 'log_area'):
@@ -2266,8 +2281,9 @@ class SyncPage(QWidget):
         print(f"Download process started for playlist: {playlist_id}. Disabling refresh.")
         self.active_download_processes[playlist_id] = playlist_item_widget
         playlist_item_widget.show_operation_status()
-        self.refresh_btn.setEnabled(False)
-        self.refresh_btn.setText("🔄 Working...")
+        
+        # Use centralized refresh button management
+        self.update_refresh_button_state()
         # --- FIX: Connect the finished signal from the modal ---
         # This ensures that when the modal is finished (or cancelled), the cleanup function is called.
         if playlist_item_widget.download_modal:
@@ -2294,8 +2310,8 @@ class SyncPage(QWidget):
 
         if not self.active_download_processes:
             print("All download processes finished. Re-enabling refresh.")
-            self.refresh_btn.setEnabled(True)
-            self.refresh_btn.setText("🔄 Refresh")
+            # Use centralized refresh button management
+            self.update_refresh_button_state()
     
     
     def showEvent(self, event):
@@ -2794,6 +2810,27 @@ class SyncPage(QWidget):
         """Re-enable refresh button after operations complete"""
         self.refresh_btn.setEnabled(True)
         self.refresh_btn.setText("🔄 Refresh")
+    
+    def has_active_operations(self):
+        """Check if any sync or download operations are currently active"""
+        has_downloads = bool(self.active_download_processes)
+        has_individual_syncs = bool(self.active_sync_workers)
+        has_sequential_sync = self.is_sequential_syncing
+        
+        print(f"DEBUG: Active operations check - downloads: {has_downloads}, individual syncs: {has_individual_syncs}, sequential: {has_sequential_sync}")
+        return has_downloads or has_individual_syncs or has_sequential_sync
+    
+    def update_refresh_button_state(self):
+        """Update refresh button state based on active operations"""
+        if self.has_active_operations():
+            if self.is_sequential_syncing:
+                self.disable_refresh_button("Sequential Sync")
+            elif self.active_sync_workers:
+                self.disable_refresh_button("Sync")
+            elif self.active_download_processes:
+                self.disable_refresh_button("Download")
+        else:
+            self.enable_refresh_button()
     
     def load_initial_playlists(self):
         """Load initial playlist data (placeholder or real)"""
