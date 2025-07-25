@@ -1464,7 +1464,42 @@ class PlaylistItem(QFrame):
         self.sync_failed_tracks = 0
         self.sync_status_widget = None
         
+        # Selection state tracking
+        self._pending_click = False
+        
         self.setup_ui()
+    
+    def on_checkbox_clicked(self):
+        """Handle direct checkbox click - use same debounced logic"""
+        print(f"Direct checkbox click for {self.name}")
+        self.toggle_selection()
+    
+    def update_selection_style(self):
+        """Update visual style based on selection state"""
+        if self.is_selected:
+            self.setStyleSheet("""
+                PlaylistItem {
+                    background: rgba(29, 185, 84, 0.1);
+                    border-radius: 8px;
+                    border: 2px solid #1db954;
+                }
+                PlaylistItem:hover {
+                    background: rgba(29, 185, 84, 0.15);
+                    border: 2px solid #1ed760;
+                }
+            """)
+        else:
+            self.setStyleSheet("""
+                PlaylistItem {
+                    background: #282828;
+                    border-radius: 8px;
+                    border: 1px solid #404040;
+                }
+                PlaylistItem:hover {
+                    background: #333333;
+                    border: 1px solid #1db954;
+                }
+            """)
     
     def setup_ui(self):
         self.setFixedHeight(80)
@@ -1480,12 +1515,18 @@ class PlaylistItem(QFrame):
             }
         """)
         
+        # Make the entire item clickable
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)  # Enable styled background
+        
         layout = QHBoxLayout(self)
         layout.setContentsMargins(20, 15, 20, 15)
         layout.setSpacing(15)
         
         # Checkbox
         self.checkbox = QCheckBox()
+        self.checkbox.clicked.connect(self.on_checkbox_clicked)
         self.checkbox.setStyleSheet("""
             QCheckBox::indicator {
                 width: 18px;
@@ -1589,6 +1630,95 @@ class PlaylistItem(QFrame):
         layout.addWidget(self.sync_status_widget)
         layout.addWidget(self.action_btn)
         layout.addWidget(self.status_label)
+        
+        # Install event filter to capture mouse events on child widgets
+        self.installEventFilter(self)
+        for child in self.findChildren(QWidget):
+            if child != self.action_btn and child != self.status_label:
+                child.installEventFilter(self)
+    
+    def eventFilter(self, source, event):
+        """Filter events to handle clicks anywhere on the item"""
+        if event.type() == event.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
+            # Don't handle if it's the action button or status label
+            if source == self.action_btn or source == self.status_label:
+                return False  # Let the button handle its own click
+            
+            # Handle click as playlist selection toggle
+            print(f"Event filter caught click on {source} in playlist {self.name}")
+            self.toggle_selection()
+            return True  # Event handled
+        
+        return super().eventFilter(source, event)
+    
+    def toggle_selection(self):
+        """Toggle the selection state of this playlist item immediately"""
+        # Skip if already processing to prevent double-clicks
+        if self._pending_click:
+            return
+            
+        self._pending_click = True
+        
+        # Get current state from SyncPage (source of truth)
+        sync_page = self
+        while sync_page and not isinstance(sync_page, SyncPage):
+            sync_page = sync_page.parent()
+        
+        if sync_page and self.playlist and self.playlist.id:
+            # Check actual selection state from parent
+            currently_selected = self.playlist.id in sync_page.selected_playlists
+            
+            # Toggle selection in parent
+            sync_page.toggle_playlist_selection(self.playlist.id)
+            
+            # Update our local state to match parent
+            new_state = self.playlist.id in sync_page.selected_playlists
+            self.is_selected = new_state
+            
+            # Update checkbox to match (without triggering signal)
+            self.checkbox.blockSignals(True)
+            self.checkbox.setChecked(new_state)
+            self.checkbox.blockSignals(False)
+            
+            # Update visual style
+            self.update_selection_style()
+            
+            print(f"Processed click for {self.name}: {currently_selected} -> {new_state}")
+        else:
+            print(f"Could not process click for {self.name} - missing sync page or playlist ID")
+        
+        # Clear pending flag after a short delay to prevent rapid double-clicks
+        QTimer.singleShot(25, lambda: setattr(self, '_pending_click', False))
+    
+    def mousePressEvent(self, event):
+        """Handle direct clicks on the playlist item background"""
+        if event.button() == Qt.MouseButton.LeftButton:
+            print(f"Direct click on playlist item: {self.name}")
+            self.toggle_selection()
+        super().mousePressEvent(event)
+    
+    def sync_selection_state(self):
+        """Synchronize selection state with parent SyncPage (call when needed)"""
+        sync_page = self
+        while sync_page and not isinstance(sync_page, SyncPage):
+            sync_page = sync_page.parent()
+        
+        if sync_page and self.playlist and self.playlist.id:
+            # Get actual state from parent
+            actual_selected = self.playlist.id in sync_page.selected_playlists
+            
+            # Update our state to match
+            if self.is_selected != actual_selected:
+                print(f"Syncing state for {self.name}: {self.is_selected} -> {actual_selected}")
+                self.is_selected = actual_selected
+                
+                # Update checkbox (without triggering signal)
+                self.checkbox.blockSignals(True)
+                self.checkbox.setChecked(actual_selected)
+                self.checkbox.blockSignals(False)
+                
+                # Update visual style
+                self.update_selection_style()
     
     def create_compact_sync_status(self):
         """Create compact sync status display for playlist item"""
@@ -1824,6 +1954,11 @@ class SyncPage(QWidget):
         # Sync worker management 
         self.active_sync_workers = {}  # playlist_id -> SyncWorker
         
+        # Selection tracking
+        self.selected_playlists = set()  # Set of selected playlist IDs
+        self.sequential_sync_queue = []  # Queue for sequential syncing
+        self.is_sequential_syncing = False
+        
         # Thread pool for async operations (like downloads.py)
         self.thread_pool = QThreadPool()
         self.thread_pool.setMaxThreadCount(3)  # Limit concurrent Spotify API calls
@@ -1886,6 +2021,93 @@ class SyncPage(QWidget):
         
         return True
     
+    def toggle_playlist_selection(self, playlist_id):
+        """Toggle selection state of a playlist"""
+        if playlist_id in self.selected_playlists:
+            self.selected_playlists.remove(playlist_id)
+            print(f"Deselected playlist: {playlist_id}")
+        else:
+            self.selected_playlists.add(playlist_id)
+            print(f"Selected playlist: {playlist_id}")
+        
+        print(f"Total selected: {len(self.selected_playlists)}")
+        self.update_selection_ui()
+    
+    def update_selection_ui(self):
+        """Update the selection info label and button state"""
+        selected_count = len(self.selected_playlists)
+        
+        print(f"Updating UI with {selected_count} selected playlists")
+        
+        if selected_count == 0:
+            self.selection_info.setText("Select playlists to sync")
+            self.start_sync_btn.setEnabled(False)
+            print("Button disabled - no selection")
+        elif selected_count == 1:
+            self.selection_info.setText("1 playlist selected")
+            self.start_sync_btn.setEnabled(True)
+            print("Button enabled - 1 playlist")
+        else:
+            self.selection_info.setText(f"{selected_count} playlists selected")
+            self.start_sync_btn.setEnabled(True)
+            print(f"Button enabled - {selected_count} playlists")
+    
+    def start_selected_playlist_sync(self):
+        """Start syncing all selected playlists sequentially"""
+        if not self.selected_playlists or self.is_sequential_syncing:
+            return
+        
+        # Get selected playlist objects
+        selected_playlist_objects = []
+        for playlist_item in self.get_all_playlist_items():
+            if playlist_item.playlist.id in self.selected_playlists:
+                selected_playlist_objects.append(playlist_item.playlist)
+        
+        if not selected_playlist_objects:
+            return
+        
+        # Start sequential sync
+        self.sequential_sync_queue = selected_playlist_objects.copy()
+        self.is_sequential_syncing = True
+        self.start_sync_btn.setText("Syncing...")
+        self.start_sync_btn.setEnabled(False)
+        
+        # Start first sync
+        self.process_next_in_sync_queue()
+    
+    def process_next_in_sync_queue(self):
+        """Process the next playlist in the sequential sync queue"""
+        if not self.sequential_sync_queue or not self.is_sequential_syncing:
+            # Sync queue complete
+            self.on_sequential_sync_complete()
+            return
+        
+        # Get next playlist to sync
+        next_playlist = self.sequential_sync_queue.pop(0)
+        
+        # Start sync for this playlist
+        success = self.start_playlist_sync(next_playlist)
+        if not success:
+            # If sync failed to start, move to next
+            self.process_next_in_sync_queue()
+    
+    def on_sequential_sync_complete(self):
+        """Handle completion of sequential sync"""
+        self.is_sequential_syncing = False
+        self.sequential_sync_queue.clear()
+        self.start_sync_btn.setText("Start Sync")
+        self.update_selection_ui()  # Re-enable if playlists still selected
+    
+    def get_all_playlist_items(self):
+        """Get all PlaylistItem widgets from the playlist layout"""
+        playlist_items = []
+        for i in range(self.playlist_layout.count()):
+            item = self.playlist_layout.itemAt(i)
+            widget = item.widget()
+            if isinstance(widget, PlaylistItem):
+                playlist_items.append(widget)
+        return playlist_items
+    
     def cancel_playlist_sync(self, playlist_id):
         """Cancel sync for a playlist"""
         if playlist_id in self.active_sync_workers:
@@ -1945,6 +2167,10 @@ class SyncPage(QWidget):
         # Update any open modals
         self.update_open_modals_completion(playlist_id, result)
         
+        # Continue sequential sync if in progress
+        if self.is_sequential_syncing:
+            self.process_next_in_sync_queue()
+        
         # Log completion
         if hasattr(self, 'log_area'):
             success_rate = result.success_rate
@@ -1968,6 +2194,10 @@ class SyncPage(QWidget):
         
         # Update any open modals
         self.update_open_modals_error(playlist_id, error_msg)
+        
+        # Continue sequential sync if in progress (even on error)
+        if self.is_sequential_syncing:
+            self.process_next_in_sync_queue()
         
         # Log error
         if hasattr(self, 'log_area'):
@@ -2071,6 +2301,10 @@ class SyncPage(QWidget):
         """Auto-load playlists with proper UI transition"""
         # Clear the welcome state first
         self.clear_playlists()
+        
+        # Clear selection state when auto-loading
+        self.selected_playlists.clear()
+        self.update_selection_ui()
         
         # Start loading (this will set playlists_loaded = True)
         self.load_playlists_async()
@@ -2241,10 +2475,6 @@ class SyncPage(QWidget):
         layout = QVBoxLayout(section)
         layout.setSpacing(20)
         
-        # Sync options
-        options_panel = SyncOptionsPanel()
-        layout.addWidget(options_panel)
-        
         # Action buttons
         actions_frame = QFrame()
         actions_frame.setStyleSheet("""
@@ -2259,10 +2489,18 @@ class SyncPage(QWidget):
         actions_layout.setContentsMargins(20, 20, 20, 20)
         actions_layout.setSpacing(15)
         
-        # Sync button
-        sync_btn = QPushButton("Start Sync")
-        sync_btn.setFixedHeight(45)
-        sync_btn.setStyleSheet("""
+        # Selection info label
+        self.selection_info = QLabel("Select playlists to sync")
+        self.selection_info.setFont(QFont("Arial", 12))
+        self.selection_info.setStyleSheet("color: #b3b3b3;")
+        self.selection_info.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        # Sync button (initially disabled)
+        self.start_sync_btn = QPushButton("Start Sync")
+        self.start_sync_btn.setFixedHeight(45)
+        self.start_sync_btn.setEnabled(False)  # Disabled by default
+        self.start_sync_btn.clicked.connect(self.start_selected_playlist_sync)
+        self.start_sync_btn.setStyleSheet("""
             QPushButton {
                 background: #1db954;
                 border: none;
@@ -2271,33 +2509,20 @@ class SyncPage(QWidget):
                 font-size: 14px;
                 font-weight: bold;
             }
-            QPushButton:hover {
+            QPushButton:hover:enabled {
                 background: #1ed760;
             }
-            QPushButton:pressed {
+            QPushButton:pressed:enabled {
                 background: #1aa34a;
             }
-        """)
-        
-        # Preview button
-        preview_btn = QPushButton("Preview Changes")
-        preview_btn.setFixedHeight(35)
-        preview_btn.setStyleSheet("""
-            QPushButton {
-                background: transparent;
-                border: 1px solid #1db954;
-                border-radius: 17px;
-                color: #1db954;
-                font-size: 12px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background: rgba(29, 185, 84, 0.1);
+            QPushButton:disabled {
+                background: #404040;
+                color: #666666;
             }
         """)
         
-        actions_layout.addWidget(sync_btn)
-        actions_layout.addWidget(preview_btn)
+        actions_layout.addWidget(self.selection_info)
+        actions_layout.addWidget(self.start_sync_btn)
         
         layout.addWidget(actions_frame)
         
@@ -2397,6 +2622,10 @@ class SyncPage(QWidget):
         # Clear existing playlists
         self.clear_playlists()
         
+        # Clear selection state when refreshing
+        self.selected_playlists.clear()
+        self.update_selection_ui()
+        
         # Add loading placeholder
         loading_label = QLabel("🔄 Loading playlists...")
         loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -2429,7 +2658,7 @@ class SyncPage(QWidget):
         """Add a single playlist to the UI as it's loaded"""
         # Simple sync status (placeholder for now)
         sync_status = "Never Synced"  # TODO: Check actual sync status
-        item = PlaylistItem(playlist.name, playlist.total_tracks, sync_status, playlist)
+        item = PlaylistItem(playlist.name, playlist.total_tracks, sync_status, playlist, self)
         item.view_details_clicked.connect(self.show_playlist_details)
         
         # Add subtle fade-in animation
@@ -2569,7 +2798,7 @@ class SyncPage(QWidget):
             ]
             
             for name, count, status in playlists:
-                item = PlaylistItem(name, count, status, None)  # No playlist object for placeholders
+                item = PlaylistItem(name, count, status, None, self)  # Set parent for placeholders too
                 self.playlist_layout.addWidget(item)
     
     def refresh_playlists(self):
