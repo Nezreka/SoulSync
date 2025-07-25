@@ -250,8 +250,8 @@ class PlexClient:
     
     def search_tracks(self, title: str, artist: str, limit: int = 15) -> List[PlexTrackInfo]:
         """
-        Searches for tracks using a robust, multi-stage fallback strategy to find
-        the best possible candidates for matching.
+        Searches for tracks using an efficient, multi-stage "early exit" strategy.
+        It stops and returns results as soon as candidates are found.
         """
         if not self.music_library:
             logger.warning("Plex music library not found. Cannot perform search.")
@@ -259,7 +259,6 @@ class PlexClient:
 
         try:
             candidate_tracks = []
-            # Use a set to keep track of found track keys to avoid duplicates
             found_track_keys = set()
 
             def add_candidates(tracks):
@@ -277,25 +276,31 @@ class PlexClient:
                     plex_artist = artist_results[0]
                     all_artist_tracks = plex_artist.tracks()
                     lower_title = title.lower()
-                    # Find all tracks by this artist that contain the title text
                     stage1_results = [track for track in all_artist_tracks if lower_title in track.title.lower()]
                     add_candidates(stage1_results)
                     logger.debug(f"Stage 1 found {len(stage1_results)} candidates.")
+            
+            # --- Early Exit: If Stage 1 found results, stop here ---
+            if candidate_tracks:
+                logger.info(f"Found {len(candidate_tracks)} candidates in Stage 1. Exiting early.")
+                return [PlexTrackInfo.from_plex_track(track) for track in candidate_tracks[:limit]]
 
             # --- Stage 2: Flexible Keyword Search (Artist + Title combined) ---
-            # This is good for artist variations like "The Dare" vs "Dare"
             search_query = f"{artist} {title}".strip()
             logger.debug(f"Stage 2: Performing keyword search for '{search_query}'")
             stage2_results = self.music_library.search(title=search_query, libtype='track', limit=limit)
             add_candidates(stage2_results)
-            
+
+            # --- Early Exit: If Stage 2 found results, stop here ---
+            if candidate_tracks:
+                logger.info(f"Found {len(candidate_tracks)} candidates in Stage 2. Exiting early.")
+                return [PlexTrackInfo.from_plex_track(track) for track in candidate_tracks[:limit]]
+
             # --- Stage 3: Title-Only Fallback Search ---
-            # This is the broadest search for cases where artist metadata is wrong or missing.
             logger.debug(f"Stage 3: Performing title-only search for '{title}'")
             stage3_results = self.music_library.searchTracks(title=title, limit=limit)
             add_candidates(stage3_results)
             
-            # Convert the raw Plex track objects to our simplified PlexTrackInfo dataclass
             tracks = [PlexTrackInfo.from_plex_track(track) for track in candidate_tracks[:limit]]
     
             if tracks:
@@ -308,6 +313,9 @@ class PlexClient:
             import traceback
             traceback.print_exc()
             return []
+
+
+
 
     def get_library_stats(self) -> Dict[str, int]:
         if not self.music_library:
