@@ -22,21 +22,17 @@ class MatchResult:
 
 class MusicMatchingEngine:
     def __init__(self):
-        # More comprehensive patterns to strip extra info from titles
+        # The order of these patterns is important. More general patterns go first.
         self.title_patterns = [
-            # NEW: General patterns to remove all content in brackets/parentheses first
+            # General patterns to remove all content in brackets/parentheses
             r'\(.*\)',
             r'\[.*\]',
-            # Patterns after a hyphen
-            r'-\s*single version',
-            r'-\s*remaster.*',
-            r'-\s*live.*',
-            r'-\s*remix',
-            r'-\s*radio edit',
-            # Patterns in the open title string (not in brackets)
-            r'\s+feat\.?.*',
-            r'\s+ft\.?.*',
-            r'\s+featuring.*'
+            # General pattern to remove everything after a hyphen
+            r'\s-\s.*',
+            # Patterns to remove featuring artists from the title itself
+            r'\sfeat\.?.*',
+            r'\sft\.?.*',
+            r'\sfeaturing.*'
         ]
         
         self.artist_patterns = [
@@ -56,16 +52,10 @@ class MusicMatchingEngine:
         if not text:
             return ""
         
-        # Transliterate Unicode characters (e.g., ñ -> n, é -> e) to ASCII
         text = unidecode(text)
-        
-        # Convert to lowercase
         text = text.lower()
-        
-        # Remove specific punctuation but keep alphanumeric and spaces
+        # Keep alphanumeric, spaces, and hyphens, but remove other punctuation like '.' or ','
         text = re.sub(r'[^\w\s-]', '', text)
-        
-        # Collapse multiple spaces into one
         text = re.sub(r'\s+', ' ', text).strip()
         
         return text
@@ -104,56 +94,52 @@ class MusicMatchingEngine:
         if abs(duration1 - duration2) <= 5000:
             return 1.0
         
-        # Penalize larger differences
         diff_ratio = abs(duration1 - duration2) / max(duration1, duration2)
-        return max(0, 1.0 - diff_ratio * 5) # Scale penalty
+        return max(0, 1.0 - diff_ratio * 5)
 
     def calculate_match_confidence(self, spotify_track: SpotifyTrack, plex_track: PlexTrackInfo) -> Tuple[float, str]:
-        """Calculates a confidence score for a potential match with weighted factors."""
+        """Calculates a confidence score for a potential match with a more robust, prioritized logic."""
         
         spotify_title_cleaned = self.clean_title(spotify_track.name)
         plex_title_cleaned = self.clean_title(plex_track.title)
 
-        # --- Enhanced Artist Scoring ---
+        # --- Artist Scoring ---
         spotify_artists_cleaned = [self.clean_artist(a) for a in spotify_track.artists if a]
-        plex_artist_cleaned = self.clean_artist(plex_track.artist)
         plex_artist_normalized = self.normalize_string(plex_track.artist)
 
         best_artist_score = 0.0
         for spotify_artist in spotify_artists_cleaned:
-            if spotify_artist in plex_artist_normalized:
-                score = 1.0
-            else:
-                score = self.similarity_score(spotify_artist, plex_artist_cleaned)
-            
+            if spotify_artist and spotify_artist in plex_artist_normalized:
+                best_artist_score = 1.0
+                break
+            score = self.similarity_score(spotify_artist, self.clean_artist(plex_track.artist))
             if score > best_artist_score:
                 best_artist_score = score
-                if best_artist_score == 1.0:
-                    break
         
         artist_score = best_artist_score
         
-        # --- Calculate other scores ---
+        # --- Title and Duration Scoring ---
         title_score = self.similarity_score(spotify_title_cleaned, plex_title_cleaned)
         duration_score = self.duration_similarity(spotify_track.duration_ms, plex_track.duration if plex_track.duration else 0)
         
-        # --- Weighted confidence calculation ---
-        confidence = (title_score * 0.5) + (artist_score * 0.3) + (duration_score * 0.2)
-        
-        # --- NEW: Add confidence boost for exact title matches ---
-        if spotify_title_cleaned == plex_title_cleaned and len(spotify_title_cleaned) > 0:
-            confidence = max(confidence, 0.85) # Boost to at least 0.85 for exact titles
-        
-        # Determine match type based on scores
-        if title_score > 0.95 and artist_score > 0.9 and duration_score > 0.9:
-            match_type = "perfect_match"
-            confidence = max(confidence, 0.98)
-        elif title_score > 0.85 and artist_score > 0.8:
+        # --- Prioritized Confidence Logic ---
+        # Priority 1: Near-perfect title and artist match is a very strong signal.
+        if title_score > 0.98 and artist_score > 0.9:
+            confidence = 0.98
+            match_type = "strong_match"
+        # Priority 2: Exact title match, even with a weaker artist match, should have high confidence.
+        # This helps with short titles like "Girls" or "LIL DEMON".
+        elif title_score > 0.98:
+            confidence = 0.90 + (artist_score * 0.05) # Base of 0.9, with a small artist bonus
+            match_type = "exact_title_match"
+        # Priority 3: High title similarity is still a good indicator.
+        elif title_score > 0.9:
+            confidence = (title_score * 0.6) + (artist_score * 0.3) + (duration_score * 0.1)
             match_type = "high_confidence"
-        elif title_score > 0.75:
-            match_type = "medium_confidence"
+        # Default: Standard weighted calculation for all other cases.
         else:
-            match_type = "low_confidence"
+            confidence = (title_score * 0.5) + (artist_score * 0.3) + (duration_score * 0.2)
+            match_type = "standard_match"
 
         return confidence, match_type
     
