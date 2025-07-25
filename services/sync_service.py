@@ -1,12 +1,12 @@
 import asyncio
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime
 from utils.logging_config import get_logger
-from core.spotify_client import SpotifyClient, Playlist as SpotifyPlaylist
+from core.spotify_client import SpotifyClient, Playlist as SpotifyPlaylist, Track as SpotifyTrack
 from core.plex_client import PlexClient, PlexTrackInfo
 from core.soulseek_client import SoulseekClient
-from core.matching_engine import matching_engine, MatchResult
+from core.matching_engine import MusicMatchingEngine, MatchResult
 
 logger = get_logger("sync_service")
 
@@ -34,6 +34,10 @@ class SyncProgress:
     progress: float
     total_steps: int
     current_step_number: int
+    # Add detailed track stats for UI updates
+    total_tracks: int = 0
+    matched_tracks: int = 0
+    failed_tracks: int = 0
 
 class PlaylistSyncService:
     def __init__(self, spotify_client: SpotifyClient, plex_client: PlexClient, soulseek_client: SoulseekClient):
@@ -42,25 +46,36 @@ class PlaylistSyncService:
         self.soulseek_client = soulseek_client
         self.progress_callback = None
         self.is_syncing = False
+        self._cancelled = False
+        self.matching_engine = MusicMatchingEngine()
     
     def set_progress_callback(self, callback):
         self.progress_callback = callback
     
-    def _update_progress(self, step: str, track: str, progress: float, total_steps: int, current_step: int):
+    def cancel_sync(self):
+        """Cancel the current sync operation"""
+        self._cancelled = True
+        self.is_syncing = False
+    
+    def _update_progress(self, step: str, track: str, progress: float, total_steps: int, current_step: int, 
+                        total_tracks: int = 0, matched_tracks: int = 0, failed_tracks: int = 0):
         if self.progress_callback:
             self.progress_callback(SyncProgress(
                 current_step=step,
                 current_track=track,
                 progress=progress,
                 total_steps=total_steps,
-                current_step_number=current_step
+                current_step_number=current_step,
+                total_tracks=total_tracks,
+                matched_tracks=matched_tracks,
+                failed_tracks=failed_tracks
             ))
     
-    async def sync_playlist(self, playlist_name: str, download_missing: bool = False) -> SyncResult:
+    async def sync_playlist(self, playlist: SpotifyPlaylist, download_missing: bool = False) -> SyncResult:
         if self.is_syncing:
             logger.warning("Sync already in progress")
             return SyncResult(
-                playlist_name=playlist_name,
+                playlist_name=playlist.name,
                 total_tracks=0,
                 matched_tracks=0,
                 synced_tracks=0,
@@ -71,49 +86,104 @@ class PlaylistSyncService:
             )
         
         self.is_syncing = True
+        self._cancelled = False
         errors = []
         
         try:
-            logger.info(f"Starting sync for playlist: {playlist_name}")
+            logger.info(f"Starting sync for playlist: {playlist.name}")
             
-            self._update_progress("Fetching Spotify playlist", "", 0, 6, 1)
-            spotify_playlist = self._get_spotify_playlist(playlist_name)
-            if not spotify_playlist:
-                errors.append(f"Spotify playlist '{playlist_name}' not found")
-                return self._create_error_result(playlist_name, errors)
+            if self._cancelled:
+                return self._create_error_result(playlist.name, ["Sync cancelled"])
             
-            self._update_progress("Fetching Plex library", "", 16, 6, 2)
-            plex_tracks = await self._get_plex_tracks()
+            # Skip fetching playlist since we already have it
+            self._update_progress("Preparing playlist sync", "", 10, 5, 1)
             
-            self._update_progress("Matching tracks", "", 33, 6, 3)
-            match_results = matching_engine.match_playlist_tracks(
-                spotify_playlist.tracks, 
-                plex_tracks
-            )
+            if not playlist.tracks:
+                errors.append(f"Playlist '{playlist.name}' has no tracks")
+                return self._create_error_result(playlist.name, errors)
+            
+            if self._cancelled:
+                return self._create_error_result(playlist.name, ["Sync cancelled"])
+            
+            total_tracks = len(playlist.tracks)
+            
+            self._update_progress("Matching tracks against Plex library", "", 20, 5, 2, total_tracks=total_tracks)
+            
+            # Use the same robust matching approach as "Download Missing Tracks"
+            match_results = []
+            for i, track in enumerate(playlist.tracks):
+                if self._cancelled:
+                    return self._create_error_result(playlist.name, ["Sync cancelled"])
+                
+                # Update progress for each track
+                progress_percent = 20 + (40 * (i + 1) / total_tracks)  # 20-60% for matching
+                current_track_name = f"{track.artists[0]} - {track.name}" if track.artists else track.name
+                self._update_progress("Matching tracks", current_track_name, progress_percent, 5, 2, 
+                                    total_tracks=total_tracks,
+                                    matched_tracks=len([r for r in match_results if r.is_match]),
+                                    failed_tracks=len([r for r in match_results if not r.is_match]))
+                
+                # Use the robust search approach
+                plex_match, confidence = await self._find_track_in_plex(track)
+                
+                match_result = MatchResult(
+                    spotify_track=track,
+                    plex_track=plex_match,
+                    confidence=confidence,
+                    match_type="robust_search" if plex_match else "no_match"
+                )
+                match_results.append(match_result)
             
             matched_tracks = [r for r in match_results if r.is_match]
             unmatched_tracks = [r for r in match_results if not r.is_match]
             
-            logger.info(f"Found {len(matched_tracks)} matches out of {len(spotify_playlist.tracks)} tracks")
+            logger.info(f"Found {len(matched_tracks)} matches out of {len(playlist.tracks)} tracks")
+            
+            
+            if self._cancelled:
+                return self._create_error_result(playlist.name, ["Sync cancelled"])
+            
+            # Update progress with match results
+            self._update_progress("Matching completed", "", 60, 5, 3, 
+                                total_tracks=total_tracks, 
+                                matched_tracks=len(matched_tracks), 
+                                failed_tracks=len(unmatched_tracks))
             
             downloaded_tracks = 0
             if download_missing and unmatched_tracks:
-                self._update_progress("Downloading missing tracks", "", 50, 6, 4)
+                if self._cancelled:
+                    return self._create_error_result(playlist.name, ["Sync cancelled"])
+                self._update_progress("Downloading missing tracks", "", 70, 5, 4, 
+                                    total_tracks=total_tracks,
+                                    matched_tracks=len(matched_tracks),
+                                    failed_tracks=len(unmatched_tracks))
                 downloaded_tracks = await self._download_missing_tracks(unmatched_tracks)
             
-            self._update_progress("Creating/updating Plex playlist", "", 66, 6, 5)
-            plex_track_infos = [r.plex_track for r in matched_tracks if r.plex_track]
+            if self._cancelled:
+                return self._create_error_result(playlist.name, ["Sync cancelled"])
             
-            sync_success = self.plex_client.update_playlist(playlist_name, plex_track_infos)
+            self._update_progress("Creating/updating Plex playlist", "", 80, 5, 4,
+                                total_tracks=total_tracks,
+                                matched_tracks=len(matched_tracks),
+                                failed_tracks=len(unmatched_tracks))
             
-            synced_tracks = len(plex_track_infos) if sync_success else 0
-            failed_tracks = len(spotify_playlist.tracks) - synced_tracks - downloaded_tracks
+            # Get the actual Plex track objects (not PlexTrackInfo)
+            plex_tracks = [r.plex_track for r in matched_tracks if r.plex_track]
+            logger.info(f"Creating playlist with {len(plex_tracks)} matched tracks")
             
-            self._update_progress("Sync completed", "", 100, 6, 6)
+            sync_success = self.plex_client.update_playlist(playlist.name, plex_tracks)
+            
+            synced_tracks = len(plex_tracks) if sync_success else 0
+            failed_tracks = len(playlist.tracks) - synced_tracks - downloaded_tracks
+            
+            self._update_progress("Sync completed", "", 100, 5, 5,
+                                total_tracks=total_tracks,
+                                matched_tracks=len(matched_tracks),
+                                failed_tracks=failed_tracks)
             
             result = SyncResult(
-                playlist_name=playlist_name,
-                total_tracks=len(spotify_playlist.tracks),
+                playlist_name=playlist.name,
+                total_tracks=len(playlist.tracks),
                 matched_tracks=len(matched_tracks),
                 synced_tracks=synced_tracks,
                 downloaded_tracks=downloaded_tracks,
@@ -128,10 +198,91 @@ class PlaylistSyncService:
         except Exception as e:
             logger.error(f"Error during sync: {e}")
             errors.append(str(e))
-            return self._create_error_result(playlist_name, errors)
+            return self._create_error_result(playlist.name, errors)
         
         finally:
             self.is_syncing = False
+            self._cancelled = False
+    
+    async def _find_track_in_plex(self, spotify_track: SpotifyTrack) -> Tuple[Optional[PlexTrackInfo], float]:
+        """Find a track in Plex using the same robust search approach as Download Missing Tracks"""
+        try:
+            if not self.plex_client or not self.plex_client.is_connected():
+                logger.warning("Plex client not connected")
+                return None, 0.0
+            
+            # Use same robust search logic as PlaylistTrackAnalysisWorker
+            original_title = spotify_track.name
+            
+            # Create title variations
+            unique_title_variations = []
+            original_clean = self.matching_engine.get_core_string(original_title)
+            unique_title_variations.append(original_clean)
+            
+            # Add cleaned version
+            cleaned_version = self.matching_engine.clean_title(original_title)
+            if cleaned_version != original_clean:
+                unique_title_variations.append(cleaned_version)
+            
+            all_potential_matches = []
+            found_match_ids = set()
+            
+            # Search by artist + title combinations
+            for artist in spotify_track.artists[:2]:  # Limit to first 2 artists
+                if self._cancelled:
+                    return None, 0.0
+                
+                artist_name = self.matching_engine.clean_artist(artist)
+                
+                for query_title in unique_title_variations:
+                    if self._cancelled:
+                        return None, 0.0
+                    
+                    potential_plex_matches = self.plex_client.search_tracks(
+                        title=query_title,
+                        artist=artist_name,
+                        limit=15
+                    )
+                    
+                    for track in potential_plex_matches:
+                        if track.id not in found_match_ids:
+                            all_potential_matches.append(track)
+                            found_match_ids.add(track.id)
+                
+                # Early exit check for confident match
+                if all_potential_matches:
+                    match_result = self.matching_engine.find_best_match(spotify_track, all_potential_matches)
+                    if match_result.is_match:
+                        logger.debug(f"Early confident match found for '{original_title}'")
+                        return match_result.plex_track, match_result.confidence
+            
+            # Fallback: Title-only search
+            if not all_potential_matches:
+                logger.debug(f"No artist-based matches found. Using title-only fallback for '{original_title}'")
+                for query_title in unique_title_variations:
+                    title_only_matches = self.plex_client.search_tracks(title=query_title, artist="", limit=10)
+                    for track in title_only_matches:
+                        if track.id not in found_match_ids:
+                            all_potential_matches.append(track)
+                            found_match_ids.add(track.id)
+            
+            if not all_potential_matches:
+                logger.debug(f"No Plex candidates found for '{original_title}'")
+                return None, 0.0
+            
+            # Final scoring
+            final_match_result = self.matching_engine.find_best_match(spotify_track, all_potential_matches)
+            
+            if final_match_result.is_match:
+                logger.debug(f"Match found for '{original_title}': '{final_match_result.plex_track.title}' (confidence: {final_match_result.confidence:.2f})")
+            else:
+                logger.debug(f"No confident match for '{original_title}' (best score: {final_match_result.confidence:.2f})")
+            
+            return final_match_result.plex_track, final_match_result.confidence
+            
+        except Exception as e:
+            logger.error(f"Error searching for track '{spotify_track.name}': {e}")
+            return None, 0.0
     
     async def sync_multiple_playlists(self, playlist_names: List[str], download_missing: bool = False) -> List[SyncResult]:
         results = []
@@ -169,7 +320,7 @@ class PlaylistSyncService:
         
         for match_result in unmatched_tracks:
             try:
-                query = matching_engine.generate_download_query(match_result.spotify_track)
+                query = self.matching_engine.generate_download_query(match_result.spotify_track)
                 logger.info(f"Attempting to download: {query}")
                 
                 download_id = await self.soulseek_client.search_and_download_best(query)
@@ -207,12 +358,12 @@ class PlaylistSyncService:
             
             plex_tracks = self.plex_client.search_tracks("", limit=1000)
             
-            match_results = matching_engine.match_playlist_tracks(
+            match_results = self.matching_engine.match_playlist_tracks(
                 spotify_playlist.tracks, 
                 plex_tracks
             )
             
-            stats = matching_engine.get_match_statistics(match_results)
+            stats = self.matching_engine.get_match_statistics(match_results)
             
             preview = {
                 "playlist_name": playlist_name,

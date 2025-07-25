@@ -178,24 +178,83 @@ class PlexClient:
             logger.error(f"Error fetching playlist '{name}': {e}")
             return None
     
-    def create_playlist(self, name: str, tracks: List[PlexTrackInfo]) -> bool:
+    def create_playlist(self, name: str, tracks) -> bool:
         if not self.ensure_connection():
             logger.error("Not connected to Plex server")
             return False
         
         try:
+            # Handle both PlexTrackInfo objects and actual Plex track objects
             plex_tracks = []
-            for track_info in tracks:
-                plex_track = self._find_track(track_info.title, track_info.artist, track_info.album)
-                if plex_track:
-                    plex_tracks.append(plex_track)
-                else:
-                    logger.warning(f"Track not found in Plex: {track_info.title} by {track_info.artist}")
+            for track in tracks:
+                if hasattr(track, 'ratingKey'):
+                    # This is already a Plex track object
+                    plex_tracks.append(track)
+                elif hasattr(track, '_original_plex_track'):
+                    # This is a PlexTrackInfo object with stored original track reference
+                    original_track = track._original_plex_track
+                    if original_track is not None:
+                        plex_tracks.append(original_track)
+                        logger.debug(f"Using stored track reference for: {track.title} by {track.artist} (ratingKey: {original_track.ratingKey})")
+                    else:
+                        logger.warning(f"Stored track reference is None for: {track.title} by {track.artist}")
+                elif hasattr(track, 'title'):
+                    # Fallback: This is a PlexTrackInfo object, need to find the actual track
+                    plex_track = self._find_track(track.title, track.artist, track.album)
+                    if plex_track:
+                        plex_tracks.append(plex_track)
+                    else:
+                        logger.warning(f"Track not found in Plex: {track.title} by {track.artist}")
+            
+            logger.info(f"Processed {len(tracks)} input tracks, resulting in {len(plex_tracks)} valid Plex tracks for playlist '{name}'")
             
             if plex_tracks:
-                playlist = self.server.createPlaylist(name, plex_tracks)
-                logger.info(f"Created playlist '{name}' with {len(plex_tracks)} tracks")
-                return True
+                # Additional validation
+                valid_tracks = [t for t in plex_tracks if t is not None and hasattr(t, 'ratingKey')]
+                logger.info(f"Final validation: {len(valid_tracks)} valid tracks with ratingKeys")
+                
+                if valid_tracks:
+                    # Debug the track objects before creating playlist
+                    logger.debug(f"About to create playlist with tracks:")
+                    for i, track in enumerate(valid_tracks):
+                        logger.debug(f"  Track {i+1}: {track.title} (type: {type(track)}, ratingKey: {track.ratingKey})")
+                    
+                    try:
+                        playlist = self.server.createPlaylist(name, valid_tracks)
+                        logger.info(f"Created playlist '{name}' with {len(valid_tracks)} tracks")
+                        return True
+                    except Exception as create_error:
+                        logger.error(f"CreatePlaylist failed: {create_error}")
+                        # Try alternative approach - pass items as list
+                        try:
+                            playlist = self.server.createPlaylist(name, items=valid_tracks)
+                            logger.info(f"Created playlist '{name}' with {len(valid_tracks)} tracks (using items parameter)")
+                            return True
+                        except Exception as alt_error:
+                            logger.error(f"Alternative createPlaylist also failed: {alt_error}")
+                            # Try creating empty playlist first, then adding tracks
+                            try:
+                                logger.debug("Trying to create empty playlist first, then add tracks...")
+                                playlist = self.server.createPlaylist(name, [])
+                                playlist.addItems(valid_tracks)
+                                logger.info(f"Created empty playlist and added {len(valid_tracks)} tracks")
+                                return True
+                            except Exception as empty_error:
+                                logger.error(f"Empty playlist approach also failed: {empty_error}")
+                                # Final attempt: Create with first item, then add the rest
+                                try:
+                                    logger.debug("Trying to create playlist with first track, then add remaining...")
+                                    playlist = self.server.createPlaylist(name, valid_tracks[0])
+                                    if len(valid_tracks) > 1:
+                                        playlist.addItems(valid_tracks[1:])
+                                    logger.info(f"Created playlist with first track and added {len(valid_tracks)-1} more tracks")
+                                    return True
+                                except Exception as final_error:
+                                    logger.error(f"Final playlist creation attempt failed: {final_error}")
+                                    raise create_error
+                else:
+                    logger.error(f"No valid tracks with ratingKeys for playlist '{name}'")
+                    return False
             else:
                 logger.error(f"No tracks found for playlist '{name}'")
                 return False
@@ -283,7 +342,15 @@ class PlexClient:
             # --- Early Exit: If Stage 1 found results, stop here ---
             if candidate_tracks:
                 logger.info(f"Found {len(candidate_tracks)} candidates in Stage 1. Exiting early.")
-                return [PlexTrackInfo.from_plex_track(track) for track in candidate_tracks[:limit]]
+                tracks = [PlexTrackInfo.from_plex_track(track) for track in candidate_tracks[:limit]]
+                # Store references to original tracks for playlist creation
+                for i, track_info in enumerate(tracks):
+                    if i < len(candidate_tracks):
+                        track_info._original_plex_track = candidate_tracks[i]
+                        logger.debug(f"Stored original track reference for '{track_info.title}' (ratingKey: {candidate_tracks[i].ratingKey})")
+                    else:
+                        logger.warning(f"Index mismatch: cannot store original track for '{track_info.title}'")
+                return tracks
 
             # --- Stage 2: Flexible Keyword Search (Artist + Title combined) ---
             search_query = f"{artist} {title}".strip()
@@ -294,7 +361,15 @@ class PlexClient:
             # --- Early Exit: If Stage 2 found results, stop here ---
             if candidate_tracks:
                 logger.info(f"Found {len(candidate_tracks)} candidates in Stage 2. Exiting early.")
-                return [PlexTrackInfo.from_plex_track(track) for track in candidate_tracks[:limit]]
+                tracks = [PlexTrackInfo.from_plex_track(track) for track in candidate_tracks[:limit]]
+                # Store references to original tracks for playlist creation
+                for i, track_info in enumerate(tracks):
+                    if i < len(candidate_tracks):
+                        track_info._original_plex_track = candidate_tracks[i]
+                        logger.debug(f"Stored original track reference for '{track_info.title}' (ratingKey: {candidate_tracks[i].ratingKey})")
+                    else:
+                        logger.warning(f"Index mismatch: cannot store original track for '{track_info.title}'")
+                return tracks
 
             # --- Stage 3: Title-Only Fallback Search ---
             logger.debug(f"Stage 3: Performing title-only search for '{title}'")
@@ -302,6 +377,14 @@ class PlexClient:
             add_candidates(stage3_results)
             
             tracks = [PlexTrackInfo.from_plex_track(track) for track in candidate_tracks[:limit]]
+    
+            # Store references to original tracks for playlist creation
+            for i, track_info in enumerate(tracks):
+                if i < len(candidate_tracks):
+                    track_info._original_plex_track = candidate_tracks[i]
+                    logger.debug(f"Stored original track reference for '{track_info.title}' (ratingKey: {candidate_tracks[i].ratingKey})")
+                else:
+                    logger.warning(f"Index mismatch: cannot store original track for '{track_info.title}'")
     
             if tracks:
                 logger.info(f"Found {len(tracks)} total potential matches for '{title}' by '{artist}' after all stages.")

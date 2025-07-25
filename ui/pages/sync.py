@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import List, Optional
 from core.soulseek_client import TrackResult
 import re
+import asyncio
 from core.matching_engine import MusicMatchingEngine
 
 def clean_track_name_for_search(track_name):
@@ -454,6 +455,66 @@ class TrackLoadingWorker(QRunnable):
                 # Emit error signal only if not cancelled
                 self.signals.loading_failed.emit(self.playlist_id, str(e))
 
+class SyncWorkerSignals(QObject):
+    """Signals for sync worker"""
+    progress = pyqtSignal(object)  # SyncProgress
+    finished = pyqtSignal(object)  # SyncResult
+    error = pyqtSignal(str)
+
+class SyncWorker(QRunnable):
+    """Background worker for playlist synchronization with real-time progress callbacks"""
+    
+    def __init__(self, playlist, sync_service, progress_callback=None):
+        super().__init__()
+        self.playlist = playlist
+        self.sync_service = sync_service
+        self.progress_callback = progress_callback
+        self.signals = SyncWorkerSignals()
+        self._cancelled = False
+        
+        # Connect progress callback
+        if progress_callback:
+            self.signals.progress.connect(progress_callback)
+    
+    def cancel(self):
+        """Cancel the sync operation"""
+        self._cancelled = True
+        if hasattr(self.sync_service, 'cancel_sync'):
+            self.sync_service.cancel_sync()
+    
+    def run(self):
+        """Execute the sync operation"""
+        try:
+            if self._cancelled:
+                return
+            
+            # Set up progress callback for sync service
+            def on_progress(progress):
+                if not self._cancelled:
+                    self.signals.progress.emit(progress)
+            
+            self.sync_service.set_progress_callback(on_progress)
+            
+            # Create new event loop for this thread
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            try:
+                # Run sync with playlist object
+                result = loop.run_until_complete(
+                    self.sync_service.sync_playlist(self.playlist, download_missing=False)
+                )
+                
+                if not self._cancelled:
+                    self.signals.finished.emit(result)
+                    
+            finally:
+                loop.close()
+                
+        except Exception as e:
+            if not self._cancelled:
+                self.signals.error.emit(str(e))
+
 class PlaylistDetailsModal(QDialog):
     def __init__(self, playlist, parent=None):
         super().__init__(parent)
@@ -466,7 +527,16 @@ class PlaylistDetailsModal(QDialog):
         self.fallback_pools = []
         self.is_closing = False
         
+        # Sync state tracking
+        self.is_syncing = False
+        self.sync_worker = None
+        self.sync_status_widget = None
+        self.sync_button = None
+        
         self.setup_ui()
+        
+        # Restore sync state if playlist is currently syncing
+        self.restore_sync_state()
         
         # Load tracks asynchronously if not already cached
         if not self.playlist.tracks and self.spotify_client:
@@ -623,10 +693,132 @@ class PlaylistDetailsModal(QDialog):
         info_layout.addWidget(status)
         info_layout.addStretch()
         
+        # Sync status display (hidden by default)
+        self.sync_status_widget = self.create_sync_status_display()
+        info_layout.addWidget(self.sync_status_widget)
+        
         layout.addWidget(name_label)
         layout.addLayout(info_layout)
         
         return header
+    
+    def create_sync_status_display(self):
+        """Create sync status display widget (hidden by default)"""
+        sync_status = QFrame()
+        sync_status.setStyleSheet("""
+            QFrame {
+                background: rgba(29, 185, 84, 0.1);
+                border: 1px solid rgba(29, 185, 84, 0.3);
+                border-radius: 12px;
+                padding: 6px 12px;
+            }
+        """)
+        sync_status.hide()  # Hidden by default
+        
+        layout = QHBoxLayout(sync_status)
+        layout.setContentsMargins(8, 4, 8, 4)
+        layout.setSpacing(12)
+        
+        # Total tracks
+        self.total_tracks_label = QLabel("📀 0")
+        self.total_tracks_label.setFont(QFont("SF Pro Text", 12, QFont.Weight.Medium))
+        self.total_tracks_label.setStyleSheet("color: #ffffff; background: transparent; border: none;")
+        
+        # Matched tracks
+        self.matched_tracks_label = QLabel("✅ 0")
+        self.matched_tracks_label.setFont(QFont("SF Pro Text", 12, QFont.Weight.Medium))
+        self.matched_tracks_label.setStyleSheet("color: #1db954; background: transparent; border: none;")
+        
+        # Failed tracks
+        self.failed_tracks_label = QLabel("❌ 0")
+        self.failed_tracks_label.setFont(QFont("SF Pro Text", 12, QFont.Weight.Medium))
+        self.failed_tracks_label.setStyleSheet("color: #e22134; background: transparent; border: none;")
+        
+        # Percentage
+        self.percentage_label = QLabel("0%")
+        self.percentage_label.setFont(QFont("SF Pro Text", 12, QFont.Weight.Bold))
+        self.percentage_label.setStyleSheet("color: #1db954; background: transparent; border: none;")
+        
+        layout.addWidget(self.total_tracks_label)
+        layout.addWidget(self.matched_tracks_label)
+        layout.addWidget(self.failed_tracks_label)
+        layout.addWidget(self.percentage_label)
+        
+        return sync_status
+    
+    def update_sync_status(self, total_tracks=0, matched_tracks=0, failed_tracks=0):
+        """Update sync status display"""
+        if self.sync_status_widget:
+            self.total_tracks_label.setText(f"📀 {total_tracks}")
+            self.matched_tracks_label.setText(f"✅ {matched_tracks}")
+            self.failed_tracks_label.setText(f"❌ {failed_tracks}")
+            
+            if total_tracks > 0:
+                percentage = int((matched_tracks / total_tracks) * 100)
+                self.percentage_label.setText(f"{percentage}%")
+            else:
+                self.percentage_label.setText("0%")
+    
+    def set_sync_button_state(self, is_syncing):
+        """Update sync button appearance based on sync state"""
+        if self.sync_button:
+            if is_syncing:
+                # Change to Cancel Sync with red styling
+                self.sync_button.setText("Cancel Sync")
+                self.sync_button.setStyleSheet("""
+                    QPushButton {
+                        background: #e22134;
+                        border: none;
+                        border-radius: 22px;
+                        color: #ffffff;
+                        font-size: 13px;
+                        font-weight: 600;
+                        font-family: 'SF Pro Text';
+                    }
+                    QPushButton:hover {
+                        background: #f44336;
+                    }
+                    QPushButton:pressed {
+                        background: #c62828;
+                    }
+                """)
+            else:
+                # Change back to Sync This Playlist with green styling
+                self.sync_button.setText("Sync This Playlist")
+                self.sync_button.setStyleSheet("""
+                    QPushButton {
+                        background: #1db954;
+                        border: none;
+                        border-radius: 22px;
+                        color: #ffffff;
+                        font-size: 13px;
+                        font-weight: 600;
+                        font-family: 'SF Pro Text';
+                    }
+                    QPushButton:hover {
+                        background: #1ed760;
+                    }
+                    QPushButton:pressed {
+                        background: #169c46;
+                    }
+                """)
+    
+    def restore_sync_state(self):
+        """Restore sync state when modal is reopened"""
+        # Find corresponding playlist item to check if sync is ongoing
+        playlist_item = self.parent_page.find_playlist_item_widget(self.playlist.id)
+        if playlist_item and playlist_item.is_syncing:
+            self.is_syncing = True
+            self.set_sync_button_state(True)
+            
+            # Show sync status widget with current progress
+            if self.sync_status_widget:
+                self.sync_status_widget.show()
+                self.update_sync_status(
+                    playlist_item.sync_total_tracks,
+                    playlist_item.sync_matched_tracks,
+                    playlist_item.sync_failed_tracks
+                )
     
     def create_track_list(self):
         container = QFrame()
@@ -820,10 +1012,10 @@ class PlaylistDetailsModal(QDialog):
             }
         """)
         
-        # Sync button with primary styling
-        sync_btn = QPushButton("Sync This Playlist")
-        sync_btn.setFixedSize(160, 44)
-        sync_btn.setStyleSheet("""
+        # Sync button with primary styling (store reference for state management)
+        self.sync_button = QPushButton("Sync This Playlist")
+        self.sync_button.setFixedSize(160, 44)
+        self.sync_button.setStyleSheet("""
             QPushButton {
                 background: #1db954;
                 border: none;
@@ -843,12 +1035,12 @@ class PlaylistDetailsModal(QDialog):
         
         # Connect button signals
         download_btn.clicked.connect(self.on_download_missing_tracks_clicked)
-        sync_btn.clicked.connect(self.on_sync_playlist_clicked)
+        self.sync_button.clicked.connect(self.on_sync_playlist_clicked)
         
         button_layout.addStretch()
         button_layout.addWidget(close_btn)
         button_layout.addWidget(download_btn)
-        button_layout.addWidget(sync_btn)
+        button_layout.addWidget(self.sync_button)
         
         return button_layout
     
@@ -903,6 +1095,11 @@ class PlaylistDetailsModal(QDialog):
     
     def on_sync_playlist_clicked(self):
         """Handle Sync This Playlist button click"""
+        if self.is_syncing:
+            # Cancel sync
+            self.cancel_sync()
+            return
+        
         if not self.playlist:
             QMessageBox.warning(self, "Error", "No playlist selected")
             return
@@ -921,75 +1118,119 @@ class PlaylistDetailsModal(QDialog):
                 self.parent_page.soulseek_client
             )
         
-        # Set up progress callback to update console
-        self.parent_page.sync_service.set_progress_callback(self.on_sync_progress)
+        # Start sync
+        self.start_sync()
+
+    def start_sync(self):
+        """Start playlist sync operation"""
+        self.is_syncing = True
         
-        # Add initial console log
-        self.parent_page.log_area.append(f"🔄 Starting sync for playlist: {self.playlist.name}")
+        # Update button state
+        self.set_sync_button_state(True)
         
-        # Start sync in background thread
-        self.start_sync_thread()
+        # Show sync status widget
+        if self.sync_status_widget:
+            self.sync_status_widget.show()
+            self.update_sync_status(len(self.playlist.tracks), 0, 0)
         
-        # Close modal to return to main view
-        self.accept()
-    
-    def on_sync_progress(self, progress):
-        """Handle sync progress updates and forward to console"""
-        if hasattr(self.parent_page, 'log_area'):
-            progress_msg = f"⏳ {progress.current_step}"
-            if progress.current_track:
-                progress_msg += f" - {progress.current_track}"
-            progress_msg += f" ({progress.progress:.1f}%)"
-            self.parent_page.log_area.append(progress_msg)
-    
-    def start_sync_thread(self):
-        """Start playlist sync in a background thread"""
-        import asyncio
-        from PyQt6.QtCore import QRunnable, QObject, pyqtSignal
+        # Find corresponding playlist item and update its status
+        playlist_item = self.parent_page.find_playlist_item_widget(self.playlist.id)
+        if playlist_item:
+            playlist_item.is_syncing = True
+            playlist_item.update_sync_status(len(self.playlist.tracks), 0, 0)
         
-        class SyncWorkerSignals(QObject):
-            finished = pyqtSignal(object)  # SyncResult
-            error = pyqtSignal(str)
+        # Create and configure sync worker
+        self.sync_worker = SyncWorker(
+            playlist=self.playlist,
+            sync_service=self.parent_page.sync_service,
+            progress_callback=self.on_sync_progress
+        )
         
-        class SyncWorker(QRunnable):
-            def __init__(self, sync_service, playlist_name):
-                super().__init__()
-                self.sync_service = sync_service
-                self.playlist_name = playlist_name
-                self.signals = SyncWorkerSignals()
-            
-            def run(self):
-                try:
-                    # Create new event loop for this thread
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    
-                    # Run sync
-                    result = loop.run_until_complete(
-                        self.sync_service.sync_playlist(self.playlist_name, download_missing=False)
-                    )
-                    
-                    loop.close()
-                    self.signals.finished.emit(result)
-                    
-                except Exception as e:
-                    self.signals.error.emit(str(e))
+        # Connect worker signals
+        self.sync_worker.signals.finished.connect(self.on_sync_finished)
+        self.sync_worker.signals.error.connect(self.on_sync_error)
         
-        # Create and start worker
-        worker = SyncWorker(self.parent_page.sync_service, self.playlist.name)
-        worker.signals.finished.connect(self.on_sync_finished)
-        worker.signals.error.connect(self.on_sync_error)
+        # Track worker for cleanup
+        self.active_workers.append(self.sync_worker)
         
         # Submit to thread pool
         if hasattr(self.parent_page, 'thread_pool'):
-            self.parent_page.thread_pool.start(worker)
+            self.parent_page.thread_pool.start(self.sync_worker)
         else:
-            # Create fallback thread pool
+            # Create and track fallback thread pool
             thread_pool = QThreadPool()
-            thread_pool.start(worker)
-    
+            self.fallback_pools.append(thread_pool)
+            thread_pool.start(self.sync_worker)
+        
+        # Log start of sync
+        if hasattr(self.parent_page, 'log_area'):
+            self.parent_page.log_area.append(f"🔄 Starting sync for playlist: {self.playlist.name}")
+
+    def cancel_sync(self):
+        """Cancel ongoing sync operation"""
+        if self.sync_worker:
+            self.sync_worker.cancel()
+        
+        self.is_syncing = False
+        
+        # Update button state
+        self.set_sync_button_state(False)
+        
+        # Hide sync status widget
+        if self.sync_status_widget:
+            self.sync_status_widget.hide()
+        
+        # Find corresponding playlist item and update its status
+        playlist_item = self.parent_page.find_playlist_item_widget(self.playlist.id)
+        if playlist_item:
+            playlist_item.is_syncing = False
+            if playlist_item.sync_status_widget:
+                playlist_item.sync_status_widget.hide()
+
+    def on_sync_progress(self, progress):
+        """Handle sync progress updates"""
+        # Update modal status display
+        self.update_sync_status(
+            progress.total_tracks,
+            progress.matched_tracks,
+            progress.failed_tracks
+        )
+        
+        # Find corresponding playlist item and update its status
+        playlist_item = self.parent_page.find_playlist_item_widget(self.playlist.id)
+        if playlist_item:
+            playlist_item.update_sync_status(
+                progress.total_tracks,
+                progress.matched_tracks,
+                progress.failed_tracks
+            )
+
     def on_sync_finished(self, result):
         """Handle sync completion"""
+        self.is_syncing = False
+        self.sync_worker = None
+        
+        # Update button state
+        self.set_sync_button_state(False)
+        
+        # Update final status
+        self.update_sync_status(
+            result.total_tracks,
+            result.matched_tracks,
+            result.failed_tracks
+        )
+        
+        # Find corresponding playlist item and update its status
+        playlist_item = self.parent_page.find_playlist_item_widget(self.playlist.id)
+        if playlist_item:
+            playlist_item.is_syncing = False
+            playlist_item.update_sync_status(
+                result.total_tracks,
+                result.matched_tracks,
+                result.failed_tracks
+            )
+        
+        # Log completion
         if hasattr(self.parent_page, 'log_area'):
             success_rate = result.success_rate
             msg = f"✅ Sync complete: {result.synced_tracks}/{result.total_tracks} tracks synced ({success_rate:.1f}%)"
@@ -1001,12 +1242,32 @@ class PlaylistDetailsModal(QDialog):
             if result.errors:
                 for error in result.errors:
                     self.parent_page.log_area.append(f"❌ Error: {error}")
-    
-    def on_sync_error(self, error):
+
+    def on_sync_error(self, error_msg):
         """Handle sync error"""
+        self.is_syncing = False
+        self.sync_worker = None
+        
+        # Update button state
+        self.set_sync_button_state(False)
+        
+        # Hide sync status widget
+        if self.sync_status_widget:
+            self.sync_status_widget.hide()
+        
+        # Find corresponding playlist item and update its status
+        playlist_item = self.parent_page.find_playlist_item_widget(self.playlist.id)
+        if playlist_item:
+            playlist_item.is_syncing = False
+            if playlist_item.sync_status_widget:
+                playlist_item.sync_status_widget.hide()
+        
+        # Log error
         if hasattr(self.parent_page, 'log_area'):
-            self.parent_page.log_area.append(f"❌ Sync failed: {error}")
-        QMessageBox.critical(self, "Sync Error", f"Sync failed: {error}")
+            self.parent_page.log_area.append(f"❌ Sync failed: {error_msg}")
+        
+        # Show error message
+        QMessageBox.critical(self, "Sync Failed", f"Sync failed: {error_msg}")
     
     def start_playlist_missing_tracks_download(self):
         """Start the process of downloading missing tracks from playlist"""
@@ -1203,6 +1464,14 @@ class PlaylistItem(QFrame):
         self.playlist = playlist
         self.is_selected = False
         self.download_modal = None # This line is new
+        
+        # Sync state tracking
+        self.is_syncing = False
+        self.sync_total_tracks = 0
+        self.sync_matched_tracks = 0
+        self.sync_failed_tracks = 0
+        self.sync_status_widget = None
+        
         self.setup_ui()
     
     def setup_ui(self):
@@ -1319,12 +1588,83 @@ class PlaylistItem(QFrame):
         # Store reference to the download modal
         self.download_modal = None
         
+        # Create compact sync status display (hidden by default)
+        self.sync_status_widget = self.create_compact_sync_status()
+        
         layout.addWidget(self.checkbox)
         layout.addLayout(content_layout)
         layout.addStretch()
+        layout.addWidget(self.sync_status_widget)
         layout.addWidget(self.action_btn)
         layout.addWidget(self.status_label)
     
+    def create_compact_sync_status(self):
+        """Create compact sync status display for playlist item"""
+        sync_status = QFrame()
+        sync_status.setFixedHeight(30)
+        sync_status.setStyleSheet("""
+            QFrame {
+                background: rgba(29, 185, 84, 0.1);
+                border: 1px solid rgba(29, 185, 84, 0.3);
+                border-radius: 15px;
+                padding: 4px 8px;
+            }
+        """)
+        sync_status.hide()  # Hidden by default
+        
+        layout = QHBoxLayout(sync_status)
+        layout.setContentsMargins(6, 2, 6, 2)
+        layout.setSpacing(6)
+        
+        # Total tracks
+        self.item_total_tracks_label = QLabel("📀 0")
+        self.item_total_tracks_label.setFont(QFont("SF Pro Text", 9, QFont.Weight.Medium))
+        self.item_total_tracks_label.setStyleSheet("color: #ffffff; background: transparent; border: none;")
+        
+        # Matched tracks
+        self.item_matched_tracks_label = QLabel("✅ 0")
+        self.item_matched_tracks_label.setFont(QFont("SF Pro Text", 9, QFont.Weight.Medium))
+        self.item_matched_tracks_label.setStyleSheet("color: #1db954; background: transparent; border: none;")
+        
+        # Failed tracks
+        self.item_failed_tracks_label = QLabel("❌ 0")
+        self.item_failed_tracks_label.setFont(QFont("SF Pro Text", 9, QFont.Weight.Medium))
+        self.item_failed_tracks_label.setStyleSheet("color: #e22134; background: transparent; border: none;")
+        
+        # Percentage
+        self.item_percentage_label = QLabel("0%")
+        self.item_percentage_label.setFont(QFont("SF Pro Text", 9, QFont.Weight.Bold))
+        self.item_percentage_label.setStyleSheet("color: #1db954; background: transparent; border: none;")
+        
+        layout.addWidget(self.item_total_tracks_label)
+        layout.addWidget(self.item_matched_tracks_label)
+        layout.addWidget(self.item_failed_tracks_label)
+        layout.addWidget(self.item_percentage_label)
+        
+        return sync_status
+    
+    def update_sync_status(self, total_tracks=0, matched_tracks=0, failed_tracks=0):
+        """Update sync status display for playlist item"""
+        self.sync_total_tracks = total_tracks
+        self.sync_matched_tracks = matched_tracks
+        self.sync_failed_tracks = failed_tracks
+        
+        if self.sync_status_widget and hasattr(self, 'item_total_tracks_label'):
+            self.item_total_tracks_label.setText(f"📀 {total_tracks}")
+            self.item_matched_tracks_label.setText(f"✅ {matched_tracks}")
+            self.item_failed_tracks_label.setText(f"❌ {failed_tracks}")
+            
+            if total_tracks > 0:
+                percentage = int((matched_tracks / total_tracks) * 100)
+                self.item_percentage_label.setText(f"{percentage}%")
+            else:
+                self.item_percentage_label.setText("0%")
+            
+            # Show/hide based on sync state
+            if total_tracks > 0 or self.is_syncing:
+                self.sync_status_widget.show()
+            else:
+                self.sync_status_widget.hide()
 
     def show_operation_status(self, status_text="View Progress"):
         """Changes the button to show an operation is in progress."""
