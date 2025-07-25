@@ -6,6 +6,8 @@ from unidecode import unidecode
 from utils.logging_config import get_logger
 from core.spotify_client import Track as SpotifyTrack
 from core.plex_client import PlexTrackInfo
+from core.soulseek_client import TrackResult
+
 
 logger = get_logger("matching_engine")
 
@@ -181,3 +183,80 @@ class MusicMatchingEngine:
         else:
             # Fallback to just track name if no artist
             return self.clean_title(spotify_track.name)
+        
+    
+    def calculate_slskd_match_confidence(self, spotify_track: SpotifyTrack, slskd_track: TrackResult) -> float:
+        """
+        Calculates a confidence score for a Soulseek track against a Spotify track.
+        This is the core of the new matching logic.
+        """
+        # Normalize the Spotify track info once for efficiency
+        spotify_title_norm = self.normalize_string(spotify_track.name)
+        spotify_artists_norm = [self.normalize_string(a) for a in spotify_track.artists]
+
+        # The slskd filename is our primary source of truth, so normalize it
+        slskd_filename_norm = self.normalize_string(slskd_track.filename)
+
+        # 1. Title Score: How well does the Spotify title appear in the filename?
+        # We use the cleaned, core title for a strict check. This avoids matching remixes.
+        spotify_cleaned_title = self.clean_title(spotify_track.name)
+        title_score = 0.0
+        if spotify_cleaned_title in slskd_filename_norm:
+            title_score = 0.9  # High score for direct inclusion
+            # Bonus for being a standalone word/phrase, penalizing partial matches like 'in' in 'finland'
+            if re.search(r'\b' + re.escape(spotify_cleaned_title) + r'\b', slskd_filename_norm):
+                 title_score = 1.0
+        
+        # 2. Artist Score: How well do the Spotify artists appear in the filename?
+        artist_score = 0.0
+        for artist in spotify_artists_norm:
+            if artist in slskd_filename_norm:
+                artist_score = 1.0 # Perfect match if any artist is found
+                break
+        
+        # 3. Duration Score: How similar are the track lengths?
+        # We give this a lower weight as slskd duration data can be unreliable.
+        duration_score = self.duration_similarity(spotify_track.duration_ms, slskd_track.duration if slskd_track.duration else 0)
+
+        # 4. Quality Bonus: Add a small bonus for higher quality formats
+        quality_bonus = 0.0
+        if slskd_track.quality:
+            if slskd_track.quality.lower() == 'flac':
+                quality_bonus = 0.1
+            elif slskd_track.quality.lower() == 'mp3' and (slskd_track.bitrate or 0) >= 320:
+                quality_bonus = 0.05
+
+        # --- Final Weighted Score ---
+        # Title and Artist are the most important factors for an accurate match.
+        final_confidence = (title_score * 0.60) + (artist_score * 0.35) + (duration_score * 0.05)
+        
+        # Add the quality bonus to the final score
+        final_confidence += quality_bonus
+        
+        # Ensure the final score doesn't exceed 1.0
+        return min(final_confidence, 1.0)
+
+
+    def find_best_slskd_matches(self, spotify_track: SpotifyTrack, slskd_results: List[TrackResult]) -> List[TrackResult]:
+        """
+        Scores and sorts a list of Soulseek results against a Spotify track.
+        Returns the list of candidates sorted from best to worst match.
+        """
+        if not slskd_results:
+            return []
+
+        scored_results = []
+        for slskd_track in slskd_results:
+            confidence = self.calculate_slskd_match_confidence(spotify_track, slskd_track)
+            # We temporarily store the confidence score on the object itself for sorting
+            slskd_track.confidence = confidence 
+            scored_results.append(slskd_track)
+
+        # Sort by confidence score (descending), and then by size as a tie-breaker
+        sorted_results = sorted(scored_results, key=lambda r: (r.confidence, r.size), reverse=True)
+        
+        # Filter out very low-confidence results to avoid bad matches.
+        # A threshold of 0.6 means the title and artist had to have some reasonable similarity.
+        confident_results = [r for r in sorted_results if r.confidence > 0.6]
+
+        return confident_results

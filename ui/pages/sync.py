@@ -3443,7 +3443,7 @@ class DownloadMissingTracksModal(QDialog):
         self.playlist_item = playlist_item
         self.parent_page = parent_page
         self.downloads_page = downloads_page
-        
+        self.matching_engine = MusicMatchingEngine()
         # State tracking
         self.total_tracks = len(playlist.tracks)
         self.matched_tracks_count = 0
@@ -4374,9 +4374,25 @@ class DownloadMissingTracksModal(QDialog):
                 if loop: loop.close()
 
     def get_valid_candidates(self, results, spotify_track, query):
-        """Get all valid candidates sorted by score (for retry mechanism)"""
-        # This is a simplified version for brevity. The full scoring logic should be here.
-        return sorted(results, key=lambda r: r.size, reverse=True)
+        """
+        Scores and filters search results using the MusicMatchingEngine to find the best candidates.
+        This replaces the simple size-based sorting with intelligent, confidence-based scoring.
+        """
+        if not results:
+            return []
+
+        # Use the new matching engine function to score, filter, and sort the results.
+        # This returns a list of SlskdTrack objects with a 'confidence' attribute,
+        # already sorted from best to worst and filtered by our confidence threshold.
+        confident_matches = self.matching_engine.find_best_slskd_matches(spotify_track, results)
+
+        if confident_matches:
+            best_confidence = confident_matches[0].confidence
+            print(f"✅ Found {len(confident_matches)} confident matches for '{spotify_track.name}'. Best score: {best_confidence:.2f} from query '{query}'")
+        else:
+            print(f"⚠️ No confident matches found for '{spotify_track.name}' from query '{query}'.")
+
+        return confident_matches
 
     def create_spotify_based_search_result_from_validation(self, slskd_result, spotify_metadata):
         """Create SpotifyBasedSearchResult from validation results"""
