@@ -1952,7 +1952,8 @@ class SyncPage(QWidget):
         self.track_cache = {}  # playlist_id -> tracks
         
         # Sync worker management 
-        self.active_sync_workers = {}  # playlist_id -> SyncWorker
+        self.active_sync_workers = {}  # playlist_id -> SyncWorker (for individual modal syncs)
+        self.sequential_sync_worker = None  # Current sequential sync worker
         
         # Selection tracking
         self.selected_playlists = set()  # Set of selected playlist IDs
@@ -2024,6 +2025,46 @@ class SyncPage(QWidget):
         
         return True
     
+    def start_sequential_playlist_sync(self, playlist):
+        """Start sync for a playlist as part of sequential sync (separate from individual syncs)"""
+        # Create sync service if not available
+        if not hasattr(self, 'sync_service'):
+            from services.sync_service import PlaylistSyncService
+            self.sync_service = PlaylistSyncService(
+                self.spotify_client,
+                self.plex_client,
+                self.soulseek_client
+            )
+        
+        # Create sync worker for sequential sync
+        sync_worker = SyncWorker(
+            playlist=playlist,
+            sync_service=self.sync_service
+        )
+        
+        # Connect worker signals for sequential sync
+        sync_worker.signals.finished.connect(lambda result: self.on_sequential_sync_finished(playlist.id, result))
+        sync_worker.signals.error.connect(lambda error: self.on_sequential_sync_error(playlist.id, error))
+        sync_worker.signals.progress.connect(lambda progress: self.on_sync_progress(playlist.id, progress))
+        
+        # Store the sequential sync worker
+        self.sequential_sync_worker = sync_worker
+        
+        # Start the worker
+        self.thread_pool.start(sync_worker)
+        
+        # Update playlist item status
+        playlist_item = self.find_playlist_item_widget(playlist.id)
+        if playlist_item:
+            playlist_item.is_syncing = True
+            playlist_item.update_sync_status(len(playlist.tracks), 0, 0)
+        
+        # Log start
+        if hasattr(self, 'log_area'):
+            self.log_area.append(f"🔄 Starting sequential sync for playlist: {playlist.name}")
+        
+        return True
+    
     def toggle_playlist_selection(self, playlist_id):
         """Toggle selection state of a playlist"""
         if playlist_id in self.selected_playlists:
@@ -2040,15 +2081,15 @@ class SyncPage(QWidget):
         """Update the selection info label and button state"""
         selected_count = len(self.selected_playlists)
         
-        print(f"Updating UI with {selected_count} selected playlists, sequential syncing: {self.is_sequential_syncing}")
+        print(f"Updating UI with {selected_count} selected playlists, sequential syncing: {self.is_sequential_syncing}, individual syncs: {len(self.active_sync_workers)}")
         
         if selected_count == 0:
             self.selection_info.setText("Select playlists to sync")
             self.start_sync_btn.setEnabled(False)
             print("Button disabled - no selection")
-        elif self.is_sequential_syncing:
-            # Don't change button state during sequential sync
-            print(f"Sequential sync in progress - keeping button as is")
+        elif self.has_active_operations():
+            # Don't change button state during any active operations
+            print(f"Active operations in progress - keeping button as is")
         elif selected_count == 1:
             self.selection_info.setText("1 playlist selected")
             self.start_sync_btn.setEnabled(True)
@@ -2061,6 +2102,11 @@ class SyncPage(QWidget):
     def start_selected_playlist_sync(self):
         """Start syncing all selected playlists sequentially"""
         if not self.selected_playlists or self.is_sequential_syncing:
+            return
+        
+        # Don't allow sequential sync if individual syncs are already running
+        if self.active_sync_workers:
+            print(f"DEBUG: Cannot start sequential sync - {len(self.active_sync_workers)} individual syncs are running")
             return
         
         # Get selected playlist objects
@@ -2098,9 +2144,9 @@ class SyncPage(QWidget):
         next_playlist = self.sequential_sync_queue.pop(0)
         print(f"DEBUG: Starting sync for next playlist: {next_playlist.name}")
         
-        # Start sync for this playlist
-        success = self.start_playlist_sync(next_playlist)
-        print(f"DEBUG: start_playlist_sync returned: {success}")
+        # Start sync for this playlist using dedicated sequential sync method
+        success = self.start_sequential_playlist_sync(next_playlist)
+        print(f"DEBUG: start_sequential_playlist_sync returned: {success}")
         if not success:
             # If sync failed to start, move to next
             print("DEBUG: Sync failed to start, moving to next playlist")
@@ -2116,6 +2162,68 @@ class SyncPage(QWidget):
         
         # Update refresh button state since sequential sync is complete
         self.update_refresh_button_state()
+    
+    def on_sequential_sync_finished(self, playlist_id, result):
+        """Handle completion of individual playlist in sequential sync"""
+        print(f"DEBUG: Sequential sync finished for playlist {playlist_id}")
+        
+        # Clear sequential sync worker
+        self.sequential_sync_worker = None
+        
+        # Update playlist item status
+        playlist_item = self.find_playlist_item_widget(playlist_id)
+        if playlist_item:
+            playlist_item.is_syncing = False
+            playlist_item.update_sync_status(
+                result.total_tracks,
+                result.matched_tracks,
+                result.failed_tracks
+            )
+            
+            # Hide status widget after completion with delay
+            QTimer.singleShot(3000, lambda: playlist_item.sync_status_widget.hide() if playlist_item.sync_status_widget else None)
+        
+        # Update any open modals
+        self.update_open_modals_completion(playlist_id, result)
+        
+        # Continue sequential sync to next playlist
+        if self.is_sequential_syncing:
+            print(f"DEBUG: Sequential sync continuing to next playlist")
+            self.process_next_in_sync_queue()
+        
+        # Log completion
+        if hasattr(self, 'log_area'):
+            success_rate = result.success_rate
+            msg = f"✅ Sequential sync complete: {result.synced_tracks}/{result.total_tracks} tracks synced ({success_rate:.1f}%)"
+            if result.failed_tracks > 0:
+                msg += f", {result.failed_tracks} failed"
+            self.log_area.append(msg)
+    
+    def on_sequential_sync_error(self, playlist_id, error_msg):
+        """Handle error in individual playlist during sequential sync"""
+        print(f"DEBUG: Sequential sync error for playlist {playlist_id}: {error_msg}")
+        
+        # Clear sequential sync worker
+        self.sequential_sync_worker = None
+        
+        # Update playlist item status
+        playlist_item = self.find_playlist_item_widget(playlist_id)
+        if playlist_item:
+            playlist_item.is_syncing = False
+            if playlist_item.sync_status_widget:
+                playlist_item.sync_status_widget.hide()
+        
+        # Update any open modals
+        self.update_open_modals_error(playlist_id, error_msg)
+        
+        # Continue sequential sync even on error
+        if self.is_sequential_syncing:
+            print(f"DEBUG: Sequential sync continuing to next playlist despite error")
+            self.process_next_in_sync_queue()
+        
+        # Log error
+        if hasattr(self, 'log_area'):
+            self.log_area.append(f"❌ Sequential sync failed: {error_msg}")
     
     def get_all_playlist_items(self):
         """Get all PlaylistItem widgets from the playlist layout"""
@@ -2815,7 +2923,7 @@ class SyncPage(QWidget):
         """Check if any sync or download operations are currently active"""
         has_downloads = bool(self.active_download_processes)
         has_individual_syncs = bool(self.active_sync_workers)
-        has_sequential_sync = self.is_sequential_syncing
+        has_sequential_sync = self.is_sequential_syncing or self.sequential_sync_worker is not None
         
         print(f"DEBUG: Active operations check - downloads: {has_downloads}, individual syncs: {has_individual_syncs}, sequential: {has_sequential_sync}")
         return has_downloads or has_individual_syncs or has_sequential_sync
