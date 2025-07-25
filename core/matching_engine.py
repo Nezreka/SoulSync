@@ -27,7 +27,7 @@ class MusicMatchingEngine:
             # General patterns to remove all content in brackets/parentheses
             r'\(.*\)',
             r'\[.*\]',
-            # General pattern to remove everything after a hyphen
+            # General pattern to remove everything after a hyphen, which is common for version info
             r'\s-\s.*',
             # Patterns to remove featuring artists from the title itself
             r'\sfeat\.?.*',
@@ -60,8 +60,16 @@ class MusicMatchingEngine:
         
         return text
     
+    def get_core_string(self, text: str) -> str:
+        """Returns a 'core' version of a string with only letters and numbers for a strict comparison."""
+        if not text:
+            return ""
+        # Transliterate, lowercase, and remove everything that isn't a letter or digit.
+        text = unidecode(text).lower()
+        return re.sub(r'[^a-z0-9]', '', text)
+
     def clean_title(self, title: str) -> str:
-        """Cleans title by removing common extra info using regex."""
+        """Cleans title by removing common extra info using regex for fuzzy matching."""
         cleaned = title
         
         for pattern in self.title_patterns:
@@ -98,48 +106,43 @@ class MusicMatchingEngine:
         return max(0, 1.0 - diff_ratio * 5)
 
     def calculate_match_confidence(self, spotify_track: SpotifyTrack, plex_track: PlexTrackInfo) -> Tuple[float, str]:
-        """Calculates a confidence score for a potential match with a more robust, prioritized logic."""
+        """Calculates a confidence score using a prioritized model, starting with a strict 'core' title check."""
         
-        spotify_title_cleaned = self.clean_title(spotify_track.name)
-        plex_title_cleaned = self.clean_title(plex_track.title)
-
-        # --- Artist Scoring ---
+        # --- Artist Scoring (calculated once) ---
         spotify_artists_cleaned = [self.clean_artist(a) for a in spotify_track.artists if a]
         plex_artist_normalized = self.normalize_string(plex_track.artist)
+        plex_artist_cleaned = self.clean_artist(plex_track.artist)
 
         best_artist_score = 0.0
         for spotify_artist in spotify_artists_cleaned:
             if spotify_artist and spotify_artist in plex_artist_normalized:
                 best_artist_score = 1.0
                 break
-            score = self.similarity_score(spotify_artist, self.clean_artist(plex_track.artist))
+            score = self.similarity_score(spotify_artist, plex_artist_cleaned)
             if score > best_artist_score:
                 best_artist_score = score
-        
         artist_score = best_artist_score
         
-        # --- Title and Duration Scoring ---
+        # --- Priority 1: Core Title Match (for exact matches like "Girls", "APT.", "LIL DEMON") ---
+        spotify_core_title = self.get_core_string(spotify_track.name)
+        plex_core_title = self.get_core_string(plex_track.title)
+
+        if spotify_core_title and spotify_core_title == plex_core_title:
+            # If the core titles are identical, we are highly confident.
+            # The final score is a high base (0.9) plus a bonus for artist similarity.
+            confidence = 0.90 + (artist_score * 0.09) # Max score of 0.99
+            return confidence, "core_title_match"
+
+        # --- Priority 2: Fuzzy Title Match (for variations, typos, etc.) ---
+        spotify_title_cleaned = self.clean_title(spotify_track.name)
+        plex_title_cleaned = self.clean_title(plex_track.title)
+        
         title_score = self.similarity_score(spotify_title_cleaned, plex_title_cleaned)
         duration_score = self.duration_similarity(spotify_track.duration_ms, plex_track.duration if plex_track.duration else 0)
-        
-        # --- Prioritized Confidence Logic ---
-        # Priority 1: Near-perfect title and artist match is a very strong signal.
-        if title_score > 0.98 and artist_score > 0.9:
-            confidence = 0.98
-            match_type = "strong_match"
-        # Priority 2: Exact title match, even with a weaker artist match, should have high confidence.
-        # This helps with short titles like "Girls" or "LIL DEMON".
-        elif title_score > 0.98:
-            confidence = 0.90 + (artist_score * 0.05) # Base of 0.9, with a small artist bonus
-            match_type = "exact_title_match"
-        # Priority 3: High title similarity is still a good indicator.
-        elif title_score > 0.9:
-            confidence = (title_score * 0.6) + (artist_score * 0.3) + (duration_score * 0.1)
-            match_type = "high_confidence"
-        # Default: Standard weighted calculation for all other cases.
-        else:
-            confidence = (title_score * 0.5) + (artist_score * 0.3) + (duration_score * 0.2)
-            match_type = "standard_match"
+
+        # Use a standard weighted calculation if the core titles didn't match
+        confidence = (title_score * 0.60) + (artist_score * 0.30) + (duration_score * 0.10)
+        match_type = "standard_match"
 
         return confidence, match_type
     
