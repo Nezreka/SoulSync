@@ -719,13 +719,13 @@ class PlaylistDetailsModal(QDialog):
                 background: rgba(29, 185, 84, 0.1);
                 border: 1px solid rgba(29, 185, 84, 0.3);
                 border-radius: 12px;
-                padding: 6px 12px;
             }
         """)
+        sync_status.setMinimumHeight(36)  # Ensure adequate height
         sync_status.hide()  # Hidden by default
         
         layout = QHBoxLayout(sync_status)
-        layout.setContentsMargins(8, 4, 8, 4)
+        layout.setContentsMargins(12, 8, 12, 8)  # Increased margins for better text visibility
         layout.setSpacing(12)
         
         # Total tracks
