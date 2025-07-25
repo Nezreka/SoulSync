@@ -120,39 +120,38 @@ class PlaylistTrackAnalysisWorker(QRunnable):
     
     def _check_track_in_plex(self, spotify_track):
         """
-        Check if a Spotify track exists in Plex by trying several search strategies
-        across ALL artists associated with the track.
+        Check if a Spotify track exists in Plex by trying a multi-stage search strategy:
+        1. Search using Artist + Title variations.
+        2. Fallback to searching with only the Title variations across the entire library.
         """
         try:
             original_title = spotify_track.name
             
             # --- Generate a list of title variations ---
             title_variations = []
-            title_variations.append(original_title) # Strategy 1: Original title
-            if " - " in original_title: # Strategy 2: Strip content after hyphen
+            title_variations.append(original_title)
+            if " - " in original_title:
                 title_variations.append(original_title.split(' - ')[0].strip())
             
-            cleaned_for_search = clean_track_name_for_search(original_title) # Strategy 3: Strip parenthetical content
+            cleaned_for_search = clean_track_name_for_search(original_title)
             if cleaned_for_search.lower() != original_title.lower():
                 title_variations.append(cleaned_for_search)
 
-            base_title = self.matching_engine.clean_title(original_title) # Strategy 4: Aggressively cleaned title
+            base_title = self.matching_engine.clean_title(original_title)
             if base_title.lower() not in [t.lower() for t in title_variations]:
                 title_variations.append(base_title)
 
             unique_title_variations = list(dict.fromkeys(title_variations))
             
-            # --- Execute searches for EACH artist and collect all potential matches ---
+            # --- Execute searches and collect all potential matches ---
             all_potential_matches = []
             found_match_ids = set()
             
-            # Use all artists from Spotify, not just the first one
+            # STAGE 1: Search with Artist + Title
             artists_to_search = spotify_track.artists if spotify_track.artists else [""]
-
             for artist_name in artists_to_search:
                 if self._cancelled: return None, 0.0
                 
-                print(f"🎤 Searching for artist: '{artist_name}'")
                 for query_title in unique_title_variations:
                     if self._cancelled: return None, 0.0
 
@@ -166,13 +165,28 @@ class PlaylistTrackAnalysisWorker(QRunnable):
                         if track.id not in found_match_ids:
                             all_potential_matches.append(track)
                             found_match_ids.add(track.id)
+
+            # STAGE 2: Fallback search with Title Only (as suggested)
+            print(f"🎤 Performing title-only fallback search for '{original_title}'")
+            for query_title in unique_title_variations:
+                if self._cancelled: return None, 0.0
+                # Pass an empty artist to trigger title-only search logic in plex_client
+                title_only_matches = self.plex_client.search_tracks(
+                    title=query_title,
+                    artist="",
+                    limit=10
+                )
+                for track in title_only_matches:
+                    if track.id not in found_match_ids:
+                        all_potential_matches.append(track)
+                        found_match_ids.add(track.id)
             
             if not all_potential_matches:
-                print(f"❌ No Plex candidates found for '{original_title}' after trying all artists and title variations.")
+                print(f"❌ No Plex candidates found for '{original_title}' after all search strategies.")
                 return None, 0.0
             
             # --- Use the matching engine to find the best match among ALL candidates ---
-            print(f"✅ Found {len(all_potential_matches)} potential Plex matches for '{original_title}'. Scoring now...")
+            print(f"✅ Found {len(all_potential_matches)} total potential Plex matches for '{original_title}'. Scoring now...")
             match_result = self.matching_engine.find_best_match(spotify_track, all_potential_matches)
             
             if match_result.is_match:
@@ -187,6 +201,8 @@ class PlaylistTrackAnalysisWorker(QRunnable):
             print(f"Error checking track in Plex: {e}")
             traceback.print_exc()
             return None, 0.0
+
+
 
 class TrackDownloadWorkerSignals(QObject):
     """Signals for track download worker"""
