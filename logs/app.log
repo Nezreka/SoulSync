@@ -5413,3 +5413,983 @@
 2025-07-24 19:37:08 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
 2025-07-24 19:37:08 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
 2025-07-24 19:37:08 - newmusic.soulseek_client - [92mINFO[0m - search:632 - Search completed. Final results: 0 tracks and 0 albums for query: Virtual Mage Signals from Space
+2025-07-24 19:47:55 - newmusic - [92mINFO[0m - setup_logging:57 - Logging initialized with level: DEBUG
+2025-07-24 19:47:55 - newmusic.main - [92mINFO[0m - main:211 - Starting NewMusic application
+2025-07-24 19:47:55 - newmusic.spotify_client - [92mINFO[0m - _setup_client:179 - Spotify client initialized (user info will be fetched when needed)
+2025-07-24 19:47:55 - newmusic.soulseek_client - [92mINFO[0m - _setup_client:220 - Soulseek client configured with slskd at http://localhost:5030
+2025-07-24 19:47:55 - newmusic.spotify_client - [92mINFO[0m - _setup_client:179 - Spotify client initialized (user info will be fetched when needed)
+2025-07-24 19:47:56 - newmusic.main - [92mINFO[0m - change_page:163 - Changed to page: dashboard
+2025-07-24 19:47:56 - newmusic.main - [92mINFO[0m - setup_media_player_connections:150 - Media player connections established between sidebar and downloads page
+2025-07-24 19:47:56 - newmusic.plex_client - [92mINFO[0m - _find_music_library:127 - Found music library: Music
+2025-07-24 19:47:56 - newmusic.plex_client - [92mINFO[0m - _setup_client:113 - Successfully connected to Plex server: PLEX-MACHINE
+2025-07-24 19:47:57 - newmusic.main - [92mINFO[0m - change_page:163 - Changed to page: sync
+2025-07-24 19:47:57 - newmusic.spotify_client - [92mINFO[0m - _ensure_user_id:195 - Successfully authenticated with Spotify as broquethomas
+2025-07-24 19:47:57 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists_metadata_only:256 - Retrieved 8 playlist metadata (first batch)
+2025-07-24 19:48:04 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:273 - Stage 1: Searching for artist 'Virtual Mage'
+2025-07-24 19:48:04 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:281 - Stage 1 found 2 candidates.
+2025-07-24 19:48:04 - newmusic.plex_client - [92mINFO[0m - search_tracks:285 - Found 2 candidates in Stage 1. Exiting early.
+2025-07-24 19:48:04 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:273 - Stage 1: Searching for artist 'Virtual Mage'
+2025-07-24 19:48:04 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:281 - Stage 1 found 2 candidates.
+2025-07-24 19:48:04 - newmusic.plex_client - [92mINFO[0m - search_tracks:285 - Found 2 candidates in Stage 1. Exiting early.
+2025-07-24 19:48:04 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:273 - Stage 1: Searching for artist 'Virtual Mage'
+2025-07-24 19:48:04 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:281 - Stage 1 found 2 candidates.
+2025-07-24 19:48:04 - newmusic.plex_client - [92mINFO[0m - search_tracks:285 - Found 2 candidates in Stage 1. Exiting early.
+2025-07-24 19:48:08 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists_metadata_only:256 - Retrieved 8 playlist metadata (first batch)
+2025-07-24 19:48:12 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:273 - Stage 1: Searching for artist 'Virtual Mage'
+2025-07-24 19:48:12 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:281 - Stage 1 found 2 candidates.
+2025-07-24 19:48:12 - newmusic.plex_client - [92mINFO[0m - search_tracks:285 - Found 2 candidates in Stage 1. Exiting early.
+2025-07-24 19:48:12 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:273 - Stage 1: Searching for artist 'Virtual Mage'
+2025-07-24 19:48:12 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:281 - Stage 1 found 2 candidates.
+2025-07-24 19:48:12 - newmusic.plex_client - [92mINFO[0m - search_tracks:285 - Found 2 candidates in Stage 1. Exiting early.
+2025-07-24 19:48:12 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:273 - Stage 1: Searching for artist 'Virtual Mage'
+2025-07-24 19:48:13 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:281 - Stage 1 found 2 candidates.
+2025-07-24 19:48:13 - newmusic.plex_client - [92mINFO[0m - search_tracks:285 - Found 2 candidates in Stage 1. Exiting early.
+2025-07-24 19:48:36 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:273 - Stage 1: Searching for artist 'Virtual Mage'
+2025-07-24 19:48:36 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:281 - Stage 1 found 0 candidates.
+2025-07-24 19:48:36 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:290 - Stage 2: Performing keyword search for 'Virtual Mage Signals from Space'
+2025-07-24 19:48:36 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:300 - Stage 3: Performing title-only search for 'Signals from Space'
+2025-07-24 19:48:37 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:290 - Stage 2: Performing keyword search for 'Signals from Space'
+2025-07-24 19:48:38 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:300 - Stage 3: Performing title-only search for 'Signals from Space'
+2025-07-24 19:48:38 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:273 - Stage 1: Searching for artist 'Virtual Mage'
+2025-07-24 19:48:38 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:281 - Stage 1 found 1 candidates.
+2025-07-24 19:48:38 - newmusic.plex_client - [92mINFO[0m - search_tracks:285 - Found 1 candidates in Stage 1. Exiting early.
+2025-07-24 19:48:38 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:273 - Stage 1: Searching for artist 'Virtual Mage'
+2025-07-24 19:48:38 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:281 - Stage 1 found 1 candidates.
+2025-07-24 19:48:38 - newmusic.plex_client - [92mINFO[0m - search_tracks:285 - Found 1 candidates in Stage 1. Exiting early.
+2025-07-24 19:48:39 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:273 - Stage 1: Searching for artist 'Virtual Mage'
+2025-07-24 19:48:39 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:281 - Stage 1 found 1 candidates.
+2025-07-24 19:48:39 - newmusic.plex_client - [92mINFO[0m - search_tracks:285 - Found 1 candidates in Stage 1. Exiting early.
+2025-07-24 19:48:39 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:273 - Stage 1: Searching for artist 'Virtual Mage'
+2025-07-24 19:48:39 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:281 - Stage 1 found 1 candidates.
+2025-07-24 19:48:39 - newmusic.plex_client - [92mINFO[0m - search_tracks:285 - Found 1 candidates in Stage 1. Exiting early.
+2025-07-24 19:48:39 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:273 - Stage 1: Searching for artist 'Virtual Mage'
+2025-07-24 19:48:39 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:281 - Stage 1 found 1 candidates.
+2025-07-24 19:48:39 - newmusic.plex_client - [92mINFO[0m - search_tracks:285 - Found 1 candidates in Stage 1. Exiting early.
+2025-07-24 19:48:39 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:273 - Stage 1: Searching for artist 'Kendrick Lamar'
+2025-07-24 19:48:39 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:281 - Stage 1 found 0 candidates.
+2025-07-24 19:48:39 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:290 - Stage 2: Performing keyword search for 'Kendrick Lamar Super Bowl LIX Halftime Show - Live'
+2025-07-24 19:48:40 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:300 - Stage 3: Performing title-only search for 'Super Bowl LIX Halftime Show - Live'
+2025-07-24 19:48:40 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:273 - Stage 1: Searching for artist 'Kendrick Lamar'
+2025-07-24 19:48:40 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:281 - Stage 1 found 0 candidates.
+2025-07-24 19:48:40 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:290 - Stage 2: Performing keyword search for 'Kendrick Lamar Super Bowl LIX Halftime Show'
+2025-07-24 19:48:41 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:300 - Stage 3: Performing title-only search for 'Super Bowl LIX Halftime Show'
+2025-07-24 19:48:42 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:273 - Stage 1: Searching for artist 'NFL'
+2025-07-24 19:48:42 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:290 - Stage 2: Performing keyword search for 'NFL Super Bowl LIX Halftime Show - Live'
+2025-07-24 19:48:42 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:300 - Stage 3: Performing title-only search for 'Super Bowl LIX Halftime Show - Live'
+2025-07-24 19:48:43 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:273 - Stage 1: Searching for artist 'NFL'
+2025-07-24 19:48:43 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:290 - Stage 2: Performing keyword search for 'NFL Super Bowl LIX Halftime Show'
+2025-07-24 19:48:44 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:300 - Stage 3: Performing title-only search for 'Super Bowl LIX Halftime Show'
+2025-07-24 19:48:44 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:290 - Stage 2: Performing keyword search for 'Super Bowl LIX Halftime Show - Live'
+2025-07-24 19:48:45 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:300 - Stage 3: Performing title-only search for 'Super Bowl LIX Halftime Show - Live'
+2025-07-24 19:48:46 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:290 - Stage 2: Performing keyword search for 'Super Bowl LIX Halftime Show'
+2025-07-24 19:48:46 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:300 - Stage 3: Performing title-only search for 'Super Bowl LIX Halftime Show'
+2025-07-24 19:48:47 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:273 - Stage 1: Searching for artist 'bbno$'
+2025-07-24 19:48:47 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:281 - Stage 1 found 0 candidates.
+2025-07-24 19:48:47 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:290 - Stage 2: Performing keyword search for 'bbno$ 1-800'
+2025-07-24 19:48:48 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:300 - Stage 3: Performing title-only search for '1-800'
+2025-07-24 19:48:49 - newmusic.plex_client - [92mINFO[0m - search_tracks:307 - Found 7 total potential matches for '1-800' by 'bbno$' after all stages.
+2025-07-24 19:48:49 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:273 - Stage 1: Searching for artist 'Ironmouse'
+2025-07-24 19:48:49 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:290 - Stage 2: Performing keyword search for 'Ironmouse 1-800'
+2025-07-24 19:48:49 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:300 - Stage 3: Performing title-only search for '1-800'
+2025-07-24 19:48:50 - newmusic.plex_client - [92mINFO[0m - search_tracks:307 - Found 7 total potential matches for '1-800' by 'Ironmouse' after all stages.
+2025-07-24 19:48:50 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:273 - Stage 1: Searching for artist 'bbno$'
+2025-07-24 19:48:50 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:281 - Stage 1 found 0 candidates.
+2025-07-24 19:48:50 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:290 - Stage 2: Performing keyword search for 'bbno$ mary poppins'
+2025-07-24 19:48:51 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:300 - Stage 3: Performing title-only search for 'mary poppins'
+2025-07-24 19:48:52 - newmusic.plex_client - [92mINFO[0m - search_tracks:307 - Found 6 total potential matches for 'mary poppins' by 'bbno$' after all stages.
+2025-07-24 19:48:52 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:273 - Stage 1: Searching for artist 'bbno$'
+2025-07-24 19:48:52 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:281 - Stage 1 found 0 candidates.
+2025-07-24 19:48:52 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:290 - Stage 2: Performing keyword search for 'bbno$ boom'
+2025-07-24 19:48:53 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:300 - Stage 3: Performing title-only search for 'boom'
+2025-07-24 19:48:54 - newmusic.plex_client - [92mINFO[0m - search_tracks:307 - Found 15 total potential matches for 'boom' by 'bbno$' after all stages.
+2025-07-24 19:48:54 - newmusic.soulseek_client - [92mINFO[0m - search:551 - Starting search for: 'Virtual Mage Signals from Space'
+2025-07-24 19:48:54 - newmusic.soulseek_client - [94mDEBUG[0m - search:561 - Search data: {'searchText': 'Virtual Mage Signals from Space', 'timeout': 30000, 'filterResponses': True, 'minimumResponseFileCount': 1, 'minimumPeerUploadSpeed': 0}
+2025-07-24 19:48:54 - newmusic.soulseek_client - [94mDEBUG[0m - search:562 - Making POST request to: http://localhost:5030/api/v0/searches
+2025-07-24 19:48:54 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/searches
+2025-07-24 19:48:54 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:48:54 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: {'searchText': 'Virtual Mage Signals from Space', 'timeout': 30000, 'filterResponses': True, 'minimumResponseFileCount': 1, 'minimumPeerUploadSpeed': 0}
+2025-07-24 19:48:54 - newmusic.soulseek_client - [92mINFO[0m - search:551 - Starting search for: 'Kendrick Lamar Super Bowl LIX Halftime Show - Live'
+2025-07-24 19:48:54 - newmusic.soulseek_client - [92mINFO[0m - search:551 - Starting search for: 'bbno$ 1-800'
+2025-07-24 19:48:54 - newmusic.soulseek_client - [94mDEBUG[0m - search:561 - Search data: {'searchText': 'Kendrick Lamar Super Bowl LIX Halftime Show - Live', 'timeout': 30000, 'filterResponses': True, 'minimumResponseFileCount': 1, 'minimumPeerUploadSpeed': 0}
+2025-07-24 19:48:54 - newmusic.soulseek_client - [94mDEBUG[0m - search:561 - Search data: {'searchText': 'bbno$ 1-800', 'timeout': 30000, 'filterResponses': True, 'minimumResponseFileCount': 1, 'minimumPeerUploadSpeed': 0}
+2025-07-24 19:48:54 - newmusic.soulseek_client - [94mDEBUG[0m - search:562 - Making POST request to: http://localhost:5030/api/v0/searches
+2025-07-24 19:48:54 - newmusic.soulseek_client - [94mDEBUG[0m - search:562 - Making POST request to: http://localhost:5030/api/v0/searches
+2025-07-24 19:48:54 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/searches
+2025-07-24 19:48:54 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/searches
+2025-07-24 19:48:54 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:48:54 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:48:54 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: {'searchText': 'Kendrick Lamar Super Bowl LIX Halftime Show - Live', 'timeout': 30000, 'filterResponses': True, 'minimumResponseFileCount': 1, 'minimumPeerUploadSpeed': 0}
+2025-07-24 19:48:54 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: {'searchText': 'bbno$ 1-800', 'timeout': 30000, 'filterResponses': True, 'minimumResponseFileCount': 1, 'minimumPeerUploadSpeed': 0}
+2025-07-24 19:48:54 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:48:54 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: {"fileCount":0,"id":"80fdaefd-40ea-413e-8518-b8ab4f889cfa","isComplete":false,"lockedFileCount":0,"responseCount":0,"responses":[],"searchText":"Virtual Mage Signals from Space","startedAt":"2025-07-25T02:48:54.3540992Z","state":"InProgress","token":650}...
+2025-07-24 19:48:54 - newmusic.soulseek_client - [92mINFO[0m - search:575 - Search initiated with ID: 80fdaefd-40ea-413e-8518-b8ab4f889cfa
+2025-07-24 19:48:54 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 1/20) - elapsed: 0.0s
+2025-07-24 19:48:54 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/80fdaefd-40ea-413e-8518-b8ab4f889cfa/responses
+2025-07-24 19:48:54 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:48:54 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:48:54 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: {"fileCount":0,"id":"96513f2c-32e3-4a6d-8824-435f23cc8d63","isComplete":false,"lockedFileCount":0,"responseCount":0,"responses":[],"searchText":"Kendrick Lamar Super Bowl LIX Halftime Show - Live","startedAt":"2025-07-25T02:48:54.3540996Z","state":"InProgress","token":651}...
+2025-07-24 19:48:54 - newmusic.soulseek_client - [92mINFO[0m - search:575 - Search initiated with ID: 96513f2c-32e3-4a6d-8824-435f23cc8d63
+2025-07-24 19:48:54 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 1/20) - elapsed: 0.0s
+2025-07-24 19:48:54 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/96513f2c-32e3-4a6d-8824-435f23cc8d63/responses
+2025-07-24 19:48:54 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:48:54 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:48:54 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: {"fileCount":0,"id":"d42fb58f-93cc-4bb4-8f2e-26a7305db1ae","isComplete":false,"lockedFileCount":0,"responseCount":0,"responses":[],"searchText":"bbno$ 1-800","startedAt":"2025-07-25T02:48:54.3542687Z","state":"InProgress","token":652}...
+2025-07-24 19:48:54 - newmusic.soulseek_client - [92mINFO[0m - search:575 - Search initiated with ID: d42fb58f-93cc-4bb4-8f2e-26a7305db1ae
+2025-07-24 19:48:54 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 1/20) - elapsed: 0.0s
+2025-07-24 19:48:54 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/d42fb58f-93cc-4bb4-8f2e-26a7305db1ae/responses
+2025-07-24 19:48:54 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:48:54 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:48:54 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:48:54 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:48:54 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:48:54 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:48:54 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:48:56 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 2/20) - elapsed: 1.5s
+2025-07-24 19:48:56 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/80fdaefd-40ea-413e-8518-b8ab4f889cfa/responses
+2025-07-24 19:48:56 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:48:56 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 2/20) - elapsed: 1.5s
+2025-07-24 19:48:56 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/96513f2c-32e3-4a6d-8824-435f23cc8d63/responses
+2025-07-24 19:48:56 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:48:56 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 2/20) - elapsed: 1.5s
+2025-07-24 19:48:56 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/d42fb58f-93cc-4bb4-8f2e-26a7305db1ae/responses
+2025-07-24 19:48:56 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:48:56 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:48:56 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:48:56 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:48:56 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:48:56 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:48:56 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:48:57 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 3/20) - elapsed: 3.0s
+2025-07-24 19:48:57 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/80fdaefd-40ea-413e-8518-b8ab4f889cfa/responses
+2025-07-24 19:48:57 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:48:57 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 3/20) - elapsed: 3.0s
+2025-07-24 19:48:57 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/96513f2c-32e3-4a6d-8824-435f23cc8d63/responses
+2025-07-24 19:48:57 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:48:58 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 3/20) - elapsed: 3.0s
+2025-07-24 19:48:58 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/d42fb58f-93cc-4bb4-8f2e-26a7305db1ae/responses
+2025-07-24 19:48:58 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:48:58 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:48:58 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:48:58 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:48:58 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:48:58 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:48:58 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:48:59 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 4/20) - elapsed: 4.5s
+2025-07-24 19:48:59 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/80fdaefd-40ea-413e-8518-b8ab4f889cfa/responses
+2025-07-24 19:48:59 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:48:59 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 4/20) - elapsed: 4.5s
+2025-07-24 19:48:59 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/96513f2c-32e3-4a6d-8824-435f23cc8d63/responses
+2025-07-24 19:48:59 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:48:59 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 4/20) - elapsed: 4.5s
+2025-07-24 19:48:59 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/d42fb58f-93cc-4bb4-8f2e-26a7305db1ae/responses
+2025-07-24 19:48:59 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:48:59 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:48:59 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:48:59 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:48:59 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:00 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:00 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:01 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 5/20) - elapsed: 6.0s
+2025-07-24 19:49:01 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/80fdaefd-40ea-413e-8518-b8ab4f889cfa/responses
+2025-07-24 19:49:01 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:01 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 5/20) - elapsed: 6.0s
+2025-07-24 19:49:01 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/96513f2c-32e3-4a6d-8824-435f23cc8d63/responses
+2025-07-24 19:49:01 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:01 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 5/20) - elapsed: 6.0s
+2025-07-24 19:49:01 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/d42fb58f-93cc-4bb4-8f2e-26a7305db1ae/responses
+2025-07-24 19:49:01 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:01 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:01 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:01 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:01 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:01 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:01 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:03 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 6/20) - elapsed: 7.5s
+2025-07-24 19:49:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/80fdaefd-40ea-413e-8518-b8ab4f889cfa/responses
+2025-07-24 19:49:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:03 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 6/20) - elapsed: 7.5s
+2025-07-24 19:49:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/96513f2c-32e3-4a6d-8824-435f23cc8d63/responses
+2025-07-24 19:49:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:03 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 6/20) - elapsed: 7.5s
+2025-07-24 19:49:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/d42fb58f-93cc-4bb4-8f2e-26a7305db1ae/responses
+2025-07-24 19:49:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:05 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 7/20) - elapsed: 9.0s
+2025-07-24 19:49:05 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/80fdaefd-40ea-413e-8518-b8ab4f889cfa/responses
+2025-07-24 19:49:05 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:05 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 7/20) - elapsed: 9.0s
+2025-07-24 19:49:05 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/96513f2c-32e3-4a6d-8824-435f23cc8d63/responses
+2025-07-24 19:49:05 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:05 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 7/20) - elapsed: 9.0s
+2025-07-24 19:49:05 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/d42fb58f-93cc-4bb4-8f2e-26a7305db1ae/responses
+2025-07-24 19:49:05 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:05 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:05 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:05 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:05 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:05 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:05 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:06 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 8/20) - elapsed: 10.5s
+2025-07-24 19:49:06 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/80fdaefd-40ea-413e-8518-b8ab4f889cfa/responses
+2025-07-24 19:49:06 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:06 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 8/20) - elapsed: 10.5s
+2025-07-24 19:49:06 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/96513f2c-32e3-4a6d-8824-435f23cc8d63/responses
+2025-07-24 19:49:06 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:06 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 8/20) - elapsed: 10.5s
+2025-07-24 19:49:06 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/d42fb58f-93cc-4bb4-8f2e-26a7305db1ae/responses
+2025-07-24 19:49:06 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:07 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:07 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:07 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:07 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:07 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:07 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:08 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 9/20) - elapsed: 12.0s
+2025-07-24 19:49:08 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/80fdaefd-40ea-413e-8518-b8ab4f889cfa/responses
+2025-07-24 19:49:08 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:08 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 9/20) - elapsed: 12.0s
+2025-07-24 19:49:08 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/96513f2c-32e3-4a6d-8824-435f23cc8d63/responses
+2025-07-24 19:49:08 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:08 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 9/20) - elapsed: 12.0s
+2025-07-24 19:49:08 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/d42fb58f-93cc-4bb4-8f2e-26a7305db1ae/responses
+2025-07-24 19:49:08 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:08 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:08 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:08 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:08 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:08 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:08 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:10 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 10/20) - elapsed: 13.5s
+2025-07-24 19:49:10 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/80fdaefd-40ea-413e-8518-b8ab4f889cfa/responses
+2025-07-24 19:49:10 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:10 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 10/20) - elapsed: 13.5s
+2025-07-24 19:49:10 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/96513f2c-32e3-4a6d-8824-435f23cc8d63/responses
+2025-07-24 19:49:10 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:10 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 10/20) - elapsed: 13.5s
+2025-07-24 19:49:10 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/d42fb58f-93cc-4bb4-8f2e-26a7305db1ae/responses
+2025-07-24 19:49:10 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:10 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:10 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:10 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:10 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:10 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:10 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:12 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 11/20) - elapsed: 15.0s
+2025-07-24 19:49:12 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/80fdaefd-40ea-413e-8518-b8ab4f889cfa/responses
+2025-07-24 19:49:12 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:12 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 11/20) - elapsed: 15.0s
+2025-07-24 19:49:12 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/96513f2c-32e3-4a6d-8824-435f23cc8d63/responses
+2025-07-24 19:49:12 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:12 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 11/20) - elapsed: 15.0s
+2025-07-24 19:49:12 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/d42fb58f-93cc-4bb4-8f2e-26a7305db1ae/responses
+2025-07-24 19:49:12 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:12 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:12 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:12 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:12 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:12 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:12 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":2,"files":[{"bitDepth":16,"code":1,"extension":"flac","filename":"music\\bbno$\\2025 - 1-800\\01 - 1-800.flac","length":209,"sampleRate":44100,"size":28114584,"isLocked":false},{"code":1,"extension":"jpg","filename":"music\\bbno$\\2025 - 1-800\\cover.jpg","size":1086303,"isLocked":false}],"hasFreeUploadSlot":true,"lockedFileCount":0,"lockedFiles":[],"queueLength":0,"token":652,"uploadSpeed":6049034,"username":"mon5termatt-dc"},{"fileCount":3,"files":[{"bitDepth":16,"code":1,"extens...
+2025-07-24 19:49:12 - newmusic.soulseek_client - [92mINFO[0m - search:597 - Found 13 new responses (13 total) at 15.0s
+2025-07-24 19:49:12 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:345 - Processing 13 user responses
+2025-07-24 19:49:12 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User mon5termatt-dc has 2 files
+2025-07-24 19:49:12 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User macro has 3 files
+2025-07-24 19:49:12 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User wargawrg has 3 files
+2025-07-24 19:49:12 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User TheHellaFella has 1 files
+2025-07-24 19:49:12 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User diamondcreeper has 1 files
+2025-07-24 19:49:12 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User theoddhermit has 2 files
+2025-07-24 19:49:12 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User s4mi has 3 files
+2025-07-24 19:49:12 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User FlameU has 3 files
+2025-07-24 19:49:12 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User DJ's Private Club has 4 files
+2025-07-24 19:49:12 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User soulshookt has 2 files
+2025-07-24 19:49:12 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User pixelmelt has 3 files
+2025-07-24 19:49:12 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Kyusetzu has 2 files
+2025-07-24 19:49:12 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User Hattyotter has 1 files
+2025-07-24 19:49:12 - newmusic.soulseek_client - [92mINFO[0m - _process_search_responses:399 - Found 14 individual tracks and 1 albums
+2025-07-24 19:49:12 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:400 - Album detection details: 15 potential albums processed
+2025-07-24 19:49:12 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:402 - Album: mon5termatt-dc/music/bbno$/2025 - 1-800 -> 1 tracks
+2025-07-24 19:49:12 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:402 - Album: macro/tidal rips/Albums/bbno$/1-800 (Explicit) -> 1 tracks
+2025-07-24 19:49:12 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:402 - Album: wargawrg/Album/Artists/Bbno$/1-800 (2025) -> 1 tracks
+2025-07-24 19:49:12 - newmusic.soulseek_client - [92mINFO[0m - search:617 - Processed results: 14 tracks, 1 albums
+2025-07-24 19:49:13 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 12/20) - elapsed: 16.5s
+2025-07-24 19:49:13 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/80fdaefd-40ea-413e-8518-b8ab4f889cfa/responses
+2025-07-24 19:49:13 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:13 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 12/20) - elapsed: 16.5s
+2025-07-24 19:49:13 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/96513f2c-32e3-4a6d-8824-435f23cc8d63/responses
+2025-07-24 19:49:13 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:14 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 12/20) - elapsed: 16.5s
+2025-07-24 19:49:14 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/d42fb58f-93cc-4bb4-8f2e-26a7305db1ae/responses
+2025-07-24 19:49:14 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:14 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:14 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:14 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:14 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:14 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:14 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":2,"files":[{"bitDepth":16,"code":1,"extension":"flac","filename":"music\\bbno$\\2025 - 1-800\\01 - 1-800.flac","length":209,"sampleRate":44100,"size":28114584,"isLocked":false},{"code":1,"extension":"jpg","filename":"music\\bbno$\\2025 - 1-800\\cover.jpg","size":1086303,"isLocked":false}],"hasFreeUploadSlot":true,"lockedFileCount":0,"lockedFiles":[],"queueLength":0,"token":652,"uploadSpeed":6049034,"username":"mon5termatt-dc"},{"fileCount":3,"files":[{"bitDepth":16,"code":1,"extens...
+2025-07-24 19:49:14 - newmusic.soulseek_client - [94mDEBUG[0m - search:624 - No new responses, total still: 13
+2025-07-24 19:49:15 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 13/20) - elapsed: 18.0s
+2025-07-24 19:49:15 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/80fdaefd-40ea-413e-8518-b8ab4f889cfa/responses
+2025-07-24 19:49:15 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:15 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 13/20) - elapsed: 18.0s
+2025-07-24 19:49:15 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/96513f2c-32e3-4a6d-8824-435f23cc8d63/responses
+2025-07-24 19:49:15 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:15 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 13/20) - elapsed: 18.0s
+2025-07-24 19:49:15 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/d42fb58f-93cc-4bb4-8f2e-26a7305db1ae/responses
+2025-07-24 19:49:15 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:15 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:15 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:15 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:15 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:16 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:16 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":2,"files":[{"bitDepth":16,"code":1,"extension":"flac","filename":"music\\bbno$\\2025 - 1-800\\01 - 1-800.flac","length":209,"sampleRate":44100,"size":28114584,"isLocked":false},{"code":1,"extension":"jpg","filename":"music\\bbno$\\2025 - 1-800\\cover.jpg","size":1086303,"isLocked":false}],"hasFreeUploadSlot":true,"lockedFileCount":0,"lockedFiles":[],"queueLength":0,"token":652,"uploadSpeed":6049034,"username":"mon5termatt-dc"},{"fileCount":3,"files":[{"bitDepth":16,"code":1,"extens...
+2025-07-24 19:49:16 - newmusic.soulseek_client - [94mDEBUG[0m - search:624 - No new responses, total still: 13
+2025-07-24 19:49:17 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 14/20) - elapsed: 19.5s
+2025-07-24 19:49:17 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/80fdaefd-40ea-413e-8518-b8ab4f889cfa/responses
+2025-07-24 19:49:17 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:17 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 14/20) - elapsed: 19.5s
+2025-07-24 19:49:17 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/96513f2c-32e3-4a6d-8824-435f23cc8d63/responses
+2025-07-24 19:49:17 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:17 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 14/20) - elapsed: 19.5s
+2025-07-24 19:49:17 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/d42fb58f-93cc-4bb4-8f2e-26a7305db1ae/responses
+2025-07-24 19:49:17 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:17 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:17 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:17 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:17 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:17 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:17 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":2,"files":[{"bitDepth":16,"code":1,"extension":"flac","filename":"music\\bbno$\\2025 - 1-800\\01 - 1-800.flac","length":209,"sampleRate":44100,"size":28114584,"isLocked":false},{"code":1,"extension":"jpg","filename":"music\\bbno$\\2025 - 1-800\\cover.jpg","size":1086303,"isLocked":false}],"hasFreeUploadSlot":true,"lockedFileCount":0,"lockedFiles":[],"queueLength":0,"token":652,"uploadSpeed":6049034,"username":"mon5termatt-dc"},{"fileCount":3,"files":[{"bitDepth":16,"code":1,"extens...
+2025-07-24 19:49:17 - newmusic.soulseek_client - [94mDEBUG[0m - search:624 - No new responses, total still: 13
+2025-07-24 19:49:19 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 15/20) - elapsed: 21.0s
+2025-07-24 19:49:19 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/80fdaefd-40ea-413e-8518-b8ab4f889cfa/responses
+2025-07-24 19:49:19 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:19 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 15/20) - elapsed: 21.0s
+2025-07-24 19:49:19 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/96513f2c-32e3-4a6d-8824-435f23cc8d63/responses
+2025-07-24 19:49:19 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:19 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 15/20) - elapsed: 21.0s
+2025-07-24 19:49:19 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/d42fb58f-93cc-4bb4-8f2e-26a7305db1ae/responses
+2025-07-24 19:49:19 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:19 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:19 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:19 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:19 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:19 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:19 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":2,"files":[{"bitDepth":16,"code":1,"extension":"flac","filename":"music\\bbno$\\2025 - 1-800\\01 - 1-800.flac","length":209,"sampleRate":44100,"size":28114584,"isLocked":false},{"code":1,"extension":"jpg","filename":"music\\bbno$\\2025 - 1-800\\cover.jpg","size":1086303,"isLocked":false}],"hasFreeUploadSlot":true,"lockedFileCount":0,"lockedFiles":[],"queueLength":0,"token":652,"uploadSpeed":6049034,"username":"mon5termatt-dc"},{"fileCount":3,"files":[{"bitDepth":16,"code":1,"extens...
+2025-07-24 19:49:19 - newmusic.soulseek_client - [94mDEBUG[0m - search:624 - No new responses, total still: 13
+2025-07-24 19:49:20 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 16/20) - elapsed: 22.5s
+2025-07-24 19:49:20 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/80fdaefd-40ea-413e-8518-b8ab4f889cfa/responses
+2025-07-24 19:49:20 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:20 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 16/20) - elapsed: 22.5s
+2025-07-24 19:49:20 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/96513f2c-32e3-4a6d-8824-435f23cc8d63/responses
+2025-07-24 19:49:20 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:21 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 16/20) - elapsed: 22.5s
+2025-07-24 19:49:21 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/d42fb58f-93cc-4bb4-8f2e-26a7305db1ae/responses
+2025-07-24 19:49:21 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:21 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:21 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:21 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:21 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:21 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:21 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":2,"files":[{"bitDepth":16,"code":1,"extension":"flac","filename":"music\\bbno$\\2025 - 1-800\\01 - 1-800.flac","length":209,"sampleRate":44100,"size":28114584,"isLocked":false},{"code":1,"extension":"jpg","filename":"music\\bbno$\\2025 - 1-800\\cover.jpg","size":1086303,"isLocked":false}],"hasFreeUploadSlot":true,"lockedFileCount":0,"lockedFiles":[],"queueLength":0,"token":652,"uploadSpeed":6049034,"username":"mon5termatt-dc"},{"fileCount":3,"files":[{"bitDepth":16,"code":1,"extens...
+2025-07-24 19:49:21 - newmusic.soulseek_client - [94mDEBUG[0m - search:624 - No new responses, total still: 13
+2025-07-24 19:49:22 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 17/20) - elapsed: 24.0s
+2025-07-24 19:49:22 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/80fdaefd-40ea-413e-8518-b8ab4f889cfa/responses
+2025-07-24 19:49:22 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:22 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 17/20) - elapsed: 24.0s
+2025-07-24 19:49:22 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/96513f2c-32e3-4a6d-8824-435f23cc8d63/responses
+2025-07-24 19:49:22 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:22 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 17/20) - elapsed: 24.0s
+2025-07-24 19:49:22 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/d42fb58f-93cc-4bb4-8f2e-26a7305db1ae/responses
+2025-07-24 19:49:22 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:22 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:22 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:22 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:22 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:23 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:23 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":2,"files":[{"bitDepth":16,"code":1,"extension":"flac","filename":"music\\bbno$\\2025 - 1-800\\01 - 1-800.flac","length":209,"sampleRate":44100,"size":28114584,"isLocked":false},{"code":1,"extension":"jpg","filename":"music\\bbno$\\2025 - 1-800\\cover.jpg","size":1086303,"isLocked":false}],"hasFreeUploadSlot":true,"lockedFileCount":0,"lockedFiles":[],"queueLength":0,"token":652,"uploadSpeed":6049034,"username":"mon5termatt-dc"},{"fileCount":3,"files":[{"bitDepth":16,"code":1,"extens...
+2025-07-24 19:49:23 - newmusic.soulseek_client - [94mDEBUG[0m - search:624 - No new responses, total still: 13
+2025-07-24 19:49:24 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 18/20) - elapsed: 25.5s
+2025-07-24 19:49:24 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/80fdaefd-40ea-413e-8518-b8ab4f889cfa/responses
+2025-07-24 19:49:24 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:24 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 18/20) - elapsed: 25.5s
+2025-07-24 19:49:24 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/96513f2c-32e3-4a6d-8824-435f23cc8d63/responses
+2025-07-24 19:49:24 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:24 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 18/20) - elapsed: 25.5s
+2025-07-24 19:49:24 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/d42fb58f-93cc-4bb4-8f2e-26a7305db1ae/responses
+2025-07-24 19:49:24 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:24 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:24 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:24 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:24 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:24 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:24 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":2,"files":[{"bitDepth":16,"code":1,"extension":"flac","filename":"music\\bbno$\\2025 - 1-800\\01 - 1-800.flac","length":209,"sampleRate":44100,"size":28114584,"isLocked":false},{"code":1,"extension":"jpg","filename":"music\\bbno$\\2025 - 1-800\\cover.jpg","size":1086303,"isLocked":false}],"hasFreeUploadSlot":true,"lockedFileCount":0,"lockedFiles":[],"queueLength":0,"token":652,"uploadSpeed":6049034,"username":"mon5termatt-dc"},{"fileCount":3,"files":[{"bitDepth":16,"code":1,"extens...
+2025-07-24 19:49:24 - newmusic.soulseek_client - [94mDEBUG[0m - search:624 - No new responses, total still: 13
+2025-07-24 19:49:26 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 19/20) - elapsed: 27.0s
+2025-07-24 19:49:26 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/80fdaefd-40ea-413e-8518-b8ab4f889cfa/responses
+2025-07-24 19:49:26 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:26 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 19/20) - elapsed: 27.0s
+2025-07-24 19:49:26 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/96513f2c-32e3-4a6d-8824-435f23cc8d63/responses
+2025-07-24 19:49:26 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:26 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 19/20) - elapsed: 27.0s
+2025-07-24 19:49:26 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/d42fb58f-93cc-4bb4-8f2e-26a7305db1ae/responses
+2025-07-24 19:49:26 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:26 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:26 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:26 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:26 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:26 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:26 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":2,"files":[{"bitDepth":16,"code":1,"extension":"flac","filename":"music\\bbno$\\2025 - 1-800\\01 - 1-800.flac","length":209,"sampleRate":44100,"size":28114584,"isLocked":false},{"code":1,"extension":"jpg","filename":"music\\bbno$\\2025 - 1-800\\cover.jpg","size":1086303,"isLocked":false}],"hasFreeUploadSlot":true,"lockedFileCount":0,"lockedFiles":[],"queueLength":0,"token":652,"uploadSpeed":6049034,"username":"mon5termatt-dc"},{"fileCount":3,"files":[{"bitDepth":16,"code":1,"extens...
+2025-07-24 19:49:26 - newmusic.soulseek_client - [94mDEBUG[0m - search:624 - No new responses, total still: 13
+2025-07-24 19:49:27 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 20/20) - elapsed: 28.5s
+2025-07-24 19:49:27 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/80fdaefd-40ea-413e-8518-b8ab4f889cfa/responses
+2025-07-24 19:49:27 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 20/20) - elapsed: 28.5s
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/96513f2c-32e3-4a6d-8824-435f23cc8d63/responses
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 20/20) - elapsed: 28.5s
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/d42fb58f-93cc-4bb4-8f2e-26a7305db1ae/responses
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:28 - newmusic.soulseek_client - [92mINFO[0m - search:632 - Search completed. Final results: 0 tracks and 0 albums for query: Virtual Mage Signals from Space
+2025-07-24 19:49:28 - newmusic.soulseek_client - [92mINFO[0m - search:551 - Starting search for: 'Signals from Space Virtual'
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - search:561 - Search data: {'searchText': 'Signals from Space Virtual', 'timeout': 30000, 'filterResponses': True, 'minimumResponseFileCount': 1, 'minimumPeerUploadSpeed': 0}
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - search:562 - Making POST request to: http://localhost:5030/api/v0/searches
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/searches
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: {'searchText': 'Signals from Space Virtual', 'timeout': 30000, 'filterResponses': True, 'minimumResponseFileCount': 1, 'minimumPeerUploadSpeed': 0}
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:28 - newmusic.soulseek_client - [92mINFO[0m - search:632 - Search completed. Final results: 0 tracks and 0 albums for query: Kendrick Lamar Super Bowl LIX Halftime Show - Live
+2025-07-24 19:49:28 - newmusic.soulseek_client - [92mINFO[0m - search:551 - Starting search for: 'Super Bowl LIX Halftime Show - Live Kendrick'
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - search:561 - Search data: {'searchText': 'Super Bowl LIX Halftime Show - Live Kendrick', 'timeout': 30000, 'filterResponses': True, 'minimumResponseFileCount': 1, 'minimumPeerUploadSpeed': 0}
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - search:562 - Making POST request to: http://localhost:5030/api/v0/searches
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/searches
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: {'searchText': 'Super Bowl LIX Halftime Show - Live Kendrick', 'timeout': 30000, 'filterResponses': True, 'minimumResponseFileCount': 1, 'minimumPeerUploadSpeed': 0}
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":2,"files":[{"bitDepth":16,"code":1,"extension":"flac","filename":"music\\bbno$\\2025 - 1-800\\01 - 1-800.flac","length":209,"sampleRate":44100,"size":28114584,"isLocked":false},{"code":1,"extension":"jpg","filename":"music\\bbno$\\2025 - 1-800\\cover.jpg","size":1086303,"isLocked":false}],"hasFreeUploadSlot":true,"lockedFileCount":0,"lockedFiles":[],"queueLength":0,"token":652,"uploadSpeed":6049034,"username":"mon5termatt-dc"},{"fileCount":3,"files":[{"bitDepth":16,"code":1,"extens...
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - search:624 - No new responses, total still: 13
+2025-07-24 19:49:28 - newmusic.soulseek_client - [92mINFO[0m - search:632 - Search completed. Final results: 14 tracks and 1 albums for query: bbno$ 1-800
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - download:645 - Attempting to download: Music\bbno$\1-800 (Explicit)\01. bbno$, Ironmouse - 1-800 (Explicit).flac from FlameU (size: 28351518)
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - download:658 - Using web interface API format: [{'filename': 'Music\\bbno$\\1-800 (Explicit)\\01. bbno$, Ironmouse - 1-800 (Explicit).flac', 'size': 28351518, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - download:662 - Trying web interface endpoint: transfers/downloads/FlameU
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/transfers/downloads/FlameU
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: [{'filename': 'Music\\bbno$\\1-800 (Explicit)\\01. bbno$, Ironmouse - 1-800 (Explicit).flac', 'size': 28351518, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: {"fileCount":0,"id":"a1719879-071d-47ef-9512-9ac096b8ad90","isComplete":false,"lockedFileCount":0,"responseCount":0,"responses":[],"searchText":"Signals from Space Virtual","startedAt":"2025-07-25T02:49:28.523547Z","state":"InProgress","token":653}...
+2025-07-24 19:49:28 - newmusic.soulseek_client - [92mINFO[0m - search:575 - Search initiated with ID: a1719879-071d-47ef-9512-9ac096b8ad90
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 1/20) - elapsed: 0.0s
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/a1719879-071d-47ef-9512-9ac096b8ad90/responses
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: {"fileCount":0,"id":"e0ddce91-fe0b-467d-b4d6-417247699fd5","isComplete":false,"lockedFileCount":0,"responseCount":0,"responses":[],"searchText":"Super Bowl LIX Halftime Show - Live Kendrick","startedAt":"2025-07-25T02:49:28.5535046Z","state":"InProgress","token":654}...
+2025-07-24 19:49:28 - newmusic.soulseek_client - [92mINFO[0m - search:575 - Search initiated with ID: e0ddce91-fe0b-467d-b4d6-417247699fd5
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 1/20) - elapsed: 0.0s
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/e0ddce91-fe0b-467d-b4d6-417247699fd5/responses
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"username":"soulshookt","directories":[{"directory":"musa2\\Kendrick Lamar\\[ALAC] NFL - Super Bowl LIX (Live from New Orleans, LA)","fileCount":1,"files":[{"id":"9388680c-87cc-4309-b1b1-c63ad93b3271","username":"soulshookt","direction":"Download","filename":"musa2\\Kendrick Lamar\\[ALAC] NFL - Super Bowl LIX (Live from New Orleans, LA)\\04 Kendrick Lamar - Super Bowl LIX Halftime Show.m4a","size":79212350,"startOffset":0,"state":"Completed, Errored","stateDescription":"Completed, Errored","re...
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:28 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:29 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 201
+2025-07-24 19:49:29 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: ...
+2025-07-24 19:49:29 - newmusic.soulseek_client - [92mINFO[0m - download:667 - [SUCCESS] Started download: Music\bbno$\1-800 (Explicit)\01. bbno$, Ironmouse - 1-800 (Explicit).flac from FlameU
+2025-07-24 19:49:29 - newmusic.soulseek_client - [94mDEBUG[0m - download:677 - No ID in response, using filename as fallback: {}
+2025-07-24 19:49:29 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-24 19:49:29 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:29 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:29 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"username":"soulshookt","directories":[{"directory":"musa2\\Kendrick Lamar\\[ALAC] NFL - Super Bowl LIX (Live from New Orleans, LA)","fileCount":1,"files":[{"id":"9388680c-87cc-4309-b1b1-c63ad93b3271","username":"soulshookt","direction":"Download","filename":"musa2\\Kendrick Lamar\\[ALAC] NFL - Super Bowl LIX (Live from New Orleans, LA)\\04 Kendrick Lamar - Super Bowl LIX Halftime Show.m4a","size":79212350,"startOffset":0,"state":"Completed, Errored","stateDescription":"Completed, Errored","re...
+2025-07-24 19:49:30 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 2/20) - elapsed: 1.5s
+2025-07-24 19:49:30 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/a1719879-071d-47ef-9512-9ac096b8ad90/responses
+2025-07-24 19:49:30 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:30 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-24 19:49:30 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:30 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 2/20) - elapsed: 1.5s
+2025-07-24 19:49:30 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/e0ddce91-fe0b-467d-b4d6-417247699fd5/responses
+2025-07-24 19:49:30 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:30 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-24 19:49:30 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:30 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:30 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:30 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:30 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"username":"soulshookt","directories":[{"directory":"musa2\\Kendrick Lamar\\[ALAC] NFL - Super Bowl LIX (Live from New Orleans, LA)","fileCount":1,"files":[{"id":"9388680c-87cc-4309-b1b1-c63ad93b3271","username":"soulshookt","direction":"Download","filename":"musa2\\Kendrick Lamar\\[ALAC] NFL - Super Bowl LIX (Live from New Orleans, LA)\\04 Kendrick Lamar - Super Bowl LIX Halftime Show.m4a","size":79212350,"startOffset":0,"state":"Completed, Errored","stateDescription":"Completed, Errored","re...
+2025-07-24 19:49:30 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:30 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:30 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:30 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"username":"soulshookt","directories":[{"directory":"musa2\\Kendrick Lamar\\[ALAC] NFL - Super Bowl LIX (Live from New Orleans, LA)","fileCount":1,"files":[{"id":"9388680c-87cc-4309-b1b1-c63ad93b3271","username":"soulshookt","direction":"Download","filename":"musa2\\Kendrick Lamar\\[ALAC] NFL - Super Bowl LIX (Live from New Orleans, LA)\\04 Kendrick Lamar - Super Bowl LIX Halftime Show.m4a","size":79212350,"startOffset":0,"state":"Completed, Errored","stateDescription":"Completed, Errored","re...
+2025-07-24 19:49:31 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-24 19:49:31 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:31 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:31 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"username":"soulshookt","directories":[{"directory":"musa2\\Kendrick Lamar\\[ALAC] NFL - Super Bowl LIX (Live from New Orleans, LA)","fileCount":1,"files":[{"id":"9388680c-87cc-4309-b1b1-c63ad93b3271","username":"soulshookt","direction":"Download","filename":"musa2\\Kendrick Lamar\\[ALAC] NFL - Super Bowl LIX (Live from New Orleans, LA)\\04 Kendrick Lamar - Super Bowl LIX Halftime Show.m4a","size":79212350,"startOffset":0,"state":"Completed, Errored","stateDescription":"Completed, Errored","re...
+2025-07-24 19:49:32 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 3/20) - elapsed: 3.0s
+2025-07-24 19:49:32 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/a1719879-071d-47ef-9512-9ac096b8ad90/responses
+2025-07-24 19:49:32 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:32 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 3/20) - elapsed: 3.0s
+2025-07-24 19:49:32 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/e0ddce91-fe0b-467d-b4d6-417247699fd5/responses
+2025-07-24 19:49:32 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:32 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-24 19:49:32 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:32 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:32 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:32 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:32 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:32 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-24 19:49:32 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:32 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:32 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"username":"soulshookt","directories":[{"directory":"musa2\\Kendrick Lamar\\[ALAC] NFL - Super Bowl LIX (Live from New Orleans, LA)","fileCount":1,"files":[{"id":"9388680c-87cc-4309-b1b1-c63ad93b3271","username":"soulshookt","direction":"Download","filename":"musa2\\Kendrick Lamar\\[ALAC] NFL - Super Bowl LIX (Live from New Orleans, LA)\\04 Kendrick Lamar - Super Bowl LIX Halftime Show.m4a","size":79212350,"startOffset":0,"state":"Completed, Errored","stateDescription":"Completed, Errored","re...
+2025-07-24 19:49:32 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:32 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"username":"soulshookt","directories":[{"directory":"musa2\\Kendrick Lamar\\[ALAC] NFL - Super Bowl LIX (Live from New Orleans, LA)","fileCount":1,"files":[{"id":"9388680c-87cc-4309-b1b1-c63ad93b3271","username":"soulshookt","direction":"Download","filename":"musa2\\Kendrick Lamar\\[ALAC] NFL - Super Bowl LIX (Live from New Orleans, LA)\\04 Kendrick Lamar - Super Bowl LIX Halftime Show.m4a","size":79212350,"startOffset":0,"state":"Completed, Errored","stateDescription":"Completed, Errored","re...
+2025-07-24 19:49:33 - newmusic.soulseek_client - [94mDEBUG[0m - signal_download_completion:894 - Signaling completion for download f8cea87e-5fbc-4e01-bbfe-c48ceb5682ef from FlameU
+2025-07-24 19:49:33 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making DELETE request to: http://localhost:5030/api/v0/transfers/downloads/FlameU/f8cea87e-5fbc-4e01-bbfe-c48ceb5682ef?remove=true
+2025-07-24 19:49:33 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:33 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 204
+2025-07-24 19:49:33 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: ...
+2025-07-24 19:49:33 - newmusic.soulseek_client - [92mINFO[0m - signal_download_completion:900 - Successfully signaled download signaling completion: f8cea87e-5fbc-4e01-bbfe-c48ceb5682ef
+2025-07-24 19:49:33 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 4/20) - elapsed: 4.5s
+2025-07-24 19:49:33 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/a1719879-071d-47ef-9512-9ac096b8ad90/responses
+2025-07-24 19:49:33 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:33 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 4/20) - elapsed: 4.5s
+2025-07-24 19:49:33 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/e0ddce91-fe0b-467d-b4d6-417247699fd5/responses
+2025-07-24 19:49:33 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:34 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:34 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:34 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:34 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:35 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 5/20) - elapsed: 6.0s
+2025-07-24 19:49:35 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/a1719879-071d-47ef-9512-9ac096b8ad90/responses
+2025-07-24 19:49:35 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:35 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 5/20) - elapsed: 6.0s
+2025-07-24 19:49:35 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/e0ddce91-fe0b-467d-b4d6-417247699fd5/responses
+2025-07-24 19:49:35 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:35 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:35 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:35 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:35 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:37 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 6/20) - elapsed: 7.5s
+2025-07-24 19:49:37 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/a1719879-071d-47ef-9512-9ac096b8ad90/responses
+2025-07-24 19:49:37 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:37 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 6/20) - elapsed: 7.5s
+2025-07-24 19:49:37 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/e0ddce91-fe0b-467d-b4d6-417247699fd5/responses
+2025-07-24 19:49:37 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:37 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:37 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:37 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:37 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:39 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 7/20) - elapsed: 9.0s
+2025-07-24 19:49:39 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/a1719879-071d-47ef-9512-9ac096b8ad90/responses
+2025-07-24 19:49:39 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:39 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 7/20) - elapsed: 9.0s
+2025-07-24 19:49:39 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/e0ddce91-fe0b-467d-b4d6-417247699fd5/responses
+2025-07-24 19:49:39 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:39 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:39 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:39 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:39 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:40 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 8/20) - elapsed: 10.5s
+2025-07-24 19:49:40 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/a1719879-071d-47ef-9512-9ac096b8ad90/responses
+2025-07-24 19:49:40 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:40 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 8/20) - elapsed: 10.5s
+2025-07-24 19:49:40 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/e0ddce91-fe0b-467d-b4d6-417247699fd5/responses
+2025-07-24 19:49:40 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:41 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:41 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:41 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:41 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:42 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 9/20) - elapsed: 12.0s
+2025-07-24 19:49:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/a1719879-071d-47ef-9512-9ac096b8ad90/responses
+2025-07-24 19:49:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:42 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 9/20) - elapsed: 12.0s
+2025-07-24 19:49:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/e0ddce91-fe0b-467d-b4d6-417247699fd5/responses
+2025-07-24 19:49:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:42 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:43 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:43 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:44 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 10/20) - elapsed: 13.5s
+2025-07-24 19:49:44 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/a1719879-071d-47ef-9512-9ac096b8ad90/responses
+2025-07-24 19:49:44 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:44 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 10/20) - elapsed: 13.5s
+2025-07-24 19:49:44 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/e0ddce91-fe0b-467d-b4d6-417247699fd5/responses
+2025-07-24 19:49:44 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:44 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:44 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:44 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:44 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:46 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 11/20) - elapsed: 15.0s
+2025-07-24 19:49:46 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/a1719879-071d-47ef-9512-9ac096b8ad90/responses
+2025-07-24 19:49:46 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:46 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 11/20) - elapsed: 15.0s
+2025-07-24 19:49:46 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/e0ddce91-fe0b-467d-b4d6-417247699fd5/responses
+2025-07-24 19:49:46 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:46 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:46 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:46 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:46 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":1,"files":[{"bitDepth":16,"code":1,"extension":"","filename":"001 Soulseek Music\\Various Artists [Mixed]\\Super Bowl LIX Live From New Orleans, LA\\04 - Kendrick Lamar - Super Bowl LIX Halftime Show.flac","length":800,"sampleRate":44100,"size":72803291,"isLocked":false}],"hasFreeUploadSlot":true,"lockedFileCount":0,"lockedFiles":[],"queueLength":360,"token":654,"uploadSpeed":103979,"username":"jimmybreeze"},{"fileCount":2,"files":[{"code":1,"extension":"","filename":"musa2\\Kendri...
+2025-07-24 19:49:46 - newmusic.soulseek_client - [92mINFO[0m - search:597 - Found 2 new responses (2 total) at 15.0s
+2025-07-24 19:49:46 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:345 - Processing 2 user responses
+2025-07-24 19:49:46 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User jimmybreeze has 1 files
+2025-07-24 19:49:46 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:353 - User soulshookt has 2 files
+2025-07-24 19:49:46 - newmusic.soulseek_client - [92mINFO[0m - _process_search_responses:399 - Found 2 individual tracks and 0 albums
+2025-07-24 19:49:46 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:400 - Album detection details: 2 potential albums processed
+2025-07-24 19:49:46 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:402 - Album: jimmybreeze/001 Soulseek Music/Various Artists [Mixed]/Super Bowl LIX Live From New Orleans, LA -> 1 tracks
+2025-07-24 19:49:46 - newmusic.soulseek_client - [94mDEBUG[0m - _process_search_responses:402 - Album: soulshookt/musa2/Kendrick Lamar/[ALAC] NFL - Super Bowl LIX (Live from New Orleans, LA) -> 1 tracks
+2025-07-24 19:49:46 - newmusic.soulseek_client - [92mINFO[0m - search:617 - Processed results: 2 tracks, 0 albums
+2025-07-24 19:49:48 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 12/20) - elapsed: 16.5s
+2025-07-24 19:49:48 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/a1719879-071d-47ef-9512-9ac096b8ad90/responses
+2025-07-24 19:49:48 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:48 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 12/20) - elapsed: 16.5s
+2025-07-24 19:49:48 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/e0ddce91-fe0b-467d-b4d6-417247699fd5/responses
+2025-07-24 19:49:48 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:48 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:48 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:48 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:48 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":1,"files":[{"bitDepth":16,"code":1,"extension":"","filename":"001 Soulseek Music\\Various Artists [Mixed]\\Super Bowl LIX Live From New Orleans, LA\\04 - Kendrick Lamar - Super Bowl LIX Halftime Show.flac","length":800,"sampleRate":44100,"size":72803291,"isLocked":false}],"hasFreeUploadSlot":true,"lockedFileCount":0,"lockedFiles":[],"queueLength":360,"token":654,"uploadSpeed":103979,"username":"jimmybreeze"},{"fileCount":2,"files":[{"code":1,"extension":"","filename":"musa2\\Kendri...
+2025-07-24 19:49:48 - newmusic.soulseek_client - [94mDEBUG[0m - search:624 - No new responses, total still: 2
+2025-07-24 19:49:49 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 13/20) - elapsed: 18.0s
+2025-07-24 19:49:49 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/a1719879-071d-47ef-9512-9ac096b8ad90/responses
+2025-07-24 19:49:49 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:49 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 13/20) - elapsed: 18.0s
+2025-07-24 19:49:49 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/e0ddce91-fe0b-467d-b4d6-417247699fd5/responses
+2025-07-24 19:49:49 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:50 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:50 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:50 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:50 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":1,"files":[{"bitDepth":16,"code":1,"extension":"","filename":"001 Soulseek Music\\Various Artists [Mixed]\\Super Bowl LIX Live From New Orleans, LA\\04 - Kendrick Lamar - Super Bowl LIX Halftime Show.flac","length":800,"sampleRate":44100,"size":72803291,"isLocked":false}],"hasFreeUploadSlot":true,"lockedFileCount":0,"lockedFiles":[],"queueLength":360,"token":654,"uploadSpeed":103979,"username":"jimmybreeze"},{"fileCount":2,"files":[{"code":1,"extension":"","filename":"musa2\\Kendri...
+2025-07-24 19:49:50 - newmusic.soulseek_client - [94mDEBUG[0m - search:624 - No new responses, total still: 2
+2025-07-24 19:49:51 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 14/20) - elapsed: 19.5s
+2025-07-24 19:49:51 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/a1719879-071d-47ef-9512-9ac096b8ad90/responses
+2025-07-24 19:49:51 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:51 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 14/20) - elapsed: 19.5s
+2025-07-24 19:49:51 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/e0ddce91-fe0b-467d-b4d6-417247699fd5/responses
+2025-07-24 19:49:51 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:51 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:51 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:51 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:51 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":1,"files":[{"bitDepth":16,"code":1,"extension":"","filename":"001 Soulseek Music\\Various Artists [Mixed]\\Super Bowl LIX Live From New Orleans, LA\\04 - Kendrick Lamar - Super Bowl LIX Halftime Show.flac","length":800,"sampleRate":44100,"size":72803291,"isLocked":false}],"hasFreeUploadSlot":true,"lockedFileCount":0,"lockedFiles":[],"queueLength":360,"token":654,"uploadSpeed":103979,"username":"jimmybreeze"},{"fileCount":2,"files":[{"code":1,"extension":"","filename":"musa2\\Kendri...
+2025-07-24 19:49:51 - newmusic.soulseek_client - [94mDEBUG[0m - search:624 - No new responses, total still: 2
+2025-07-24 19:49:53 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 15/20) - elapsed: 21.0s
+2025-07-24 19:49:53 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/a1719879-071d-47ef-9512-9ac096b8ad90/responses
+2025-07-24 19:49:53 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:53 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 15/20) - elapsed: 21.0s
+2025-07-24 19:49:53 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/e0ddce91-fe0b-467d-b4d6-417247699fd5/responses
+2025-07-24 19:49:53 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:53 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:53 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:53 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:53 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":1,"files":[{"bitDepth":16,"code":1,"extension":"","filename":"001 Soulseek Music\\Various Artists [Mixed]\\Super Bowl LIX Live From New Orleans, LA\\04 - Kendrick Lamar - Super Bowl LIX Halftime Show.flac","length":800,"sampleRate":44100,"size":72803291,"isLocked":false}],"hasFreeUploadSlot":true,"lockedFileCount":0,"lockedFiles":[],"queueLength":360,"token":654,"uploadSpeed":103979,"username":"jimmybreeze"},{"fileCount":2,"files":[{"code":1,"extension":"","filename":"musa2\\Kendri...
+2025-07-24 19:49:53 - newmusic.soulseek_client - [94mDEBUG[0m - search:624 - No new responses, total still: 2
+2025-07-24 19:49:55 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 16/20) - elapsed: 22.5s
+2025-07-24 19:49:55 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/a1719879-071d-47ef-9512-9ac096b8ad90/responses
+2025-07-24 19:49:55 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:55 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 16/20) - elapsed: 22.5s
+2025-07-24 19:49:55 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/e0ddce91-fe0b-467d-b4d6-417247699fd5/responses
+2025-07-24 19:49:55 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:55 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:55 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:55 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:55 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":1,"files":[{"bitDepth":16,"code":1,"extension":"","filename":"001 Soulseek Music\\Various Artists [Mixed]\\Super Bowl LIX Live From New Orleans, LA\\04 - Kendrick Lamar - Super Bowl LIX Halftime Show.flac","length":800,"sampleRate":44100,"size":72803291,"isLocked":false}],"hasFreeUploadSlot":true,"lockedFileCount":0,"lockedFiles":[],"queueLength":360,"token":654,"uploadSpeed":103979,"username":"jimmybreeze"},{"fileCount":2,"files":[{"code":1,"extension":"","filename":"musa2\\Kendri...
+2025-07-24 19:49:55 - newmusic.soulseek_client - [94mDEBUG[0m - search:624 - No new responses, total still: 2
+2025-07-24 19:49:56 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 17/20) - elapsed: 24.0s
+2025-07-24 19:49:56 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/a1719879-071d-47ef-9512-9ac096b8ad90/responses
+2025-07-24 19:49:56 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:56 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 17/20) - elapsed: 24.0s
+2025-07-24 19:49:56 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/e0ddce91-fe0b-467d-b4d6-417247699fd5/responses
+2025-07-24 19:49:56 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:57 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:57 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:57 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:57 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":1,"files":[{"bitDepth":16,"code":1,"extension":"","filename":"001 Soulseek Music\\Various Artists [Mixed]\\Super Bowl LIX Live From New Orleans, LA\\04 - Kendrick Lamar - Super Bowl LIX Halftime Show.flac","length":800,"sampleRate":44100,"size":72803291,"isLocked":false}],"hasFreeUploadSlot":true,"lockedFileCount":0,"lockedFiles":[],"queueLength":360,"token":654,"uploadSpeed":103979,"username":"jimmybreeze"},{"fileCount":2,"files":[{"code":1,"extension":"","filename":"musa2\\Kendri...
+2025-07-24 19:49:57 - newmusic.soulseek_client - [94mDEBUG[0m - search:624 - No new responses, total still: 2
+2025-07-24 19:49:58 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 18/20) - elapsed: 25.5s
+2025-07-24 19:49:58 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/a1719879-071d-47ef-9512-9ac096b8ad90/responses
+2025-07-24 19:49:58 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:58 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 18/20) - elapsed: 25.5s
+2025-07-24 19:49:58 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/e0ddce91-fe0b-467d-b4d6-417247699fd5/responses
+2025-07-24 19:49:58 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:49:58 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:58 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:49:58 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:49:58 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":1,"files":[{"bitDepth":16,"code":1,"extension":"","filename":"001 Soulseek Music\\Various Artists [Mixed]\\Super Bowl LIX Live From New Orleans, LA\\04 - Kendrick Lamar - Super Bowl LIX Halftime Show.flac","length":800,"sampleRate":44100,"size":72803291,"isLocked":false}],"hasFreeUploadSlot":true,"lockedFileCount":0,"lockedFiles":[],"queueLength":360,"token":654,"uploadSpeed":103979,"username":"jimmybreeze"},{"fileCount":2,"files":[{"code":1,"extension":"","filename":"musa2\\Kendri...
+2025-07-24 19:49:58 - newmusic.soulseek_client - [94mDEBUG[0m - search:624 - No new responses, total still: 2
+2025-07-24 19:50:00 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 19/20) - elapsed: 27.0s
+2025-07-24 19:50:00 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/a1719879-071d-47ef-9512-9ac096b8ad90/responses
+2025-07-24 19:50:00 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:50:00 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 19/20) - elapsed: 27.0s
+2025-07-24 19:50:00 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/e0ddce91-fe0b-467d-b4d6-417247699fd5/responses
+2025-07-24 19:50:00 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:50:00 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:50:00 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:50:00 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:50:00 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":1,"files":[{"bitDepth":16,"code":1,"extension":"","filename":"001 Soulseek Music\\Various Artists [Mixed]\\Super Bowl LIX Live From New Orleans, LA\\04 - Kendrick Lamar - Super Bowl LIX Halftime Show.flac","length":800,"sampleRate":44100,"size":72803291,"isLocked":false}],"hasFreeUploadSlot":true,"lockedFileCount":0,"lockedFiles":[],"queueLength":360,"token":654,"uploadSpeed":103979,"username":"jimmybreeze"},{"fileCount":2,"files":[{"code":1,"extension":"","filename":"musa2\\Kendri...
+2025-07-24 19:50:00 - newmusic.soulseek_client - [94mDEBUG[0m - search:624 - No new responses, total still: 2
+2025-07-24 19:50:02 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 20/20) - elapsed: 28.5s
+2025-07-24 19:50:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/a1719879-071d-47ef-9512-9ac096b8ad90/responses
+2025-07-24 19:50:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:50:02 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 20/20) - elapsed: 28.5s
+2025-07-24 19:50:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/e0ddce91-fe0b-467d-b4d6-417247699fd5/responses
+2025-07-24 19:50:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:50:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:50:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:50:02 - newmusic.soulseek_client - [92mINFO[0m - search:632 - Search completed. Final results: 0 tracks and 0 albums for query: Signals from Space Virtual
+2025-07-24 19:50:02 - newmusic.soulseek_client - [92mINFO[0m - search:551 - Starting search for: 'Signals from Space'
+2025-07-24 19:50:02 - newmusic.soulseek_client - [94mDEBUG[0m - search:561 - Search data: {'searchText': 'Signals from Space', 'timeout': 30000, 'filterResponses': True, 'minimumResponseFileCount': 1, 'minimumPeerUploadSpeed': 0}
+2025-07-24 19:50:02 - newmusic.soulseek_client - [94mDEBUG[0m - search:562 - Making POST request to: http://localhost:5030/api/v0/searches
+2025-07-24 19:50:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/searches
+2025-07-24 19:50:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:50:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: {'searchText': 'Signals from Space', 'timeout': 30000, 'filterResponses': True, 'minimumResponseFileCount': 1, 'minimumPeerUploadSpeed': 0}
+2025-07-24 19:50:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:50:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"fileCount":1,"files":[{"bitDepth":16,"code":1,"extension":"","filename":"001 Soulseek Music\\Various Artists [Mixed]\\Super Bowl LIX Live From New Orleans, LA\\04 - Kendrick Lamar - Super Bowl LIX Halftime Show.flac","length":800,"sampleRate":44100,"size":72803291,"isLocked":false}],"hasFreeUploadSlot":true,"lockedFileCount":0,"lockedFiles":[],"queueLength":360,"token":654,"uploadSpeed":103979,"username":"jimmybreeze"},{"fileCount":2,"files":[{"code":1,"extension":"","filename":"musa2\\Kendri...
+2025-07-24 19:50:02 - newmusic.soulseek_client - [94mDEBUG[0m - search:624 - No new responses, total still: 2
+2025-07-24 19:50:02 - newmusic.soulseek_client - [92mINFO[0m - search:632 - Search completed. Final results: 2 tracks and 0 albums for query: Super Bowl LIX Halftime Show - Live Kendrick
+2025-07-24 19:50:02 - newmusic.soulseek_client - [94mDEBUG[0m - download:645 - Attempting to download: musa2\Kendrick Lamar\[ALAC] NFL - Super Bowl LIX (Live from New Orleans, LA)\04 Kendrick Lamar - Super Bowl LIX Halftime Show.m4a from soulshookt (size: 79212350)
+2025-07-24 19:50:02 - newmusic.soulseek_client - [94mDEBUG[0m - download:658 - Using web interface API format: [{'filename': 'musa2\\Kendrick Lamar\\[ALAC] NFL - Super Bowl LIX (Live from New Orleans, LA)\\04 Kendrick Lamar - Super Bowl LIX Halftime Show.m4a', 'size': 79212350, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-24 19:50:02 - newmusic.soulseek_client - [94mDEBUG[0m - download:662 - Trying web interface endpoint: transfers/downloads/soulshookt
+2025-07-24 19:50:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/transfers/downloads/soulshookt
+2025-07-24 19:50:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:50:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: [{'filename': 'musa2\\Kendrick Lamar\\[ALAC] NFL - Super Bowl LIX (Live from New Orleans, LA)\\04 Kendrick Lamar - Super Bowl LIX Halftime Show.m4a', 'size': 79212350, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-24 19:50:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-24 19:50:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:50:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:50:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: {"fileCount":0,"id":"ede5dac4-eb11-4861-a33e-53f9e87fba2d","isComplete":false,"lockedFileCount":0,"responseCount":0,"responses":[],"searchText":"Signals from Space","startedAt":"2025-07-25T02:50:02.7144554Z","state":"InProgress","token":660}...
+2025-07-24 19:50:02 - newmusic.soulseek_client - [92mINFO[0m - search:575 - Search initiated with ID: ede5dac4-eb11-4861-a33e-53f9e87fba2d
+2025-07-24 19:50:02 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 1/20) - elapsed: 0.0s
+2025-07-24 19:50:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/ede5dac4-eb11-4861-a33e-53f9e87fba2d/responses
+2025-07-24 19:50:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:50:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:50:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"username":"soulshookt","directories":[{"directory":"musa2\\Kendrick Lamar\\[ALAC] NFL - Super Bowl LIX (Live from New Orleans, LA)","fileCount":1,"files":[{"id":"9388680c-87cc-4309-b1b1-c63ad93b3271","username":"soulshookt","direction":"Download","filename":"musa2\\Kendrick Lamar\\[ALAC] NFL - Super Bowl LIX (Live from New Orleans, LA)\\04 Kendrick Lamar - Super Bowl LIX Halftime Show.m4a","size":79212350,"startOffset":0,"state":"Completed, Errored","stateDescription":"Completed, Errored","re...
+2025-07-24 19:50:02 - newmusic.soulseek_client - [94mDEBUG[0m - download:645 - Attempting to download: 001 Soulseek Music\Various Artists [Mixed]\Super Bowl LIX Live From New Orleans, LA\04 - Kendrick Lamar - Super Bowl LIX Halftime Show.flac from jimmybreeze (size: 72803291)
+2025-07-24 19:50:02 - newmusic.soulseek_client - [94mDEBUG[0m - download:658 - Using web interface API format: [{'filename': '001 Soulseek Music\\Various Artists [Mixed]\\Super Bowl LIX Live From New Orleans, LA\\04 - Kendrick Lamar - Super Bowl LIX Halftime Show.flac', 'size': 72803291, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-24 19:50:02 - newmusic.soulseek_client - [94mDEBUG[0m - download:662 - Trying web interface endpoint: transfers/downloads/jimmybreeze
+2025-07-24 19:50:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/transfers/downloads/jimmybreeze
+2025-07-24 19:50:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:50:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: [{'filename': '001 Soulseek Music\\Various Artists [Mixed]\\Super Bowl LIX Live From New Orleans, LA\\04 - Kendrick Lamar - Super Bowl LIX Halftime Show.flac', 'size': 72803291, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-24 19:50:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:50:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 500
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: "One or more errors occurred. (One or more errors occurred. (An active or queued download of musa2\\Kendrick Lamar\\[ALAC] NFL - Super Bowl LIX (Live from New Orleans, LA)\\04 Kendrick Lamar - Super Bowl LIX Halftime Show.m4a from soulshookt is already in progress))"...
+2025-07-24 19:50:03 - newmusic.soulseek_client - [91mERROR[0m - _make_request:272 - API request failed: 500 - "One or more errors occurred. (One or more errors occurred. (An active or queued download of musa2\\Kendrick Lamar\\[ALAC] NFL - Super Bowl LIX (Live from New Orleans, LA)\\04 Kendrick Lamar - Super Bowl LIX Halftime Show.m4a from soulshookt is already in progress))"
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - download:680 - Web interface endpoint returned no response
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - download:686 - Web interface endpoint failed, trying alternatives...
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - download:697 - Trying endpoint: transfers/soulshookt/enqueue with array format
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/transfers/soulshookt/enqueue
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: [{'filename': 'musa2\\Kendrick Lamar\\[ALAC] NFL - Super Bowl LIX (Live from New Orleans, LA)\\04 Kendrick Lamar - Super Bowl LIX Halftime Show.m4a', 'size': 79212350, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 404
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: ...
+2025-07-24 19:50:03 - newmusic.soulseek_client - [91mERROR[0m - _make_request:272 - API request failed: 404 - 
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - download:715 - Endpoint transfers/soulshookt/enqueue returned no response
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - download:697 - Trying endpoint: users/soulshookt/downloads with array format
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/users/soulshookt/downloads
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: [{'filename': 'musa2\\Kendrick Lamar\\[ALAC] NFL - Super Bowl LIX (Live from New Orleans, LA)\\04 Kendrick Lamar - Super Bowl LIX Halftime Show.m4a', 'size': 79212350, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 500
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: "One or more errors occurred. (One or more errors occurred. (An active or queued download of 001 Soulseek Music\\Various Artists [Mixed]\\Super Bowl LIX Live From New Orleans, LA\\04 - Kendrick Lamar - Super Bowl LIX Halftime Show.flac from jimmybreeze is already in progress))"...
+2025-07-24 19:50:03 - newmusic.soulseek_client - [91mERROR[0m - _make_request:272 - API request failed: 500 - "One or more errors occurred. (One or more errors occurred. (An active or queued download of 001 Soulseek Music\\Various Artists [Mixed]\\Super Bowl LIX Live From New Orleans, LA\\04 - Kendrick Lamar - Super Bowl LIX Halftime Show.flac from jimmybreeze is already in progress))"
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - download:680 - Web interface endpoint returned no response
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - download:686 - Web interface endpoint failed, trying alternatives...
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - download:697 - Trying endpoint: transfers/jimmybreeze/enqueue with array format
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/transfers/jimmybreeze/enqueue
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: [{'filename': '001 Soulseek Music\\Various Artists [Mixed]\\Super Bowl LIX Live From New Orleans, LA\\04 - Kendrick Lamar - Super Bowl LIX Halftime Show.flac', 'size': 72803291, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 404
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: ...
+2025-07-24 19:50:03 - newmusic.soulseek_client - [91mERROR[0m - _make_request:272 - API request failed: 404 - 
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - download:715 - Endpoint users/soulshookt/downloads returned no response
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - download:697 - Trying endpoint: users/soulshookt/enqueue with array format
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/users/soulshookt/enqueue
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: [{'filename': 'musa2\\Kendrick Lamar\\[ALAC] NFL - Super Bowl LIX (Live from New Orleans, LA)\\04 Kendrick Lamar - Super Bowl LIX Halftime Show.m4a', 'size': 79212350, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"username":"soulshookt","directories":[{"directory":"musa2\\Kendrick Lamar\\[ALAC] NFL - Super Bowl LIX (Live from New Orleans, LA)","fileCount":1,"files":[{"id":"63157e9a-455c-47a7-aa4e-38c616c29383","username":"soulshookt","direction":"Download","filename":"musa2\\Kendrick Lamar\\[ALAC] NFL - Super Bowl LIX (Live from New Orleans, LA)\\04 Kendrick Lamar - Super Bowl LIX Halftime Show.m4a","size":79212350,"startOffset":0,"state":"Completed, Errored","stateDescription":"Completed, Errored","re...
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 404
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: ...
+2025-07-24 19:50:03 - newmusic.soulseek_client - [91mERROR[0m - _make_request:272 - API request failed: 404 - 
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - download:715 - Endpoint transfers/jimmybreeze/enqueue returned no response
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - download:697 - Trying endpoint: users/jimmybreeze/downloads with array format
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/users/jimmybreeze/downloads
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: [{'filename': '001 Soulseek Music\\Various Artists [Mixed]\\Super Bowl LIX Live From New Orleans, LA\\04 - Kendrick Lamar - Super Bowl LIX Halftime Show.flac', 'size': 72803291, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 404
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: ...
+2025-07-24 19:50:03 - newmusic.soulseek_client - [91mERROR[0m - _make_request:272 - API request failed: 404 - 
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - download:715 - Endpoint users/soulshookt/enqueue returned no response
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - download:722 - Array format failed, trying old object format
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - download:733 - Trying endpoint: transfers/soulshookt/enqueue with object format
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/transfers/soulshookt/enqueue
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: {'files': [{'filename': 'musa2\\Kendrick Lamar\\[ALAC] NFL - Super Bowl LIX (Live from New Orleans, LA)\\04 Kendrick Lamar - Super Bowl LIX Halftime Show.m4a', 'size': 79212350}]}
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 404
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: ...
+2025-07-24 19:50:03 - newmusic.soulseek_client - [91mERROR[0m - _make_request:272 - API request failed: 404 - 
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - download:715 - Endpoint users/jimmybreeze/downloads returned no response
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - download:697 - Trying endpoint: users/jimmybreeze/enqueue with array format
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/users/jimmybreeze/enqueue
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:50:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: [{'filename': '001 Soulseek Music\\Various Artists [Mixed]\\Super Bowl LIX Live From New Orleans, LA\\04 - Kendrick Lamar - Super Bowl LIX Halftime Show.flac', 'size': 72803291, 'path': 'E:\\Broque Projects\\newMusic\\downloads'}]
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 404
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: ...
+2025-07-24 19:50:04 - newmusic.soulseek_client - [91mERROR[0m - _make_request:272 - API request failed: 404 - 
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - download:751 - Fallback endpoint transfers/soulshookt/enqueue returned no response
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - download:733 - Trying endpoint: users/soulshookt/downloads with object format
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/users/soulshookt/downloads
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: {'files': [{'filename': 'musa2\\Kendrick Lamar\\[ALAC] NFL - Super Bowl LIX (Live from New Orleans, LA)\\04 Kendrick Lamar - Super Bowl LIX Halftime Show.m4a', 'size': 79212350}]}
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 404
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: ...
+2025-07-24 19:50:04 - newmusic.soulseek_client - [91mERROR[0m - _make_request:272 - API request failed: 404 - 
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - download:715 - Endpoint users/jimmybreeze/enqueue returned no response
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - download:722 - Array format failed, trying old object format
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - download:733 - Trying endpoint: transfers/jimmybreeze/enqueue with object format
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/transfers/jimmybreeze/enqueue
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: {'files': [{'filename': '001 Soulseek Music\\Various Artists [Mixed]\\Super Bowl LIX Live From New Orleans, LA\\04 - Kendrick Lamar - Super Bowl LIX Halftime Show.flac', 'size': 72803291}]}
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 404
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: ...
+2025-07-24 19:50:04 - newmusic.soulseek_client - [91mERROR[0m - _make_request:272 - API request failed: 404 - 
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - download:751 - Fallback endpoint users/soulshookt/downloads returned no response
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - download:733 - Trying endpoint: users/soulshookt/enqueue with object format
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/users/soulshookt/enqueue
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: {'files': [{'filename': 'musa2\\Kendrick Lamar\\[ALAC] NFL - Super Bowl LIX (Live from New Orleans, LA)\\04 Kendrick Lamar - Super Bowl LIX Halftime Show.m4a', 'size': 79212350}]}
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 404
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: ...
+2025-07-24 19:50:04 - newmusic.soulseek_client - [91mERROR[0m - _make_request:272 - API request failed: 404 - 
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - download:751 - Fallback endpoint transfers/jimmybreeze/enqueue returned no response
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - download:733 - Trying endpoint: users/jimmybreeze/downloads with object format
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/users/jimmybreeze/downloads
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: {'files': [{'filename': '001 Soulseek Music\\Various Artists [Mixed]\\Super Bowl LIX Live From New Orleans, LA\\04 - Kendrick Lamar - Super Bowl LIX Halftime Show.flac', 'size': 72803291}]}
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 2/20) - elapsed: 1.5s
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/ede5dac4-eb11-4861-a33e-53f9e87fba2d/responses
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/transfers/downloads
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 404
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: ...
+2025-07-24 19:50:04 - newmusic.soulseek_client - [91mERROR[0m - _make_request:272 - API request failed: 404 - 
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - download:751 - Fallback endpoint users/soulshookt/enqueue returned no response
+2025-07-24 19:50:04 - newmusic.soulseek_client - [91mERROR[0m - download:757 - All download endpoints failed for musa2\Kendrick Lamar\[ALAC] NFL - Super Bowl LIX (Live from New Orleans, LA)\04 Kendrick Lamar - Super Bowl LIX Halftime Show.m4a from soulshookt
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 404
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: ...
+2025-07-24 19:50:04 - newmusic.soulseek_client - [91mERROR[0m - _make_request:272 - API request failed: 404 - 
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - download:751 - Fallback endpoint users/jimmybreeze/downloads returned no response
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - download:733 - Trying endpoint: users/jimmybreeze/enqueue with object format
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/users/jimmybreeze/enqueue
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: {'files': [{'filename': '001 Soulseek Music\\Various Artists [Mixed]\\Super Bowl LIX Live From New Orleans, LA\\04 - Kendrick Lamar - Super Bowl LIX Halftime Show.flac', 'size': 72803291}]}
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"username":"soulshookt","directories":[{"directory":"musa2\\Kendrick Lamar\\[ALAC] NFL - Super Bowl LIX (Live from New Orleans, LA)","fileCount":1,"files":[{"id":"63157e9a-455c-47a7-aa4e-38c616c29383","username":"soulshookt","direction":"Download","filename":"musa2\\Kendrick Lamar\\[ALAC] NFL - Super Bowl LIX (Live from New Orleans, LA)\\04 Kendrick Lamar - Super Bowl LIX Halftime Show.m4a","size":79212350,"startOffset":0,"state":"Completed, Errored","stateDescription":"Completed, Errored","re...
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 404
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: ...
+2025-07-24 19:50:04 - newmusic.soulseek_client - [91mERROR[0m - _make_request:272 - API request failed: 404 - 
+2025-07-24 19:50:04 - newmusic.soulseek_client - [94mDEBUG[0m - download:751 - Fallback endpoint users/jimmybreeze/enqueue returned no response
+2025-07-24 19:50:04 - newmusic.soulseek_client - [91mERROR[0m - download:757 - All download endpoints failed for 001 Soulseek Music\Various Artists [Mixed]\Super Bowl LIX Live From New Orleans, LA\04 - Kendrick Lamar - Super Bowl LIX Halftime Show.flac from jimmybreeze
+2025-07-24 19:50:06 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 3/20) - elapsed: 3.0s
+2025-07-24 19:50:06 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/ede5dac4-eb11-4861-a33e-53f9e87fba2d/responses
+2025-07-24 19:50:06 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:50:06 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:50:06 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:50:08 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 4/20) - elapsed: 4.5s
+2025-07-24 19:50:08 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/ede5dac4-eb11-4861-a33e-53f9e87fba2d/responses
+2025-07-24 19:50:08 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:50:08 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:50:08 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:50:09 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 5/20) - elapsed: 6.0s
+2025-07-24 19:50:09 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/ede5dac4-eb11-4861-a33e-53f9e87fba2d/responses
+2025-07-24 19:50:09 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:50:10 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:50:10 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:50:11 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 6/20) - elapsed: 7.5s
+2025-07-24 19:50:11 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/ede5dac4-eb11-4861-a33e-53f9e87fba2d/responses
+2025-07-24 19:50:11 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:50:11 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:50:11 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:50:13 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 7/20) - elapsed: 9.0s
+2025-07-24 19:50:13 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/ede5dac4-eb11-4861-a33e-53f9e87fba2d/responses
+2025-07-24 19:50:13 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:50:13 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:50:13 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:50:15 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 8/20) - elapsed: 10.5s
+2025-07-24 19:50:15 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/ede5dac4-eb11-4861-a33e-53f9e87fba2d/responses
+2025-07-24 19:50:15 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:50:15 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:50:15 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:50:16 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 9/20) - elapsed: 12.0s
+2025-07-24 19:50:16 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/ede5dac4-eb11-4861-a33e-53f9e87fba2d/responses
+2025-07-24 19:50:16 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:50:17 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:50:17 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:50:18 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 10/20) - elapsed: 13.5s
+2025-07-24 19:50:18 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/ede5dac4-eb11-4861-a33e-53f9e87fba2d/responses
+2025-07-24 19:50:18 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:50:18 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:50:18 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:50:20 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 11/20) - elapsed: 15.0s
+2025-07-24 19:50:20 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/ede5dac4-eb11-4861-a33e-53f9e87fba2d/responses
+2025-07-24 19:50:20 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:50:20 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:50:20 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:50:22 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 12/20) - elapsed: 16.5s
+2025-07-24 19:50:22 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/ede5dac4-eb11-4861-a33e-53f9e87fba2d/responses
+2025-07-24 19:50:22 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:50:22 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:50:22 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:50:23 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 13/20) - elapsed: 18.0s
+2025-07-24 19:50:23 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/ede5dac4-eb11-4861-a33e-53f9e87fba2d/responses
+2025-07-24 19:50:23 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:50:24 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:50:24 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:50:25 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 14/20) - elapsed: 19.5s
+2025-07-24 19:50:25 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/ede5dac4-eb11-4861-a33e-53f9e87fba2d/responses
+2025-07-24 19:50:25 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:50:26 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:50:26 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:50:27 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 15/20) - elapsed: 21.0s
+2025-07-24 19:50:27 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/ede5dac4-eb11-4861-a33e-53f9e87fba2d/responses
+2025-07-24 19:50:27 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:50:27 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:50:27 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:50:29 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 16/20) - elapsed: 22.5s
+2025-07-24 19:50:29 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/ede5dac4-eb11-4861-a33e-53f9e87fba2d/responses
+2025-07-24 19:50:29 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:50:29 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:50:29 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:50:31 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 17/20) - elapsed: 24.0s
+2025-07-24 19:50:31 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/ede5dac4-eb11-4861-a33e-53f9e87fba2d/responses
+2025-07-24 19:50:31 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:50:31 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:50:31 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:50:32 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 18/20) - elapsed: 25.5s
+2025-07-24 19:50:32 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/ede5dac4-eb11-4861-a33e-53f9e87fba2d/responses
+2025-07-24 19:50:32 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:50:33 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:50:33 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:50:34 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 19/20) - elapsed: 27.0s
+2025-07-24 19:50:34 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/ede5dac4-eb11-4861-a33e-53f9e87fba2d/responses
+2025-07-24 19:50:34 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:50:34 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:50:34 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:50:36 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 20/20) - elapsed: 28.5s
+2025-07-24 19:50:36 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/ede5dac4-eb11-4861-a33e-53f9e87fba2d/responses
+2025-07-24 19:50:36 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-24 19:50:36 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-24 19:50:36 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-24 19:50:36 - newmusic.soulseek_client - [92mINFO[0m - search:632 - Search completed. Final results: 0 tracks and 0 albums for query: Signals from Space
+2025-07-24 19:51:07 - newmusic.main - [92mINFO[0m - closeEvent:176 - Closing application...
+2025-07-24 19:51:07 - newmusic.main - [92mINFO[0m - closeEvent:181 - Cleaning up Downloads page threads...
+2025-07-24 19:51:07 - newmusic.main - [92mINFO[0m - closeEvent:186 - Stopping status monitoring thread...
+2025-07-24 19:51:08 - newmusic.main - [92mINFO[0m - closeEvent:191 - Closing Soulseek client...
+2025-07-24 19:51:08 - newmusic.main - [92mINFO[0m - closeEvent:197 - Application closed successfully
