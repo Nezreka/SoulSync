@@ -14859,3 +14859,681 @@
 2025-07-25 08:00:34 - newmusic.plex_client - [91mERROR[0m - create_playlist:227 - CreatePlaylist failed: Must include items to add when creating new playlist.
 2025-07-25 08:00:34 - newmusic.plex_client - [92mINFO[0m - create_playlist:231 - Created playlist 'Aether' with 3 tracks (using items parameter)
 2025-07-25 08:00:34 - newmusic.sync_service - [92mINFO[0m - sync_playlist:196 - Sync completed: 100.0% success rate
+2025-07-25 08:09:21 - newmusic - [92mINFO[0m - setup_logging:57 - Logging initialized with level: DEBUG
+2025-07-25 08:09:21 - newmusic.main - [92mINFO[0m - main:211 - Starting NewMusic application
+2025-07-25 08:09:21 - newmusic.spotify_client - [92mINFO[0m - _setup_client:179 - Spotify client initialized (user info will be fetched when needed)
+2025-07-25 08:09:21 - newmusic.soulseek_client - [92mINFO[0m - _setup_client:220 - Soulseek client configured with slskd at http://localhost:5030
+2025-07-25 08:09:21 - newmusic.spotify_client - [92mINFO[0m - _setup_client:179 - Spotify client initialized (user info will be fetched when needed)
+2025-07-25 08:09:22 - newmusic.main - [92mINFO[0m - change_page:163 - Changed to page: dashboard
+2025-07-25 08:09:22 - newmusic.main - [92mINFO[0m - setup_media_player_connections:150 - Media player connections established between sidebar and downloads page
+2025-07-25 08:09:22 - newmusic.plex_client - [92mINFO[0m - _find_music_library:127 - Found music library: Music
+2025-07-25 08:09:22 - newmusic.plex_client - [92mINFO[0m - _setup_client:113 - Successfully connected to Plex server: PLEX-MACHINE
+2025-07-25 08:09:24 - newmusic.main - [92mINFO[0m - change_page:163 - Changed to page: sync
+2025-07-25 08:09:24 - newmusic.spotify_client - [92mINFO[0m - _ensure_user_id:195 - Successfully authenticated with Spotify as broquethomas
+2025-07-25 08:09:25 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists_metadata_only:256 - Retrieved 8 playlist metadata (first batch)
+2025-07-25 08:20:44 - newmusic.main - [92mINFO[0m - closeEvent:176 - Closing application...
+2025-07-25 08:20:44 - newmusic.main - [92mINFO[0m - closeEvent:181 - Cleaning up Downloads page threads...
+2025-07-25 08:20:44 - newmusic.main - [92mINFO[0m - closeEvent:186 - Stopping status monitoring thread...
+2025-07-25 08:20:45 - newmusic.main - [92mINFO[0m - closeEvent:191 - Closing Soulseek client...
+2025-07-25 08:20:45 - newmusic.main - [92mINFO[0m - closeEvent:197 - Application closed successfully
+2025-07-25 08:20:47 - newmusic - [92mINFO[0m - setup_logging:57 - Logging initialized with level: DEBUG
+2025-07-25 08:20:47 - newmusic.main - [92mINFO[0m - main:211 - Starting NewMusic application
+2025-07-25 08:20:47 - newmusic.spotify_client - [92mINFO[0m - _setup_client:179 - Spotify client initialized (user info will be fetched when needed)
+2025-07-25 08:20:47 - newmusic.soulseek_client - [92mINFO[0m - _setup_client:220 - Soulseek client configured with slskd at http://localhost:5030
+2025-07-25 08:20:47 - newmusic.spotify_client - [92mINFO[0m - _setup_client:179 - Spotify client initialized (user info will be fetched when needed)
+2025-07-25 08:20:48 - newmusic.main - [92mINFO[0m - change_page:163 - Changed to page: dashboard
+2025-07-25 08:20:48 - newmusic.main - [92mINFO[0m - setup_media_player_connections:150 - Media player connections established between sidebar and downloads page
+2025-07-25 08:20:49 - newmusic.plex_client - [92mINFO[0m - _find_music_library:127 - Found music library: Music
+2025-07-25 08:20:49 - newmusic.plex_client - [92mINFO[0m - _setup_client:113 - Successfully connected to Plex server: PLEX-MACHINE
+2025-07-25 08:20:50 - newmusic.main - [92mINFO[0m - change_page:163 - Changed to page: sync
+2025-07-25 08:20:50 - newmusic.spotify_client - [92mINFO[0m - _ensure_user_id:195 - Successfully authenticated with Spotify as broquethomas
+2025-07-25 08:20:50 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists_metadata_only:256 - Retrieved 8 playlist metadata (first batch)
+2025-07-25 08:21:35 - newmusic.main - [92mINFO[0m - closeEvent:176 - Closing application...
+2025-07-25 08:21:35 - newmusic.main - [92mINFO[0m - closeEvent:181 - Cleaning up Downloads page threads...
+2025-07-25 08:21:35 - newmusic.main - [92mINFO[0m - closeEvent:186 - Stopping status monitoring thread...
+2025-07-25 08:21:37 - newmusic.main - [92mINFO[0m - closeEvent:191 - Closing Soulseek client...
+2025-07-25 08:21:37 - newmusic.main - [92mINFO[0m - closeEvent:197 - Application closed successfully
+2025-07-25 08:21:39 - newmusic - [92mINFO[0m - setup_logging:57 - Logging initialized with level: DEBUG
+2025-07-25 08:21:39 - newmusic.main - [92mINFO[0m - main:211 - Starting NewMusic application
+2025-07-25 08:21:39 - newmusic.spotify_client - [92mINFO[0m - _setup_client:179 - Spotify client initialized (user info will be fetched when needed)
+2025-07-25 08:21:39 - newmusic.soulseek_client - [92mINFO[0m - _setup_client:220 - Soulseek client configured with slskd at http://localhost:5030
+2025-07-25 08:21:39 - newmusic.spotify_client - [92mINFO[0m - _setup_client:179 - Spotify client initialized (user info will be fetched when needed)
+2025-07-25 08:21:40 - newmusic.main - [92mINFO[0m - change_page:163 - Changed to page: dashboard
+2025-07-25 08:21:40 - newmusic.main - [92mINFO[0m - setup_media_player_connections:150 - Media player connections established between sidebar and downloads page
+2025-07-25 08:21:40 - newmusic.plex_client - [92mINFO[0m - _find_music_library:127 - Found music library: Music
+2025-07-25 08:21:40 - newmusic.plex_client - [92mINFO[0m - _setup_client:113 - Successfully connected to Plex server: PLEX-MACHINE
+2025-07-25 08:21:41 - newmusic.main - [92mINFO[0m - change_page:163 - Changed to page: sync
+2025-07-25 08:21:41 - newmusic.spotify_client - [92mINFO[0m - _ensure_user_id:195 - Successfully authenticated with Spotify as broquethomas
+2025-07-25 08:21:41 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists_metadata_only:256 - Retrieved 8 playlist metadata (first batch)
+2025-07-25 08:22:14 - newmusic.sync_service - [92mINFO[0m - sync_playlist:94 - Starting sync for playlist: Favorite Artists
+2025-07-25 08:22:14 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'virtual mage'
+2025-07-25 08:22:14 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 0 candidates.
+2025-07-25 08:22:14 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'virtual mage spaceflute'
+2025-07-25 08:22:15 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'spaceflute'
+2025-07-25 08:22:16 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'virtual mage'
+2025-07-25 08:22:16 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 1 candidates.
+2025-07-25 08:22:16 - newmusic.plex_client - [92mINFO[0m - search_tracks:344 - Found 1 candidates in Stage 1. Exiting early.
+2025-07-25 08:22:16 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Space Flute' (ratingKey: 155525)
+2025-07-25 08:22:16 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:263 - Early confident match found for 'Space Flute'
+2025-07-25 08:22:16 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'youth 83'
+2025-07-25 08:22:16 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 0 candidates.
+2025-07-25 08:22:16 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'youth 83 goldeyes'
+2025-07-25 08:22:17 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'goldeyes'
+2025-07-25 08:22:17 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'youth 83'
+2025-07-25 08:22:17 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 0 candidates.
+2025-07-25 08:22:17 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'youth 83 gold eyes'
+2025-07-25 08:22:18 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'gold eyes'
+2025-07-25 08:22:19 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Gold Eyes (feat. Spherelet)' (ratingKey: 451921)
+2025-07-25 08:22:19 - newmusic.plex_client - [92mINFO[0m - search_tracks:390 - Found 1 total potential matches for 'gold eyes' by 'youth 83' after all stages.
+2025-07-25 08:22:19 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:299 - No confident match for 'Gold Eyes' (best score: 0.69)
+2025-07-25 08:22:19 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'inteus'
+2025-07-25 08:22:19 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 0 candidates.
+2025-07-25 08:22:19 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'inteus poolparty'
+2025-07-25 08:22:20 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'poolparty'
+2025-07-25 08:22:20 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Poolparty' (ratingKey: 351361)
+2025-07-25 08:22:20 - newmusic.plex_client - [92mINFO[0m - search_tracks:390 - Found 1 total potential matches for 'poolparty' by 'inteus' after all stages.
+2025-07-25 08:22:20 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'inteus'
+2025-07-25 08:22:20 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 1 candidates.
+2025-07-25 08:22:20 - newmusic.plex_client - [92mINFO[0m - search_tracks:344 - Found 1 candidates in Stage 1. Exiting early.
+2025-07-25 08:22:20 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Pool Party' (ratingKey: 391917)
+2025-07-25 08:22:20 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:263 - Early confident match found for 'Pool Party'
+2025-07-25 08:22:20 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'the g'
+2025-07-25 08:22:21 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 1 candidates.
+2025-07-25 08:22:21 - newmusic.plex_client - [92mINFO[0m - search_tracks:344 - Found 1 candidates in Stage 1. Exiting early.
+2025-07-25 08:22:21 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Starshine' (ratingKey: 391979)
+2025-07-25 08:22:21 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:263 - Early confident match found for 'Starshine'
+2025-07-25 08:22:21 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'rezz'
+2025-07-25 08:22:21 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 0 candidates.
+2025-07-25 08:22:21 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'rezz puzzlebox'
+2025-07-25 08:22:21 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'puzzlebox'
+2025-07-25 08:22:22 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Puzzlebox (feat. Juice Jackal)' (ratingKey: 506426)
+2025-07-25 08:22:22 - newmusic.plex_client - [92mINFO[0m - search_tracks:390 - Found 1 total potential matches for 'puzzlebox' by 'rezz' after all stages.
+2025-07-25 08:22:22 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'rezz'
+2025-07-25 08:22:22 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 1 candidates.
+2025-07-25 08:22:22 - newmusic.plex_client - [92mINFO[0m - search_tracks:344 - Found 1 candidates in Stage 1. Exiting early.
+2025-07-25 08:22:22 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Puzzle Box' (ratingKey: 159681)
+2025-07-25 08:22:22 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:263 - Early confident match found for 'Puzzle Box'
+2025-07-25 08:22:22 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'exmag'
+2025-07-25 08:22:22 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 0 candidates.
+2025-07-25 08:22:22 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'exmag timepiece'
+2025-07-25 08:22:23 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'timepiece'
+2025-07-25 08:22:24 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'exmag'
+2025-07-25 08:22:24 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 2 candidates.
+2025-07-25 08:22:24 - newmusic.plex_client - [92mINFO[0m - search_tracks:344 - Found 2 candidates in Stage 1. Exiting early.
+2025-07-25 08:22:24 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Time Piece' (ratingKey: 452411)
+2025-07-25 08:22:24 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Time Piece' (ratingKey: 452354)
+2025-07-25 08:22:24 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:263 - Early confident match found for 'Time Piece'
+2025-07-25 08:22:24 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'goodlife'
+2025-07-25 08:22:24 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'goodlife goodlifevipmix'
+2025-07-25 08:22:25 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'goodlifevipmix'
+2025-07-25 08:22:25 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'goodlife'
+2025-07-25 08:22:25 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'goodlife good life'
+2025-07-25 08:22:26 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'good life'
+2025-07-25 08:22:27 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Good Life' (ratingKey: 346863)
+2025-07-25 08:22:27 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Good Life' (ratingKey: 490517)
+2025-07-25 08:22:27 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Good Life (Live at Royal Albert Hall)' (ratingKey: 490531)
+2025-07-25 08:22:27 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Good Life' (ratingKey: 183756)
+2025-07-25 08:22:27 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Good Life' (ratingKey: 464348)
+2025-07-25 08:22:27 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for '(I Hope You Find) The Good Life' (ratingKey: 231222)
+2025-07-25 08:22:27 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for '(I Hope You Find) The Good Life (Instrumental)' (ratingKey: 231211)
+2025-07-25 08:22:27 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'You're the Only Good Thing In My Life' (ratingKey: 383673)
+2025-07-25 08:22:27 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Tha Good Life (feat. Mod Sun & Pat Brown)' (ratingKey: 395450)
+2025-07-25 08:22:27 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Living the Good Life' (ratingKey: 464065)
+2025-07-25 08:22:27 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Good Riddance (Time of Your Life)' (ratingKey: 437125)
+2025-07-25 08:22:27 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'The Good Life' (ratingKey: 378485)
+2025-07-25 08:22:27 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Good Life' (ratingKey: 520902)
+2025-07-25 08:22:27 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Good Life' (ratingKey: 520892)
+2025-07-25 08:22:27 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Good Life (VIP Mix)' (ratingKey: 520904)
+2025-07-25 08:22:27 - newmusic.plex_client - [92mINFO[0m - search_tracks:390 - Found 15 total potential matches for 'good life' by 'goodlife' after all stages.
+2025-07-25 08:22:27 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:263 - Early confident match found for 'Good Life - VIP Mix'
+2025-07-25 08:22:27 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'anomalie'
+2025-07-25 08:22:28 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 2 candidates.
+2025-07-25 08:22:28 - newmusic.plex_client - [92mINFO[0m - search_tracks:344 - Found 2 candidates in Stage 1. Exiting early.
+2025-07-25 08:22:28 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Velours' (ratingKey: 392143)
+2025-07-25 08:22:28 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Velours' (ratingKey: 392090)
+2025-07-25 08:22:28 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:263 - Early confident match found for 'Velours'
+2025-07-25 08:22:28 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'lucid monday'
+2025-07-25 08:22:28 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 1 candidates.
+2025-07-25 08:22:28 - newmusic.plex_client - [92mINFO[0m - search_tracks:344 - Found 1 candidates in Stage 1. Exiting early.
+2025-07-25 08:22:28 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Beatbox' (ratingKey: 392198)
+2025-07-25 08:22:28 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:263 - Early confident match found for 'Beatbox'
+2025-07-25 08:22:28 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'alex boychuk'
+2025-07-25 08:22:28 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 1 candidates.
+2025-07-25 08:22:28 - newmusic.plex_client - [92mINFO[0m - search_tracks:344 - Found 1 candidates in Stage 1. Exiting early.
+2025-07-25 08:22:28 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Neonoir (feat. Lebedev Sax)' (ratingKey: 255927)
+2025-07-25 08:22:28 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:263 - Early confident match found for 'Neonoir'
+2025-07-25 08:22:28 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'ark patrol'
+2025-07-25 08:22:28 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 2 candidates.
+2025-07-25 08:22:28 - newmusic.plex_client - [92mINFO[0m - search_tracks:344 - Found 2 candidates in Stage 1. Exiting early.
+2025-07-25 08:22:28 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Hex (VIP)' (ratingKey: 520063)
+2025-07-25 08:22:28 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Hex' (ratingKey: 520080)
+2025-07-25 08:22:28 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:263 - Early confident match found for 'Hex'
+2025-07-25 08:22:28 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'haezer'
+2025-07-25 08:22:28 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 1 candidates.
+2025-07-25 08:22:28 - newmusic.plex_client - [92mINFO[0m - search_tracks:344 - Found 1 candidates in Stage 1. Exiting early.
+2025-07-25 08:22:28 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Energy' (ratingKey: 519431)
+2025-07-25 08:22:28 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:263 - Early confident match found for 'Energy'
+2025-07-25 08:22:28 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'zapravka'
+2025-07-25 08:22:28 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 0 candidates.
+2025-07-25 08:22:28 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'zapravka votchtoialiubliu'
+2025-07-25 08:22:29 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'votchtoialiubliu'
+2025-07-25 08:22:30 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'zapravka'
+2025-07-25 08:22:30 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 0 candidates.
+2025-07-25 08:22:30 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'zapravka vot chto ia liubliu'
+2025-07-25 08:22:30 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'vot chto ia liubliu'
+2025-07-25 08:22:31 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'votchtoialiubliu'
+2025-07-25 08:22:32 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'votchtoialiubliu'
+2025-07-25 08:22:32 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'vot chto ia liubliu'
+2025-07-25 08:22:33 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'vot chto ia liubliu'
+2025-07-25 08:22:34 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'ava low'
+2025-07-25 08:22:34 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 0 candidates.
+2025-07-25 08:22:34 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'ava low casualchic'
+2025-07-25 08:22:34 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'casualchic'
+2025-07-25 08:22:35 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'ava low'
+2025-07-25 08:22:35 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 1 candidates.
+2025-07-25 08:22:35 - newmusic.plex_client - [92mINFO[0m - search_tracks:344 - Found 1 candidates in Stage 1. Exiting early.
+2025-07-25 08:22:35 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Casual Chic' (ratingKey: 518596)
+2025-07-25 08:22:35 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:263 - Early confident match found for 'Casual Chic'
+2025-07-25 08:22:35 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'deti rave'
+2025-07-25 08:22:35 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'deti rave mazdarx7'
+2025-07-25 08:22:36 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'mazdarx7'
+2025-07-25 08:22:37 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'deti rave'
+2025-07-25 08:22:37 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'deti rave mazda rx-7'
+2025-07-25 08:22:37 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'mazda rx-7'
+2025-07-25 08:22:38 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'MAZDA RX-7' (ratingKey: 517899)
+2025-07-25 08:22:38 - newmusic.plex_client - [92mINFO[0m - search_tracks:390 - Found 1 total potential matches for 'mazda rx-7' by 'deti rave' after all stages.
+2025-07-25 08:22:38 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:263 - Early confident match found for 'MAZDA RX-7'
+2025-07-25 08:22:38 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'faneone'
+2025-07-25 08:22:38 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 1 candidates.
+2025-07-25 08:22:38 - newmusic.plex_client - [92mINFO[0m - search_tracks:344 - Found 1 candidates in Stage 1. Exiting early.
+2025-07-25 08:22:38 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Going' (ratingKey: 518293)
+2025-07-25 08:22:38 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:263 - Early confident match found for 'Going'
+2025-07-25 08:22:38 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'wsde'
+2025-07-25 08:22:38 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 0 candidates.
+2025-07-25 08:22:38 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'wsde phonkmeharder'
+2025-07-25 08:22:39 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'phonkmeharder'
+2025-07-25 08:22:40 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'wsde'
+2025-07-25 08:22:40 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 3 candidates.
+2025-07-25 08:22:40 - newmusic.plex_client - [92mINFO[0m - search_tracks:344 - Found 3 candidates in Stage 1. Exiting early.
+2025-07-25 08:22:40 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Phonk Me Harder' (ratingKey: 517441)
+2025-07-25 08:22:40 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Phonk Me Harder 2' (ratingKey: 517451)
+2025-07-25 08:22:40 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Phonk Me Harder 3' (ratingKey: 517433)
+2025-07-25 08:22:40 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:263 - Early confident match found for 'Phonk Me Harder'
+2025-07-25 08:22:40 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'pinkdesperado'
+2025-07-25 08:22:41 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'pinkdesperado'
+2025-07-25 08:22:41 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'pink desperado'
+2025-07-25 08:22:42 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'pink desperado'
+2025-07-25 08:22:43 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'posij'
+2025-07-25 08:22:43 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 0 candidates.
+2025-07-25 08:22:43 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'posij pinkdesperado'
+2025-07-25 08:22:43 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'pinkdesperado'
+2025-07-25 08:22:44 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'posij'
+2025-07-25 08:22:44 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 0 candidates.
+2025-07-25 08:22:44 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'posij pink desperado'
+2025-07-25 08:22:45 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'pink desperado'
+2025-07-25 08:22:45 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:272 - No artist-based matches found. Using title-only fallback for 'Pink Desperado'
+2025-07-25 08:22:45 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'pinkdesperado'
+2025-07-25 08:22:46 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'pinkdesperado'
+2025-07-25 08:22:47 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'pink desperado'
+2025-07-25 08:22:47 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'pink desperado'
+2025-07-25 08:22:48 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:290 - No Plex candidates found for 'Pink Desperado'
+2025-07-25 08:22:48 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'lestmor'
+2025-07-25 08:22:48 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 3 candidates.
+2025-07-25 08:22:48 - newmusic.plex_client - [92mINFO[0m - search_tracks:344 - Found 3 candidates in Stage 1. Exiting early.
+2025-07-25 08:22:48 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Triplav (Slowed)' (ratingKey: 517314)
+2025-07-25 08:22:48 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Triplav (Sped Up)' (ratingKey: 517305)
+2025-07-25 08:22:48 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Triplav' (ratingKey: 517256)
+2025-07-25 08:22:48 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:263 - Early confident match found for 'Triplav'
+2025-07-25 08:22:48 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'teddybears'
+2025-07-25 08:22:48 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 0 candidates.
+2025-07-25 08:22:48 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'teddybears cobrastylefeatmadcobraasfeaturedinsuperman'
+2025-07-25 08:22:49 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'cobrastylefeatmadcobraasfeaturedinsuperman'
+2025-07-25 08:22:50 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'teddybears'
+2025-07-25 08:22:50 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 1 candidates.
+2025-07-25 08:22:50 - newmusic.plex_client - [92mINFO[0m - search_tracks:344 - Found 1 candidates in Stage 1. Exiting early.
+2025-07-25 08:22:50 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Cobrastyle (feat. Mad Cobra)' (ratingKey: 514935)
+2025-07-25 08:22:50 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:263 - Early confident match found for 'Cobrastyle (feat. Mad Cobra) - As featured in Superman'
+2025-07-25 08:22:50 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'funkin matt'
+2025-07-25 08:22:50 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 1 candidates.
+2025-07-25 08:22:50 - newmusic.plex_client - [92mINFO[0m - search_tracks:344 - Found 1 candidates in Stage 1. Exiting early.
+2025-07-25 08:22:50 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Joi' (ratingKey: 513038)
+2025-07-25 08:22:50 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:263 - Early confident match found for 'Joi'
+2025-07-25 08:22:50 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'nielsir'
+2025-07-25 08:22:50 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 1 candidates.
+2025-07-25 08:22:50 - newmusic.plex_client - [92mINFO[0m - search_tracks:344 - Found 1 candidates in Stage 1. Exiting early.
+2025-07-25 08:22:50 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Theta' (ratingKey: 512938)
+2025-07-25 08:22:50 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:263 - Early confident match found for 'Theta'
+2025-07-25 08:22:50 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'adieu aru'
+2025-07-25 08:22:50 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 1 candidates.
+2025-07-25 08:22:50 - newmusic.plex_client - [92mINFO[0m - search_tracks:344 - Found 1 candidates in Stage 1. Exiting early.
+2025-07-25 08:22:50 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Euphorie' (ratingKey: 518052)
+2025-07-25 08:22:50 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:263 - Early confident match found for 'Euphorie'
+2025-07-25 08:22:50 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'peregrihn'
+2025-07-25 08:22:50 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 1 candidates.
+2025-07-25 08:22:50 - newmusic.plex_client - [92mINFO[0m - search_tracks:344 - Found 1 candidates in Stage 1. Exiting early.
+2025-07-25 08:22:50 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Isles' (ratingKey: 512724)
+2025-07-25 08:22:50 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:263 - Early confident match found for 'Isles'
+2025-07-25 08:22:50 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'alison'
+2025-07-25 08:22:50 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 0 candidates.
+2025-07-25 08:22:50 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'alison screens'
+2025-07-25 08:22:51 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'screens'
+2025-07-25 08:22:53 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Screens' (ratingKey: 204948)
+2025-07-25 08:22:53 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Screensaver' (ratingKey: 300144)
+2025-07-25 08:22:53 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'The Killing Screens' (ratingKey: 399065)
+2025-07-25 08:22:53 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'The Killing Screens' (ratingKey: 399031)
+2025-07-25 08:22:53 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'screenshot me like one of your french girls' (ratingKey: 167710)
+2025-07-25 08:22:53 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Green Screens' (ratingKey: 239365)
+2025-07-25 08:22:53 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Tiny Glowing Screens, Pt. 1' (ratingKey: 487227)
+2025-07-25 08:22:53 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Tiny Glowing Screens, Pt. 2' (ratingKey: 487228)
+2025-07-25 08:22:53 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Tiny Glowing Screens, Pt. 3' (ratingKey: 487175)
+2025-07-25 08:22:53 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Tiny Glowing Screens, Pt. 3' (ratingKey: 487254)
+2025-07-25 08:22:53 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Centrefolds & Empty Screens' (ratingKey: 454179)
+2025-07-25 08:22:53 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Screens' (ratingKey: 459756)
+2025-07-25 08:22:53 - newmusic.plex_client - [92mINFO[0m - search_tracks:390 - Found 13 total potential matches for 'screens' by 'alison' after all stages.
+2025-07-25 08:22:53 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:263 - Early confident match found for 'Screens'
+2025-07-25 08:22:53 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'rosentwig'
+2025-07-25 08:22:53 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 1 candidates.
+2025-07-25 08:22:53 - newmusic.plex_client - [92mINFO[0m - search_tracks:344 - Found 1 candidates in Stage 1. Exiting early.
+2025-07-25 08:22:53 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Imagination' (ratingKey: 512607)
+2025-07-25 08:22:53 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:263 - Early confident match found for 'Imagination'
+2025-07-25 08:22:53 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'fantom 87'
+2025-07-25 08:22:53 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'fantom 87 thecomet'
+2025-07-25 08:22:54 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'thecomet'
+2025-07-25 08:22:54 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'fantom 87'
+2025-07-25 08:22:54 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'fantom 87 the comet'
+2025-07-25 08:22:55 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'the comet'
+2025-07-25 08:22:56 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'The Comet' (ratingKey: 512548)
+2025-07-25 08:22:56 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'The Juiceman Cometh' (ratingKey: 310634)
+2025-07-25 08:22:56 - newmusic.plex_client - [92mINFO[0m - search_tracks:390 - Found 2 total potential matches for 'the comet' by 'fantom 87' after all stages.
+2025-07-25 08:22:56 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:263 - Early confident match found for 'The Comet'
+2025-07-25 08:22:56 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'miami nights 1984'
+2025-07-25 08:22:56 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 0 candidates.
+2025-07-25 08:22:56 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'miami nights 1984 mn84theme'
+2025-07-25 08:22:57 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'mn84theme'
+2025-07-25 08:22:57 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'miami nights 1984'
+2025-07-25 08:22:57 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 1 candidates.
+2025-07-25 08:22:57 - newmusic.plex_client - [92mINFO[0m - search_tracks:344 - Found 1 candidates in Stage 1. Exiting early.
+2025-07-25 08:22:57 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'MN84 Theme' (ratingKey: 156745)
+2025-07-25 08:22:57 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:263 - Early confident match found for 'MN84 Theme'
+2025-07-25 08:22:57 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'admo'
+2025-07-25 08:22:58 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 0 candidates.
+2025-07-25 08:22:58 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'admo equinox'
+2025-07-25 08:22:58 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'equinox'
+2025-07-25 08:23:00 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'equinox (for me!)' (ratingKey: 258625)
+2025-07-25 08:23:00 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Équinoxe' (ratingKey: 484278)
+2025-07-25 08:23:00 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Equinox' (ratingKey: 322403)
+2025-07-25 08:23:00 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Equinoxe' (ratingKey: 260391)
+2025-07-25 08:23:00 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Equinox' (ratingKey: 327924)
+2025-07-25 08:23:00 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Equinox Desire' (ratingKey: 399415)
+2025-07-25 08:23:00 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Equinox' (ratingKey: 508939)
+2025-07-25 08:23:00 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'springtime equinox offering (ambient)' (ratingKey: 487602)
+2025-07-25 08:23:00 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Equinox' (ratingKey: 303443)
+2025-07-25 08:23:00 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Equinox Dub' (ratingKey: 498926)
+2025-07-25 08:23:00 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Equinox' (ratingKey: 438203)
+2025-07-25 08:23:00 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Equinox' (ratingKey: 438156)
+2025-07-25 08:23:00 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Celestial Equinox' (ratingKey: 166032)
+2025-07-25 08:23:00 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Equinox' (ratingKey: 322081)
+2025-07-25 08:23:00 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Equinox' (ratingKey: 185067)
+2025-07-25 08:23:00 - newmusic.plex_client - [92mINFO[0m - search_tracks:390 - Found 15 total potential matches for 'equinox' by 'admo' after all stages.
+2025-07-25 08:23:00 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:263 - Early confident match found for 'Equinox'
+2025-07-25 08:23:00 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'voyage'
+2025-07-25 08:23:00 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 1 candidates.
+2025-07-25 08:23:00 - newmusic.plex_client - [92mINFO[0m - search_tracks:344 - Found 1 candidates in Stage 1. Exiting early.
+2025-07-25 08:23:00 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Astra' (ratingKey: 511997)
+2025-07-25 08:23:00 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:263 - Early confident match found for 'Astra'
+2025-07-25 08:23:00 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'adieu aru'
+2025-07-25 08:23:00 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 4 candidates.
+2025-07-25 08:23:00 - newmusic.plex_client - [92mINFO[0m - search_tracks:344 - Found 4 candidates in Stage 1. Exiting early.
+2025-07-25 08:23:01 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Release' (ratingKey: 518033)
+2025-07-25 08:23:01 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Release (Slowed)' (ratingKey: 518034)
+2025-07-25 08:23:01 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Release (Super Slowed)' (ratingKey: 518035)
+2025-07-25 08:23:01 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Release (Sped Up)' (ratingKey: 518036)
+2025-07-25 08:23:01 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:263 - Early confident match found for 'Release'
+2025-07-25 08:23:01 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'portugal the man'
+2025-07-25 08:23:01 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 0 candidates.
+2025-07-25 08:23:01 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'portugal the man grimgeneration'
+2025-07-25 08:23:02 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'grimgeneration'
+2025-07-25 08:23:02 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'portugal the man'
+2025-07-25 08:23:02 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 1 candidates.
+2025-07-25 08:23:02 - newmusic.plex_client - [92mINFO[0m - search_tracks:344 - Found 1 candidates in Stage 1. Exiting early.
+2025-07-25 08:23:02 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Grim Generation' (ratingKey: 511221)
+2025-07-25 08:23:02 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:263 - Early confident match found for 'Grim Generation'
+2025-07-25 08:23:02 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'dr fresch'
+2025-07-25 08:23:02 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 1 candidates.
+2025-07-25 08:23:02 - newmusic.plex_client - [92mINFO[0m - search_tracks:344 - Found 1 candidates in Stage 1. Exiting early.
+2025-07-25 08:23:03 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Armageddon' (ratingKey: 510712)
+2025-07-25 08:23:03 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:263 - Early confident match found for 'Armageddon'
+2025-07-25 08:23:03 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'no signe'
+2025-07-25 08:23:03 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 0 candidates.
+2025-07-25 08:23:03 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'no signe begood'
+2025-07-25 08:23:03 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'begood'
+2025-07-25 08:23:04 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'no signe'
+2025-07-25 08:23:04 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 1 candidates.
+2025-07-25 08:23:04 - newmusic.plex_client - [92mINFO[0m - search_tracks:344 - Found 1 candidates in Stage 1. Exiting early.
+2025-07-25 08:23:04 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Be Good' (ratingKey: 509577)
+2025-07-25 08:23:04 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:263 - Early confident match found for 'Be Good'
+2025-07-25 08:23:04 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'laika beats'
+2025-07-25 08:23:04 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 1 candidates.
+2025-07-25 08:23:04 - newmusic.plex_client - [92mINFO[0m - search_tracks:344 - Found 1 candidates in Stage 1. Exiting early.
+2025-07-25 08:23:04 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Different' (ratingKey: 509065)
+2025-07-25 08:23:04 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:263 - Early confident match found for 'Different'
+2025-07-25 08:23:04 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'mat zo'
+2025-07-25 08:23:04 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 0 candidates.
+2025-07-25 08:23:04 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'mat zo lesmishegas'
+2025-07-25 08:23:05 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'lesmishegas'
+2025-07-25 08:23:06 - newmusic.sync_service - [92mINFO[0m - cancel_sync:57 - PlaylistSyncService.cancel_sync() called - setting cancellation flag
+2025-07-25 08:23:06 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:251 - Sync cancelled after search for 'Les Mishegas'
+2025-07-25 08:24:53 - newmusic.main - [92mINFO[0m - closeEvent:176 - Closing application...
+2025-07-25 08:24:53 - newmusic.main - [92mINFO[0m - closeEvent:181 - Cleaning up Downloads page threads...
+2025-07-25 08:24:53 - newmusic.main - [92mINFO[0m - closeEvent:186 - Stopping status monitoring thread...
+2025-07-25 08:24:55 - newmusic.main - [92mINFO[0m - closeEvent:191 - Closing Soulseek client...
+2025-07-25 08:24:55 - newmusic.main - [92mINFO[0m - closeEvent:197 - Application closed successfully
+2025-07-25 08:24:57 - newmusic - [92mINFO[0m - setup_logging:57 - Logging initialized with level: DEBUG
+2025-07-25 08:24:57 - newmusic.main - [92mINFO[0m - main:211 - Starting NewMusic application
+2025-07-25 08:24:57 - newmusic.spotify_client - [92mINFO[0m - _setup_client:179 - Spotify client initialized (user info will be fetched when needed)
+2025-07-25 08:24:57 - newmusic.soulseek_client - [92mINFO[0m - _setup_client:220 - Soulseek client configured with slskd at http://localhost:5030
+2025-07-25 08:24:57 - newmusic.spotify_client - [92mINFO[0m - _setup_client:179 - Spotify client initialized (user info will be fetched when needed)
+2025-07-25 08:24:58 - newmusic.main - [92mINFO[0m - change_page:163 - Changed to page: dashboard
+2025-07-25 08:24:58 - newmusic.main - [92mINFO[0m - setup_media_player_connections:150 - Media player connections established between sidebar and downloads page
+2025-07-25 08:24:58 - newmusic.plex_client - [92mINFO[0m - _find_music_library:127 - Found music library: Music
+2025-07-25 08:24:58 - newmusic.plex_client - [92mINFO[0m - _setup_client:113 - Successfully connected to Plex server: PLEX-MACHINE
+2025-07-25 08:25:00 - newmusic.main - [92mINFO[0m - change_page:163 - Changed to page: sync
+2025-07-25 08:25:00 - newmusic.spotify_client - [92mINFO[0m - _ensure_user_id:195 - Successfully authenticated with Spotify as broquethomas
+2025-07-25 08:25:00 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists_metadata_only:256 - Retrieved 8 playlist metadata (first batch)
+2025-07-25 08:28:19 - newmusic.main - [92mINFO[0m - closeEvent:176 - Closing application...
+2025-07-25 08:28:19 - newmusic.main - [92mINFO[0m - closeEvent:181 - Cleaning up Downloads page threads...
+2025-07-25 08:28:19 - newmusic.main - [92mINFO[0m - closeEvent:186 - Stopping status monitoring thread...
+2025-07-25 08:28:20 - newmusic.main - [92mINFO[0m - closeEvent:191 - Closing Soulseek client...
+2025-07-25 08:28:20 - newmusic.main - [92mINFO[0m - closeEvent:197 - Application closed successfully
+2025-07-25 08:29:54 - newmusic - [92mINFO[0m - setup_logging:57 - Logging initialized with level: DEBUG
+2025-07-25 08:29:54 - newmusic.main - [92mINFO[0m - main:211 - Starting NewMusic application
+2025-07-25 08:29:54 - newmusic.spotify_client - [92mINFO[0m - _setup_client:179 - Spotify client initialized (user info will be fetched when needed)
+2025-07-25 08:29:54 - newmusic.soulseek_client - [92mINFO[0m - _setup_client:220 - Soulseek client configured with slskd at http://localhost:5030
+2025-07-25 08:29:54 - newmusic.spotify_client - [92mINFO[0m - _setup_client:179 - Spotify client initialized (user info will be fetched when needed)
+2025-07-25 08:29:54 - newmusic.main - [92mINFO[0m - change_page:163 - Changed to page: dashboard
+2025-07-25 08:29:54 - newmusic.main - [92mINFO[0m - setup_media_player_connections:150 - Media player connections established between sidebar and downloads page
+2025-07-25 08:29:55 - newmusic.plex_client - [92mINFO[0m - _find_music_library:127 - Found music library: Music
+2025-07-25 08:29:55 - newmusic.plex_client - [92mINFO[0m - _setup_client:113 - Successfully connected to Plex server: PLEX-MACHINE
+2025-07-25 08:29:55 - newmusic.main - [92mINFO[0m - change_page:163 - Changed to page: sync
+2025-07-25 08:29:56 - newmusic.spotify_client - [92mINFO[0m - _ensure_user_id:195 - Successfully authenticated with Spotify as broquethomas
+2025-07-25 08:29:56 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists_metadata_only:256 - Retrieved 8 playlist metadata (first batch)
+2025-07-25 08:35:42 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'Virtual Mage'
+2025-07-25 08:35:42 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 0 candidates.
+2025-07-25 08:35:42 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'Virtual Mage Signals from Space'
+2025-07-25 08:35:42 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'Signals from Space'
+2025-07-25 08:35:43 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'Signals from Space'
+2025-07-25 08:35:44 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'Signals from Space'
+2025-07-25 08:35:44 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'Virtual Mage'
+2025-07-25 08:35:44 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 1 candidates.
+2025-07-25 08:35:44 - newmusic.plex_client - [92mINFO[0m - search_tracks:344 - Found 1 candidates in Stage 1. Exiting early.
+2025-07-25 08:35:45 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Zztlyk Syrn Qryss' (ratingKey: 539056)
+2025-07-25 08:35:45 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'Virtual Mage'
+2025-07-25 08:35:45 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 1 candidates.
+2025-07-25 08:35:45 - newmusic.plex_client - [92mINFO[0m - search_tracks:344 - Found 1 candidates in Stage 1. Exiting early.
+2025-07-25 08:35:45 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Jyxkra' (ratingKey: 539057)
+2025-07-25 08:35:45 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'Virtual Mage'
+2025-07-25 08:35:45 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 1 candidates.
+2025-07-25 08:35:45 - newmusic.plex_client - [92mINFO[0m - search_tracks:344 - Found 1 candidates in Stage 1. Exiting early.
+2025-07-25 08:35:45 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Ktal Vysh' (ratingKey: 539058)
+2025-07-25 08:35:45 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'Virtual Mage'
+2025-07-25 08:35:45 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 1 candidates.
+2025-07-25 08:35:45 - newmusic.plex_client - [92mINFO[0m - search_tracks:344 - Found 1 candidates in Stage 1. Exiting early.
+2025-07-25 08:35:45 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Fluxx' (ratingKey: 539059)
+2025-07-25 08:35:45 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'Virtual Mage'
+2025-07-25 08:35:45 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 1 candidates.
+2025-07-25 08:35:45 - newmusic.plex_client - [92mINFO[0m - search_tracks:344 - Found 1 candidates in Stage 1. Exiting early.
+2025-07-25 08:35:45 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Vwrn Tlyx' (ratingKey: 539060)
+2025-07-25 08:35:45 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'Kendrick Lamar'
+2025-07-25 08:35:45 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 0 candidates.
+2025-07-25 08:35:45 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'Kendrick Lamar Super Bowl LIX Halftime Show - Live'
+2025-07-25 08:35:46 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'Super Bowl LIX Halftime Show - Live'
+2025-07-25 08:35:46 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'Kendrick Lamar'
+2025-07-25 08:35:47 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 0 candidates.
+2025-07-25 08:35:47 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'Kendrick Lamar Super Bowl LIX Halftime Show'
+2025-07-25 08:35:47 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'Super Bowl LIX Halftime Show'
+2025-07-25 08:35:48 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'NFL'
+2025-07-25 08:35:48 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'NFL Super Bowl LIX Halftime Show - Live'
+2025-07-25 08:35:49 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'Super Bowl LIX Halftime Show - Live'
+2025-07-25 08:35:49 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'NFL'
+2025-07-25 08:35:49 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'NFL Super Bowl LIX Halftime Show'
+2025-07-25 08:35:50 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'Super Bowl LIX Halftime Show'
+2025-07-25 08:35:51 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'Super Bowl LIX Halftime Show - Live'
+2025-07-25 08:35:51 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'Super Bowl LIX Halftime Show - Live'
+2025-07-25 08:35:52 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'Super Bowl LIX Halftime Show'
+2025-07-25 08:35:53 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'Super Bowl LIX Halftime Show'
+2025-07-25 08:35:53 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'bbno$'
+2025-07-25 08:35:54 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 0 candidates.
+2025-07-25 08:35:54 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'bbno$ 1-800'
+2025-07-25 08:35:54 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for '1-800'
+2025-07-25 08:35:55 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for '1-800-DIRTY' (ratingKey: 342942)
+2025-07-25 08:35:55 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for '1-800MYLOVE' (ratingKey: 446003)
+2025-07-25 08:35:55 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for '1-800-273-8255' (ratingKey: 487383)
+2025-07-25 08:35:55 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for '1-800-273-8255' (ratingKey: 487532)
+2025-07-25 08:35:55 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Captain Save a Hoe (feat. 1-800-lost)' (ratingKey: 330364)
+2025-07-25 08:35:55 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for '1-800-SMD' (ratingKey: 330399)
+2025-07-25 08:35:55 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for '1-800 Nothing' (ratingKey: 327017)
+2025-07-25 08:35:55 - newmusic.plex_client - [92mINFO[0m - search_tracks:390 - Found 7 total potential matches for '1-800' by 'bbno$' after all stages.
+2025-07-25 08:35:55 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'Ironmouse'
+2025-07-25 08:35:55 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'Ironmouse 1-800'
+2025-07-25 08:35:56 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for '1-800'
+2025-07-25 08:35:57 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for '1-800-DIRTY' (ratingKey: 342942)
+2025-07-25 08:35:57 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for '1-800MYLOVE' (ratingKey: 446003)
+2025-07-25 08:35:57 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for '1-800-273-8255' (ratingKey: 487383)
+2025-07-25 08:35:57 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for '1-800-273-8255' (ratingKey: 487532)
+2025-07-25 08:35:57 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Captain Save a Hoe (feat. 1-800-lost)' (ratingKey: 330364)
+2025-07-25 08:35:57 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for '1-800-SMD' (ratingKey: 330399)
+2025-07-25 08:35:57 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for '1-800 Nothing' (ratingKey: 327017)
+2025-07-25 08:35:57 - newmusic.plex_client - [92mINFO[0m - search_tracks:390 - Found 7 total potential matches for '1-800' by 'Ironmouse' after all stages.
+2025-07-25 08:35:57 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'bbno$'
+2025-07-25 08:35:57 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 0 candidates.
+2025-07-25 08:35:57 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'bbno$ mary poppins'
+2025-07-25 08:35:58 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'mary poppins'
+2025-07-25 08:35:59 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Mary Poppins' (ratingKey: 325667)
+2025-07-25 08:35:59 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Introducing Mary Poppins' (ratingKey: 143885)
+2025-07-25 08:35:59 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'A Cover Is Not the Book' (ratingKey: 143886)
+2025-07-25 08:35:59 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Nowhere to Go But Up' (ratingKey: 143892)
+2025-07-25 08:35:59 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Theme from Mary Poppins Returns' (ratingKey: 143894)
+2025-07-25 08:35:59 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Mary Poppins Arrives' (ratingKey: 143896)
+2025-07-25 08:35:59 - newmusic.plex_client - [92mINFO[0m - search_tracks:390 - Found 6 total potential matches for 'mary poppins' by 'bbno$' after all stages.
+2025-07-25 08:35:59 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'bbno$'
+2025-07-25 08:35:59 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 0 candidates.
+2025-07-25 08:35:59 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'bbno$ boom'
+2025-07-25 08:36:00 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'boom'
+2025-07-25 08:36:01 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'BOOM' (ratingKey: 258903)
+2025-07-25 08:36:01 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'BOOM (Rap remix)' (ratingKey: 258943)
+2025-07-25 08:36:01 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Boom (Ricky Pedretti Remix)' (ratingKey: 285354)
+2025-07-25 08:36:01 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Boom (Original Mix)' (ratingKey: 285339)
+2025-07-25 08:36:01 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Here Comes The Boom (Original Mix)' (ratingKey: 285349)
+2025-07-25 08:36:01 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'pop ur shit' (ratingKey: 291146)
+2025-07-25 08:36:01 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'dangerous' (ratingKey: 291148)
+2025-07-25 08:36:01 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'née-nah' (ratingKey: 291149)
+2025-07-25 08:36:01 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'just like me' (ratingKey: 291153)
+2025-07-25 08:36:01 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'pop ur shit (nightcore version)' (ratingKey: 291130)
+2025-07-25 08:36:01 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'dangerous (nightcore version)' (ratingKey: 291132)
+2025-07-25 08:36:01 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'née-nah (nightcore version)' (ratingKey: 291133)
+2025-07-25 08:36:01 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'just like me (nightcore version)' (ratingKey: 291137)
+2025-07-25 08:36:01 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'pop ur shit (slowed down)' (ratingKey: 291098)
+2025-07-25 08:36:01 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'dangerous (slowed down)' (ratingKey: 291100)
+2025-07-25 08:36:01 - newmusic.plex_client - [92mINFO[0m - search_tracks:390 - Found 15 total potential matches for 'boom' by 'bbno$' after all stages.
+2025-07-25 08:36:01 - newmusic.soulseek_client - [92mINFO[0m - search:551 - Starting search for: 'Virtual Mage Signals from Space'
+2025-07-25 08:36:01 - newmusic.soulseek_client - [94mDEBUG[0m - search:561 - Search data: {'searchText': 'Virtual Mage Signals from Space', 'timeout': 30000, 'filterResponses': True, 'minimumResponseFileCount': 1, 'minimumPeerUploadSpeed': 0}
+2025-07-25 08:36:01 - newmusic.soulseek_client - [94mDEBUG[0m - search:562 - Making POST request to: http://localhost:5030/api/v0/searches
+2025-07-25 08:36:01 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/searches
+2025-07-25 08:36:01 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-25 08:36:01 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: {'searchText': 'Virtual Mage Signals from Space', 'timeout': 30000, 'filterResponses': True, 'minimumResponseFileCount': 1, 'minimumPeerUploadSpeed': 0}
+2025-07-25 08:36:01 - newmusic.soulseek_client - [92mINFO[0m - search:551 - Starting search for: 'Kendrick Lamar Super Bowl LIX Halftime Show - Live'
+2025-07-25 08:36:01 - newmusic.soulseek_client - [92mINFO[0m - search:551 - Starting search for: 'bbno$ 1-800'
+2025-07-25 08:36:01 - newmusic.soulseek_client - [94mDEBUG[0m - search:561 - Search data: {'searchText': 'Kendrick Lamar Super Bowl LIX Halftime Show - Live', 'timeout': 30000, 'filterResponses': True, 'minimumResponseFileCount': 1, 'minimumPeerUploadSpeed': 0}
+2025-07-25 08:36:01 - newmusic.soulseek_client - [94mDEBUG[0m - search:561 - Search data: {'searchText': 'bbno$ 1-800', 'timeout': 30000, 'filterResponses': True, 'minimumResponseFileCount': 1, 'minimumPeerUploadSpeed': 0}
+2025-07-25 08:36:01 - newmusic.soulseek_client - [94mDEBUG[0m - search:562 - Making POST request to: http://localhost:5030/api/v0/searches
+2025-07-25 08:36:01 - newmusic.soulseek_client - [94mDEBUG[0m - search:562 - Making POST request to: http://localhost:5030/api/v0/searches
+2025-07-25 08:36:01 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/searches
+2025-07-25 08:36:01 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making POST request to: http://localhost:5030/api/v0/searches
+2025-07-25 08:36:01 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-25 08:36:01 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-25 08:36:01 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: {'searchText': 'Kendrick Lamar Super Bowl LIX Halftime Show - Live', 'timeout': 30000, 'filterResponses': True, 'minimumResponseFileCount': 1, 'minimumPeerUploadSpeed': 0}
+2025-07-25 08:36:01 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:245 - JSON payload: {'searchText': 'bbno$ 1-800', 'timeout': 30000, 'filterResponses': True, 'minimumResponseFileCount': 1, 'minimumPeerUploadSpeed': 0}
+2025-07-25 08:36:01 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-25 08:36:01 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: {"fileCount":0,"id":"001af632-70fa-49c1-9c2b-911b88550105","isComplete":false,"lockedFileCount":0,"responseCount":0,"responses":[],"searchText":"Kendrick Lamar Super Bowl LIX Halftime Show - Live","startedAt":"2025-07-25T15:36:01.7386842Z","state":"InProgress","token":209}...
+2025-07-25 08:36:01 - newmusic.soulseek_client - [92mINFO[0m - search:575 - Search initiated with ID: 001af632-70fa-49c1-9c2b-911b88550105
+2025-07-25 08:36:01 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 1/20) - elapsed: 0.0s
+2025-07-25 08:36:01 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/001af632-70fa-49c1-9c2b-911b88550105/responses
+2025-07-25 08:36:01 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-25 08:36:01 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-25 08:36:01 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: {"fileCount":0,"id":"1f53c469-d16f-4d47-987a-0d04ee1ac5b7","isComplete":false,"lockedFileCount":0,"responseCount":0,"responses":[],"searchText":"Virtual Mage Signals from Space","startedAt":"2025-07-25T15:36:01.7384845Z","state":"InProgress","token":208}...
+2025-07-25 08:36:01 - newmusic.soulseek_client - [92mINFO[0m - search:575 - Search initiated with ID: 1f53c469-d16f-4d47-987a-0d04ee1ac5b7
+2025-07-25 08:36:01 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 1/20) - elapsed: 0.0s
+2025-07-25 08:36:01 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/1f53c469-d16f-4d47-987a-0d04ee1ac5b7/responses
+2025-07-25 08:36:01 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-25 08:36:01 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-25 08:36:01 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: {"fileCount":0,"id":"bf3c3a96-0979-4bcb-b5ad-0776df3493aa","isComplete":false,"lockedFileCount":0,"responseCount":0,"responses":[],"searchText":"bbno$ 1-800","startedAt":"2025-07-25T15:36:01.7379047Z","state":"InProgress","token":207}...
+2025-07-25 08:36:01 - newmusic.soulseek_client - [92mINFO[0m - search:575 - Search initiated with ID: bf3c3a96-0979-4bcb-b5ad-0776df3493aa
+2025-07-25 08:36:01 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 1/20) - elapsed: 0.0s
+2025-07-25 08:36:01 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/bf3c3a96-0979-4bcb-b5ad-0776df3493aa/responses
+2025-07-25 08:36:01 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-25 08:36:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-25 08:36:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-25 08:36:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-25 08:36:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-25 08:36:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-25 08:36:02 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-25 08:36:03 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 2/20) - elapsed: 1.5s
+2025-07-25 08:36:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/001af632-70fa-49c1-9c2b-911b88550105/responses
+2025-07-25 08:36:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-25 08:36:03 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 2/20) - elapsed: 1.5s
+2025-07-25 08:36:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/1f53c469-d16f-4d47-987a-0d04ee1ac5b7/responses
+2025-07-25 08:36:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-25 08:36:03 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 2/20) - elapsed: 1.5s
+2025-07-25 08:36:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/bf3c3a96-0979-4bcb-b5ad-0776df3493aa/responses
+2025-07-25 08:36:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-25 08:36:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-25 08:36:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-25 08:36:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-25 08:36:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-25 08:36:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-25 08:36:03 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-25 08:36:05 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 3/20) - elapsed: 3.0s
+2025-07-25 08:36:05 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/001af632-70fa-49c1-9c2b-911b88550105/responses
+2025-07-25 08:36:05 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-25 08:36:05 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 3/20) - elapsed: 3.0s
+2025-07-25 08:36:05 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/1f53c469-d16f-4d47-987a-0d04ee1ac5b7/responses
+2025-07-25 08:36:05 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-25 08:36:05 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 3/20) - elapsed: 3.0s
+2025-07-25 08:36:05 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/bf3c3a96-0979-4bcb-b5ad-0776df3493aa/responses
+2025-07-25 08:36:05 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-25 08:36:05 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-25 08:36:05 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-25 08:36:05 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-25 08:36:05 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-25 08:36:05 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-25 08:36:05 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-25 08:36:07 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 4/20) - elapsed: 4.5s
+2025-07-25 08:36:07 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/001af632-70fa-49c1-9c2b-911b88550105/responses
+2025-07-25 08:36:07 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-25 08:36:07 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 4/20) - elapsed: 4.5s
+2025-07-25 08:36:07 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/1f53c469-d16f-4d47-987a-0d04ee1ac5b7/responses
+2025-07-25 08:36:07 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-25 08:36:07 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 4/20) - elapsed: 4.5s
+2025-07-25 08:36:07 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/bf3c3a96-0979-4bcb-b5ad-0776df3493aa/responses
+2025-07-25 08:36:07 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-25 08:36:07 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-25 08:36:07 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-25 08:36:07 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-25 08:36:07 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-25 08:36:07 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-25 08:36:07 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-25 08:36:07 - newmusic.main - [92mINFO[0m - closeEvent:176 - Closing application...
+2025-07-25 08:36:07 - newmusic.main - [92mINFO[0m - closeEvent:181 - Cleaning up Downloads page threads...
+2025-07-25 08:36:07 - newmusic.main - [92mINFO[0m - closeEvent:186 - Stopping status monitoring thread...
+2025-07-25 08:36:08 - newmusic.main - [92mINFO[0m - closeEvent:191 - Closing Soulseek client...
+2025-07-25 08:36:08 - newmusic.main - [92mINFO[0m - closeEvent:197 - Application closed successfully
+2025-07-25 08:36:08 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 5/20) - elapsed: 6.0s
+2025-07-25 08:36:08 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/001af632-70fa-49c1-9c2b-911b88550105/responses
+2025-07-25 08:36:08 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-25 08:36:08 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 5/20) - elapsed: 6.0s
+2025-07-25 08:36:08 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/1f53c469-d16f-4d47-987a-0d04ee1ac5b7/responses
+2025-07-25 08:36:08 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-25 08:36:09 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 5/20) - elapsed: 6.0s
+2025-07-25 08:36:09 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/bf3c3a96-0979-4bcb-b5ad-0776df3493aa/responses
+2025-07-25 08:36:09 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-25 08:36:09 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-25 08:36:09 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-25 08:36:09 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-25 08:36:09 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-25 08:36:09 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-25 08:36:09 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-25 08:36:10 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 6/20) - elapsed: 7.5s
+2025-07-25 08:36:10 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/001af632-70fa-49c1-9c2b-911b88550105/responses
+2025-07-25 08:36:10 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-25 08:36:10 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 6/20) - elapsed: 7.5s
+2025-07-25 08:36:10 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/1f53c469-d16f-4d47-987a-0d04ee1ac5b7/responses
+2025-07-25 08:36:10 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-25 08:36:10 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 6/20) - elapsed: 7.5s
+2025-07-25 08:36:10 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/bf3c3a96-0979-4bcb-b5ad-0776df3493aa/responses
+2025-07-25 08:36:10 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-25 08:36:10 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-25 08:36:10 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-25 08:36:10 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-25 08:36:10 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-25 08:36:11 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-25 08:36:11 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-25 08:36:12 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 7/20) - elapsed: 9.0s
+2025-07-25 08:36:12 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/001af632-70fa-49c1-9c2b-911b88550105/responses
+2025-07-25 08:36:12 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-25 08:36:12 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 7/20) - elapsed: 9.0s
+2025-07-25 08:36:12 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/1f53c469-d16f-4d47-987a-0d04ee1ac5b7/responses
+2025-07-25 08:36:12 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-25 08:36:12 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 7/20) - elapsed: 9.0s
+2025-07-25 08:36:12 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/bf3c3a96-0979-4bcb-b5ad-0776df3493aa/responses
+2025-07-25 08:36:12 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-25 08:36:12 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-25 08:36:12 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-25 08:36:12 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-25 08:36:12 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-25 08:36:12 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-25 08:36:12 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-25 08:36:14 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 8/20) - elapsed: 10.5s
+2025-07-25 08:36:14 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/001af632-70fa-49c1-9c2b-911b88550105/responses
+2025-07-25 08:36:14 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-25 08:36:14 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 8/20) - elapsed: 10.5s
+2025-07-25 08:36:14 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/1f53c469-d16f-4d47-987a-0d04ee1ac5b7/responses
+2025-07-25 08:36:14 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-25 08:36:14 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 8/20) - elapsed: 10.5s
+2025-07-25 08:36:14 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/bf3c3a96-0979-4bcb-b5ad-0776df3493aa/responses
+2025-07-25 08:36:14 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-25 08:36:14 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-25 08:36:14 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-25 08:36:14 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-25 08:36:14 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-25 08:36:14 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-25 08:36:14 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-25 08:36:15 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 9/20) - elapsed: 12.0s
+2025-07-25 08:36:15 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/001af632-70fa-49c1-9c2b-911b88550105/responses
+2025-07-25 08:36:15 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-25 08:36:15 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 9/20) - elapsed: 12.0s
+2025-07-25 08:36:15 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/1f53c469-d16f-4d47-987a-0d04ee1ac5b7/responses
+2025-07-25 08:36:15 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-25 08:36:16 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 9/20) - elapsed: 12.0s
+2025-07-25 08:36:16 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/bf3c3a96-0979-4bcb-b5ad-0776df3493aa/responses
+2025-07-25 08:36:16 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-25 08:36:16 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-25 08:36:16 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-25 08:36:16 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-25 08:36:16 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-25 08:36:16 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-25 08:36:16 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-25 08:36:17 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 10/20) - elapsed: 13.5s
+2025-07-25 08:36:17 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/001af632-70fa-49c1-9c2b-911b88550105/responses
+2025-07-25 08:36:17 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-25 08:36:17 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 10/20) - elapsed: 13.5s
+2025-07-25 08:36:17 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/1f53c469-d16f-4d47-987a-0d04ee1ac5b7/responses
+2025-07-25 08:36:17 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-25 08:36:17 - newmusic.soulseek_client - [94mDEBUG[0m - search:585 - Polling for results (attempt 10/20) - elapsed: 13.5s
+2025-07-25 08:36:17 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:242 - Making GET request to: http://localhost:5030/api/v0/searches/bf3c3a96-0979-4bcb-b5ad-0776df3493aa/responses
+2025-07-25 08:36:17 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
+2025-07-25 08:36:18 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-25 08:36:18 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-25 08:36:18 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-25 08:36:18 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...
+2025-07-25 08:36:18 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
+2025-07-25 08:36:18 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: []...

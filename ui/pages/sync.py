@@ -12,6 +12,42 @@ import re
 import asyncio
 from core.matching_engine import MusicMatchingEngine
 
+
+class EllipsisLabel(QLabel):
+    """A label that shows ellipsis for long text and tooltip on hover"""
+    def __init__(self, text="", parent=None):
+        super().__init__(text, parent)
+        self.full_text = text
+        self.setText(text)
+        
+    def setText(self, text):
+        self.full_text = text
+        # Set elided text with ellipsis
+        fm = self.fontMetrics()
+        elided_text = fm.elidedText(text, Qt.TextElideMode.ElideRight, self.width() - 10)
+        super().setText(elided_text)
+        
+        # Set tooltip to show full text if it's elided
+        if elided_text != text:
+            self.setToolTip(text)
+        else:
+            self.setToolTip("")  # Clear tooltip if text fits
+    
+    def resizeEvent(self, event):
+        """Handle resize events to recalculate ellipsis"""
+        super().resizeEvent(event)
+        # Re-elide text with new width
+        if self.full_text:
+            fm = self.fontMetrics()
+            elided_text = fm.elidedText(self.full_text, Qt.TextElideMode.ElideRight, self.width() - 10)
+            super().setText(elided_text)
+            
+            # Update tooltip
+            if elided_text != self.full_text:
+                self.setToolTip(self.full_text)
+            else:
+                self.setToolTip("")
+
 def clean_track_name_for_search(track_name):
     """
     Cleans a track name for searching by removing text in parentheses and brackets.
@@ -883,11 +919,11 @@ class PlaylistDetailsModal(QDialog):
                 border-radius: 16px;
                 gridline-color: transparent;
                 color: #ffffff;
-                font-size: 13px;
+                font-size: 11px;
                 selection-background-color: rgba(29, 185, 84, 0.2);
             }
             QTableWidget::item {
-                padding: 16px 24px;
+                padding: 12px 16px;
                 border-bottom: 1px solid rgba(255, 255, 255, 0.05);
                 background: transparent;
             }
@@ -905,11 +941,11 @@ class PlaylistDetailsModal(QDialog):
             QHeaderView::section {
                 background: transparent;
                 color: #b3b3b3;
-                padding: 16px 24px;
+                padding: 12px 16px;
                 border: none;
                 border-bottom: 2px solid rgba(255, 255, 255, 0.1);
                 font-weight: 600;
-                font-size: 12px;
+                font-size: 10px;
                 text-transform: uppercase;
                 letter-spacing: 0.5px;
             }
@@ -921,30 +957,30 @@ class PlaylistDetailsModal(QDialog):
         # Populate table with proper styling
         if self.playlist.tracks:
             for row, track in enumerate(self.playlist.tracks):
-                # Track name with proper styling
-                track_item = QTableWidgetItem(track.name)
-                track_item.setFlags(track_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                track_item.setFont(QFont("SF Pro Text", 13, QFont.Weight.Medium))
-                self.track_table.setItem(row, 0, track_item)
+                # Track name with ellipsis label
+                track_label = EllipsisLabel(track.name)
+                track_label.setFont(QFont("SF Pro Text", 11, QFont.Weight.Medium))
+                track_label.setStyleSheet("color: #ffffff; background: transparent; border: none;")
+                self.track_table.setCellWidget(row, 0, track_label)
                 
-                # Artist(s) with subtle styling
+                # Artist(s) with ellipsis label  
                 artists = ", ".join(track.artists)
-                artist_item = QTableWidgetItem(artists)
-                artist_item.setFlags(artist_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                artist_item.setFont(QFont("SF Pro Text", 13))
-                self.track_table.setItem(row, 1, artist_item)
+                artist_label = EllipsisLabel(artists)
+                artist_label.setFont(QFont("SF Pro Text", 11))
+                artist_label.setStyleSheet("color: #ffffff; background: transparent; border: none;")
+                self.track_table.setCellWidget(row, 1, artist_label)
                 
-                # Album with subtle styling
-                album_item = QTableWidgetItem(track.album)
-                album_item.setFlags(album_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                album_item.setFont(QFont("SF Pro Text", 13))
-                self.track_table.setItem(row, 2, album_item)
+                # Album with ellipsis label
+                album_label = EllipsisLabel(track.album)
+                album_label.setFont(QFont("SF Pro Text", 11))
+                album_label.setStyleSheet("color: #ffffff; background: transparent; border: none;")
+                self.track_table.setCellWidget(row, 2, album_label)
                 
-                # Duration with monospace font
+                # Duration with standard item (doesn't need scrolling)
                 duration = self.format_duration(track.duration_ms)
                 duration_item = QTableWidgetItem(duration)
                 duration_item.setFlags(duration_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                duration_item.setFont(QFont("SF Mono", 12))
+                duration_item.setFont(QFont("SF Mono", 10))
                 self.track_table.setItem(row, 3, duration_item)
         else:
             # Show placeholder while tracks are being loaded
@@ -988,6 +1024,9 @@ class PlaylistDetailsModal(QDialog):
         self.track_table.verticalHeader().setVisible(False)
         self.track_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.track_table.setAlternatingRowColors(False)
+        
+        # Set uniform row height to accommodate the labels properly
+        self.track_table.verticalHeader().setDefaultSectionSize(40)  # Height for each row
         
         layout.addWidget(self.track_table)
         
@@ -1380,26 +1419,30 @@ class PlaylistDetailsModal(QDialog):
         
         # Populate table
         for row, track in enumerate(self.playlist.tracks):
-            # Track name
-            track_item = QTableWidgetItem(track.name)
-            track_item.setFlags(track_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            self.track_table.setItem(row, 0, track_item)
+            # Track name with ellipsis label
+            track_label = EllipsisLabel(track.name)
+            track_label.setFont(QFont("SF Pro Text", 11, QFont.Weight.Medium))
+            track_label.setStyleSheet("color: #ffffff; background: transparent; border: none;")
+            self.track_table.setCellWidget(row, 0, track_label)
             
-            # Artist(s)
+            # Artist(s) with ellipsis label
             artists = ", ".join(track.artists)
-            artist_item = QTableWidgetItem(artists)
-            artist_item.setFlags(artist_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            self.track_table.setItem(row, 1, artist_item)
+            artist_label = EllipsisLabel(artists)
+            artist_label.setFont(QFont("SF Pro Text", 11))
+            artist_label.setStyleSheet("color: #ffffff; background: transparent; border: none;")
+            self.track_table.setCellWidget(row, 1, artist_label)
             
-            # Album
-            album_item = QTableWidgetItem(track.album)
-            album_item.setFlags(album_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            self.track_table.setItem(row, 2, album_item)
+            # Album with ellipsis label
+            album_label = EllipsisLabel(track.album)
+            album_label.setFont(QFont("SF Pro Text", 11))
+            album_label.setStyleSheet("color: #ffffff; background: transparent; border: none;")
+            self.track_table.setCellWidget(row, 2, album_label)
             
-            # Duration
+            # Duration with standard item (doesn't need scrolling)
             duration = self.format_duration(track.duration_ms)
             duration_item = QTableWidgetItem(duration)
             duration_item.setFlags(duration_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            duration_item.setFont(QFont("SF Mono", 10))
             self.track_table.setItem(row, 3, duration_item)
 
 class PlaylistItem(QFrame):
