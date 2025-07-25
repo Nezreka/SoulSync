@@ -19226,3 +19226,192 @@
 2025-07-25 09:27:27 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:243 - Headers: {'Content-Type': 'application/json', 'X-API-Key': '1234567891234567'}
 2025-07-25 09:27:27 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:254 - Response status: 200
 2025-07-25 09:27:27 - newmusic.soulseek_client - [94mDEBUG[0m - _make_request:255 - Response text: [{"username":"borisk","directories":[{"directory":"@@tdzlm\\myzik_volume_III\\1 -  zapad_modern\\03 Brit - Rock\\Bill Nelson\\2011 - Signals from Realms of Light","fileCount":1,"files":[{"id":"3cace47a-3a6b-4bf4-affe-7e0f811afe75","username":"borisk","direction":"Download","filename":"@@tdzlm\\myzik_volume_III\\1 -  zapad_modern\\03 Brit - Rock\\Bill Nelson\\2011 - Signals from Realms of Light\\02 - Past And Present, (And The Space Between).flac","size":138819202,"startOffset":0,"state":"Complet...
+2025-07-25 09:30:06 - newmusic.main - [92mINFO[0m - closeEvent:176 - Closing application...
+2025-07-25 09:30:06 - newmusic.main - [92mINFO[0m - closeEvent:181 - Cleaning up Downloads page threads...
+2025-07-25 09:30:06 - newmusic.main - [92mINFO[0m - closeEvent:186 - Stopping status monitoring thread...
+2025-07-25 09:30:07 - newmusic.main - [92mINFO[0m - closeEvent:191 - Closing Soulseek client...
+2025-07-25 09:30:07 - newmusic.main - [92mINFO[0m - closeEvent:197 - Application closed successfully
+2025-07-25 09:30:20 - newmusic - [92mINFO[0m - setup_logging:57 - Logging initialized with level: DEBUG
+2025-07-25 09:30:20 - newmusic.main - [92mINFO[0m - main:211 - Starting NewMusic application
+2025-07-25 09:30:20 - newmusic.spotify_client - [92mINFO[0m - _setup_client:179 - Spotify client initialized (user info will be fetched when needed)
+2025-07-25 09:30:20 - newmusic.soulseek_client - [92mINFO[0m - _setup_client:220 - Soulseek client configured with slskd at http://localhost:5030
+2025-07-25 09:30:20 - newmusic.spotify_client - [92mINFO[0m - _setup_client:179 - Spotify client initialized (user info will be fetched when needed)
+2025-07-25 09:30:20 - newmusic.main - [92mINFO[0m - change_page:163 - Changed to page: dashboard
+2025-07-25 09:30:20 - newmusic.main - [92mINFO[0m - setup_media_player_connections:150 - Media player connections established between sidebar and downloads page
+2025-07-25 09:30:21 - newmusic.plex_client - [92mINFO[0m - _find_music_library:127 - Found music library: Music
+2025-07-25 09:30:21 - newmusic.plex_client - [92mINFO[0m - _setup_client:113 - Successfully connected to Plex server: PLEX-MACHINE
+2025-07-25 09:30:21 - newmusic.main - [92mINFO[0m - change_page:163 - Changed to page: sync
+2025-07-25 09:30:21 - newmusic.spotify_client - [92mINFO[0m - _ensure_user_id:195 - Successfully authenticated with Spotify as broquethomas
+2025-07-25 09:30:22 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists_metadata_only:256 - Retrieved 8 playlist metadata (first batch)
+2025-07-25 09:30:24 - newmusic.sync_service - [92mINFO[0m - sync_playlist:94 - Starting sync for playlist: Failed test
+2025-07-25 09:30:24 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'virtual mage'
+2025-07-25 09:30:25 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 0 candidates.
+2025-07-25 09:30:25 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'virtual mage signalsfromspace'
+2025-07-25 09:30:25 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'signalsfromspace'
+2025-07-25 09:30:26 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'virtual mage'
+2025-07-25 09:30:26 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 0 candidates.
+2025-07-25 09:30:26 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'virtual mage signals from space'
+2025-07-25 09:30:27 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'signals from space'
+2025-07-25 09:30:27 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:272 - No artist-based matches found. Using title-only fallback for 'Signals from Space'
+2025-07-25 09:30:27 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'signalsfromspace'
+2025-07-25 09:30:28 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'signalsfromspace'
+2025-07-25 09:30:29 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'signals from space'
+2025-07-25 09:30:29 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'signals from space'
+2025-07-25 09:30:30 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:290 - No Plex candidates found for 'Signals from Space'
+2025-07-25 09:30:30 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'virtual mage'
+2025-07-25 09:30:30 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 0 candidates.
+2025-07-25 09:30:30 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'virtual mage zztlyksyrnqryss'
+2025-07-25 09:30:31 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'zztlyksyrnqryss'
+2025-07-25 09:30:31 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'virtual mage'
+2025-07-25 09:30:31 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 1 candidates.
+2025-07-25 09:30:31 - newmusic.plex_client - [92mINFO[0m - search_tracks:344 - Found 1 candidates in Stage 1. Exiting early.
+2025-07-25 09:30:31 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Zztlyk Syrn Qryss' (ratingKey: 539056)
+2025-07-25 09:30:31 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:263 - Early confident match found for 'Zztlyk Syrn Qryss'
+2025-07-25 09:30:31 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'virtual mage'
+2025-07-25 09:30:31 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 1 candidates.
+2025-07-25 09:30:31 - newmusic.plex_client - [92mINFO[0m - search_tracks:344 - Found 1 candidates in Stage 1. Exiting early.
+2025-07-25 09:30:31 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Jyxkra' (ratingKey: 539057)
+2025-07-25 09:30:31 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:263 - Early confident match found for 'Jyxkra'
+2025-07-25 09:30:31 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'virtual mage'
+2025-07-25 09:30:31 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 0 candidates.
+2025-07-25 09:30:31 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'virtual mage ktalvysh'
+2025-07-25 09:30:32 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'ktalvysh'
+2025-07-25 09:30:33 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'virtual mage'
+2025-07-25 09:30:33 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 1 candidates.
+2025-07-25 09:30:33 - newmusic.plex_client - [92mINFO[0m - search_tracks:344 - Found 1 candidates in Stage 1. Exiting early.
+2025-07-25 09:30:33 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Ktal Vysh' (ratingKey: 539058)
+2025-07-25 09:30:33 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:263 - Early confident match found for 'Ktal Vysh'
+2025-07-25 09:30:33 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'virtual mage'
+2025-07-25 09:30:33 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 1 candidates.
+2025-07-25 09:30:33 - newmusic.plex_client - [92mINFO[0m - search_tracks:344 - Found 1 candidates in Stage 1. Exiting early.
+2025-07-25 09:30:33 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Fluxx' (ratingKey: 539059)
+2025-07-25 09:30:33 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:263 - Early confident match found for 'Fluxx'
+2025-07-25 09:30:33 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'virtual mage'
+2025-07-25 09:30:33 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 0 candidates.
+2025-07-25 09:30:33 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'virtual mage vwrntlyx'
+2025-07-25 09:30:33 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'vwrntlyx'
+2025-07-25 09:30:34 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'virtual mage'
+2025-07-25 09:30:34 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 1 candidates.
+2025-07-25 09:30:34 - newmusic.plex_client - [92mINFO[0m - search_tracks:344 - Found 1 candidates in Stage 1. Exiting early.
+2025-07-25 09:30:34 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:350 - Stored original track reference for 'Vwrn Tlyx' (ratingKey: 539060)
+2025-07-25 09:30:34 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:263 - Early confident match found for 'Vwrn Tlyx'
+2025-07-25 09:30:34 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'kendrick lamar'
+2025-07-25 09:30:34 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 0 candidates.
+2025-07-25 09:30:34 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'kendrick lamar superbowllixhalftimeshowlive'
+2025-07-25 09:30:35 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'superbowllixhalftimeshowlive'
+2025-07-25 09:30:36 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'kendrick lamar'
+2025-07-25 09:30:36 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 0 candidates.
+2025-07-25 09:30:36 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'kendrick lamar super bowl lix halftime show'
+2025-07-25 09:30:36 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'super bowl lix halftime show'
+2025-07-25 09:30:37 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'nfl'
+2025-07-25 09:30:37 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'nfl superbowllixhalftimeshowlive'
+2025-07-25 09:30:38 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'superbowllixhalftimeshowlive'
+2025-07-25 09:30:38 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'nfl'
+2025-07-25 09:30:38 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'nfl super bowl lix halftime show'
+2025-07-25 09:30:39 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'super bowl lix halftime show'
+2025-07-25 09:30:40 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:272 - No artist-based matches found. Using title-only fallback for 'Super Bowl LIX Halftime Show - Live'
+2025-07-25 09:30:40 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'superbowllixhalftimeshowlive'
+2025-07-25 09:30:40 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'superbowllixhalftimeshowlive'
+2025-07-25 09:30:41 - newmusic.sync_service - [93mWARNING[0m - sync_playlist:77 - Sync already in progress
+2025-07-25 09:30:41 - newmusic.sync_service - [93mWARNING[0m - sync_playlist:77 - Sync already in progress
+2025-07-25 09:30:41 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'super bowl lix halftime show'
+2025-07-25 09:30:42 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'super bowl lix halftime show'
+2025-07-25 09:30:42 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:290 - No Plex candidates found for 'Super Bowl LIX Halftime Show - Live'
+2025-07-25 09:30:42 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'bbno'
+2025-07-25 09:30:42 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 0 candidates.
+2025-07-25 09:30:42 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'bbno 1800'
+2025-07-25 09:30:43 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for '1800'
+2025-07-25 09:30:44 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for '1800 Satan' (ratingKey: 488568)
+2025-07-25 09:30:44 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for '1800' (ratingKey: 195875)
+2025-07-25 09:30:44 - newmusic.plex_client - [92mINFO[0m - search_tracks:390 - Found 2 total potential matches for '1800' by 'bbno' after all stages.
+2025-07-25 09:30:44 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'bbno'
+2025-07-25 09:30:44 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 0 candidates.
+2025-07-25 09:30:44 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'bbno 1-800'
+2025-07-25 09:30:45 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for '1-800'
+2025-07-25 09:30:45 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for '1-800-DIRTY' (ratingKey: 342942)
+2025-07-25 09:30:45 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for '1-800MYLOVE' (ratingKey: 446003)
+2025-07-25 09:30:45 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for '1-800-273-8255' (ratingKey: 487383)
+2025-07-25 09:30:45 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for '1-800-273-8255' (ratingKey: 487532)
+2025-07-25 09:30:45 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Captain Save a Hoe (feat. 1-800-lost)' (ratingKey: 330364)
+2025-07-25 09:30:45 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for '1-800-SMD' (ratingKey: 330399)
+2025-07-25 09:30:45 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for '1-800 Nothing' (ratingKey: 327017)
+2025-07-25 09:30:45 - newmusic.plex_client - [92mINFO[0m - search_tracks:390 - Found 7 total potential matches for '1-800' by 'bbno' after all stages.
+2025-07-25 09:30:45 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:263 - Early confident match found for '1-800'
+2025-07-25 09:30:45 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'bbno'
+2025-07-25 09:30:46 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 0 candidates.
+2025-07-25 09:30:46 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'bbno marypoppins'
+2025-07-25 09:30:46 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'marypoppins'
+2025-07-25 09:30:47 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'bbno'
+2025-07-25 09:30:47 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 0 candidates.
+2025-07-25 09:30:47 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'bbno mary poppins'
+2025-07-25 09:30:48 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'mary poppins'
+2025-07-25 09:30:49 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Mary Poppins' (ratingKey: 325667)
+2025-07-25 09:30:49 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Introducing Mary Poppins' (ratingKey: 143885)
+2025-07-25 09:30:49 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'A Cover Is Not the Book' (ratingKey: 143886)
+2025-07-25 09:30:49 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Nowhere to Go But Up' (ratingKey: 143892)
+2025-07-25 09:30:49 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Theme from Mary Poppins Returns' (ratingKey: 143894)
+2025-07-25 09:30:49 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Mary Poppins Arrives' (ratingKey: 143896)
+2025-07-25 09:30:49 - newmusic.plex_client - [92mINFO[0m - search_tracks:390 - Found 6 total potential matches for 'mary poppins' by 'bbno' after all stages.
+2025-07-25 09:30:49 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:263 - Early confident match found for 'mary poppins'
+2025-07-25 09:30:49 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:332 - Stage 1: Searching for artist 'bbno'
+2025-07-25 09:30:49 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:340 - Stage 1 found 0 candidates.
+2025-07-25 09:30:49 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:357 - Stage 2: Performing keyword search for 'bbno boom'
+2025-07-25 09:30:49 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:375 - Stage 3: Performing title-only search for 'boom'
+2025-07-25 09:30:50 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'BOOM' (ratingKey: 258903)
+2025-07-25 09:30:50 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'BOOM (Rap remix)' (ratingKey: 258943)
+2025-07-25 09:30:50 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Boom (Ricky Pedretti Remix)' (ratingKey: 285354)
+2025-07-25 09:30:50 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Boom (Original Mix)' (ratingKey: 285339)
+2025-07-25 09:30:50 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'Here Comes The Boom (Original Mix)' (ratingKey: 285349)
+2025-07-25 09:30:50 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'pop ur shit' (ratingKey: 291146)
+2025-07-25 09:30:50 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'dangerous' (ratingKey: 291148)
+2025-07-25 09:30:50 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'née-nah' (ratingKey: 291149)
+2025-07-25 09:30:50 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'just like me' (ratingKey: 291153)
+2025-07-25 09:30:50 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'pop ur shit (nightcore version)' (ratingKey: 291130)
+2025-07-25 09:30:50 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'dangerous (nightcore version)' (ratingKey: 291132)
+2025-07-25 09:30:50 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'née-nah (nightcore version)' (ratingKey: 291133)
+2025-07-25 09:30:50 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'just like me (nightcore version)' (ratingKey: 291137)
+2025-07-25 09:30:50 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'pop ur shit (slowed down)' (ratingKey: 291098)
+2025-07-25 09:30:50 - newmusic.plex_client - [94mDEBUG[0m - search_tracks:385 - Stored original track reference for 'dangerous (slowed down)' (ratingKey: 291100)
+2025-07-25 09:30:50 - newmusic.plex_client - [92mINFO[0m - search_tracks:390 - Found 15 total potential matches for 'boom' by 'bbno' after all stages.
+2025-07-25 09:30:50 - newmusic.sync_service - [94mDEBUG[0m - _find_track_in_plex:263 - Early confident match found for 'boom'
+2025-07-25 09:30:50 - newmusic.sync_service - [92mINFO[0m - sync_playlist:141 - Found 8 matches out of 10 tracks
+2025-07-25 09:30:50 - newmusic.sync_service - [92mINFO[0m - sync_playlist:173 - Creating playlist with 8 matched tracks
+2025-07-25 09:30:50 - newmusic.plex_client - [94mDEBUG[0m - create_playlist:198 - Using stored track reference for: Zztlyk Syrn Qryss by Virtual Mage (ratingKey: 539056)
+2025-07-25 09:30:50 - newmusic.plex_client - [94mDEBUG[0m - create_playlist:198 - Using stored track reference for: Jyxkra by Virtual Mage (ratingKey: 539057)
+2025-07-25 09:30:50 - newmusic.plex_client - [94mDEBUG[0m - create_playlist:198 - Using stored track reference for: Ktal Vysh by Virtual Mage (ratingKey: 539058)
+2025-07-25 09:30:50 - newmusic.plex_client - [94mDEBUG[0m - create_playlist:198 - Using stored track reference for: Fluxx by Virtual Mage (ratingKey: 539059)
+2025-07-25 09:30:50 - newmusic.plex_client - [94mDEBUG[0m - create_playlist:198 - Using stored track reference for: Vwrn Tlyx by Virtual Mage (ratingKey: 539060)
+2025-07-25 09:30:50 - newmusic.plex_client - [94mDEBUG[0m - create_playlist:198 - Using stored track reference for: 1800 by Snoop Dogg (ratingKey: 195875)
+2025-07-25 09:30:50 - newmusic.plex_client - [94mDEBUG[0m - create_playlist:198 - Using stored track reference for: Mary Poppins by Elènne (ratingKey: 325667)
+2025-07-25 09:30:50 - newmusic.plex_client - [94mDEBUG[0m - create_playlist:198 - Using stored track reference for: BOOM by $ebu (ratingKey: 258903)
+2025-07-25 09:30:50 - newmusic.plex_client - [92mINFO[0m - create_playlist:209 - Processed 8 input tracks, resulting in 8 valid Plex tracks for playlist 'Failed test'
+2025-07-25 09:30:50 - newmusic.plex_client - [92mINFO[0m - create_playlist:214 - Final validation: 8 valid tracks with ratingKeys
+2025-07-25 09:30:50 - newmusic.plex_client - [94mDEBUG[0m - create_playlist:218 - About to create playlist with tracks:
+2025-07-25 09:30:50 - newmusic.plex_client - [94mDEBUG[0m - create_playlist:220 -   Track 1: Zztlyk Syrn Qryss (type: <class 'plexapi.audio.Track'>, ratingKey: 539056)
+2025-07-25 09:30:50 - newmusic.plex_client - [94mDEBUG[0m - create_playlist:220 -   Track 2: Jyxkra (type: <class 'plexapi.audio.Track'>, ratingKey: 539057)
+2025-07-25 09:30:50 - newmusic.plex_client - [94mDEBUG[0m - create_playlist:220 -   Track 3: Ktal Vysh (type: <class 'plexapi.audio.Track'>, ratingKey: 539058)
+2025-07-25 09:30:50 - newmusic.plex_client - [94mDEBUG[0m - create_playlist:220 -   Track 4: Fluxx (type: <class 'plexapi.audio.Track'>, ratingKey: 539059)
+2025-07-25 09:30:50 - newmusic.plex_client - [94mDEBUG[0m - create_playlist:220 -   Track 5: Vwrn Tlyx (type: <class 'plexapi.audio.Track'>, ratingKey: 539060)
+2025-07-25 09:30:50 - newmusic.plex_client - [94mDEBUG[0m - create_playlist:220 -   Track 6: 1800 (type: <class 'plexapi.audio.Track'>, ratingKey: 195875)
+2025-07-25 09:30:50 - newmusic.plex_client - [94mDEBUG[0m - create_playlist:220 -   Track 7: Mary Poppins (type: <class 'plexapi.audio.Track'>, ratingKey: 325667)
+2025-07-25 09:30:50 - newmusic.plex_client - [94mDEBUG[0m - create_playlist:220 -   Track 8: BOOM (type: <class 'plexapi.audio.Track'>, ratingKey: 258903)
+2025-07-25 09:30:50 - newmusic.plex_client - [91mERROR[0m - create_playlist:227 - CreatePlaylist failed: Must include items to add when creating new playlist.
+2025-07-25 09:30:50 - newmusic.plex_client - [92mINFO[0m - create_playlist:231 - Created playlist 'Failed test' with 8 tracks (using items parameter)
+2025-07-25 09:30:50 - newmusic.sync_service - [92mINFO[0m - sync_playlist:196 - Sync completed: 80.0% success rate
+2025-07-25 09:31:16 - newmusic.main - [92mINFO[0m - closeEvent:176 - Closing application...
+2025-07-25 09:31:16 - newmusic.main - [92mINFO[0m - closeEvent:181 - Cleaning up Downloads page threads...
+2025-07-25 09:31:16 - newmusic.main - [92mINFO[0m - closeEvent:186 - Stopping status monitoring thread...
+2025-07-25 09:31:18 - newmusic.main - [92mINFO[0m - closeEvent:191 - Closing Soulseek client...
+2025-07-25 09:31:18 - newmusic.main - [92mINFO[0m - closeEvent:197 - Application closed successfully
+2025-07-25 09:31:21 - newmusic - [92mINFO[0m - setup_logging:57 - Logging initialized with level: DEBUG
+2025-07-25 09:31:21 - newmusic.main - [92mINFO[0m - main:211 - Starting NewMusic application
+2025-07-25 09:31:21 - newmusic.spotify_client - [92mINFO[0m - _setup_client:179 - Spotify client initialized (user info will be fetched when needed)
+2025-07-25 09:31:21 - newmusic.soulseek_client - [92mINFO[0m - _setup_client:220 - Soulseek client configured with slskd at http://localhost:5030
+2025-07-25 09:31:21 - newmusic.spotify_client - [92mINFO[0m - _setup_client:179 - Spotify client initialized (user info will be fetched when needed)
+2025-07-25 09:31:21 - newmusic.main - [92mINFO[0m - change_page:163 - Changed to page: dashboard
+2025-07-25 09:31:21 - newmusic.main - [92mINFO[0m - setup_media_player_connections:150 - Media player connections established between sidebar and downloads page
+2025-07-25 09:31:22 - newmusic.plex_client - [92mINFO[0m - _find_music_library:127 - Found music library: Music
+2025-07-25 09:31:22 - newmusic.plex_client - [92mINFO[0m - _setup_client:113 - Successfully connected to Plex server: PLEX-MACHINE
+2025-07-25 09:31:36 - newmusic.main - [92mINFO[0m - change_page:163 - Changed to page: sync
+2025-07-25 09:31:36 - newmusic.spotify_client - [92mINFO[0m - _ensure_user_id:195 - Successfully authenticated with Spotify as broquethomas
+2025-07-25 09:31:36 - newmusic.spotify_client - [92mINFO[0m - get_user_playlists_metadata_only:256 - Retrieved 8 playlist metadata (first batch)
