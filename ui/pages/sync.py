@@ -729,9 +729,9 @@ class PlaylistDetailsModal(QDialog):
         layout.setSpacing(12)
         
         # Total tracks
-        self.total_tracks_label = QLabel("🎵 0")
+        self.total_tracks_label = QLabel("♪ 0")
         self.total_tracks_label.setFont(QFont("SF Pro Text", 12, QFont.Weight.Medium))
-        self.total_tracks_label.setStyleSheet("color: #ffffff; background: transparent; border: none;")
+        self.total_tracks_label.setStyleSheet("color: #ffa500; background: transparent; border: none;")
         
         # Matched tracks
         self.matched_tracks_label = QLabel("✓ 0")
@@ -749,8 +749,29 @@ class PlaylistDetailsModal(QDialog):
         self.percentage_label.setStyleSheet("color: #1db954; background: transparent; border: none;")
         
         layout.addWidget(self.total_tracks_label)
+        
+        # Separator 1
+        sep1 = QLabel("/")
+        sep1.setFont(QFont("SF Pro Text", 12, QFont.Weight.Medium))
+        sep1.setStyleSheet("color: #666666; background: transparent; border: none;")
+        layout.addWidget(sep1)
+        
         layout.addWidget(self.matched_tracks_label)
+        
+        # Separator 2
+        sep2 = QLabel("/")
+        sep2.setFont(QFont("SF Pro Text", 12, QFont.Weight.Medium))
+        sep2.setStyleSheet("color: #666666; background: transparent; border: none;")
+        layout.addWidget(sep2)
+        
         layout.addWidget(self.failed_tracks_label)
+        
+        # Separator 3
+        sep3 = QLabel("/")
+        sep3.setFont(QFont("SF Pro Text", 12, QFont.Weight.Medium))
+        sep3.setStyleSheet("color: #666666; background: transparent; border: none;")
+        layout.addWidget(sep3)
+        
         layout.addWidget(self.percentage_label)
         
         return sync_status
@@ -758,7 +779,7 @@ class PlaylistDetailsModal(QDialog):
     def update_sync_status(self, total_tracks=0, matched_tracks=0, failed_tracks=0):
         """Update sync status display"""
         if self.sync_status_widget:
-            self.total_tracks_label.setText(f"🎵 {total_tracks}")
+            self.total_tracks_label.setText(f"♪ {total_tracks}")
             self.matched_tracks_label.setText(f"✓ {matched_tracks}")
             self.failed_tracks_label.setText(f"✗ {failed_tracks}")
             
@@ -1529,25 +1550,24 @@ class PlaylistItem(QFrame):
     def create_compact_sync_status(self):
         """Create compact sync status display for playlist item"""
         sync_status = QFrame()
-        sync_status.setFixedHeight(30)
+        sync_status.setFixedHeight(36)  # Increased from 30 to 36
         sync_status.setStyleSheet("""
             QFrame {
                 background: rgba(29, 185, 84, 0.1);
                 border: 1px solid rgba(29, 185, 84, 0.3);
                 border-radius: 15px;
-                padding: 4px 8px;
             }
         """)
         sync_status.hide()  # Hidden by default
         
         layout = QHBoxLayout(sync_status)
-        layout.setContentsMargins(6, 2, 6, 2)
+        layout.setContentsMargins(8, 6, 8, 6)  # Increased margins for better text visibility
         layout.setSpacing(6)
         
         # Total tracks
-        self.item_total_tracks_label = QLabel("🎵 0")
+        self.item_total_tracks_label = QLabel("♪ 0")
         self.item_total_tracks_label.setFont(QFont("SF Pro Text", 9, QFont.Weight.Medium))
-        self.item_total_tracks_label.setStyleSheet("color: #ffffff; background: transparent; border: none;")
+        self.item_total_tracks_label.setStyleSheet("color: #ffa500; background: transparent; border: none;")
         
         # Matched tracks
         self.item_matched_tracks_label = QLabel("✓ 0")
@@ -1565,8 +1585,29 @@ class PlaylistItem(QFrame):
         self.item_percentage_label.setStyleSheet("color: #1db954; background: transparent; border: none;")
         
         layout.addWidget(self.item_total_tracks_label)
+        
+        # Separator 1
+        item_sep1 = QLabel("/")
+        item_sep1.setFont(QFont("SF Pro Text", 9, QFont.Weight.Medium))
+        item_sep1.setStyleSheet("color: #666666; background: transparent; border: none;")
+        layout.addWidget(item_sep1)
+        
         layout.addWidget(self.item_matched_tracks_label)
+        
+        # Separator 2
+        item_sep2 = QLabel("/")
+        item_sep2.setFont(QFont("SF Pro Text", 9, QFont.Weight.Medium))
+        item_sep2.setStyleSheet("color: #666666; background: transparent; border: none;")
+        layout.addWidget(item_sep2)
+        
         layout.addWidget(self.item_failed_tracks_label)
+        
+        # Separator 3
+        item_sep3 = QLabel("/")
+        item_sep3.setFont(QFont("SF Pro Text", 9, QFont.Weight.Medium))
+        item_sep3.setStyleSheet("color: #666666; background: transparent; border: none;")
+        layout.addWidget(item_sep3)
+        
         layout.addWidget(self.item_percentage_label)
         
         return sync_status
@@ -1578,9 +1619,9 @@ class PlaylistItem(QFrame):
         self.sync_failed_tracks = failed_tracks
         
         if self.sync_status_widget and hasattr(self, 'item_total_tracks_label'):
-            self.item_total_tracks_label.setText(f"📀 {total_tracks}")
-            self.item_matched_tracks_label.setText(f"✅ {matched_tracks}")
-            self.item_failed_tracks_label.setText(f"❌ {failed_tracks}")
+            self.item_total_tracks_label.setText(f"♪ {total_tracks}")
+            self.item_matched_tracks_label.setText(f"✓ {matched_tracks}")
+            self.item_failed_tracks_label.setText(f"✗ {failed_tracks}")
             
             if total_tracks > 0:
                 percentage = int((matched_tracks / total_tracks) * 100)
