@@ -290,6 +290,7 @@ class PlexLibraryWorker(QThread):
                     print(f"❌ No Plex candidates found for '{spotify_album.name}'")
             
             print(f"🎯 Final result: {len(owned_albums)} owned albums out of {len(self.albums)}")
+            print(f"🚀 Emitting signal with owned_albums: {list(owned_albums)}")
             self.library_checked.emit(owned_albums)
             
         except Exception as e:
@@ -784,7 +785,6 @@ class AlbumCard(QFrame):
         super().__init__(parent)
         self.album = album
         self.is_owned = is_owned
-        print(f"🎨 AlbumCard created: '{album.name}' - is_owned: {is_owned}")
         self.setup_ui()
         self.load_album_image()
     
@@ -845,10 +845,7 @@ class AlbumCard(QFrame):
         self.overlay.setFixedSize(164, 164)
         self.overlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
-        print(f"🎨 Setting up overlay for '{self.album.name}' - is_owned: {self.is_owned}")
-        
         if self.is_owned:
-            print(f"🎨 Creating OWNED overlay for '{self.album.name}'")
             self.overlay.setStyleSheet("""
                 QLabel {
                     background: rgba(29, 185, 84, 0.8);
@@ -860,7 +857,6 @@ class AlbumCard(QFrame):
             """)
             self.overlay.setText("✓")
         else:
-            print(f"🎨 Creating DOWNLOAD overlay for '{self.album.name}'")
             self.overlay.setStyleSheet("""
                 QLabel {
                     background: rgba(0, 0, 0, 0.7);
@@ -874,6 +870,13 @@ class AlbumCard(QFrame):
             self.overlay.setCursor(Qt.CursorShape.PointingHandCursor)
         
         self.overlay.hide()  # Initially hidden, shown on hover
+        
+        # Permanent ownership indicator (always visible)
+        self.status_indicator = QLabel(self.image_container)
+        self.status_indicator.setFixedSize(24, 24)
+        self.status_indicator.move(140, 8)  # Top-right corner
+        self.status_indicator.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.update_status_indicator()
         
         # Album name
         album_label = QLabel(self.album.name)
@@ -921,6 +924,69 @@ class AlbumCard(QFrame):
         """Hide overlay when not hovering"""
         self.overlay.hide()
         super().leaveEvent(event)
+    
+    def update_status_indicator(self):
+        """Update the permanent status indicator"""
+        if self.is_owned:
+            self.status_indicator.setStyleSheet("""
+                QLabel {
+                    background: rgba(29, 185, 84, 0.9);
+                    border-radius: 12px;
+                    color: white;
+                    font-size: 14px;
+                    font-weight: bold;
+                }
+            """)
+            self.status_indicator.setText("✓")
+            self.status_indicator.setToolTip("Album owned in Plex")
+        else:
+            self.status_indicator.setStyleSheet("""
+                QLabel {
+                    background: rgba(220, 53, 69, 0.8);
+                    border-radius: 12px;
+                    color: white;
+                    font-size: 12px;
+                    font-weight: bold;
+                }
+            """)
+            self.status_indicator.setText("📥")
+            self.status_indicator.setToolTip("Album available for download")
+    
+    def update_ownership(self, is_owned: bool):
+        """Update ownership status and refresh UI"""
+        if self.is_owned != is_owned:  # Only log if status actually changed
+            print(f"🔄 '{self.album.name}' ownership: {self.is_owned} -> {is_owned}")
+        
+        self.is_owned = is_owned
+        
+        # Update the permanent indicator
+        self.update_status_indicator()
+        
+        # Update the hover overlay
+        if self.is_owned:
+            self.overlay.setStyleSheet("""
+                QLabel {
+                    background: rgba(29, 185, 84, 0.8);
+                    border-radius: 6px;
+                    color: white;
+                    font-size: 24px;
+                    font-weight: bold;
+                }
+            """)
+            self.overlay.setText("✓")
+            self.overlay.setCursor(Qt.CursorShape.ArrowCursor)
+        else:
+            self.overlay.setStyleSheet("""
+                QLabel {
+                    background: rgba(0, 0, 0, 0.7);
+                    border-radius: 6px;
+                    color: white;
+                    font-size: 16px;
+                    font-weight: bold;
+                }
+            """)
+            self.overlay.setText("📥\nDownload")
+            self.overlay.setCursor(Qt.CursorShape.PointingHandCursor)
     
     def mousePressEvent(self, event):
         """Handle click for download"""
@@ -1397,15 +1463,15 @@ class ArtistsPage(QWidget):
         self.current_albums = albums
         self.albums_status.setText(f"Found {len(albums)} albums • Checking Plex library...")
         
-        # Display albums first (without ownership info)
+        # Display albums immediately (without ownership info)
         self.display_albums(albums, set())
         
-        # Start Plex library check in background
+        # Start Plex library check in background - will update UI when complete
         self.start_plex_library_check(albums)
     
     def display_albums(self, albums, owned_albums):
         """Display albums in the grid"""
-        print(f"🎨 Refreshing UI with {len(albums)} albums, {len(owned_albums)} owned")
+        print(f"🎨 Displaying {len(albums)} albums, {len(owned_albums)} owned")
         
         # Clear existing albums
         self.clear_albums()
@@ -1415,7 +1481,6 @@ class ArtistsPage(QWidget):
         
         for album in albums:
             is_owned = album.name in owned_albums
-            print(f"🎨 Creating card for '{album.name}' - owned: {is_owned}")
             
             card = AlbumCard(album, is_owned)
             if not is_owned:
@@ -1427,6 +1492,7 @@ class ArtistsPage(QWidget):
             if col >= max_cols:
                 col = 0
                 row += 1
+    
     
     def start_plex_library_check(self, albums):
         """Start Plex library check in background"""
@@ -1444,20 +1510,33 @@ class ArtistsPage(QWidget):
     
     def on_plex_library_checked(self, owned_albums):
         """Handle Plex library check results"""
-        if self.current_albums:
-            # Update the status
-            owned_count = len(owned_albums)
-            total_count = len(self.current_albums)
-            missing_count = total_count - owned_count
-            
-            self.albums_status.setText(f"Found {total_count} albums • {owned_count} owned • {missing_count} available for download")
-            
-            # Debug output
-            print(f"🎯 UI Update: {owned_count} owned albums found")
-            print(f"🎯 Owned albums: {list(owned_albums)}")
-            
-            # Refresh the display with ownership info
-            self.display_albums(self.current_albums, owned_albums)
+        print(f"📨 Handler started: {len(owned_albums)} owned albums")
+        
+        if not self.current_albums:
+            print("📨 No current albums, skipping update")
+            return
+        
+        # Update the status
+        owned_count = len(owned_albums)
+        total_count = len(self.current_albums)
+        missing_count = total_count - owned_count
+        
+        self.albums_status.setText(f"Found {total_count} albums • {owned_count} owned • {missing_count} available for download")
+        
+        # Update existing album cards with ownership info
+        print(f"🔄 Updating {self.albums_grid_layout.count()} album cards")
+        
+        updated_count = 0
+        for i in range(self.albums_grid_layout.count()):
+            item = self.albums_grid_layout.itemAt(i)
+            if item and item.widget():
+                album_card = item.widget()
+                if hasattr(album_card, 'album') and hasattr(album_card, 'update_ownership'):
+                    is_owned = album_card.album.name in owned_albums
+                    album_card.update_ownership(is_owned)
+                    updated_count += 1
+        
+        print(f"✅ Updated {updated_count} album cards successfully")
     
     def on_plex_library_check_failed(self, error):
         """Handle Plex library check failure"""
@@ -1596,7 +1675,7 @@ class ArtistsPage(QWidget):
             item = self.albums_grid_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-        self.current_albums = []
+        # Don't clear self.current_albums here - it's needed for Plex updates
     
     def closeEvent(self, event):
         """Handle page close/cleanup"""
