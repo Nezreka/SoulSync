@@ -542,7 +542,7 @@ class SoulseekClient:
         
         return None
     
-    async def search(self, query: str, timeout: int = 30, progress_callback=None) -> tuple[List[TrackResult], List[AlbumResult]]:
+    async def search(self, query: str, timeout: int = 35, progress_callback=None) -> tuple[List[TrackResult], List[AlbumResult]]:
         if not self.base_url:
             logger.error("Soulseek client not configured")
             return [], []
@@ -578,7 +578,7 @@ class SoulseekClient:
             all_responses = []
             all_tracks = []
             all_albums = []
-            poll_interval = 1.5  # Check every 1.5 seconds for more responsive updates
+            poll_interval = 1  # Check every 1.5 seconds for more responsive updates
             max_polls = int(timeout / poll_interval)  # 20 attempts over 30 seconds
             
             for poll_count in range(max_polls):
