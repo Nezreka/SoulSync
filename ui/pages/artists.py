@@ -873,6 +873,22 @@ class AlbumCard(QFrame):
         
         self.overlay.hide()  # Initially hidden, shown on hover
         
+        # Download progress overlay (shown during downloads)
+        self.progress_overlay = QLabel(self.image_container)
+        self.progress_overlay.setFixedSize(164, 164)
+        self.progress_overlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.progress_overlay.setStyleSheet("""
+            QLabel {
+                background: rgba(0, 0, 0, 0.8);
+                border-radius: 6px;
+                color: white;
+                font-size: 12px;
+                font-weight: bold;
+                padding: 8px;
+            }
+        """)
+        self.progress_overlay.hide()  # Initially hidden
+        
         # Permanent ownership indicator (always visible)
         self.status_indicator = QLabel(self.image_container)
         self.status_indicator.setFixedSize(24, 24)
@@ -990,9 +1006,67 @@ class AlbumCard(QFrame):
             self.overlay.setText("📥\nDownload")
             self.overlay.setCursor(Qt.CursorShape.PointingHandCursor)
     
+    def set_download_in_progress(self):
+        """Set album card to download in progress state"""
+        # Hide hover overlay and show progress overlay
+        self.overlay.hide()
+        self.progress_overlay.setText("⏳\nPreparing...")
+        self.progress_overlay.show()
+        
+        # Update status indicator
+        self.status_indicator.setStyleSheet("""
+            QLabel {
+                background: rgba(255, 193, 7, 0.9);
+                border-radius: 12px;
+                color: white;
+                font-size: 12px;
+                font-weight: bold;
+            }
+        """)
+        self.status_indicator.setText("⏳")
+        self.status_indicator.setToolTip("Album downloading...")
+    
+    def update_download_progress(self, completed_tracks: int, total_tracks: int, percentage: int):
+        """Update download progress display"""
+        progress_text = f"📥 Downloading\n{completed_tracks}/{total_tracks} tracks\n{percentage}%"
+        self.progress_overlay.setText(progress_text)
+        self.progress_overlay.show()
+        
+        # Update status indicator with progress
+        self.status_indicator.setText(f"{percentage}%")
+        self.status_indicator.setToolTip(f"Downloading: {completed_tracks}/{total_tracks} tracks ({percentage}%)")
+    
+    def set_download_completed(self):
+        """Set album card to download completed state"""
+        # Hide progress overlay
+        self.progress_overlay.hide()
+        
+        # Update to owned state
+        self.update_ownership(True)
+        
+        # Show completion message briefly
+        self.progress_overlay.setText("✅\nCompleted!")
+        self.progress_overlay.setStyleSheet("""
+            QLabel {
+                background: rgba(29, 185, 84, 0.9);
+                border-radius: 6px;
+                color: white;
+                font-size: 12px;
+                font-weight: bold;
+                padding: 8px;
+            }
+        """)
+        self.progress_overlay.show()
+        
+        # Hide completion message after 3 seconds
+        QTimer.singleShot(3000, self.progress_overlay.hide)
+    
     def mousePressEvent(self, event):
         """Handle click for download"""
-        if event.button() == Qt.MouseButton.LeftButton and not self.is_owned:
+        # Don't allow downloads if already downloading or owned
+        if (event.button() == Qt.MouseButton.LeftButton and 
+            not self.is_owned and 
+            not self.progress_overlay.isVisible()):
             self.download_requested.emit(self.album)
         super().mousePressEvent(event)
 
@@ -1014,6 +1088,15 @@ class ArtistsPage(QWidget):
         self.artist_search_worker = None
         self.album_fetch_worker = None
         self.plex_library_worker = None
+        
+        # Album download tracking
+        self.album_downloads = {}  # {album_id: {total_tracks: X, completed_tracks: Y, active_downloads: [download_ids], album_card: card_ref}}
+        self.download_status_timer = QTimer(self)
+        self.download_status_timer.timeout.connect(self.poll_album_download_statuses)
+        self.download_status_timer.start(2000)  # Poll every 2 seconds
+        self.download_status_pool = QThreadPool()
+        self.download_status_pool.setMaxThreadCount(1)
+        self._is_status_update_running = False
         
         # UI setup
         self.setup_ui()
@@ -1587,12 +1670,238 @@ class ArtistsPage(QWidget):
         print(f"Selected album for download: {album_result.album_title} by {album_result.artist}")
         
         if self.downloads_page:
+            # Start tracking this album download
+            album_id = f"{self.album_to_download.id}"
+            self.start_album_download_tracking(album_id, album_result, self.album_to_download)
+            
             # Delegate to the DownloadsPage to handle the matched download
             # This will open the Spotify matching modal and add to the central queue
             print("🚀 Delegating to DownloadsPage to start matched album download...")
             self.downloads_page.start_matched_album_download(album_result)
         else:
             QMessageBox.critical(self, "Error", "Downloads page is not connected. Cannot start download.")
+    
+    def start_album_download_tracking(self, album_id: str, album_result: AlbumResult, spotify_album: Album):
+        """Start tracking downloads for an album"""
+        # Find the album card for this album
+        album_card = None
+        for i in range(self.albums_grid_layout.count()):
+            item = self.albums_grid_layout.itemAt(i)
+            if item and item.widget():
+                card = item.widget()
+                if hasattr(card, 'album') and card.album.id == spotify_album.id:
+                    album_card = card
+                    break
+        
+        if album_card:
+            # Initialize tracking for this album
+            self.album_downloads[album_id] = {
+                'total_tracks': album_result.track_count,
+                'completed_tracks': 0,
+                'active_downloads': [],
+                'album_card': album_card,
+                'album_result': album_result,
+                'spotify_album': spotify_album
+            }
+            
+            # Update album card to show download in progress
+            album_card.set_download_in_progress()
+            print(f"📊 Started tracking album: {spotify_album.name} ({album_result.track_count} tracks)")
+    
+    def poll_album_download_statuses(self):
+        """Poll download statuses for tracked albums"""
+        if self._is_status_update_running or not self.album_downloads:
+            return
+        
+        # Collect all active download IDs from tracked albums
+        all_download_ids = []
+        for album_info in self.album_downloads.values():
+            all_download_ids.extend(album_info.get('active_downloads', []))
+        
+        if not all_download_ids:
+            # No active downloads to check, but we might need to populate the active_downloads
+            # by checking the downloads page for downloads related to our tracked albums
+            self.update_active_downloads_from_queue()
+            return
+        
+        self._is_status_update_running = True
+        
+        # Create items to check (similar to sync.py format)
+        items_to_check = []
+        for download_id in all_download_ids:
+            items_to_check.append({
+                'widget_id': download_id,
+                'download_id': download_id,
+                'file_path': '',  # Not needed for status checking
+                'api_missing_count': 0
+            })
+        
+        if not items_to_check:
+            self._is_status_update_running = False
+            return
+        
+        # Import the worker class from sync.py
+        from ui.pages.sync import SyncStatusProcessingWorker
+        
+        # Create and start worker
+        worker = SyncStatusProcessingWorker(
+            self.soulseek_client,
+            items_to_check
+        )
+        worker.signals.completed.connect(self._handle_album_status_updates)
+        worker.signals.error.connect(lambda e: print(f"Album Status Worker Error: {e}"))
+        self.download_status_pool.start(worker)
+    
+    def update_active_downloads_from_queue(self):
+        """Update active downloads list by checking the downloads page queue"""
+        if not self.downloads_page or not hasattr(self.downloads_page, 'download_queue'):
+            return
+        
+        # Get all active downloads from the downloads page
+        active_items = []
+        finished_items = []
+        
+        if hasattr(self.downloads_page.download_queue, 'active_queue'):
+            active_items = self.downloads_page.download_queue.active_queue.download_items
+        
+        if hasattr(self.downloads_page.download_queue, 'finished_queue'):
+            finished_items = self.downloads_page.download_queue.finished_queue.download_items
+        
+        print(f"🔍 Checking {len(active_items)} active downloads and {len(finished_items)} finished downloads for album tracking")
+        
+        # For each tracked album, check if any downloads match
+        for album_id, album_info in self.album_downloads.items():
+            album_result = album_info.get('album_result')
+            spotify_album = album_info.get('spotify_album')
+            if not album_result or not spotify_album:
+                continue
+            
+            album_name = spotify_album.name if spotify_album else 'Unknown'
+            print(f"🎵 Looking for downloads matching album: {album_name} by {album_result.artist}")
+            
+            # Look for downloads that match this album's tracks (both active and finished)
+            matching_downloads = []
+            completed_count = 0
+            
+            # Check both active and finished downloads
+            all_items = active_items + finished_items
+            
+            for download_item in all_items:
+                # More flexible matching - check multiple criteria
+                artist_match = False
+                album_match = False
+                
+                if hasattr(download_item, 'artist') and download_item.artist:
+                    # Check if artists match (case insensitive, partial match)
+                    download_artist = download_item.artist.lower()
+                    album_artist = album_result.artist.lower()
+                    spotify_artist = spotify_album.artists[0].lower() if spotify_album.artists else ""
+                    
+                    artist_match = (album_artist in download_artist or 
+                                  download_artist in album_artist or
+                                  spotify_artist in download_artist or
+                                  download_artist in spotify_artist)
+                
+                # Check if download might be from the same album
+                if hasattr(download_item, 'title') and download_item.title:
+                    # If the download has matched metadata, it's likely from our album
+                    if hasattr(download_item, 'matched_download') and download_item.matched_download:
+                        album_match = True
+                        print(f"   🎯 Found matched download: {download_item.title}")
+                
+                # If we find a match, handle differently for active vs finished
+                if artist_match or album_match:
+                    if hasattr(download_item, 'download_id') and download_item.download_id:
+                        # Check if this item is in finished items (completed)
+                        if download_item in finished_items:
+                            completed_count += 1
+                            print(f"   ✅ Found completed track: '{download_item.title}'")
+                        else:
+                            # It's an active download
+                            matching_downloads.append(download_item.download_id)
+                            print(f"   🔄 Added active download ID: {download_item.download_id} for '{download_item.title}'")
+            
+            # Update the active downloads and completed count for this album
+            album_info['active_downloads'] = matching_downloads
+            
+            # Update completed tracks count if we found more completed items
+            if completed_count > album_info.get('completed_tracks', 0):
+                print(f"📈 Updating completed tracks: {album_info.get('completed_tracks', 0)} -> {completed_count}")
+                album_info['completed_tracks'] = completed_count
+                # Trigger UI update
+                self.update_album_card_progress(album_id)
+            
+            if matching_downloads or completed_count > 0:
+                print(f"📊 Album '{album_name}': {len(matching_downloads)} active, {completed_count} completed")
+            else:
+                print(f"❌ No matching downloads found for album: {album_name}")
+                # Try to get a count of how many tracks should be downloading
+                total_tracks = album_info.get('total_tracks', 0)
+                print(f"   Expected {total_tracks} tracks for this album")
+    
+    def _handle_album_status_updates(self, results):
+        """Handle status updates from the background worker"""
+        if not results:
+            self._is_status_update_running = False
+            return
+        
+        albums_to_update = set()
+        
+        for result in results:
+            download_id = result.get('widget_id') or result.get('download_id')
+            status = result.get('status', '')
+            
+            # Find which album this download belongs to
+            for album_id, album_info in self.album_downloads.items():
+                if download_id in album_info.get('active_downloads', []):
+                    if status == 'completed':
+                        # Track completion
+                        album_info['completed_tracks'] += 1
+                        if download_id in album_info['active_downloads']:
+                            album_info['active_downloads'].remove(download_id)
+                        albums_to_update.add(album_id)
+                        print(f"✅ Album track completed: {album_info['completed_tracks']}/{album_info['total_tracks']}")
+                    
+                    elif status in ['failed', 'cancelled']:
+                        # Remove from active downloads but don't increment completed
+                        if download_id in album_info['active_downloads']:
+                            album_info['active_downloads'].remove(download_id)
+                        albums_to_update.add(album_id)
+                    
+                    break
+        
+        # Update album cards for albums that had status changes
+        for album_id in albums_to_update:
+            self.update_album_card_progress(album_id)
+        
+        self._is_status_update_running = False
+    
+    def update_album_card_progress(self, album_id: str):
+        """Update the album card with current download progress"""
+        album_info = self.album_downloads.get(album_id)
+        if not album_info:
+            return
+        
+        album_card = album_info.get('album_card')
+        if not album_card:
+            return
+        
+        completed = album_info['completed_tracks']
+        total = album_info['total_tracks']
+        percentage = int((completed / total) * 100) if total > 0 else 0
+        
+        # Update the album card progress
+        album_card.update_download_progress(completed, total, percentage)
+        
+        # Check if album is fully downloaded
+        if completed >= total and not album_info.get('active_downloads'):
+            # Album is complete
+            album_card.set_download_completed()
+            # Remove from tracking
+            spotify_album = album_info.get('spotify_album')
+            album_name = spotify_album.name if spotify_album else 'Unknown'
+            del self.album_downloads[album_id]
+            print(f"🎉 Album download completed: {album_name}")
 
     def return_to_search(self):
         """Return to search interface"""
@@ -1612,6 +1921,38 @@ class ArtistsPage(QWidget):
         self.artist_view.hide()
         self.search_interface.show()
     
+    def cleanup_download_tracking(self):
+        """Clean up download tracking resources"""
+        # Stop the download status timer
+        if hasattr(self, 'download_status_timer'):
+            self.download_status_timer.stop()
+        
+        # Reset any album cards that are showing download progress
+        for album_info in self.album_downloads.values():
+            album_card = album_info.get('album_card')
+            if album_card and hasattr(album_card, 'progress_overlay'):
+                album_card.progress_overlay.hide()
+        
+        # Clear download tracking state
+        self.album_downloads.clear()
+        self._is_status_update_running = False
+        
+        # Shutdown the download status thread pool
+        if hasattr(self, 'download_status_pool'):
+            try:
+                self.download_status_pool.clear()
+                self.download_status_pool.waitForDone(1000)  # Wait up to 1 second
+            except Exception as e:
+                print(f"Error cleaning up download status pool: {e}")
+        
+        print("🧹 Album download tracking cleaned up")
+    
+    def restart_download_tracking(self):
+        """Restart download tracking timer if stopped"""
+        if hasattr(self, 'download_status_timer') and not self.download_status_timer.isActive():
+            self.download_status_timer.start(2000)
+            print("🔄 Download tracking timer restarted")
+    
     def stop_all_workers(self):
         """Stop all background workers"""
         if self.artist_search_worker:
@@ -1629,6 +1970,9 @@ class ArtistsPage(QWidget):
             self.plex_library_worker.terminate()
             self.plex_library_worker.wait()
             self.plex_library_worker = None
+        
+        # Stop download tracking
+        self.cleanup_download_tracking()
     
     def clear_artist_results(self):
         """Clear artist search results"""
