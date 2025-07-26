@@ -1093,7 +1093,7 @@ class ArtistsPage(QWidget):
         self.album_downloads = {}  # {album_id: {total_tracks: X, completed_tracks: Y, active_downloads: [download_ids], album_card: card_ref}}
         self.download_status_timer = QTimer(self)
         self.download_status_timer.timeout.connect(self.poll_album_download_statuses)
-        self.download_status_timer.start(2000)  # Poll every 2 seconds
+        self.download_status_timer.start(500)  # Poll every .5 seconds
         self.download_status_pool = QThreadPool()
         self.download_status_pool.setMaxThreadCount(1)
         self._is_status_update_running = False
