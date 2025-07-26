@@ -208,7 +208,7 @@ class PlexLibraryWorker(QThread):
     
     def run(self):
         try:
-            print("🔍 Starting Plex library check...")
+            print("🔍 Starting robust Plex album matching...")
             owned_albums = set()
             
             if not self.plex_client or not self.plex_client.ensure_connection():
@@ -219,36 +219,77 @@ class PlexLibraryWorker(QThread):
             if self._stop_requested:
                 return
             
-            # Get a smaller sample of tracks to avoid loading 10,000 items
-            print("📚 Searching Plex library for albums...")
-            plex_tracks = self.plex_client.search_tracks("", "", limit=1000)  # Reduced from 10000
+            print(f"📚 Checking {len(self.albums)} Spotify albums against Plex library...")
             
-            if self._stop_requested:
-                return
-            
-            # Extract unique album names from Plex
-            plex_album_names = set()
-            for track in plex_tracks:
+            # Use robust matching for each album
+            for i, spotify_album in enumerate(self.albums):
                 if self._stop_requested:
                     return
+                
+                print(f"🎵 Checking album {i+1}/{len(self.albums)}: {spotify_album.name}")
+                
+                # Create multiple search variations
+                album_variations = []
+                
+                # Original name
+                album_variations.append(spotify_album.name)
+                
+                # Cleaned name (removes versions, etc.)
+                cleaned_name = self.matching_engine.clean_album_name(spotify_album.name)
+                if cleaned_name != spotify_album.name.lower():
+                    album_variations.append(cleaned_name)
+                
+                # Try different artist combinations
+                artists_to_try = spotify_album.artists[:2] if spotify_album.artists else [""]
+                
+                all_plex_matches = []
+                
+                # Search with different combinations
+                for artist in artists_to_try:
+                    if self._stop_requested:
+                        return
                     
-                if track.album and track.album != "Unknown Album":
-                    plex_album_names.add(track.album.lower())
-            
-            print(f"📀 Found {len(plex_album_names)} unique albums in Plex library")
-            
-            # Check each Spotify album against Plex albums
-            for album in self.albums:
-                if self._stop_requested:
-                    return
+                    artist_clean = self.matching_engine.clean_artist(artist) if artist else ""
                     
-                album_name_lower = album.name.lower()
-                for plex_album in plex_album_names:
-                    if self.matching_engine.similarity_score(album_name_lower, plex_album) > 0.8:
-                        owned_albums.add(album.name)
-                        break
+                    for album_name in album_variations:
+                        if self._stop_requested:
+                            return
+                        
+                        # Search Plex for this combination
+                        print(f"   🔍 Searching Plex: album='{album_name}', artist='{artist_clean}'")
+                        plex_albums = self.plex_client.search_albums(album_name, artist_clean, limit=5)
+                        print(f"   📀 Found {len(plex_albums)} Plex albums")
+                        all_plex_matches.extend(plex_albums)
+                        
+                        # Also try album-only search if artist+album didn't work
+                        if not plex_albums and artist_clean:
+                            print(f"   🔍 Trying album-only search: album='{album_name}'")
+                            album_only_results = self.plex_client.search_albums(album_name, "", limit=5)
+                            print(f"   📀 Found {len(album_only_results)} albums (album-only)")
+                            all_plex_matches.extend(album_only_results)
+                
+                # Remove duplicates based on album ID
+                unique_matches = {}
+                for match in all_plex_matches:
+                    unique_matches[match['id']] = match
+                
+                unique_plex_albums = list(unique_matches.values())
+                
+                if unique_plex_albums:
+                    # Use robust matching to find best match
+                    best_match, confidence = self.matching_engine.find_best_album_match(
+                        spotify_album, unique_plex_albums
+                    )
+                    
+                    if best_match and confidence >= 0.8:
+                        owned_albums.add(spotify_album.name)
+                        print(f"✅ Match found: '{spotify_album.name}' -> '{best_match['title']}' (confidence: {confidence:.2f})")
+                    else:
+                        print(f"❌ No confident match for '{spotify_album.name}' (best: {confidence:.2f})")
+                else:
+                    print(f"❌ No Plex candidates found for '{spotify_album.name}'")
             
-            print(f"✅ Found {len(owned_albums)} owned albums")
+            print(f"🎯 Final result: {len(owned_albums)} owned albums out of {len(self.albums)}")
             self.library_checked.emit(owned_albums)
             
         except Exception as e:
@@ -743,6 +784,7 @@ class AlbumCard(QFrame):
         super().__init__(parent)
         self.album = album
         self.is_owned = is_owned
+        print(f"🎨 AlbumCard created: '{album.name}' - is_owned: {is_owned}")
         self.setup_ui()
         self.load_album_image()
     
@@ -803,7 +845,10 @@ class AlbumCard(QFrame):
         self.overlay.setFixedSize(164, 164)
         self.overlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
+        print(f"🎨 Setting up overlay for '{self.album.name}' - is_owned: {self.is_owned}")
+        
         if self.is_owned:
+            print(f"🎨 Creating OWNED overlay for '{self.album.name}'")
             self.overlay.setStyleSheet("""
                 QLabel {
                     background: rgba(29, 185, 84, 0.8);
@@ -815,6 +860,7 @@ class AlbumCard(QFrame):
             """)
             self.overlay.setText("✓")
         else:
+            print(f"🎨 Creating DOWNLOAD overlay for '{self.album.name}'")
             self.overlay.setStyleSheet("""
                 QLabel {
                     background: rgba(0, 0, 0, 0.7);
@@ -1359,6 +1405,8 @@ class ArtistsPage(QWidget):
     
     def display_albums(self, albums, owned_albums):
         """Display albums in the grid"""
+        print(f"🎨 Refreshing UI with {len(albums)} albums, {len(owned_albums)} owned")
+        
         # Clear existing albums
         self.clear_albums()
         
@@ -1367,6 +1415,8 @@ class ArtistsPage(QWidget):
         
         for album in albums:
             is_owned = album.name in owned_albums
+            print(f"🎨 Creating card for '{album.name}' - owned: {is_owned}")
+            
             card = AlbumCard(album, is_owned)
             if not is_owned:
                 card.download_requested.connect(self.on_album_download_requested)
@@ -1401,6 +1451,10 @@ class ArtistsPage(QWidget):
             missing_count = total_count - owned_count
             
             self.albums_status.setText(f"Found {total_count} albums • {owned_count} owned • {missing_count} available for download")
+            
+            # Debug output
+            print(f"🎯 UI Update: {owned_count} owned albums found")
+            print(f"🎯 Owned albums: {list(owned_albums)}")
             
             # Refresh the display with ownership info
             self.display_albums(self.current_albums, owned_albums)

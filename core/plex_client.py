@@ -441,3 +441,104 @@ class PlexClient:
         except Exception as e:
             logger.error(f"Error updating track metadata: {e}")
             return False
+    
+    def search_albums(self, album_name: str = "", artist_name: str = "", limit: int = 20) -> List[Dict[str, Any]]:
+        """Search for albums in Plex library"""
+        if not self.ensure_connection() or not self.music_library:
+            return []
+        
+        try:
+            albums = []
+            
+            # Perform search - different approaches based on what we're searching for
+            search_results = []
+            
+            if album_name and artist_name:
+                # Search for albums by specific artist and title
+                try:
+                    # First try searching for the artist, then filter their albums
+                    artist_results = self.music_library.searchArtists(title=artist_name, limit=3)
+                    for artist in artist_results:
+                        try:
+                            artist_albums = artist.albums()
+                            for album in artist_albums:
+                                if album_name.lower() in album.title.lower():
+                                    search_results.append(album)
+                        except Exception as e:
+                            logger.debug(f"Error getting albums for artist {artist.title}: {e}")
+                except Exception as e:
+                    logger.debug(f"Artist search failed, trying general search: {e}")
+                    # Fallback to general album search
+                    try:
+                        search_results = self.music_library.search(title=album_name)
+                        # Filter to only albums
+                        search_results = [r for r in search_results if isinstance(r, PlexAlbum)]
+                    except Exception as e2:
+                        logger.debug(f"General search also failed: {e2}")
+                        
+            elif album_name:
+                # Search for albums by title only
+                try:
+                    search_results = self.music_library.search(title=album_name)
+                    # Filter to only albums  
+                    search_results = [r for r in search_results if isinstance(r, PlexAlbum)]
+                except Exception as e:
+                    logger.debug(f"Album title search failed: {e}")
+                    
+            elif artist_name:
+                # Search for all albums by artist
+                try:
+                    artist_results = self.music_library.searchArtists(title=artist_name, limit=1)
+                    if artist_results:
+                        search_results = artist_results[0].albums()
+                except Exception as e:
+                    logger.debug(f"Artist album search failed: {e}")
+            else:
+                # Get all albums if no search terms
+                try:
+                    search_results = self.music_library.albums()
+                except Exception as e:
+                    logger.debug(f"Get all albums failed: {e}")
+            
+            # Process results and convert to standardized format
+            if search_results:
+                for result in search_results:
+                    if isinstance(result, PlexAlbum):
+                        try:
+                            # Get album info
+                            album_info = {
+                                'id': str(result.ratingKey),
+                                'title': result.title,
+                                'artist': result.artist().title if result.artist() else "Unknown Artist",
+                                'year': result.year,
+                                'track_count': len(result.tracks()) if hasattr(result, 'tracks') else 0,
+                                'plex_album': result  # Keep reference to original object
+                            }
+                            albums.append(album_info)
+                            
+                            if len(albums) >= limit:
+                                break
+                                
+                        except Exception as e:
+                            logger.debug(f"Error processing album {result.title}: {e}")
+                            continue
+            
+            logger.debug(f"Found {len(albums)} albums matching query: album='{album_name}', artist='{artist_name}'")
+            return albums
+            
+        except Exception as e:
+            logger.error(f"Error searching albums: {e}")
+            return []
+    
+    def get_album_by_name_and_artist(self, album_name: str, artist_name: str) -> Optional[Dict[str, Any]]:
+        """Get a specific album by name and artist"""
+        albums = self.search_albums(album_name, artist_name, limit=5)
+        
+        # Look for exact matches first
+        for album in albums:
+            if (album['title'].lower() == album_name.lower() and 
+                album['artist'].lower() == artist_name.lower()):
+                return album
+        
+        # Return first result if no exact match
+        return albums[0] if albums else None
