@@ -88,6 +88,37 @@ class MusicMatchingEngine:
         
         return self.normalize_string(cleaned)
     
+    def clean_album_name(self, album_name: str) -> str:
+        """Clean album name by removing version info, deluxe editions, etc."""
+        if not album_name:
+            return ""
+        
+        cleaned = album_name
+        
+        # Common album suffixes to remove
+        album_patterns = [
+            r'\s*\(deluxe\s*edition?\)',
+            r'\s*\(expanded\s*edition?\)',
+            r'\s*\(remastered?\)',
+            r'\s*\(remaster\)',
+            r'\s*\(anniversary\s*edition?\)',
+            r'\s*\(special\s*edition?\)',
+            r'\s*\(bonus\s*track\s*version\)',
+            r'\s*\(.*version\)',  # Covers "Taylor's Version", "Radio Version", etc.
+            r'\s*\[deluxe\]',
+            r'\s*\[remastered?\]',
+            r'\s*\[.*version\]',
+            r'\s*-\s*deluxe',
+            r'\s*-\s*remastered?',
+            r'\s*\d{4}\s*remaster',  # Year remaster
+            r'\s*\(\d{4}\s*remaster\)'
+        ]
+        
+        for pattern in album_patterns:
+            cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE).strip()
+        
+        return self.normalize_string(cleaned)
+    
     def similarity_score(self, str1: str, str2: str) -> float:
         """Calculates similarity score between two strings."""
         if not str1 or not str2:
@@ -260,3 +291,76 @@ class MusicMatchingEngine:
         confident_results = [r for r in sorted_results if r.confidence > 0.6]
 
         return confident_results
+    
+    def calculate_album_confidence(self, spotify_album, plex_album_info: Dict[str, Any]) -> float:
+        """Calculate confidence score for album matching"""
+        if not spotify_album or not plex_album_info:
+            return 0.0
+        
+        score = 0.0
+        
+        # 1. Album name similarity (40% weight)
+        spotify_album_clean = self.clean_album_name(spotify_album.name)
+        plex_album_clean = self.clean_album_name(plex_album_info['title'])
+        
+        name_similarity = self.similarity_score(spotify_album_clean, plex_album_clean)
+        score += name_similarity * 0.4
+        
+        # 2. Artist similarity (40% weight)
+        if spotify_album.artists and plex_album_info.get('artist'):
+            spotify_artist_clean = self.clean_artist(spotify_album.artists[0])
+            plex_artist_clean = self.clean_artist(plex_album_info['artist'])
+            
+            artist_similarity = self.similarity_score(spotify_artist_clean, plex_artist_clean)
+            score += artist_similarity * 0.4
+        
+        # 3. Track count similarity (10% weight)
+        spotify_track_count = getattr(spotify_album, 'total_tracks', 0)
+        plex_track_count = plex_album_info.get('track_count', 0)
+        
+        if spotify_track_count > 0 and plex_track_count > 0:
+            # Calculate track count similarity (perfect match = 1.0, close matches get partial credit)
+            track_diff = abs(spotify_track_count - plex_track_count)
+            if track_diff == 0:
+                track_similarity = 1.0
+            elif track_diff <= 2:  # Allow for slight differences (bonus tracks, etc.)
+                track_similarity = 0.8
+            elif track_diff <= 5:
+                track_similarity = 0.5
+            else:
+                track_similarity = 0.2
+            
+            score += track_similarity * 0.1
+        
+        # 4. Year similarity bonus (10% weight)
+        spotify_year = spotify_album.release_date[:4] if spotify_album.release_date else None
+        plex_year = str(plex_album_info.get('year', '')) if plex_album_info.get('year') else None
+        
+        if spotify_year and plex_year:
+            if spotify_year == plex_year:
+                score += 0.1  # Perfect year match
+            elif abs(int(spotify_year) - int(plex_year)) <= 1:
+                score += 0.05  # Close year match (remaster, etc.)
+        
+        return min(score, 1.0)  # Cap at 1.0
+    
+    def find_best_album_match(self, spotify_album, plex_albums: List[Dict[str, Any]]) -> Tuple[Optional[Dict[str, Any]], float]:
+        """Find the best matching album from Plex candidates"""
+        if not plex_albums:
+            return None, 0.0
+        
+        best_match = None
+        best_confidence = 0.0
+        
+        for plex_album in plex_albums:
+            confidence = self.calculate_album_confidence(spotify_album, plex_album)
+            
+            if confidence > best_confidence:
+                best_confidence = confidence
+                best_match = plex_album
+        
+        # Only return matches above confidence threshold
+        if best_confidence >= 0.8:  # High threshold for album matching
+            return best_match, best_confidence
+        else:
+            return None, best_confidence
