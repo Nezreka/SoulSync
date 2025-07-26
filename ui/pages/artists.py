@@ -16,6 +16,8 @@ from core.spotify_client import SpotifyClient, Artist, Album
 from core.plex_client import PlexClient
 from core.soulseek_client import SoulseekClient, AlbumResult
 from core.matching_engine import MusicMatchingEngine
+import asyncio
+
 
 @dataclass
 class ArtistMatch:
@@ -23,6 +25,46 @@ class ArtistMatch:
     artist: Artist
     confidence: float
     match_reason: str = ""
+
+class DownloadCompletionWorkerSignals(QObject):
+    """Signals for the download completion worker"""
+    completed = pyqtSignal(object, str)  # download_item, organized_path
+    error = pyqtSignal(object, str)      # download_item, error_message
+
+class DownloadCompletionWorker(QRunnable):
+    """Background worker to handle download completion processing without blocking UI"""
+    
+    def __init__(self, download_item, absolute_file_path, organize_func):
+        super().__init__()
+        self.download_item = download_item
+        self.absolute_file_path = absolute_file_path
+        self.organize_func = organize_func
+        self.signals = DownloadCompletionWorkerSignals()
+        
+    def run(self):
+        """Process download completion in background thread"""
+        try:
+            print(f"🧵 Background worker processing download...")
+            
+            # Add a small delay to ensure file is fully written
+            import time
+            time.sleep(1)
+            
+            # Organize the file into Transfer folder structure
+            organized_path = self.organize_func(self.download_item, self.absolute_file_path)
+            
+            # Emit completion signal
+            self.signals.completed.emit(self.download_item, organized_path or self.absolute_file_path)
+            
+        except Exception as e:
+            print(f"❌ Error in background worker: {e}")
+            import traceback
+            traceback.print_exc()
+            # Emit error signal
+            self.signals.error.emit(self.download_item, str(e))
+
+
+
 
 class ImageDownloaderSignals(QObject):
     """Signals for the ImageDownloader worker."""
@@ -146,9 +188,9 @@ class AlbumSearchWorker(QThread):
     search_failed = pyqtSignal(str)
     search_progress = pyqtSignal(str)  # Progress messages
     
-    def __init__(self, album: Album, soulseek_client: SoulseekClient):
+    def __init__(self, query: str, soulseek_client: SoulseekClient):
         super().__init__()
-        self.album = album
+        self.query = query
         self.soulseek_client = soulseek_client
         self._stop_requested = False
     
@@ -157,38 +199,48 @@ class AlbumSearchWorker(QThread):
         self._stop_requested = True
     
     def run(self):
+        """Executes the album search asynchronously."""
+        loop = None
         try:
             if not self.soulseek_client:
                 self.search_failed.emit("Soulseek client not available")
                 return
             
-            # Create search query for the album
-            search_query = f'"{self.album.name}"'
-            if self.album.artists:
-                search_query = f'"{self.album.artists[0]}" "{self.album.name}"'
+            # Create a new event loop for this thread to run async operations
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
             
-            self.search_progress.emit(f"Searching for: {search_query}")
+            self.search_progress.emit(f"Searching for: {self.query}")
             
-            # Perform the search
-            results = self.soulseek_client.search(search_query)
+            # Perform the async search using the provided query
+            results = loop.run_until_complete(self.soulseek_client.search(self.query))
             
             if self._stop_requested:
                 return
             
-            # Filter to album results only
-            album_results = []
-            if results:
-                tracks, albums = results  # Unpack the tuple returned by search
-                album_results = albums if albums else []
+            # The search method returns a tuple of (tracks, albums)
+            tracks, albums = results if results else ([], [])
+            album_results = albums if albums else []
             
-            # Sort by quality/size
-            album_results.sort(key=lambda x: (x.total_size, x.track_count), reverse=True)
+            # Sort by a combination of track count and total size for relevance
+            album_results.sort(key=lambda x: (x.track_count, x.total_size), reverse=True)
             
             self.search_results.emit(album_results)
             
         except Exception as e:
             if not self._stop_requested:
+                import traceback
+                traceback.print_exc()
                 self.search_failed.emit(str(e))
+        finally:
+            # Ensure the event loop is properly closed
+            if loop:
+                try:
+                    loop.close()
+                except Exception as e:
+                    print(f"Error closing event loop in AlbumSearchWorker: {e}")
+
+
 
 class PlexLibraryWorker(QThread):
     """Background worker for checking Plex library"""
@@ -310,336 +362,283 @@ class AlbumSearchDialog(QDialog):
         super().__init__(parent)
         self.album = album
         self.selected_album_result = None
+        self.selected_widget = None
         self.search_worker = None
         self.setup_ui()
-        self.start_search()
+        self.start_search() # Start automatic search on open
     
     def setup_ui(self):
-        self.setWindowTitle(f"Download Album: {self.album.name}")
-        self.setFixedSize(600, 500)
+        self.setWindowTitle(f"Download Source for: {self.album.name}")
+        self.setFixedSize(800, 700)
         self.setStyleSheet("""
-            QDialog {
-                background: #191414;
-                color: #ffffff;
+            QDialog { background: #191414; color: #ffffff; }
+            QScrollArea { border: 1px solid #404040; border-radius: 8px; background: #282828; }
+            QLineEdit { 
+                background: #333; border: 1px solid #555; border-radius: 4px; 
+                padding: 8px; font-size: 12px;
             }
+            QPushButton {
+                background-color: #444; border: 1px solid #666; border-radius: 4px;
+                padding: 8px 12px; font-size: 12px;
+            }
+            QPushButton:hover { background-color: #555; }
         """)
         
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(16)
+        layout.setSpacing(15)
         
         # Header
-        header_label = QLabel(f"Searching for: {self.album.name}")
+        header_label = QLabel(f"Searching for: {self.album.name} by {', '.join(self.album.artists)}")
         header_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
-        header_label.setStyleSheet("color: #ffffff; padding: 8px;")
         
-        artist_label = QLabel(f"By: {', '.join(self.album.artists)}")
-        artist_label.setFont(QFont("Arial", 11))
-        artist_label.setStyleSheet("color: #b3b3b3; padding: 4px;")
+        # Manual Search Section
+        search_layout = QHBoxLayout()
+        self.manual_search_input = QLineEdit()
+        self.manual_search_input.setPlaceholderText("Refine search: Artist Album Title...")
+        self.manual_search_input.returnPressed.connect(self.trigger_manual_search)
         
-        # Progress bar
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setRange(0, 0)  # Indeterminate progress
-        self.progress_bar.setStyleSheet("""
-            QProgressBar {
-                border: 1px solid #404040;
-                border-radius: 4px;
-                background: #282828;
-                text-align: center;
-                color: #ffffff;
-            }
-            QProgressBar::chunk {
-                background: #1db954;
-                border-radius: 3px;
-            }
-        """)
+        self.search_cancel_btn = QPushButton("Search")
+        self.search_cancel_btn.setFixedWidth(120)
+        self.search_cancel_btn.clicked.connect(self.handle_search_cancel_click)
         
-        # Status label
+        search_layout.addWidget(self.manual_search_input, 1)
+        search_layout.addWidget(self.search_cancel_btn)
+        
+        # Status
         self.status_label = QLabel("Initializing search...")
-        self.status_label.setFont(QFont("Arial", 10))
-        self.status_label.setStyleSheet("color: #b3b3b3; padding: 4px;")
+        self.status_label.setStyleSheet("color: #b3b3b3;")
         
-        # Results area
+        # Results Area
         self.results_scroll = QScrollArea()
         self.results_scroll.setWidgetResizable(True)
-        self.results_scroll.setStyleSheet("""
-            QScrollArea {
-                border: 1px solid #404040;
-                border-radius: 8px;
-                background: #282828;
-            }
-            QScrollBar:vertical {
-                background: #404040;
-                width: 12px;
-                border-radius: 6px;
-            }
-            QScrollBar::handle:vertical {
-                background: #1db954;
-                border-radius: 6px;
-                min-height: 20px;
-            }
-        """)
-        
         self.results_widget = QWidget()
         self.results_layout = QVBoxLayout(self.results_widget)
         self.results_layout.setSpacing(8)
-        self.results_layout.setContentsMargins(12, 12, 12, 12)
-        
+        self.results_layout.setContentsMargins(10, 10, 10, 10)
+        self.results_layout.addStretch(1)
         self.results_scroll.setWidget(self.results_widget)
         
-        # Buttons
+        # Bottom Buttons
         button_layout = QHBoxLayout()
-        
-        self.cancel_search_btn = QPushButton("Cancel Search")
-        self.cancel_search_btn.setStyleSheet("""
-            QPushButton {
-                background: #ff6b6b;
-                border: none;
-                border-radius: 6px;
-                color: white;
-                font-weight: bold;
-                padding: 8px 16px;
-            }
-            QPushButton:hover {
-                background: #ff5252;
-            }
-        """)
-        self.cancel_search_btn.clicked.connect(self.cancel_search)
-        
         self.download_btn = QPushButton("Download Selected")
-        self.download_btn.setEnabled(False)
-        self.download_btn.setStyleSheet("""
-            QPushButton {
-                background: #1db954;
-                border: none;
-                border-radius: 6px;
-                color: white;
-                font-weight: bold;
-                padding: 8px 16px;
-            }
-            QPushButton:hover {
-                background: #1ed760;
-            }
-            QPushButton:disabled {
-                background: #404040;
-                color: #808080;
-            }
-        """)
-        self.download_btn.clicked.connect(self.download_selected)
+        self.download_btn.setEnabled(False) # Initially disabled
+        self.download_btn.setStyleSheet("background-color: #1db954; color: black;")
         
         close_btn = QPushButton("Close")
-        close_btn.setStyleSheet("""
-            QPushButton {
-                background: #404040;
-                border: none;
-                border-radius: 6px;
-                color: white;
-                font-weight: bold;
-                padding: 8px 16px;
-            }
-            QPushButton:hover {
-                background: #505050;
-            }
-        """)
+        
+        self.download_btn.clicked.connect(self.download_selected)
         close_btn.clicked.connect(self.reject)
         
-        button_layout.addWidget(self.cancel_search_btn)
-        button_layout.addStretch()
+        button_layout.addStretch(1)
         button_layout.addWidget(self.download_btn)
         button_layout.addWidget(close_btn)
         
-        # Add to main layout
         layout.addWidget(header_label)
-        layout.addWidget(artist_label)
-        layout.addWidget(self.progress_bar)
+        layout.addLayout(search_layout)
         layout.addWidget(self.status_label)
         layout.addWidget(self.results_scroll, 1)
         layout.addLayout(button_layout)
-    
-    def start_search(self):
-        """Start the album search"""
-        # We need to get the soulseek client from the parent
+
+    def handle_search_cancel_click(self):
+        """Toggles between starting a search and cancelling an active one."""
+        if self.search_worker and self.search_worker.isRunning():
+            self.cancel_search()
+        else:
+            self.trigger_manual_search()
+
+    def trigger_manual_search(self):
+        """Starts a new search using the text from the manual search input."""
+        query = self.manual_search_input.text().strip()
+        if query:
+            self.start_search(query)
+
+    def start_search(self, query: Optional[str] = None):
+        """
+        Starts the album search. If a query is provided, it's a manual search.
+        Otherwise, it constructs an automatic query.
+        """
+        if self.search_worker and self.search_worker.isRunning():
+            self.search_worker.stop()
+            self.search_worker.wait()
+
+        self.clear_results()
+        self.download_btn.setEnabled(False)
+        self.status_label.setText("Searching...")
+        self.set_search_button_to_cancel(True)
+
+        if query is None:
+            artist_part = self.album.artists[0] if self.album.artists else ""
+            query = f"{artist_part} {self.album.name}".strip()
+        
+        self.manual_search_input.setText(query)
+
         parent_page = self.parent()
         if hasattr(parent_page, 'soulseek_client') and parent_page.soulseek_client:
-            self.search_worker = AlbumSearchWorker(self.album, parent_page.soulseek_client)
+            self.search_worker = AlbumSearchWorker(query, parent_page.soulseek_client)
             self.search_worker.search_results.connect(self.on_search_results)
             self.search_worker.search_failed.connect(self.on_search_failed)
             self.search_worker.search_progress.connect(self.on_search_progress)
-            self.search_worker.finished.connect(self.on_search_finished)
             self.search_worker.start()
         else:
             self.on_search_failed("Soulseek client not available")
-    
+
     def cancel_search(self):
-        """Cancel the current search"""
-        if self.search_worker:
+        if self.search_worker and self.search_worker.isRunning():
             self.search_worker.stop()
-            self.search_worker.terminate()
-            self.search_worker.wait()
-        self.reject()
+            self.status_label.setText("Search cancelled.")
+            self.set_search_button_to_cancel(False)
     
     def on_search_progress(self, message):
-        """Handle search progress updates"""
         self.status_label.setText(message)
     
     def on_search_results(self, album_results):
-        """Handle search results"""
+        self.set_search_button_to_cancel(False)
+        self.clear_results()
         if not album_results:
-            self.status_label.setText("No albums found")
-            self.progress_bar.setRange(0, 1)
-            self.progress_bar.setValue(1)
+            self.status_label.setText("No albums found for this query.")
             return
+
+        self.status_label.setText(f"Found {len(album_results)} potential albums. Click one to select.")
         
-        self.status_label.setText(f"Found {len(album_results)} albums")
-        self.progress_bar.setRange(0, 1)
-        self.progress_bar.setValue(1)
-        
-        # Display results
-        for i, album_result in enumerate(album_results[:10]):  # Show top 10 results
-            result_item = self.create_result_item(album_result, i)
-            self.results_layout.addWidget(result_item)
-        
-        self.results_layout.addStretch()
-        self.cancel_search_btn.setText("Cancel")
-    
+        for album_result in album_results[:25]: # Show top 25
+            result_item = self.create_result_item(album_result)
+            self.results_layout.insertWidget(self.results_layout.count() - 1, result_item)
+
     def on_search_failed(self, error):
-        """Handle search failure"""
+        self.set_search_button_to_cancel(False)
         self.status_label.setText(f"Search failed: {error}")
-        self.progress_bar.setRange(0, 1)
-        self.progress_bar.setValue(1)
-        self.cancel_search_btn.setText("Close")
-    
-    def on_search_finished(self):
-        """Handle search completion"""
-        self.cancel_search_btn.setText("Close")
-    
-    def create_result_item(self, album_result: AlbumResult, index: int):
-        """Create a result item widget"""
+
+    def create_result_item(self, album_result: AlbumResult):
+        """Creates a larger, more informative, and clickable result item widget."""
         item = QFrame()
+        item.setFixedHeight(75) # Increased height for better readability
+        item.setCursor(Qt.CursorShape.PointingHandCursor)
         item.setStyleSheet("""
             QFrame {
                 background: rgba(40, 40, 40, 0.8);
-                border: 1px solid #606060;
-                border-radius: 8px;
-                padding: 8px;
-            }
-            QFrame:hover {
-                background: rgba(50, 50, 50, 0.9);
-                border: 1px solid #1db954;
+                border: 1px solid #555;
+                border-radius: 6px;
             }
         """)
-        item.setCursor(Qt.CursorShape.PointingHandCursor)
+        # Connect the click event for the whole frame
+        item.mousePressEvent = lambda event: self.select_result(album_result, item)
         
         layout = QHBoxLayout(item)
-        layout.setContentsMargins(12, 8, 12, 8)
-        layout.setSpacing(12)
+        layout.setContentsMargins(15, 10, 15, 10)
+        layout.setSpacing(15)
         
-        # Album info
         info_layout = QVBoxLayout()
+        info_layout.setSpacing(4)
         
-        title_label = QLabel(album_result.album_title)
+        title_label = QLabel(f"{album_result.album_title} by {album_result.artist}")
         title_label.setFont(QFont("Arial", 11, QFont.Weight.Bold))
-        title_label.setStyleSheet("color: #ffffff;")
         
-        details_label = QLabel(f"By: {album_result.artist} • {album_result.track_count} tracks • {self.format_size(album_result.total_size)}")
+        details_text = (f"{album_result.track_count} tracks | "
+                        f"{self.format_size(album_result.total_size)} | "
+                        f"Uploader: {album_result.username}")
+        details_label = QLabel(details_text)
         details_label.setFont(QFont("Arial", 9))
         details_label.setStyleSheet("color: #b3b3b3;")
         
-        uploader_label = QLabel(f"Uploader: {album_result.username}")
-        uploader_label.setFont(QFont("Arial", 8))
-        uploader_label.setStyleSheet("color: #888888;")
-        
         info_layout.addWidget(title_label)
         info_layout.addWidget(details_label)
-        info_layout.addWidget(uploader_label)
         
-        # Select button
-        select_btn = QPushButton("Select")
-        select_btn.setFixedWidth(80)
-        select_btn.setStyleSheet("""
-            QPushButton {
-                background: #1db954;
-                border: none;
-                border-radius: 4px;
-                color: white;
-                font-weight: bold;
-                padding: 6px 12px;
-            }
-            QPushButton:hover {
-                background: #1ed760;
-            }
-        """)
-        select_btn.clicked.connect(lambda: self.select_result(album_result))
+        quality_badge = self.create_quality_badge(album_result)
         
-        layout.addLayout(info_layout)
-        layout.addStretch()
-        layout.addWidget(select_btn)
+        layout.addLayout(info_layout, 1)
+        layout.addWidget(quality_badge)
         
         return item
-    
-    def format_size(self, size_bytes):
-        """Format file size in human readable format"""
-        if size_bytes >= 1024 * 1024 * 1024:
-            return f"{size_bytes / (1024 * 1024 * 1024):.1f} GB"
-        elif size_bytes >= 1024 * 1024:
-            return f"{size_bytes / (1024 * 1024):.1f} MB"
-        elif size_bytes >= 1024:
-            return f"{size_bytes / 1024:.1f} KB"
+
+    def create_quality_badge(self, album_result: AlbumResult):
+        """Creates a styled badge for displaying audio quality."""
+        quality = album_result.dominant_quality.upper()
+        
+        # Safely calculate average bitrate from the album's tracks
+        bitrate = 0
+        if hasattr(album_result, 'tracks') and album_result.tracks:
+            valid_bitrates = [
+                track.bitrate for track in album_result.tracks 
+                if hasattr(track, 'bitrate') and track.bitrate
+            ]
+            if valid_bitrates:
+                bitrate = sum(valid_bitrates) // len(valid_bitrates)
+        
+        badge_text = quality
+        if quality == 'MP3' and bitrate > 0:
+            badge_text = f"MP3 {bitrate}k"
+        elif quality == 'VBR':
+            badge_text = "MP3 VBR"
+            
+        badge = QLabel(badge_text)
+        badge.setFixedWidth(80)
+        badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        badge.setFont(QFont("Arial", 9, QFont.Weight.Bold))
+        
+        if quality == 'FLAC':
+            style = "background-color: #4CAF50; color: white; border-radius: 4px; padding: 5px;"
+        elif bitrate >= 320:
+            style = "background-color: #2196F3; color: white; border-radius: 4px; padding: 5px;"
+        elif bitrate >= 192 or quality == 'VBR':
+            style = "background-color: #FFC107; color: black; border-radius: 4px; padding: 5px;"
         else:
-            return f"{size_bytes} B"
+            style = "background-color: #F44336; color: white; border-radius: 4px; padding: 5px;"
+            
+        badge.setStyleSheet(style)
+        return badge
+
+    def clear_results(self):
+        """Removes all result widgets from the layout, preserving the stretch item."""
+        self.selected_widget = None # Clear selection
+        # Iterate backwards to safely remove items while preserving the stretch
+        for i in reversed(range(self.results_layout.count())):
+            item = self.results_layout.itemAt(i)
+            if item.widget():
+                widget = item.widget()
+                widget.deleteLater()
+
+    def format_size(self, size_bytes):
+        if size_bytes >= 1024**3: return f"{size_bytes / 1024**3:.1f} GB"
+        if size_bytes >= 1024**2: return f"{size_bytes / 1024**2:.1f} MB"
+        return f"{size_bytes / 1024:.1f} KB"
     
-    def select_result(self, album_result):
-        """Select an album result"""
+    def select_result(self, album_result, selected_item_widget):
+        """Handles the selection of a result and provides visual feedback."""
         self.selected_album_result = album_result
         self.download_btn.setEnabled(True)
+
+        # Deselect previous widget
+        if self.selected_widget:
+            self.selected_widget.setStyleSheet("""
+                QFrame { background: rgba(40, 40, 40, 0.8); border: 1px solid #555; border-radius: 6px; }
+            """)
         
-        # Visual feedback - highlight selected item
-        for i in range(self.results_layout.count()):
-            item = self.results_layout.itemAt(i)
-            if item and item.widget():
-                widget = item.widget()
-                if hasattr(widget, 'setStyleSheet'):
-                    if widget.layout() and widget.layout().itemAt(2) and widget.layout().itemAt(2).widget():
-                        btn = widget.layout().itemAt(2).widget()
-                        if btn.text() == "Select":
-                            widget.setStyleSheet("""
-                                QFrame {
-                                    background: rgba(40, 40, 40, 0.8);
-                                    border: 1px solid #606060;
-                                    border-radius: 8px;
-                                    padding: 8px;
-                                }
-                            """)
-                            btn.setText("Select")
-        
-        # Highlight the selected item
-        sender = self.sender()
-        if sender:
-            parent_frame = sender.parent()
-            if parent_frame:
-                parent_frame.setStyleSheet("""
-                    QFrame {
-                        background: rgba(29, 185, 84, 0.3);
-                        border: 2px solid #1db954;
-                        border-radius: 8px;
-                        padding: 8px;
-                    }
-                """)
-                sender.setText("Selected ✓")
-    
+        # Apply selected style to the new widget
+        selected_item_widget.setStyleSheet("""
+            QFrame { background: rgba(29, 185, 84, 0.2); border: 1px solid #1db954; border-radius: 6px; }
+        """)
+        self.selected_widget = selected_item_widget
+
     def download_selected(self):
-        """Download the selected album"""
         if self.selected_album_result:
             self.album_selected.emit(self.selected_album_result)
             self.accept()
     
+    def set_search_button_to_cancel(self, is_searching: bool):
+        """Changes the search button's text and style."""
+        if is_searching:
+            self.search_cancel_btn.setText("Cancel Search")
+            self.search_cancel_btn.setStyleSheet("background-color: #F44336; color: white;")
+        else:
+            self.search_cancel_btn.setText("Search")
+            self.search_cancel_btn.setStyleSheet("background-color: #1db954; color: black;")
+
     def closeEvent(self, event):
-        """Handle dialog close"""
-        if self.search_worker:
-            self.search_worker.stop()
-            self.search_worker.terminate()
-            self.search_worker.wait()
+        self.cancel_search()
         super().closeEvent(event)
+
+
 
 class ArtistResultCard(QFrame):
     """Card widget for displaying artist search results"""
@@ -998,13 +997,14 @@ class AlbumCard(QFrame):
         super().mousePressEvent(event)
 
 class ArtistsPage(QWidget):
-    def __init__(self, parent=None):
+    def __init__(self, downloads_page=None, parent=None):
         super().__init__(parent)
         
         # Core clients
         self.spotify_client = None
         self.plex_client = None
         self.soulseek_client = None
+        self.downloads_page = downloads_page  # Store reference to DownloadsPage
         self.matching_engine = MusicMatchingEngine()
         
         # State management
@@ -1500,7 +1500,6 @@ class ArtistsPage(QWidget):
                 col = 0
                 row += 1
     
-    
     def start_plex_library_check(self, albums):
         """Start Plex library check in background"""
         # Stop any existing Plex worker
@@ -1568,82 +1567,33 @@ class ArtistsPage(QWidget):
         """Handle album fetch failure"""
         self.albums_status.setText(f"Failed to load albums: {error}")
     
-    
-    def on_album_download_requested(self, album):
-        """Handle album download request"""
+    def on_album_download_requested(self, album: Album):
+        """Handle album download request from an AlbumCard."""
         print(f"Download requested for album: {album.name} by {', '.join(album.artists)}")
         
-        # Open the album search dialog
+        # Store the album object that needs to be downloaded
+        self.album_to_download = album
+        
+        # Open the album search dialog to find a source on Soulseek
         dialog = AlbumSearchDialog(album, self)
         dialog.album_selected.connect(self.on_album_selected_for_download)
         dialog.exec()
     
     def on_album_selected_for_download(self, album_result: AlbumResult):
-        """Handle album selection from search dialog"""
+        """
+        Handles album selection from the search dialog and delegates the
+        matched album download process to the main DownloadsPage.
+        """
         print(f"Selected album for download: {album_result.album_title} by {album_result.artist}")
         
-        # Start download process for the selected album
-        self.start_album_download(album_result)
-    
-    def start_album_download(self, album_result: AlbumResult):
-        """Start downloading the selected album"""
-        try:
-            if not self.soulseek_client:
-                QMessageBox.warning(self, "Error", "Soulseek client not available!")
-                return
-            
-            # Create download items for each track in the album
-            for track in album_result.tracks:
-                # Create a unique download ID
-                download_id = f"{album_result.username}_{track.filename}"
-                
-                # Add to download queue (we need to integrate with the main app's download queue)
-                self.add_to_download_queue(
-                    title=track.title or track.filename,
-                    artist=track.artist or album_result.artist,
-                    album=album_result.album_title,
-                    username=album_result.username,
-                    filename=track.filename,
-                    file_size=track.size,
-                    download_id=download_id,
-                    track_result=track
-                )
-            
-            # Show confirmation
-            QMessageBox.information(
-                self, 
-                "Download Started", 
-                f"Started downloading {len(album_result.tracks)} tracks from '{album_result.album_title}'"
-            )
-            
-        except Exception as e:
-            print(f"Error starting album download: {e}")
-            QMessageBox.critical(self, "Download Error", f"Failed to start download: {str(e)}")
-    
-    def add_to_download_queue(self, title, artist, album, username, filename, file_size, download_id, track_result):
-        """Add a track to the download queue - needs integration with main app"""
-        # TODO: This needs to integrate with the main application's download system
-        # For now, we'll simulate starting the download
-        
-        print(f"Adding to download queue: {title} by {artist}")
-        
-        # We need to access the main app's download manager
-        # This would typically be done by emitting a signal that the main app listens to
-        # or by accessing the download manager through a parent reference
-        
-        # For now, just start the individual track download
-        if self.soulseek_client:
-            try:
-                # Start the download using the soulseek client
-                self.soulseek_client.download(
-                    username=username,
-                    filename=filename,
-                    download_id=download_id
-                )
-                print(f"Started download: {filename}")
-            except Exception as e:
-                print(f"Failed to start download for {filename}: {e}")
-    
+        if self.downloads_page:
+            # Delegate to the DownloadsPage to handle the matched download
+            # This will open the Spotify matching modal and add to the central queue
+            print("🚀 Delegating to DownloadsPage to start matched album download...")
+            self.downloads_page.start_matched_album_download(album_result)
+        else:
+            QMessageBox.critical(self, "Error", "Downloads page is not connected. Cannot start download.")
+
     def return_to_search(self):
         """Return to search interface"""
         # Stop any running workers
@@ -1700,3 +1650,6 @@ class ArtistsPage(QWidget):
         """Handle page close/cleanup"""
         self.stop_all_workers()
         super().closeEvent(event)
+
+
+
