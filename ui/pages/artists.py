@@ -192,7 +192,8 @@ class AlbumSearchWorker(QThread):
 
 class PlexLibraryWorker(QThread):
     """Background worker for checking Plex library"""
-    library_checked = pyqtSignal(set)  # Set of owned album names
+    library_checked = pyqtSignal(set)  # Set of owned album names (final result)
+    album_matched = pyqtSignal(str)    # Individual album match (album name)
     check_failed = pyqtSignal(str)
     
     def __init__(self, albums, plex_client, matching_engine):
@@ -284,6 +285,8 @@ class PlexLibraryWorker(QThread):
                     if best_match and confidence >= 0.8:
                         owned_albums.add(spotify_album.name)
                         print(f"✅ Match found: '{spotify_album.name}' -> '{best_match['title']}' (confidence: {confidence:.2f})")
+                        # Emit individual match for real-time UI update
+                        self.album_matched.emit(spotify_album.name)
                     else:
                         print(f"❌ No confident match for '{spotify_album.name}' (best: {confidence:.2f})")
                 else:
@@ -1007,6 +1010,7 @@ class ArtistsPage(QWidget):
         # State management
         self.selected_artist = None
         self.current_albums = []
+        self.matched_count = 0
         self.artist_search_worker = None
         self.album_fetch_worker = None
         self.plex_library_worker = None
@@ -1463,6 +1467,9 @@ class ArtistsPage(QWidget):
         self.current_albums = albums
         self.albums_status.setText(f"Found {len(albums)} albums • Checking Plex library...")
         
+        # Initialize match counter for real-time updates
+        self.matched_count = 0
+        
         # Display albums immediately (without ownership info)
         self.display_albums(albums, set())
         
@@ -1505,38 +1512,49 @@ class ArtistsPage(QWidget):
         # Start new Plex worker
         self.plex_library_worker = PlexLibraryWorker(albums, self.plex_client, self.matching_engine)
         self.plex_library_worker.library_checked.connect(self.on_plex_library_checked)
+        self.plex_library_worker.album_matched.connect(self.on_album_matched)
         self.plex_library_worker.check_failed.connect(self.on_plex_library_check_failed)
         self.plex_library_worker.start()
     
     def on_plex_library_checked(self, owned_albums):
-        """Handle Plex library check results"""
-        print(f"📨 Handler started: {len(owned_albums)} owned albums")
+        """Handle final Plex library check completion"""
+        print(f"📨 Plex check completed: {len(owned_albums)} total matches")
         
         if not self.current_albums:
-            print("📨 No current albums, skipping update")
+            print("📨 No current albums, skipping final update")
             return
         
-        # Update the status
+        # Update final status message
         owned_count = len(owned_albums)
         total_count = len(self.current_albums)
         missing_count = total_count - owned_count
         
         self.albums_status.setText(f"Found {total_count} albums • {owned_count} owned • {missing_count} available for download")
         
-        # Update existing album cards with ownership info
-        print(f"🔄 Updating {self.albums_grid_layout.count()} album cards")
+        print(f"✅ Plex check complete: {owned_count}/{total_count} albums owned")
+    
+    def on_album_matched(self, album_name):
+        """Handle individual album match for real-time UI update"""
+        print(f"🎯 Real-time match: '{album_name}'")
         
-        updated_count = 0
+        # Update match counter
+        self.matched_count += 1
+        
+        # Update status text in real-time
+        if self.current_albums:
+            total_count = len(self.current_albums)
+            remaining_count = total_count - self.matched_count
+            self.albums_status.setText(f"Found {total_count} albums • {self.matched_count} owned • {remaining_count} checking...")
+        
+        # Find and update the specific album card
         for i in range(self.albums_grid_layout.count()):
             item = self.albums_grid_layout.itemAt(i)
             if item and item.widget():
                 album_card = item.widget()
-                if hasattr(album_card, 'album') and hasattr(album_card, 'update_ownership'):
-                    is_owned = album_card.album.name in owned_albums
-                    album_card.update_ownership(is_owned)
-                    updated_count += 1
-        
-        print(f"✅ Updated {updated_count} album cards successfully")
+                if hasattr(album_card, 'album') and album_card.album.name == album_name:
+                    print(f"🔄 Real-time update: '{album_name}' -> owned")
+                    album_card.update_ownership(True)
+                    break
     
     def on_plex_library_check_failed(self, error):
         """Handle Plex library check failure"""
@@ -1634,6 +1652,7 @@ class ArtistsPage(QWidget):
         # Clear state
         self.selected_artist = None
         self.current_albums = []
+        self.matched_count = 0
         self.header_search_input.clear()
         
         # Clear albums display
