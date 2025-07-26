@@ -33,6 +33,43 @@ class AlbumMatch:
     confidence: float
     match_reason: str = ""
 
+
+class ImageDownloaderSignals(QObject):
+    """Signals for the ImageDownloader worker."""
+    finished = pyqtSignal(QLabel, QPixmap)
+    error = pyqtSignal(str)
+
+class ImageDownloader(QRunnable):
+    """Worker to download an image in the background."""
+    def __init__(self, url: str, target_label: QLabel):
+        super().__init__()
+        self.signals = ImageDownloaderSignals()
+        self.url = url
+        self.target_label = target_label
+
+    def run(self):
+        try:
+            if not self.url:
+                self.signals.error.emit("No image URL provided.")
+                return
+
+            response = requests.get(self.url, stream=True, timeout=10)
+            response.raise_for_status()
+            
+            pixmap = QPixmap()
+            pixmap.loadFromData(response.content)
+            
+            if not pixmap.isNull():
+                self.signals.finished.emit(self.target_label, pixmap)
+            else:
+                self.signals.error.emit("Failed to load image from data.")
+                
+        except requests.RequestException as e:
+            self.signals.error.emit(f"Network error downloading image: {e}")
+        except Exception as e:
+            self.signals.error.emit(f"Error processing image: {e}")
+
+
 class DownloadCompletionWorkerSignals(QObject):
     """Signals for the download completion worker"""
     completed = pyqtSignal(object, str)  # download_item, organized_path
@@ -302,7 +339,8 @@ class SpotifyMatchingModal(QDialog):
         self.matching_engine = matching_engine
         self.is_album = is_album
         self.album_result = album_result
-        
+        self.image_download_pool = QThreadPool()
+        self.image_download_pool.setMaxThreadCount(4)
         self.selected_artist: Optional[Artist] = None
         self.selected_album: Optional[Album] = None
         
@@ -388,6 +426,22 @@ class SpotifyMatchingModal(QDialog):
         self.search_timer = QTimer()
         self.search_timer.setSingleShot(True)
         self.search_timer.timeout.connect(self.perform_manual_search)
+
+    def download_and_set_image(self, url: str, target_label: QLabel):
+        """Starts a background worker to download and set an image."""
+        worker = ImageDownloader(url, target_label)
+        worker.signals.finished.connect(self._on_image_downloaded)
+        worker.signals.error.connect(lambda msg: print(f"Image Error: {msg} for url {url}"))
+        self.image_download_pool.start(worker)
+
+    def _on_image_downloaded(self, target_label: QLabel, pixmap: QPixmap):
+        """Slot to apply the downloaded pixmap to the target label."""
+        if target_label and not pixmap.isNull():
+            # Scale pixmap to fill the label, cropping if necessary
+            scaled_pixmap = pixmap.scaled(target_label.size(), 
+                                          Qt.AspectRatioMode.KeepAspectRatioByExpanding, 
+                                          Qt.TransformationMode.SmoothTransformation)
+            target_label.setPixmap(scaled_pixmap)
 
     def generate_auto_artist_suggestions(self):
         self._clear_layout(self.auto_suggestions_layout)
@@ -508,6 +562,9 @@ class SpotifyMatchingModal(QDialog):
     def reject(self):
         if not hasattr(self, 'skipped_matching'):
             self.skipped_matching = False
+        # Clean up the image download pool
+        self.image_download_pool.clear()
+        self.image_download_pool.waitForDone(-1) # Wait indefinitely for tasks to finish
         self.cancelled.emit()
         super().reject()
 
@@ -515,33 +572,107 @@ class SpotifyMatchingModal(QDialog):
         card = QFrame()
         card.setObjectName("card")
         card.setFixedSize(220, 130)
-        layout = QVBoxLayout(card)
+        # The main card needs a layout to stack widgets
+        card_layout = QGridLayout(card)
+        card_layout.setContentsMargins(0, 0, 0, 0)
+
+        # 1. Background Layer (for the image)
+        background_label = QLabel()
+        background_label.setScaledContents(True)
+        background_label.setStyleSheet("border-radius: 12px;")
+
+        # 2. Gradient Overlay Layer (for text readability)
+        gradient_overlay = QWidget()
+        gradient_overlay.setStyleSheet("""
+            QWidget {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(18, 18, 18, 0.4),
+                    stop:0.6 rgba(18, 18, 18, 0.7),
+                    stop:1 rgba(18, 18, 18, 0.9));
+                border-radius: 12px;
+            }
+        """)
+        
+        # 3. Content Layer (the text)
+        content_layout = QVBoxLayout(gradient_overlay)
+        content_layout.setContentsMargins(12, 12, 12, 12)
+        
         name = QLabel(artist.name)
         name.setWordWrap(True)
-        name.setStyleSheet("font-size: 16px; font-weight: bold;")
+        name.setStyleSheet("font-size: 16px; font-weight: bold; color: white; background: transparent; border: none;")
+        
         confidence_label = QLabel(f"{confidence:.0%} match")
-        confidence_label.setStyleSheet("color: #B3B3B3; font-size: 12px;")
-        layout.addWidget(name)
-        layout.addStretch()
-        layout.addWidget(confidence_label)
+        confidence_label.setStyleSheet("color: #B3B3B3; font-size: 12px; background: transparent; border: none;")
+        
+        content_layout.addWidget(name)
+        content_layout.addStretch()
+        content_layout.addWidget(confidence_label)
+
+        # Stack the layers
+        card_layout.addWidget(background_label, 0, 0)
+        card_layout.addWidget(gradient_overlay, 0, 0)
+
+        # Set up interaction
         card.mousePressEvent = lambda event: self.select_artist(artist)
+
+        # Fetch the artist image in the background
+        if hasattr(artist, 'image_url') and artist.image_url:
+            self.download_and_set_image(artist.image_url, background_label)
+
         return card
 
     def create_album_card(self, album: Album, confidence: float) -> QFrame:
         card = QFrame()
         card.setObjectName("card")
         card.setFixedSize(220, 130)
-        layout = QVBoxLayout(card)
+        # The main card needs a layout to stack widgets
+        card_layout = QGridLayout(card)
+        card_layout.setContentsMargins(0, 0, 0, 0)
+
+        # 1. Background Layer (for the image)
+        background_label = QLabel()
+        background_label.setScaledContents(True)
+        background_label.setStyleSheet("border-radius: 12px;")
+
+        # 2. Gradient Overlay Layer (for text readability)
+        gradient_overlay = QWidget()
+        gradient_overlay.setStyleSheet("""
+            QWidget {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(18, 18, 18, 0.4),
+                    stop:0.6 rgba(18, 18, 18, 0.7),
+                    stop:1 rgba(18, 18, 18, 0.9));
+                border-radius: 12px;
+            }
+        """)
+        
+        # 3. Content Layer (the text)
+        content_layout = QVBoxLayout(gradient_overlay)
+        content_layout.setContentsMargins(12, 12, 12, 12)
+        
         name = QLabel(album.name)
         name.setWordWrap(True)
-        name.setStyleSheet("font-size: 14px; font-weight: bold;")
+        name.setStyleSheet("font-size: 14px; font-weight: bold; color: white; background: transparent; border: none;")
+        
         year = album.release_date.split('-')[0] if album.release_date else ""
         details = QLabel(f"{album.album_type.title()} • {year}")
-        details.setStyleSheet("color: #B3B3B3; font-size: 12px;")
-        layout.addWidget(name)
-        layout.addWidget(details)
-        layout.addStretch()
+        details.setStyleSheet("color: #B3B3B3; font-size: 12px; background: transparent; border: none;")
+        
+        content_layout.addWidget(name)
+        content_layout.addWidget(details)
+        content_layout.addStretch()
+
+        # Stack the layers
+        card_layout.addWidget(background_label, 0, 0)
+        card_layout.addWidget(gradient_overlay, 0, 0)
+
+        # Set up interaction
         card.mousePressEvent = lambda event: self.select_album(album)
+
+        # Fetch the album image in the background
+        if hasattr(album, 'image_url') and album.image_url:
+            self.download_and_set_image(album.image_url, background_label)
+
         return card
 
     def _show_loading_cards(self, layout: QHBoxLayout, text: str):
