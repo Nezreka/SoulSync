@@ -430,6 +430,31 @@ class SpotifyClient:
         except Exception as e:
             logger.error(f"Error fetching album tracks: {e}")
             return None
+    
+    @rate_limited
+    def get_artist_albums(self, artist_id: str, album_type: str = 'album,single', limit: int = 50) -> List[Album]:
+        """Get albums by artist ID"""
+        if not self.is_authenticated():
+            return []
+        
+        try:
+            albums = []
+            results = self.sp.artist_albums(artist_id, album_type=album_type, limit=limit)
+            
+            while results:
+                for album_data in results['items']:
+                    album = Album.from_spotify_album(album_data)
+                    albums.append(album)
+                
+                # Get next batch if available
+                results = self.sp.next(results) if results['next'] else None
+            
+            logger.info(f"Retrieved {len(albums)} albums for artist {artist_id}")
+            return albums
+            
+        except Exception as e:
+            logger.error(f"Error fetching artist albums: {e}")
+            return []
 
     def get_user_info(self) -> Optional[Dict[str, Any]]:
         if not self.is_authenticated():
