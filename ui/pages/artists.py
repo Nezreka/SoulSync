@@ -2023,7 +2023,10 @@ class DownloadMissingAlbumTracksModal(QDialog):
         self.completed_downloads += 1
         self.active_parallel_downloads -= 1
         self.download_progress.setValue(self.completed_downloads)
-        self.start_next_batch_of_downloads()
+        
+        # FIX: Use QTimer.singleShot to avoid deep recursion on rapid failures.
+        # This schedules the next batch to start after the current call stack unwinds.
+        QTimer.singleShot(0, self.start_next_batch_of_downloads)
     
     def on_parallel_track_failed(self, download_index, reason):
         """Handle failure of a parallel track download"""
@@ -2245,6 +2248,15 @@ class ArtistsPage(QWidget):
             self.spotify_client = SpotifyClient()
             self.plex_client = PlexClient()
             self.soulseek_client = SoulseekClient()
+
+            # --- FIX: Ensure the soulseek_client uses the download path from config ---
+            from config.settings import config_manager
+            download_path = config_manager.get('soulseek.download_path')
+            if download_path and hasattr(self.soulseek_client, 'download_path'):
+                self.soulseek_client.download_path = download_path
+                print(f"✅ Set soulseek_client download path for ArtistsPage to: {download_path}")
+            # --- END FIX ---
+
         except Exception as e:
             print(f"Failed to initialize clients: {e}")
     
