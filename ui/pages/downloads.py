@@ -10,7 +10,7 @@ import os
 import threading
 from threading import RLock, Lock
 from queue import Queue, Empty
-
+from config.settings import config_manager
 # Import the new search result classes
 from core.soulseek_client import TrackResult, AlbumResult
 from core.spotify_client import SpotifyClient, Artist, Album
@@ -4804,94 +4804,90 @@ class DownloadsPage(QWidget):
     def __init__(self, soulseek_client=None, parent=None):
         super().__init__(parent)
         self.soulseek_client = soulseek_client
+        
+        # --- FIX: Ensure the soulseek_client uses the download path from config ---
+        if self.soulseek_client:
+            from config.settings import config_manager
+            download_path = config_manager.get('soulseek.download_path')
+            if download_path and hasattr(self.soulseek_client, 'download_path'):
+                self.soulseek_client.download_path = download_path
+                print(f"✅ Set soulseek_client download path to: {download_path}")
+        # --- END FIX ---
+
         self.search_thread = None
-        self.explore_thread = None  # Track API exploration thread
-        self.session_thread = None  # Track session info thread
-        self.download_threads = []  # Track active download threads
-        self.status_update_threads = []  # Track status update threads (CRITICAL FIX)
-        self.api_cleanup_threads = []  # Track API cleanup threads
+        self.explore_thread = None
+        self.session_thread = None
+        self.download_threads = []
+        self.status_update_threads = []
+        self.api_cleanup_threads = []
         self.search_results = []
-        self.current_filtered_results = []  # Cache for filtered results based on active filter
-        self.download_items = []  # Track download items for the queue
-        self.displayed_results = 0  # Track how many results are currently displayed
-        self.results_per_page = 15  # Show 15 results at a time
-        self.is_loading_more = False  # Prevent multiple simultaneous loads
+        self.current_filtered_results = []
+        self.download_items = []
+        self.displayed_results = 0
+        self.results_per_page = 15
+        self.is_loading_more = False
         self._results_to_load_queue = []
         self.status_processing_pool = QThreadPool()
-        self.status_processing_pool.setMaxThreadCount(1) # Only one status worker at a time.
+        self.status_processing_pool.setMaxThreadCount(1)
         self._is_status_update_running = False
         
-        # Initialize Spotify client and matching engine for matched downloads
         self.spotify_client = SpotifyClient()
         self.matching_engine = MusicMatchingEngine()
         
-        # Album grouping system to ensure tracks from same album go to same folder
         import threading
         from concurrent.futures import ThreadPoolExecutor
         self.album_cache_lock = threading.Lock()
-        self.album_groups = {}  # Maps original album name -> resolved clean album name
-        self.album_artists = {}  # Maps original album name -> artist for consistency
-        self.album_editions = {}  # Maps original album name -> edition level ("standard", "deluxe")
-        self.album_name_cache = {}  # Pre-calculated consistent album names for batch downloads
+        self.album_groups = {}
+        self.album_artists = {}
+        self.album_editions = {}
+        self.album_name_cache = {}
         
-        # Thread pool for API requests to prevent excessive thread creation
         self.api_thread_pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="SpotifyAPI")
-        self.active_suggestion_threads = set()  # Track active threads for cleanup
+        self.active_suggestion_threads = set()
         
-        # QThreadPool for download completion processing to prevent UI freezing
         self.completion_thread_pool = QThreadPool()
-        self.completion_thread_pool.setMaxThreadCount(2)  # Limit concurrent completion processing
+        self.completion_thread_pool.setMaxThreadCount(2)
         
-        # OPTIMIZATION v2: Enhanced thread pool configuration
         self._optimized_api_pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="OptimizedAPI")
         self._optimized_completion_pool = QThreadPool()
-        self._optimized_completion_pool.setMaxThreadCount(4)  # Increased for better bulk handling
-        self._cleanup_pools = []  # Track pools for proper shutdown
+        self._optimized_completion_pool.setMaxThreadCount(4)
+        self._cleanup_pools = []
         
-        # OPTIMIZATION v2: Thread-safe queue management
         self._queue_manager = ThreadSafeQueueManager()
-        self._queue_consistency_lock = RLock()  # Global queue consistency lock
+        self._queue_consistency_lock = RLock()
         
-        # Initialize audio player for streaming
         self.audio_player = AudioPlayer(self)
         self.audio_player.playback_finished.connect(self.on_audio_playback_finished)
         self.audio_player.playback_error.connect(self.on_audio_playback_error)
-        self.currently_playing_button = None  # Track which play button is active
-        self.currently_expanded_item = None  # Track which item is currently expanded
+        self.currently_playing_button = None
+        self.currently_expanded_item = None
         
-        # Download status polling timer
         self.download_status_timer = QTimer()
         self.download_status_timer.timeout.connect(self.update_download_status)
-        self.download_status_timer.start(1000)  # Poll every 1 second
+        self.download_status_timer.start(1000)
         
-        # OPTIMIZATION v2: Enable optimized systems (set to True to activate)
-        # TO ENABLE OPTIMIZATIONS: Call self.enable_optimized_systems() after initialization
-        # This activates: Adaptive polling, Enhanced thread pools, Non-blocking processing,
-        # Optimized bulk downloads, Thread-safe queue management, Robust state management
-        self._use_optimized_systems = False  # Set to True to enable all optimizations
+        self._use_optimized_systems = False
         
-        # OPTIMIZATION: Adaptive polling configuration (v2)
         self._polling_intervals = {
-            'active': 1500,      # 1.5s when downloads are active (reduced from 1s)
-            'idle': 3000,        # 3s when no active downloads
-            'bulk_pause': 5000   # 5s during bulk operations
+            'active': 1500,
+            'idle': 3000,
+            'bulk_pause': 5000
         }
         self._current_polling_mode = 'active'
         self._bulk_operation_active = False
         self._last_active_count = 0
         
-        # Periodic cleanup tracker for completed downloads
-        self.downloads_to_cleanup = set()  # Track downloads found last tick for bulk cleanup
-        self.individual_downloads_to_cleanup = []  # Track downloads needing individual removal
+        self.downloads_to_cleanup = set()
+        self.individual_downloads_to_cleanup = []
         
-        # Connect clear completed signal for thread-safe communication
         self.clear_completed_finished.connect(self._handle_clear_completion)
         
-        # Connect API cleanup signal for thread-safe communication
         self.api_cleanup_finished.connect(self._handle_api_cleanup_completion)
         
         self.setup_ui()
-    
+
+
+
     def setup_ui(self):
         self.setStyleSheet("""
             DownloadsPage {
@@ -7438,9 +7434,13 @@ class DownloadsPage(QWidget):
             artist = download_item.matched_artist
             print(f"🎯 Organizing download for artist: {artist.name}")
             
-            # Create Transfer directory
-            project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))  # Go up from ui/pages/
-            transfer_dir = os.path.join(project_root, 'Transfer')
+            # --- FIX: Get transfer directory from config instead of hardcoding ---
+            # OLD CODE:
+            # project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+            # transfer_dir = os.path.join(project_root, 'Transfer')
+            
+            # NEW CODE:
+            transfer_dir = config_manager.get('soulseek.transfer_path', './Transfer')
             os.makedirs(transfer_dir, exist_ok=True)
             
             # Create artist directory
@@ -7547,6 +7547,9 @@ class DownloadsPage(QWidget):
             print(f"❌ Error organizing matched download: {e}")
             return None
     
+
+
+
     def _sanitize_filename(self, filename: str) -> str:
         """Sanitize filename for file system compatibility"""
         import re
