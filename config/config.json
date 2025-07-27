@@ -21,8 +21,6 @@
     "level": "DEBUG"
   },
   "settings": {
-    "audio_quality": "flac",
-    "download_timeout": 300,
-    "max_concurrent_downloads": 5
+    "audio_quality": "flac"
   }
 }
