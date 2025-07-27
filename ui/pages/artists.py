@@ -2410,23 +2410,27 @@ class ArtistsPage(QWidget):
         # Scrollable artist results
         self.artist_scroll = QScrollArea()
         self.artist_scroll.setWidgetResizable(True)
-        self.artist_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.artist_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.artist_scroll.setMaximumHeight(400)
+        self.artist_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.artist_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.artist_scroll.setFixedHeight(320)  # Fixed height to accommodate artist cards
         self.artist_scroll.setStyleSheet("""
             QScrollArea {
                 border: none;
                 background: transparent;
             }
-            QScrollBar:vertical {
+            QScrollBar:horizontal {
                 background: rgba(80, 80, 80, 0.3);
-                width: 8px;
+                height: 8px;
                 border-radius: 4px;
             }
-            QScrollBar::handle:vertical {
+            QScrollBar::handle:horizontal {
                 background: rgba(29, 185, 84, 0.8);
                 border-radius: 4px;
-                min-height: 20px;
+                min-width: 20px;
+            }
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+                border: none;
+                background: none;
             }
         """)
         
