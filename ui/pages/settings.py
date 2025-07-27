@@ -595,34 +595,6 @@ class SettingsPage(QWidget):
         quality_layout.addWidget(quality_label)
         quality_layout.addWidget(quality_combo)
         
-        # Max concurrent downloads
-        concurrent_layout = QHBoxLayout()
-        concurrent_label = QLabel("Max Concurrent Downloads:")
-        concurrent_label.setStyleSheet("color: #ffffff; font-size: 12px;")
-        
-        concurrent_spin = QSpinBox()
-        concurrent_spin.setRange(1, 10)
-        concurrent_spin.setValue(5)
-        concurrent_spin.setStyleSheet(self.get_spin_style())
-        concurrent_spin.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        
-        concurrent_layout.addWidget(concurrent_label)
-        concurrent_layout.addWidget(concurrent_spin)
-        
-        # Download timeout
-        timeout_layout = QHBoxLayout()
-        timeout_label = QLabel("Download Timeout (seconds):")
-        timeout_label.setStyleSheet("color: #ffffff; font-size: 12px;")
-        
-        timeout_spin = QSpinBox()
-        timeout_spin.setRange(30, 600)
-        timeout_spin.setValue(300)
-        timeout_spin.setStyleSheet(self.get_spin_style())
-        timeout_spin.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        
-        timeout_layout.addWidget(timeout_label)
-        timeout_layout.addWidget(timeout_spin)
-        
         # Download path
         path_container = QVBoxLayout()
         path_label = QLabel("Slskd Download Dir:")
@@ -664,8 +636,6 @@ class SettingsPage(QWidget):
         transfer_path_container.addLayout(transfer_input_layout)
         
         download_layout.addLayout(quality_layout)
-        download_layout.addLayout(concurrent_layout)
-        download_layout.addLayout(timeout_layout)
         download_layout.addLayout(path_container)
         download_layout.addLayout(transfer_path_container)
         
