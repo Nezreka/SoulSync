@@ -1217,16 +1217,24 @@ class AlbumCard(QFrame):
     
     def set_download_completed(self):
         """Set album card to download completed state"""
-        # Hide progress overlay
-        self.progress_overlay.hide()
-        
-        # Update to owned state
-        self.update_ownership(True)
-        
-        # Show completion message briefly
-        self.progress_overlay.setText("✅\nCompleted!")
-        self.progress_overlay.setStyleSheet("""
-            QLabel {
+        try:
+            # Hide progress overlay if it still exists
+            if hasattr(self, 'progress_overlay') and self.progress_overlay is not None:
+                try:
+                    self.progress_overlay.hide()
+                except RuntimeError:
+                    # Widget has been deleted, ignore
+                    pass
+            
+            # Update to owned state
+            self.update_ownership(True)
+            
+            # Show completion message briefly if overlay still exists
+            if hasattr(self, 'progress_overlay') and self.progress_overlay is not None:
+                try:
+                    self.progress_overlay.setText("✅\nCompleted!")
+                    self.progress_overlay.setStyleSheet("""
+                        QLabel {
                 background: rgba(29, 185, 84, 0.9);
                 border-radius: 6px;
                 color: white;
@@ -1235,10 +1243,30 @@ class AlbumCard(QFrame):
                 padding: 8px;
             }
         """)
-        self.progress_overlay.show()
-        
-        # Hide completion message after 3 seconds
-        QTimer.singleShot(3000, self.progress_overlay.hide)
+                    self.progress_overlay.show()
+                    
+                    # Hide completion message after 3 seconds
+                    QTimer.singleShot(3000, lambda: self.safe_hide_overlay())
+                except RuntimeError:
+                    # Widget has been deleted, ignore
+                    pass
+                    
+        except Exception as e:
+            print(f"⚠️ Error in set_download_completed: {e}")
+            # Still try to update ownership even if overlay fails
+            try:
+                self.update_ownership(True)
+            except:
+                pass
+    
+    def safe_hide_overlay(self):
+        """Safely hide the progress overlay with error checking"""
+        try:
+            if hasattr(self, 'progress_overlay') and self.progress_overlay is not None:
+                self.progress_overlay.hide()
+        except RuntimeError:
+            # Widget has been deleted, ignore
+            pass
     
     def mousePressEvent(self, event):
         """Handle click for download"""
@@ -1699,6 +1727,8 @@ class DownloadMissingAlbumTracksModal(QDialog):
             self.cancel_btn.hide()
             self.process_finished.emit() 
             QMessageBox.information(self, "Analysis Complete", "All album tracks already exist in Plex! No downloads needed.")
+            # Close with accept since all tracks are already available (success case)
+            self.accept()
             
     def on_analysis_failed(self, error_message):
         print(f"❌ Album analysis failed: {error_message}")
@@ -2038,6 +2068,9 @@ class DownloadMissingAlbumTracksModal(QDialog):
             final_message = f"Completed downloading {self.successful_downloads}/{len(self.missing_tracks)} missing album tracks!\n\nAll tracks were downloaded successfully!"
 
         QMessageBox.information(self, "Downloads Complete", final_message)
+        
+        # Close the modal with accept() to indicate successful completion
+        self.accept()
 
     def get_valid_candidates(self, results, spotify_track, query):
         """Score and filter search results, then perform strict artist verification"""
@@ -2198,6 +2231,9 @@ class ArtistsPage(QWidget):
         self.download_status_pool = QThreadPool()
         self.download_status_pool.setMaxThreadCount(1)  # One worker at a time to avoid conflicts
         self._is_status_update_running = False
+        
+        # Album download session management
+        self.active_album_sessions = {}  # {album_id: {'modal': modal_ref, 'album_with_tracks': album_obj}}
         
         # UI setup
         self.setup_ui()
@@ -2778,6 +2814,30 @@ class ArtistsPage(QWidget):
             QMessageBox.critical(self, "Error", "Plex client is not available. Cannot verify existing tracks.")
             return
         
+        # Check if there's already an active session for this album
+        if album.id in self.active_album_sessions:
+            print(f"🔄 Resuming existing download session for album: {album.name}")
+            existing_session = self.active_album_sessions[album.id]
+            existing_modal = existing_session.get('modal')
+            
+            # Check if the modal still exists and is valid
+            if existing_modal and not existing_modal.isVisible():
+                try:
+                    # Show the existing modal
+                    existing_modal.show()
+                    existing_modal.activateWindow()
+                    existing_modal.raise_()
+                    return
+                except RuntimeError:
+                    # Modal was deleted, remove from sessions
+                    print("⚠️ Existing modal was deleted, creating new session")
+                    del self.active_album_sessions[album.id]
+            elif existing_modal and existing_modal.isVisible():
+                # Modal is already visible, just bring it to front
+                existing_modal.activateWindow()
+                existing_modal.raise_()
+                return
+        
         print("🚀 Fetching album tracks and creating DownloadMissingAlbumTracksModal...")
         
         # First, we need to fetch the tracks for this album
@@ -2823,8 +2883,15 @@ class ArtistsPage(QWidget):
                 plex_client=self.plex_client
             )
             
-            # Connect the process finished signal to handle cleanup
-            modal.process_finished.connect(lambda: self.on_album_download_process_finished(album.id, album_card))
+            # Store the session for resumption
+            self.active_album_sessions[album.id] = {
+                'modal': modal,
+                'album_with_tracks': album_with_tracks,
+                'album_card': album_card
+            }
+            
+            # Connect signals to handle cleanup - only use modal.finished to avoid double handling
+            modal.finished.connect(lambda result: self.on_album_modal_closed(album.id, album_card, result))
             
             # Show the modal
             modal.exec()
@@ -2834,14 +2901,61 @@ class ArtistsPage(QWidget):
             QMessageBox.critical(self, "Error", f"Failed to fetch album tracks: {str(e)}\n\nPlease check your Spotify connection and try again.")
     
     def on_album_download_process_finished(self, album_id: str, album_card):
-        """Handle cleanup when album download process is finished"""
+        """Handle cleanup when album download process is actually finished (downloads completed)"""
         print(f"🏁 Album download process finished for album: {album_id}")
         
-        # Reset the album card state if needed
+        # Only mark as completed if downloads actually finished successfully
         if album_card and hasattr(album_card, 'set_download_completed'):
             album_card.set_download_completed()
+            print(f"✅ Marked album {album_id} as download completed")
         
         print("✅ Album download process cleanup completed")
+    
+    def on_album_modal_closed(self, album_id: str, album_card, result):
+        """Handle cleanup when album modal is closed (regardless of reason)"""
+        print(f"📋 Album modal closed for album: {album_id}, result: {'Accepted' if result == 1 else 'Rejected/Cancelled'}")
+        
+        # Clean up the session when modal is definitely closing
+        if album_id in self.active_album_sessions:
+            if result == 1:  # QDialog.Accepted = 1 (downloads completed or all tracks exist)
+                # Remove session since downloads are complete
+                del self.active_album_sessions[album_id]
+                print(f"🗑️ Removed completed session for album {album_id}")
+            else:
+                # Keep session for resumption, but hide the modal for now
+                print(f"💾 Keeping session for album {album_id} for potential resumption")
+        
+        if album_card:
+            try:
+                if result == 1:  # QDialog.Accepted = 1 (downloads actually completed)
+                    # Only mark as completed if downloads were actually successful
+                    if hasattr(album_card, 'set_download_completed'):
+                        album_card.set_download_completed()
+                        print(f"✅ Marked album {album_id} as download completed")
+                else:
+                    # Modal was cancelled/closed - reset the card to allow reopening (but keep session)
+                    # Reset any download-in-progress indicators
+                    if hasattr(album_card, 'progress_overlay') and album_card.progress_overlay:
+                        try:
+                            album_card.progress_overlay.hide()
+                        except RuntimeError:
+                            pass
+                    
+                    # Reset the card to allow clicking again (if not already owned)
+                    if not album_card.is_owned:
+                        # Show a visual indicator that this album has an active session
+                        if hasattr(album_card, 'status_indicator'):
+                            try:
+                                album_card.status_indicator.setText("▶️")
+                                album_card.status_indicator.setToolTip("Click to resume download session")
+                            except RuntimeError:
+                                pass
+                        print(f"🔄 Reset album card for {album_id} to allow resumption")
+                
+            except Exception as e:
+                print(f"⚠️ Error handling album card state: {e}")
+        
+        print("✅ Album modal cleanup completed")
     
     # === LEGACY METHODS - NO LONGER USED WITH NEW MODAL SYSTEM ===
     # These methods were part of the old manual album download flow
@@ -3583,6 +3697,26 @@ class ArtistsPage(QWidget):
         
         print("🧹 Album download tracking cleanup completed")
     
+    def cleanup_album_sessions(self):
+        """Clean up active album download sessions"""
+        if not self.active_album_sessions:
+            return
+            
+        session_count = len(self.active_album_sessions)
+        print(f"🧹 Cleaning up {session_count} active album sessions...")
+        
+        for album_id, session in list(self.active_album_sessions.items()):
+            try:
+                modal = session.get('modal')
+                if modal:
+                    modal.cancel_operations()
+                    modal.close()
+            except Exception as e:
+                print(f"   ⚠️ Error cleaning up session for album {album_id}: {e}")
+        
+        self.active_album_sessions.clear()
+        print(f"🧹 Cleaned up {session_count} album sessions")
+    
     def restart_download_tracking(self):
         """Restart download tracking timer if stopped"""
         if hasattr(self, 'download_status_timer') and not self.download_status_timer.isActive():
@@ -3631,6 +3765,9 @@ class ArtistsPage(QWidget):
         
         # Stop download tracking (this includes its own worker cleanup)
         self.cleanup_download_tracking()
+        
+        # Clean up active album sessions
+        self.cleanup_album_sessions()
         
         print("🛑 All workers stopped")
     
