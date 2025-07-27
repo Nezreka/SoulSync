@@ -9807,6 +9807,12 @@ class DownloadsPage(QWidget):
         except:
             pass  # Ignore errors during destruction
     
+    def on_paths_updated(self, key: str, value: str):
+        """Handle settings path updates for immediate effect"""
+        # No action needed - paths are fetched dynamically via config_manager.get()
+        # This method exists for future extensibility if caching is added later
+        pass
+    
     def create_controls_section(self):
         section = QWidget()
         layout = QVBoxLayout(section)

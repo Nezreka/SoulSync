@@ -3799,6 +3799,12 @@ class ArtistsPage(QWidget):
                 item.widget().deleteLater()
         # Don't clear self.current_albums here - it's needed for Plex updates
     
+    def on_paths_updated(self, key: str, value: str):
+        """Handle settings path updates for immediate effect"""
+        # No action needed - paths are fetched dynamically via config_manager.get()
+        # This method exists for future extensibility if caching is added later
+        pass
+    
     def closeEvent(self, event):
         """Handle page close/cleanup"""
         self.stop_all_workers()
