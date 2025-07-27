@@ -1285,7 +1285,7 @@ class AlbumCard(QFrame):
 class DownloadMissingAlbumTracksModal(QDialog):
     """Enhanced modal for downloading missing album tracks with live progress tracking"""
     process_finished = pyqtSignal()
-    
+    track_status_updated = pyqtSignal(int, str, object) # table_index, status_text, extra_data (e.g., progress)
     def __init__(self, album, album_card, parent_page, downloads_page, plex_client):
         super().__init__(parent_page)
         self.album = album
@@ -1295,6 +1295,11 @@ class DownloadMissingAlbumTracksModal(QDialog):
         self.plex_client = plex_client
         self.matching_engine = MusicMatchingEngine()
         
+        # --- NEW: Centralized State Management ---
+        self.status_lock = threading.Lock()
+        self.track_statuses = {}  # {download_index: str_status}
+        # --- END NEW ---
+
         # State tracking
         self.total_tracks = len(album.tracks)
         self.matched_tracks_count = 0
@@ -1331,6 +1336,51 @@ class DownloadMissingAlbumTracksModal(QDialog):
         print("🎨 Setting up album modal UI...")
         self.setup_ui()
         print("✅ Album modal initialization complete")
+
+    def _set_track_status(self, download_index, new_status, extra_data=None):
+        """
+        Thread-safe method to update a track's status and emit a signal for UI updates.
+        This is the single source of truth for all status changes.
+        """
+        with self.status_lock:
+            # Prevent regressing to an earlier state, but allow retries
+            current_status = self.track_statuses.get(download_index, '')
+            if current_status in ['completed', 'failed'] and new_status not in ['retrying', 'searching']:
+                return # Don't overwrite a final state unless it's a retry
+
+            self.track_statuses[download_index] = new_status
+            
+            # Find the corresponding table row index to send to the UI thread
+            track_info = self.parallel_search_tracking.get(download_index)
+            if track_info:
+                table_index = track_info['table_index']
+                self.track_status_updated.emit(table_index, new_status, extra_data)
+
+    def _update_ui_on_status_change(self, table_index, status, extra_data):
+        """
+        SLOT: Receives the status update signal and safely updates the QTableWidget on the main GUI thread.
+        """
+        status_text = "—"
+        if status == 'searching':
+            status_text = "🔍 Searching..."
+        elif status == 'queued':
+            status_text = "⌛ Queued"
+        elif status == 'downloading':
+            progress = extra_data if extra_data is not None else 0
+            status_text = f"⏬ Downloading ({progress}%)"
+        elif status == 'retrying':
+            retry_count = extra_data if extra_data is not None else 1
+            status_text = f"🔄 Retrying ({retry_count})..."
+        elif status == 'failed':
+            status_text = "❌ Failed"
+        elif status == 'completed':
+            status_text = "✅ Downloaded"
+
+        # Ensure the item exists before trying to set text
+        if self.track_table.item(table_index, 4) is None:
+            self.track_table.setItem(table_index, 4, QTableWidgetItem(status_text))
+        else:
+            self.track_table.item(table_index, 4).setText(status_text)
 
     def generate_smart_search_queries(self, artist_name, track_name):
         """Generate multiple search query variations for better matching"""
@@ -1404,6 +1454,7 @@ class DownloadMissingAlbumTracksModal(QDialog):
         
         button_section = self.create_buttons()
         main_layout.addWidget(button_section)
+        self.track_status_updated.connect(self._update_ui_on_status_change)
         
     def create_compact_top_section(self):
         """Create compact top section with header and dashboard combined"""
