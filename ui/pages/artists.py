@@ -240,6 +240,183 @@ class AlbumSearchWorker(QThread):
                 except Exception as e:
                     print(f"Error closing event loop in AlbumSearchWorker: {e}")
 
+class AlbumStatusProcessingWorkerSignals(QObject):
+    """Signals for the AlbumStatusProcessingWorker"""
+    completed = pyqtSignal(list)  # List of status update results
+    error = pyqtSignal(str)       # Error message
+
+class AlbumStatusProcessingWorker(QRunnable):
+    """
+    Background worker for processing album download status updates.
+    Based on the working pattern from downloads.py and sync.py.
+    """
+    
+    def __init__(self, soulseek_client, download_items_data):
+        super().__init__()
+        self.signals = AlbumStatusProcessingWorkerSignals()
+        self.soulseek_client = soulseek_client
+        self.download_items_data = download_items_data
+    
+    def run(self):
+        """Process status updates for album downloads in background thread"""
+        try:
+            import asyncio
+            import os
+            
+            # Create new event loop for this thread
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            try:
+                # Get all current transfers from slskd API
+                transfers_data = loop.run_until_complete(
+                    self.soulseek_client._make_request('GET', 'transfers/downloads')
+                )
+                
+                if not transfers_data:
+                    self.signals.completed.emit([])
+                    return
+                
+                # Parse transfers into flat list and create lookup dictionary
+                all_transfers = []
+                transfers_by_id = {}
+                
+                for user_data in transfers_data:
+                    username = user_data.get('username', '')
+                    
+                    # Handle files directly under user object (newer API format)
+                    if 'files' in user_data and isinstance(user_data['files'], list):
+                        for file_data in user_data['files']:
+                            file_data['username'] = username
+                            all_transfers.append(file_data)
+                            if 'id' in file_data:
+                                transfers_by_id[file_data['id']] = file_data
+                    
+                    # Handle files nested in directories (older API format)
+                    if 'directories' in user_data and isinstance(user_data['directories'], list):
+                        for directory in user_data['directories']:
+                            if 'files' in directory and isinstance(directory['files'], list):
+                                for file_data in directory['files']:
+                                    file_data['username'] = username
+                                    all_transfers.append(file_data)
+                                    if 'id' in file_data:
+                                        transfers_by_id[file_data['id']] = file_data
+                
+                print(f"🔍 Album status worker found {len(all_transfers)} total transfers")
+                
+                # Process each download item
+                results = []
+                used_transfer_ids = set()  # Prevent duplicate matching
+                
+                for item_data in self.download_items_data:
+                    download_id = item_data.get('download_id')
+                    file_path = item_data.get('file_path', '')
+                    widget_id = item_data.get('widget_id')
+                    
+                    print(f"🔍 Processing album download: ID={download_id}, file={os.path.basename(file_path)}")
+                    
+                    matching_transfer = None
+                    
+                    # Primary matching: by download ID
+                    if download_id and download_id in transfers_by_id and download_id not in used_transfer_ids:
+                        matching_transfer = transfers_by_id[download_id]
+                        used_transfer_ids.add(download_id)
+                        print(f"   ✅ ID match found for {download_id}")
+                    
+                    # Fallback matching: by filename
+                    elif file_path:
+                        expected_basename = os.path.basename(file_path).lower()
+                        for transfer in all_transfers:
+                            transfer_id = transfer.get('id')
+                            if transfer_id in used_transfer_ids:
+                                continue
+                                
+                            transfer_filename = transfer.get('filename', '')
+                            transfer_basename = os.path.basename(transfer_filename).lower()
+                            
+                            if transfer_basename == expected_basename:
+                                matching_transfer = transfer
+                                used_transfer_ids.add(transfer_id)
+                                print(f"   🎯 Filename match: {expected_basename}")
+                                # Update download_id if it was missing
+                                if not download_id:
+                                    download_id = transfer_id
+                                break
+                    
+                    # Determine status and create result
+                    if matching_transfer:
+                        state = matching_transfer.get('state', '').strip()
+                        progress = 0.0
+                        
+                        # Map slskd states to our status system
+                        if 'Cancelled' in state or 'Canceled' in state:
+                            new_status = 'cancelled'
+                        elif 'Failed' in state or 'Errored' in state:
+                            new_status = 'failed'
+                        elif 'Completed' in state or 'Succeeded' in state:
+                            new_status = 'completed'
+                            progress = 100.0
+                        elif 'InProgress' in state:
+                            new_status = 'downloading'
+                            # Extract progress from state or progress field
+                            if 'progress' in matching_transfer:
+                                progress = float(matching_transfer.get('progress', 0.0))
+                            else:
+                                # Try to extract from state string
+                                import re
+                                progress_match = re.search(r'(\d+(?:\.\d+)?)%', state)
+                                if progress_match:
+                                    progress = float(progress_match.group(1))
+                        else:
+                            new_status = 'queued'
+                        
+                        result = {
+                            'widget_id': widget_id,
+                            'download_id': download_id,
+                            'status': new_status,
+                            'progress': progress,
+                            'state': state,
+                            'filename': matching_transfer.get('filename', ''),
+                            'size': matching_transfer.get('size', 0),
+                            'transferred': matching_transfer.get('bytesTransferred', 0),
+                            'speed': matching_transfer.get('averageSpeed', 0)
+                        }
+                        
+                        print(f"   📊 Status: {new_status} ({progress:.1f}%)")
+                    else:
+                        # Download not found in API - increment missing count
+                        api_missing_count = item_data.get('api_missing_count', 0) + 1
+                        
+                        if api_missing_count >= 3:
+                            # Grace period exceeded - mark as failed
+                            new_status = 'failed'
+                            print(f"   ❌ Download missing from API (failed after 3 checks)")
+                        else:
+                            # Still in grace period
+                            new_status = 'missing'
+                            print(f"   ⚠️ Download missing from API (attempt {api_missing_count}/3)")
+                        
+                        result = {
+                            'widget_id': widget_id,
+                            'download_id': download_id,
+                            'status': new_status,
+                            'api_missing_count': api_missing_count,
+                            'progress': 0.0
+                        }
+                    
+                    results.append(result)
+                
+                print(f"🎯 Album status worker completed: {len(results)} results")
+                self.signals.completed.emit(results)
+                
+            finally:
+                loop.close()
+                
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self.signals.error.emit(f"Album status processing failed: {str(e)}")
+
 
 
 class PlexLibraryWorker(QThread):
@@ -1091,11 +1268,12 @@ class ArtistsPage(QWidget):
         
         # Album download tracking
         self.album_downloads = {}  # {album_id: {total_tracks: X, completed_tracks: Y, active_downloads: [download_ids], album_card: card_ref}}
+        self.completed_downloads = set()  # Track downloads that have been completed (to handle cleanup)
         self.download_status_timer = QTimer(self)
         self.download_status_timer.timeout.connect(self.poll_album_download_statuses)
-        self.download_status_timer.start(500)  # Poll every .5 seconds
+        self.download_status_timer.start(2000)  # Poll every 2 seconds (consistent with sync.py)
         self.download_status_pool = QThreadPool()
-        self.download_status_pool.setMaxThreadCount(1)
+        self.download_status_pool.setMaxThreadCount(1)  # One worker at a time to avoid conflicts
         self._is_status_update_running = False
         
         # UI setup
@@ -1726,31 +1904,88 @@ class ArtistsPage(QWidget):
         
         self._is_status_update_running = True
         
-        # Create items to check (similar to sync.py format)
+        # Create items to check with enhanced data structure for album tracking
         items_to_check = []
-        for download_id in all_download_ids:
-            items_to_check.append({
-                'widget_id': download_id,
-                'download_id': download_id,
-                'file_path': '',  # Not needed for status checking
-                'api_missing_count': 0
-            })
+        
+        # Build comprehensive data for each tracked download
+        for album_id, album_info in self.album_downloads.items():
+            active_downloads = album_info.get('active_downloads', [])
+            
+            for download_id in active_downloads:
+                # Try to get filename from downloads page if possible
+                file_path = self._get_download_filename(download_id)
+                
+                item_data = {
+                    'widget_id': download_id,  # Use download_id as widget_id for tracking
+                    'download_id': download_id,
+                    'file_path': file_path,
+                    'api_missing_count': 0,  # Track for grace period logic
+                    'album_id': album_id  # Link back to album for easier processing
+                }
+                items_to_check.append(item_data)
         
         if not items_to_check:
             self._is_status_update_running = False
             return
         
-        # Import the worker class from sync.py
-        from ui.pages.sync import SyncStatusProcessingWorker
+        print(f"🔍 Starting album status check for {len(items_to_check)} downloads across {len(self.album_downloads)} albums")
         
-        # Create and start worker
-        worker = SyncStatusProcessingWorker(
+        # Create and start our dedicated album worker
+        worker = AlbumStatusProcessingWorker(
             self.soulseek_client,
             items_to_check
         )
         worker.signals.completed.connect(self._handle_album_status_updates)
-        worker.signals.error.connect(lambda e: print(f"Album Status Worker Error: {e}"))
+        worker.signals.error.connect(lambda e: self._on_album_status_error(e))
         self.download_status_pool.start(worker)
+    
+    def _get_download_filename(self, download_id):
+        """Try to get filename for a download ID from the downloads page"""
+        if not self.downloads_page or not hasattr(self.downloads_page, 'download_queue'):
+            return ''
+        
+        # Check active queue first
+        if hasattr(self.downloads_page.download_queue, 'active_queue'):
+            for item in self.downloads_page.download_queue.active_queue.download_items:
+                # Check for exact ID match first
+                if hasattr(item, 'download_id') and item.download_id == download_id:
+                    if hasattr(item, 'filename'):
+                        return item.filename
+                    elif hasattr(item, 'title'):
+                        return f"{item.title}.mp3"  # Fallback with extension
+                
+                # Also check if the real ID of this item matches
+                real_id = self._get_real_download_id(item)
+                if real_id and real_id == download_id:
+                    if hasattr(item, 'filename'):
+                        return item.filename
+                    elif hasattr(item, 'title'):
+                        return f"{item.title}.mp3"  # Fallback with extension
+        
+        # Check finished queue
+        if hasattr(self.downloads_page.download_queue, 'finished_queue'):
+            for item in self.downloads_page.download_queue.finished_queue.download_items:
+                # Check for exact ID match first
+                if hasattr(item, 'download_id') and item.download_id == download_id:
+                    if hasattr(item, 'filename'):
+                        return item.filename
+                    elif hasattr(item, 'title'):
+                        return f"{item.title}.mp3"  # Fallback with extension
+                
+                # Also check if the real ID of this item matches
+                real_id = self._get_real_download_id(item)
+                if real_id and real_id == download_id:
+                    if hasattr(item, 'filename'):
+                        return item.filename
+                    elif hasattr(item, 'title'):
+                        return f"{item.title}.mp3"  # Fallback with extension
+        
+        return ''
+    
+    def _on_album_status_error(self, error_msg):
+        """Handle errors from album status worker"""
+        print(f"❌ Album status worker error: {error_msg}")
+        self._is_status_update_running = False
     
     def update_active_downloads_from_queue(self):
         """Update active downloads list by checking the downloads page queue"""
@@ -1787,57 +2022,199 @@ class ArtistsPage(QWidget):
             all_items = active_items + finished_items
             
             for download_item in all_items:
-                # More flexible matching - check multiple criteria
-                artist_match = False
-                album_match = False
+                # Enhanced matching logic for better album detection
+                is_match = self._is_download_from_album(download_item, album_result, spotify_album)
                 
-                if hasattr(download_item, 'artist') and download_item.artist:
-                    # Check if artists match (case insensitive, partial match)
-                    download_artist = download_item.artist.lower()
-                    album_artist = album_result.artist.lower()
-                    spotify_artist = spotify_album.artists[0].lower() if spotify_album.artists else ""
+                if is_match:
+                    # Debug: show what download ID we're working with
+                    current_id = getattr(download_item, 'download_id', 'NO_ID')
+                    title = getattr(download_item, 'title', 'Unknown')
+                    print(f"   🔍 Found matching item: '{title}' with download_id: {current_id}")
                     
-                    artist_match = (album_artist in download_artist or 
-                                  download_artist in album_artist or
-                                  spotify_artist in download_artist or
-                                  download_artist in spotify_artist)
-                
-                # Check if download might be from the same album
-                if hasattr(download_item, 'title') and download_item.title:
-                    # If the download has matched metadata, it's likely from our album
-                    if hasattr(download_item, 'matched_download') and download_item.matched_download:
-                        album_match = True
-                        print(f"   🎯 Found matched download: {download_item.title}")
-                
-                # If we find a match, handle differently for active vs finished
-                if artist_match or album_match:
-                    if hasattr(download_item, 'download_id') and download_item.download_id:
+                    # Use the download ID directly from the item (should be the real one)
+                    if current_id and current_id != 'NO_ID':
                         # Check if this item is in finished items (completed)
                         if download_item in finished_items:
                             completed_count += 1
-                            print(f"   ✅ Found completed track: '{download_item.title}'")
+                            print(f"   ✅ Found completed track: '{title}' (ID: {current_id})")
                         else:
-                            # It's an active download
-                            matching_downloads.append(download_item.download_id)
-                            print(f"   🔄 Added active download ID: {download_item.download_id} for '{download_item.title}'")
+                            # It's an active download - use the current ID
+                            matching_downloads.append(current_id)
+                            print(f"   🔄 Added active download ID: {current_id} for '{title}'")
+                    else:
+                        print(f"   ⚠️ No download ID found for: '{title}'")
             
             # Update the active downloads and completed count for this album
+            old_active = album_info.get('active_downloads', [])
+            old_completed = album_info.get('completed_tracks', 0)
+            
             album_info['active_downloads'] = matching_downloads
             
             # Update completed tracks count if we found more completed items
-            if completed_count > album_info.get('completed_tracks', 0):
-                print(f"📈 Updating completed tracks: {album_info.get('completed_tracks', 0)} -> {completed_count}")
+            if completed_count > old_completed:
+                print(f"📈 Updating completed tracks: {old_completed} -> {completed_count}")
                 album_info['completed_tracks'] = completed_count
                 # Trigger UI update
                 self.update_album_card_progress(album_id)
             
-            if matching_downloads or completed_count > 0:
-                print(f"📊 Album '{album_name}': {len(matching_downloads)} active, {completed_count} completed")
-            else:
-                print(f"❌ No matching downloads found for album: {album_name}")
-                # Try to get a count of how many tracks should be downloading
+            # Log changes
+            if len(matching_downloads) != len(old_active) or completed_count != old_completed:
+                print(f"📊 Album '{album_name}': {len(old_active)} -> {len(matching_downloads)} active, {old_completed} -> {completed_count} completed")
+            
+            if not matching_downloads and completed_count == 0:
                 total_tracks = album_info.get('total_tracks', 0)
-                print(f"   Expected {total_tracks} tracks for this album")
+                print(f"❌ No matching downloads found for album: {album_name} (expected {total_tracks} tracks)")
+    
+    def _get_real_download_id(self, download_item):
+        """Extract the real slskd download ID from a download item"""
+        if not hasattr(download_item, 'download_id'):
+            return None
+            
+        download_id = download_item.download_id
+        
+        # Check if it's already a UUID (real ID from slskd)
+        import re
+        uuid_pattern = r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+        
+        if re.match(uuid_pattern, download_id, re.IGNORECASE):
+            # It's already a real UUID
+            return download_id
+        
+        # Check if it's a simple numeric ID
+        if download_id.isdigit():
+            return download_id
+        
+        # If it's a composite ID like "username_filename_timestamp_suffix", 
+        # we need to look it up in the slskd API by filename
+        if hasattr(download_item, 'filename') and download_item.filename:
+            # Try to find the real ID by querying current downloads by filename
+            real_id = self._lookup_download_id_by_filename(download_item.filename)
+            if real_id:
+                print(f"🔍 Found real ID {real_id} for composite ID {download_id}")
+                return real_id
+        
+        # If we can't determine the real ID, return the composite one
+        # The worker will try filename matching as fallback
+        return download_id
+    
+    def _lookup_download_id_by_filename(self, filename):
+        """Look up the real download ID by filename from slskd API"""
+        if not self.soulseek_client:
+            return None
+            
+        try:
+            import asyncio
+            import os
+            
+            # Create a temporary event loop to make the API call
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            try:
+                transfers_data = loop.run_until_complete(
+                    self.soulseek_client._make_request('GET', 'transfers/downloads')
+                )
+                
+                if not transfers_data:
+                    return None
+                
+                expected_basename = os.path.basename(filename).lower()
+                
+                # Search through all transfers for matching filename
+                for user_data in transfers_data:
+                    # Check files directly under user object
+                    if 'files' in user_data and isinstance(user_data['files'], list):
+                        for file_data in user_data['files']:
+                            api_filename = file_data.get('filename', '')
+                            api_basename = os.path.basename(api_filename).lower()
+                            if api_basename == expected_basename:
+                                return file_data.get('id')
+                    
+                    # Check files in directories
+                    if 'directories' in user_data and isinstance(user_data['directories'], list):
+                        for directory in user_data['directories']:
+                            if 'files' in directory and isinstance(directory['files'], list):
+                                for file_data in directory['files']:
+                                    api_filename = file_data.get('filename', '')
+                                    api_basename = os.path.basename(api_filename).lower()
+                                    if api_basename == expected_basename:
+                                        return file_data.get('id')
+                
+            finally:
+                loop.close()
+                
+        except Exception as e:
+            print(f"❌ Error looking up download ID for {filename}: {e}")
+            
+        return None
+    
+    def _is_download_from_album(self, download_item, album_result, spotify_album):
+        """Enhanced matching logic to determine if a download belongs to the tracked album"""
+        # Check for explicit album match flag (from Spotify matching modal)
+        if hasattr(download_item, 'matched_download') and download_item.matched_download:
+            print(f"   🎯 Found explicitly matched download: {getattr(download_item, 'title', 'Unknown')}")
+            return True
+        
+        # Check for album metadata match
+        if hasattr(download_item, 'album') and download_item.album and spotify_album:
+            download_album = download_item.album.lower().strip()
+            spotify_album_name = spotify_album.name.lower().strip()
+            
+            # Exact or partial album name match
+            if (download_album == spotify_album_name or 
+                download_album in spotify_album_name or 
+                spotify_album_name in download_album):
+                print(f"   🎵 Album name match: '{download_album}' ~ '{spotify_album_name}'")
+                return True
+        
+        # Check artist matching
+        artist_match = False
+        if hasattr(download_item, 'artist') and download_item.artist:
+            download_artist = download_item.artist.lower().strip()
+            
+            # Check against album result artist
+            if album_result and album_result.artist:
+                album_artist = album_result.artist.lower().strip()
+                if (download_artist == album_artist or 
+                    download_artist in album_artist or 
+                    album_artist in download_artist):
+                    artist_match = True
+            
+            # Check against Spotify album artists
+            if spotify_album and spotify_album.artists:
+                for spotify_artist in spotify_album.artists:
+                    spotify_artist_name = spotify_artist.lower().strip()
+                    if (download_artist == spotify_artist_name or 
+                        download_artist in spotify_artist_name or 
+                        spotify_artist_name in download_artist):
+                        artist_match = True
+                        break
+        
+        # For artist match, also check if it's recent (to avoid false positives from other albums)
+        if artist_match:
+            # Check if download was started recently (within album tracking timeframe)
+            # This helps filter out downloads from other albums by the same artist
+            if hasattr(download_item, 'created_time') or hasattr(download_item, 'start_time'):
+                # Could add timestamp checking here if needed
+                pass
+            print(f"   👤 Artist match found for: {getattr(download_item, 'title', 'Unknown')}")
+            return True
+        
+        # Check filename-based matching as last resort
+        if hasattr(download_item, 'filename') and download_item.filename:
+            filename = download_item.filename.lower()
+            
+            # Check if filename contains album name
+            if spotify_album and spotify_album.name.lower() in filename:
+                print(f"   📂 Filename contains album name: {download_item.filename}")
+                return True
+            
+            # Check if filename contains artist name
+            if album_result and album_result.artist and album_result.artist.lower() in filename:
+                print(f"   📂 Filename contains artist name: {download_item.filename}")
+                return True
+        
+        return False
     
     def _handle_album_status_updates(self, results):
         """Handle status updates from the background worker"""
@@ -1845,36 +2222,225 @@ class ArtistsPage(QWidget):
             self._is_status_update_running = False
             return
         
+        print(f"📊 Processing {len(results)} album download status updates")
+        
         albums_to_update = set()
+        albums_completed = set()
         
         for result in results:
-            download_id = result.get('widget_id') or result.get('download_id')
+            download_id = result.get('download_id')
+            widget_id = result.get('widget_id')
             status = result.get('status', '')
+            progress = result.get('progress', 0.0)
+            album_id = result.get('album_id')  # Direct album link from our enhanced data
+            
+            # Handle missing downloads with grace period
+            if status == 'missing':
+                api_missing_count = result.get('api_missing_count', 0)
+                # Check if this download was previously completed but now missing (due to cleanup)
+                if self._was_download_previously_completed(download_id):
+                    print(f"✅ Download {download_id} was previously completed (now cleaned up)")
+                    status = 'completed'  # Treat as completed
+                else:
+                    # Update the missing count in our tracking data for next poll
+                    self._update_missing_count(download_id, api_missing_count)
+                    continue
             
             # Find which album this download belongs to
-            for album_id, album_info in self.album_downloads.items():
-                if download_id in album_info.get('active_downloads', []):
-                    if status == 'completed':
-                        # Track completion
+            target_album_id = album_id  # Use direct link if available
+            if not target_album_id:
+                # Fallback: search through all albums
+                for aid, album_info in self.album_downloads.items():
+                    if download_id in album_info.get('active_downloads', []):
+                        target_album_id = aid
+                        break
+            
+            if not target_album_id or target_album_id not in self.album_downloads:
+                print(f"⚠️ Could not find album for download {download_id}")
+                continue
+            
+            album_info = self.album_downloads[target_album_id]
+            album_name = album_info.get('spotify_album', {}).name if album_info.get('spotify_album') else 'Unknown'
+            
+            print(f"🎵 Album '{album_name}': Download {download_id} status = {status} ({progress:.1f}%)")
+            
+            # Handle status changes
+            if status == 'completed':
+                # Only process if not already handled by notification system
+                if not self._was_download_previously_completed(download_id):
+                    # Mark this download as completed in our tracking
+                    self._mark_download_as_completed(download_id)
+                    
+                    # Only increment if not already counted
+                    if download_id in album_info.get('active_downloads', []):
                         album_info['completed_tracks'] += 1
-                        if download_id in album_info['active_downloads']:
-                            album_info['active_downloads'].remove(download_id)
-                        albums_to_update.add(album_id)
-                        print(f"✅ Album track completed: {album_info['completed_tracks']}/{album_info['total_tracks']}")
-                    
-                    elif status in ['failed', 'cancelled']:
-                        # Remove from active downloads but don't increment completed
-                        if download_id in album_info['active_downloads']:
-                            album_info['active_downloads'].remove(download_id)
-                        albums_to_update.add(album_id)
-                    
-                    break
+                        album_info['active_downloads'].remove(download_id)
+                        albums_to_update.add(target_album_id)
+                        print(f"✅ Album track completed via polling: {album_info['completed_tracks']}/{album_info['total_tracks']}")
+                        
+                        # Check if album is fully completed
+                        if (album_info['completed_tracks'] >= album_info['total_tracks'] and 
+                            not album_info.get('active_downloads')):
+                            albums_completed.add(target_album_id)
+                else:
+                    print(f"✅ Download {download_id} already counted as completed")
+            
+            elif status in ['failed', 'cancelled']:
+                # Remove from active downloads but don't increment completed
+                if download_id in album_info['active_downloads']:
+                    album_info['active_downloads'].remove(download_id)
+                albums_to_update.add(target_album_id)
+                print(f"❌ Album track {status}: {download_id}")
+            
+            elif status in ['downloading', 'queued']:
+                # Update progress for in-progress downloads
+                albums_to_update.add(target_album_id)
+                if progress > 0:
+                    print(f"⏳ Track downloading: {progress:.1f}%")
         
         # Update album cards for albums that had status changes
         for album_id in albums_to_update:
             self.update_album_card_progress(album_id)
         
+        # Handle completed albums
+        for album_id in albums_completed:
+            album_info = self.album_downloads[album_id]
+            album_card = album_info.get('album_card')
+            spotify_album = album_info.get('spotify_album')
+            album_name = spotify_album.name if spotify_album else 'Unknown'
+            
+            if album_card:
+                album_card.set_download_completed()
+            
+            # Remove from tracking
+            del self.album_downloads[album_id]
+            print(f"🎉 Album download completed and removed from tracking: {album_name}")
+        
         self._is_status_update_running = False
+    
+    def _update_missing_count(self, download_id, missing_count):
+        """Update missing count for downloads in grace period"""
+        # Find and update the missing count in our tracked items
+        # This helps maintain grace period logic across polling cycles
+        for album_info in self.album_downloads.values():
+            if download_id in album_info.get('active_downloads', []):
+                # We could store per-download missing counts if needed
+                # For now, if missing count reaches 3, the worker marks it as failed
+                if missing_count >= 3:
+                    # Remove from active downloads as it's considered failed
+                    album_info['active_downloads'] = [
+                        did for did in album_info.get('active_downloads', []) 
+                        if did != download_id
+                    ]
+                    print(f"❌ Removed failed download {download_id} from album tracking")
+                break
+    
+    def _mark_download_as_completed(self, download_id):
+        """Mark a download as completed to handle cleanup detection"""
+        if download_id:
+            self.completed_downloads.add(download_id)
+            print(f"📝 Marked download {download_id} as completed")
+    
+    def _was_download_previously_completed(self, download_id):
+        """Check if a download was previously marked as completed"""
+        return download_id in self.completed_downloads
+    
+    def notify_download_completed(self, download_id, download_item=None):
+        """Called by downloads page when a download completes (before cleanup)"""
+        print(f"🔔 Downloads page notified completion of: {download_id}")
+        if download_item:
+            print(f"   Item: '{getattr(download_item, 'title', 'Unknown')}' by '{getattr(download_item, 'artist', 'Unknown')}'")
+        
+        # Check if already processed to prevent double counting
+        if self._was_download_previously_completed(download_id):
+            print(f"⏭️ Download {download_id} already processed, skipping")
+            return
+        
+        # Mark as completed immediately
+        self._mark_download_as_completed(download_id)
+        
+        # Find which album this belongs to - try multiple approaches
+        target_album_id = None
+        
+        # Approach 1: Direct ID match (might work if IDs were updated)
+        for album_id, album_info in self.album_downloads.items():
+            if download_id in album_info.get('active_downloads', []):
+                target_album_id = album_id
+                print(f"✅ Found album by direct ID match: {album_id}")
+                break
+        
+        # Approach 2: Match by download item attributes if we have the item
+        if not target_album_id and download_item:
+            for album_id, album_info in self.album_downloads.items():
+                album_result = album_info.get('album_result')
+                spotify_album = album_info.get('spotify_album')
+                
+                if self._is_download_from_album(download_item, album_result, spotify_album):
+                    target_album_id = album_id
+                    print(f"✅ Found album by item matching: {album_id}")
+                    break
+        
+        # Approach 3: Remove any composite ID that might match this download
+        if not target_album_id and download_item:
+            item_title = getattr(download_item, 'title', '')
+            for album_id, album_info in self.album_downloads.items():
+                # Look for any active download that might be this track
+                active_downloads = album_info.get('active_downloads', [])
+                for active_id in active_downloads[:]:  # Copy list to avoid modification during iteration
+                    # Check if this composite ID refers to the same track
+                    if item_title and item_title.lower() in active_id.lower():
+                        # Replace the composite ID with the real ID
+                        album_info['active_downloads'].remove(active_id)
+                        album_info['active_downloads'].append(download_id)
+                        target_album_id = album_id
+                        print(f"✅ Found album by title matching and updated ID: {active_id} -> {download_id}")
+                        break
+                
+                if target_album_id:
+                    break
+        
+        if target_album_id:
+            album_info = self.album_downloads[target_album_id]
+            
+            # Remove the download ID from active downloads (might be composite or real)
+            if download_id in album_info['active_downloads']:
+                album_info['active_downloads'].remove(download_id)
+            
+            # Increment completed count
+            album_info['completed_tracks'] += 1
+            
+            # Update UI immediately
+            self.update_album_card_progress(target_album_id)
+            
+            spotify_album = album_info.get('spotify_album')
+            album_name = spotify_album.name if spotify_album else 'Unknown'
+            print(f"✅ Album '{album_name}' track completed via notification: {album_info['completed_tracks']}/{album_info['total_tracks']}")
+            
+            # Check if album is complete
+            if (album_info['completed_tracks'] >= album_info['total_tracks'] and 
+                not album_info.get('active_downloads')):
+                
+                album_card = album_info.get('album_card')
+                if album_card:
+                    album_card.set_download_completed()
+                
+                # Remove from tracking
+                del self.album_downloads[target_album_id]
+                print(f"🎉 Album download completed via notification: {album_name}")
+        else:
+            print(f"⚠️ Could not find album for completed download: {download_id}")
+            if download_item:
+                print(f"   Title: '{getattr(download_item, 'title', 'Unknown')}'")
+                print(f"   Artist: '{getattr(download_item, 'artist', 'Unknown')}'")
+                print(f"   Album: '{getattr(download_item, 'album', 'Unknown')}'")
+            
+            # List current tracked albums for debugging
+            print(f"   Currently tracking {len(self.album_downloads)} albums:")
+            for aid, ainfo in self.album_downloads.items():
+                sa = ainfo.get('spotify_album')
+                name = sa.name if sa else 'Unknown'
+                active_count = len(ainfo.get('active_downloads', []))
+                print(f"     {aid}: '{name}' ({active_count} active downloads)")
     
     def update_album_card_progress(self, album_id: str):
         """Update the album card with current download progress"""
@@ -1886,22 +2452,50 @@ class ArtistsPage(QWidget):
         if not album_card:
             return
         
-        completed = album_info['completed_tracks']
-        total = album_info['total_tracks']
+        completed = album_info.get('completed_tracks', 0)
+        total = album_info.get('total_tracks', 1)  # Avoid division by zero
+        active_downloads = album_info.get('active_downloads', [])
+        
+        # Calculate progress percentage
         percentage = int((completed / total) * 100) if total > 0 else 0
         
-        # Update the album card progress
-        album_card.update_download_progress(completed, total, percentage)
+        # Determine album download state
+        if completed >= total and not active_downloads:
+            # Album is fully complete - this will be handled in the main status handler
+            # Don't call set_download_completed here to avoid duplicate processing
+            print(f"🎯 Album '{album_info.get('spotify_album', {}).name if album_info.get('spotify_album') else 'Unknown'}' is complete: {completed}/{total}")
+            return
+        elif not active_downloads and completed == 0:
+            # No active downloads and nothing completed - might be initializing
+            album_card.set_download_in_progress()
+            print(f"🔄 Album initializing downloads...")
+        elif active_downloads:
+            # Has active downloads - show progress
+            album_card.update_download_progress(completed, total, percentage)
+            print(f"📊 Album progress: {completed}/{total} tracks ({percentage}%)")
+        else:
+            # Some completed but no active - might be stalled or failed
+            if completed > 0:
+                album_card.update_download_progress(completed, total, percentage)
+                print(f"⚠️ Album partially complete: {completed}/{total} tracks ({percentage}%)")
+            else:
+                album_card.set_download_in_progress()
+                print(f"🔄 Album status unclear, showing in progress...")
         
-        # Check if album is fully downloaded
-        if completed >= total and not album_info.get('active_downloads'):
-            # Album is complete
-            album_card.set_download_completed()
-            # Remove from tracking
-            spotify_album = album_info.get('spotify_album')
-            album_name = spotify_album.name if spotify_album else 'Unknown'
-            del self.album_downloads[album_id]
-            print(f"🎉 Album download completed: {album_name}")
+        # Update the album card's status indicator to show download activity
+        if hasattr(album_card, 'status_indicator'):
+            if active_downloads:
+                # Show progress percentage or downloading indicator
+                if percentage > 0:
+                    album_card.status_indicator.setText(f"{percentage}%")
+                    album_card.status_indicator.setToolTip(f"Downloading: {completed}/{total} tracks ({percentage}%)")
+                else:
+                    album_card.status_indicator.setText("⏳")
+                    album_card.status_indicator.setToolTip("Starting download...")
+            elif completed > 0:
+                # Show partial completion
+                album_card.status_indicator.setText(f"{percentage}%")
+                album_card.status_indicator.setToolTip(f"Partially downloaded: {completed}/{total} tracks")
 
     def return_to_search(self):
         """Return to search interface"""
@@ -1923,29 +2517,58 @@ class ArtistsPage(QWidget):
     
     def cleanup_download_tracking(self):
         """Clean up download tracking resources"""
+        print("🧹 Starting album download tracking cleanup...")
+        
         # Stop the download status timer
-        if hasattr(self, 'download_status_timer'):
+        if hasattr(self, 'download_status_timer') and self.download_status_timer.isActive():
             self.download_status_timer.stop()
+            print("   ⏹️ Stopped download status timer")
         
         # Reset any album cards that are showing download progress
-        for album_info in self.album_downloads.values():
+        cards_reset = 0
+        for album_info in list(self.album_downloads.values()):
             album_card = album_info.get('album_card')
-            if album_card and hasattr(album_card, 'progress_overlay'):
-                album_card.progress_overlay.hide()
+            if album_card:
+                # Hide progress overlays
+                if hasattr(album_card, 'progress_overlay'):
+                    album_card.progress_overlay.hide()
+                
+                # Reset status indicator if album wasn't owned originally
+                if hasattr(album_card, 'update_ownership') and not album_card.is_owned:
+                    # Reset to available for download state
+                    album_card.update_ownership(False)
+                
+                cards_reset += 1
+        
+        if cards_reset > 0:
+            print(f"   🔄 Reset {cards_reset} album cards")
         
         # Clear download tracking state
+        tracked_albums = len(self.album_downloads)
+        completed_downloads = len(self.completed_downloads)
         self.album_downloads.clear()
+        self.completed_downloads.clear()
         self._is_status_update_running = False
         
-        # Shutdown the download status thread pool
+        if tracked_albums > 0:
+            print(f"   🗑️ Cleared tracking for {tracked_albums} albums")
+        
+        # Shutdown the download status thread pool gracefully
         if hasattr(self, 'download_status_pool'):
             try:
+                # Clear any pending tasks
                 self.download_status_pool.clear()
-                self.download_status_pool.waitForDone(1000)  # Wait up to 1 second
+                
+                # Wait for active tasks to complete (with timeout)
+                if not self.download_status_pool.waitForDone(2000):  # Wait up to 2 seconds
+                    print("   ⚠️ Download status pool did not finish within timeout")
+                else:
+                    print("   ✅ Download status pool shut down cleanly")
+                    
             except Exception as e:
-                print(f"Error cleaning up download status pool: {e}")
+                print(f"   ❌ Error cleaning up download status pool: {e}")
         
-        print("🧹 Album download tracking cleaned up")
+        print("🧹 Album download tracking cleanup completed")
     
     def restart_download_tracking(self):
         """Restart download tracking timer if stopped"""
@@ -1955,24 +2578,48 @@ class ArtistsPage(QWidget):
     
     def stop_all_workers(self):
         """Stop all background workers"""
-        if self.artist_search_worker:
+        print("🛑 Stopping all artist page workers...")
+        
+        workers_stopped = 0
+        
+        if self.artist_search_worker and self.artist_search_worker.isRunning():
+            print("   🔍 Stopping artist search worker...")
             self.artist_search_worker.terminate()
-            self.artist_search_worker.wait()
+            if self.artist_search_worker.wait(2000):  # Wait up to 2 seconds
+                print("   ✅ Artist search worker stopped")
+            else:
+                print("   ⚠️ Artist search worker did not stop within timeout")
             self.artist_search_worker = None
+            workers_stopped += 1
             
-        if self.album_fetch_worker:
+        if self.album_fetch_worker and self.album_fetch_worker.isRunning():
+            print("   📀 Stopping album fetch worker...")
             self.album_fetch_worker.terminate()
-            self.album_fetch_worker.wait()
+            if self.album_fetch_worker.wait(2000):  # Wait up to 2 seconds
+                print("   ✅ Album fetch worker stopped")
+            else:
+                print("   ⚠️ Album fetch worker did not stop within timeout")
             self.album_fetch_worker = None
+            workers_stopped += 1
             
-        if self.plex_library_worker:
+        if self.plex_library_worker and self.plex_library_worker.isRunning():
+            print("   📚 Stopping Plex library worker...")
             self.plex_library_worker.stop()
             self.plex_library_worker.terminate()
-            self.plex_library_worker.wait()
+            if self.plex_library_worker.wait(2000):  # Wait up to 2 seconds
+                print("   ✅ Plex library worker stopped")
+            else:
+                print("   ⚠️ Plex library worker did not stop within timeout")
             self.plex_library_worker = None
+            workers_stopped += 1
         
-        # Stop download tracking
+        if workers_stopped > 0:
+            print(f"   🛑 Stopped {workers_stopped} background workers")
+        
+        # Stop download tracking (this includes its own worker cleanup)
         self.cleanup_download_tracking()
+        
+        print("🛑 All workers stopped")
     
     def clear_artist_results(self):
         """Clear artist search results"""
