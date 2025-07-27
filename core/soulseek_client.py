@@ -542,7 +542,7 @@ class SoulseekClient:
         
         return None
     
-    async def search(self, query: str, timeout: int = 35, progress_callback=None) -> tuple[List[TrackResult], List[AlbumResult]]:
+    async def search(self, query: str, timeout: int = 60, progress_callback=None) -> tuple[List[TrackResult], List[AlbumResult]]:
         if not self.base_url:
             logger.error("Soulseek client not configured")
             return [], []
@@ -935,6 +935,207 @@ class SoulseekClient:
             
         except Exception as e:
             logger.error(f"Error clearing completed downloads: {e}")
+            return False
+    
+    async def get_all_searches(self) -> List[dict]:
+        """Get all search history from slskd
+        
+        Returns:
+            List[dict]: List of search objects from slskd API, empty list if error
+        """
+        if not self.base_url:
+            logger.error("Soulseek client not configured")
+            return []
+        
+        try:
+            endpoint = 'searches'
+            logger.debug(f"Getting all searches with endpoint: {endpoint}")
+            response = await self._make_request('GET', endpoint)
+            
+            if response is not None:
+                searches = response if isinstance(response, list) else []
+                logger.info(f"Retrieved {len(searches)} searches from slskd")
+                return searches
+            else:
+                logger.error("Failed to retrieve searches from slskd")
+                return []
+                
+        except Exception as e:
+            logger.error(f"Error retrieving searches: {e}")
+            return []
+    
+    async def delete_search(self, search_id: str) -> bool:
+        """Delete a specific search from slskd history
+        
+        Args:
+            search_id: The ID of the search to delete
+            
+        Returns:
+            bool: True if deletion was successful, False otherwise
+        """
+        if not self.base_url:
+            logger.error("Soulseek client not configured")
+            return False
+        
+        try:
+            endpoint = f'searches/{search_id}'
+            logger.debug(f"Deleting search {search_id} with endpoint: {endpoint}")
+            response = await self._make_request('DELETE', endpoint)
+            success = response is not None
+            
+            if success:
+                logger.debug(f"Successfully deleted search {search_id}")
+            else:
+                logger.warning(f"Failed to delete search {search_id}")
+                
+            return success
+            
+        except Exception as e:
+            logger.error(f"Error deleting search {search_id}: {e}")
+            return False
+    
+    async def clear_all_searches(self) -> bool:
+        """Clear all search history from slskd
+        
+        Returns:
+            bool: True if all searches were cleared successfully, False otherwise
+        """
+        if not self.base_url:
+            logger.error("Soulseek client not configured")
+            return False
+        
+        try:
+            # Get all searches first
+            searches = await self.get_all_searches()
+            
+            if not searches:
+                logger.info("No searches found to clear")
+                return True
+            
+            logger.info(f"Clearing {len(searches)} searches from slskd...")
+            
+            # Delete each search individually
+            deleted_count = 0
+            failed_count = 0
+            
+            for search in searches:
+                search_id = search.get('id')
+                if search_id:
+                    success = await self.delete_search(search_id)
+                    if success:
+                        deleted_count += 1
+                    else:
+                        failed_count += 1
+                else:
+                    logger.warning("Search found without ID, skipping")
+                    failed_count += 1
+            
+            logger.info(f"Search cleanup complete: {deleted_count} deleted, {failed_count} failed")
+            return failed_count == 0
+            
+        except Exception as e:
+            logger.error(f"Error clearing all searches: {e}")
+            return False
+    
+    async def maintain_search_history(self, max_searches: int = 50) -> bool:
+        """Maintain a rolling window of recent searches by deleting oldest when over limit
+        
+        Args:
+            max_searches: Maximum number of searches to keep (default: 50)
+            
+        Returns:
+            bool: True if maintenance was successful, False otherwise
+        """
+        if not self.base_url:
+            logger.debug("Soulseek client not configured, skipping search maintenance")
+            return False
+        
+        try:
+            # Get all searches (should be ordered by creation time, oldest first)
+            searches = await self.get_all_searches()
+            
+            if len(searches) <= max_searches:
+                logger.debug(f"Search count ({len(searches)}) within limit ({max_searches}), no maintenance needed")
+                return True
+            
+            # Calculate how many to delete
+            excess_count = len(searches) - max_searches
+            oldest_searches = searches[:excess_count]  # Get the oldest ones
+            
+            logger.info(f"Maintaining search history: deleting {excess_count} oldest searches (keeping {max_searches})")
+            
+            # Delete the oldest searches
+            deleted_count = 0
+            failed_count = 0
+            
+            for search in oldest_searches:
+                search_id = search.get('id')
+                if search_id:
+                    success = await self.delete_search(search_id)
+                    if success:
+                        deleted_count += 1
+                    else:
+                        failed_count += 1
+                else:
+                    logger.warning("Search found without ID during maintenance, skipping")
+                    failed_count += 1
+            
+            logger.info(f"Search maintenance complete: {deleted_count} deleted, {failed_count} failed")
+            return failed_count == 0
+            
+        except Exception as e:
+            logger.error(f"Error during search history maintenance: {e}")
+            return False
+    
+    async def maintain_search_history_with_buffer(self, keep_searches: int = 50, trigger_threshold: int = 200) -> bool:
+        """Maintain search history with a buffer - only clean when searches exceed threshold
+        
+        Args:
+            keep_searches: Number of searches to keep after cleanup (default: 50)
+            trigger_threshold: Only trigger cleanup when search count exceeds this (default: 200)
+            
+        Returns:
+            bool: True if maintenance was successful or not needed, False otherwise
+        """
+        if not self.base_url:
+            logger.debug("Soulseek client not configured, skipping search maintenance")
+            return False
+        
+        try:
+            # Get all searches
+            searches = await self.get_all_searches()
+            
+            if len(searches) <= trigger_threshold:
+                logger.debug(f"Search count ({len(searches)}) below trigger threshold ({trigger_threshold}), no maintenance needed")
+                return True
+            
+            # Calculate how many to delete (keep only the most recent ones)
+            excess_count = len(searches) - keep_searches
+            oldest_searches = searches[:excess_count]  # Get the oldest ones to delete
+            
+            logger.info(f"Search buffer exceeded: {len(searches)} searches > {trigger_threshold} threshold. Deleting {excess_count} oldest searches (keeping {keep_searches})")
+            
+            # Delete the oldest searches
+            deleted_count = 0
+            failed_count = 0
+            
+            for search in oldest_searches:
+                search_id = search.get('id')
+                if search_id:
+                    success = await self.delete_search(search_id)
+                    if success:
+                        deleted_count += 1
+                    else:
+                        failed_count += 1
+                else:
+                    logger.warning("Search found without ID during maintenance, skipping")
+                    failed_count += 1
+            
+            logger.info(f"Search buffer maintenance complete: {deleted_count} deleted, {failed_count} failed, {keep_searches} searches remaining")
+            return failed_count == 0
+            
+        except Exception as e:
+            logger.error(f"Error during search history buffer maintenance: {e}")
             return False
     
     async def search_and_download_best(self, query: str, preferred_quality: str = 'flac') -> Optional[str]:

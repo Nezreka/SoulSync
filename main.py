@@ -68,6 +68,58 @@ class MainWindow(QMainWindow):
         self.status_thread = None
         self.init_ui()
         self.setup_status_monitoring()
+        
+        # Setup periodic search maintenance (rolling 50-search window)
+        self.setup_search_maintenance()
+    
+    def setup_search_maintenance(self):
+        """Setup periodic search history maintenance to keep only the 50 most recent searches"""
+        try:
+            # Create timer for periodic search maintenance
+            self.search_maintenance_timer = QTimer()
+            self.search_maintenance_timer.timeout.connect(self._run_search_maintenance)
+            
+            # Run maintenance every 2 minutes (120 seconds)
+            # This keeps search history clean without being too frequent
+            self.search_maintenance_timer.start(120000)
+            
+            logger.info("Search maintenance timer started (every 2 minutes, keeps 200 most recent searches)")
+            
+        except Exception as e:
+            logger.error(f"Error setting up search maintenance: {e}")
+    
+    def _run_search_maintenance(self):
+        """Run search maintenance in background thread to avoid blocking UI"""
+        try:
+            # Only run if Soulseek client seems to be available
+            if hasattr(self.soulseek_client, 'base_url') and self.soulseek_client.base_url:
+                # Run maintenance in background thread
+                import threading
+                
+                def maintenance_thread():
+                    try:
+                        import asyncio
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        
+                        # Run the maintenance (keep 200 most recent searches)
+                        success = loop.run_until_complete(self.soulseek_client.maintain_search_history(200))
+                        
+                        if not success:
+                            logger.warning("Search maintenance completed with some failures")
+                            
+                    except Exception as e:
+                        logger.error(f"Error in search maintenance thread: {e}")
+                    finally:
+                        loop.close()
+                
+                thread = threading.Thread(target=maintenance_thread, daemon=True)
+                thread.start()
+            else:
+                logger.debug("Soulseek client not configured, skipping search maintenance")
+                
+        except Exception as e:
+            logger.error(f"Error running search maintenance: {e}")
     
     def init_ui(self):
         self.setWindowTitle("NewMusic - Music Sync & Manager")
@@ -203,6 +255,11 @@ class MainWindow(QMainWindow):
             if self.status_thread:
                 logger.info("Stopping status monitoring thread...")
                 self.status_thread.stop()
+            
+            # Stop search maintenance timer
+            if hasattr(self, 'search_maintenance_timer') and self.search_maintenance_timer:
+                logger.info("Stopping search maintenance timer...")
+                self.search_maintenance_timer.stop()
             
             # Close Soulseek client
             try:
