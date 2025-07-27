@@ -2072,13 +2072,18 @@ class DownloadMissingAlbumTracksModal(QDialog):
                 self.show()
             self.activateWindow()
             self.raise_()
+            
+            # Show the message but DO NOT close the modal
+            QMessageBox.information(self, "Downloads Complete", final_message)
+
         else:
             final_message = f"Completed downloading {self.successful_downloads}/{len(self.missing_tracks)} missing album tracks!\n\nAll tracks were downloaded successfully!"
-
-        QMessageBox.information(self, "Downloads Complete", final_message)
-        
-        # Close the modal with accept() to indicate successful completion
-        self.accept()
+            
+            # Show the success message
+            QMessageBox.information(self, "Downloads Complete", final_message)
+            
+            # FIX: Only accept and close the modal on full success
+            self.accept()
 
     def get_valid_candidates(self, results, spotify_track, query):
         """Score and filter search results, then perform strict artist verification"""
