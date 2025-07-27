@@ -48,16 +48,27 @@ class MusicMatchingEngine:
     
     def normalize_string(self, text: str) -> str:
         """
-        Normalizes string by converting to ASCII, lowercasing, and removing
-        specific punctuation while keeping alphanumeric characters.
+        Normalizes string by handling common stylizations, converting to ASCII,
+        lowercasing, and replacing separators with spaces.
         """
         if not text:
             return ""
         
         text = unidecode(text)
         text = text.lower()
-        # Keep alphanumeric, spaces, and hyphens, but remove other punctuation like '.' or ','
-        text = re.sub(r'[^\w\s-]', '', text)
+        
+        # --- IMPROVEMENT V4 ---
+        # The user correctly pointed out that replacing '$' with 's' was incorrect
+        # as it breaks searching for stylized names like A$AP Rocky.
+        # The new approach is to PRESERVE the '$' symbol during normalization.
+        
+        # Replace common separators with spaces to preserve word boundaries.
+        text = re.sub(r'[._/]', ' ', text)
+        
+        # Keep alphanumeric characters, spaces, hyphens, AND the '$' sign.
+        text = re.sub(r'[^a-z0-9\s$-]', '', text)
+        
+        # Consolidate multiple spaces into one
         text = re.sub(r'\s+', ' ', text).strip()
         
         return text
@@ -97,6 +108,8 @@ class MusicMatchingEngine:
         
         # Common album suffixes to remove
         album_patterns = [
+            # Add pattern to remove trailing info after a hyphen, common for remasters/editions.
+            r'\s-\s.*',
             r'\s*\(deluxe\s*edition?\)',
             r'\s*\(expanded\s*edition?\)',
             r'\s*\(remastered?\)',
