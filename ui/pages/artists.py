@@ -1953,7 +1953,9 @@ class DownloadMissingAlbumTracksModal(QDialog):
                          download_info['downloading_start_time'] = time.time()
                      # 90-second timeout for being stuck at 0%
                      elif time.time() - download_info['downloading_start_time'] > 90:
-                         print(f"⚠️ Download for '{download_info['slskd_result'].filename}' is stuck at 0%. Retrying.")
+                         print(f"⚠️ Download for '{download_info['slskd_result'].filename}' is stuck at 0%. Cancelling and retrying.")
+                         # Cancel the old download before retry
+                         self.cancel_download_before_retry(download_info)
                          if download_info in self.active_downloads:
                              self.active_downloads.remove(download_info)
                          self.retry_parallel_download_with_fallback(download_info)
@@ -1968,12 +1970,49 @@ class DownloadMissingAlbumTracksModal(QDialog):
                  if 'queued_start_time' not in download_info:
                      download_info['queued_start_time'] = time.time()
                  elif time.time() - download_info['queued_start_time'] > 90: # 90-second timeout
-                     print(f"⚠️ Download for '{download_info['slskd_result'].filename}' is stuck in queue. Retrying.")
+                     print(f"⚠️ Download for '{download_info['slskd_result'].filename}' is stuck in queue. Cancelling and retrying.")
+                     # Cancel the old download before retry
+                     self.cancel_download_before_retry(download_info)
                      if download_info in self.active_downloads:
                          self.active_downloads.remove(download_info)
                      self.retry_parallel_download_with_fallback(download_info)
         
         self._is_status_update_running = False
+
+    def cancel_download_before_retry(self, download_info):
+        """Cancel the current download before retrying with alternative source"""
+        try:
+            slskd_result = download_info.get('slskd_result')
+            if not slskd_result:
+                print("⚠️ No slskd_result found in download_info for cancellation")
+                return
+            
+            # Extract download details for cancellation
+            download_id = download_info.get('download_id')
+            username = getattr(slskd_result, 'username', None)
+            
+            if download_id and username:
+                print(f"🚫 Cancelling timed-out album download: {download_id} from {username}")
+                
+                # Use asyncio to call the async cancel method
+                import asyncio
+                try:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    success = loop.run_until_complete(
+                        self.soulseek_client.cancel_download(download_id, username, remove=False)
+                    )
+                    if success:
+                        print(f"✅ Successfully cancelled album download {download_id}")
+                    else:
+                        print(f"⚠️ Failed to cancel album download {download_id}")
+                finally:
+                    loop.close()
+            else:
+                print(f"⚠️ Missing download_id ({download_id}) or username ({username}) for album cancellation")
+                
+        except Exception as e:
+            print(f"❌ Error cancelling album download: {e}")
 
     def retry_parallel_download_with_fallback(self, failed_download_info):
         """Retries a failed download by selecting the next-best cached candidate"""
