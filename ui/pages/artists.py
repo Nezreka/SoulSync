@@ -1,13 +1,15 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                            QFrame, QPushButton, QLineEdit, QScrollArea,
                            QGridLayout, QSizePolicy, QSpacerItem, QApplication,
-                           QDialog, QDialogButtonBox, QProgressBar, QMessageBox)
+                           QDialog, QDialogButtonBox, QProgressBar, QMessageBox,
+                           QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView)
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QThread, QObject, QRunnable, QThreadPool, QPropertyAnimation, QEasingCurve, QRect
 from PyQt6.QtGui import QFont, QPixmap, QPainter, QPen, QColor
 import functools
 import os
 import threading
 import requests
+import re
 from typing import List, Optional
 from dataclasses import dataclass
 
@@ -1247,6 +1249,927 @@ class AlbumCard(QFrame):
             self.download_requested.emit(self.album)
         super().mousePressEvent(event)
 
+class DownloadMissingAlbumTracksModal(QDialog):
+    """Enhanced modal for downloading missing album tracks with live progress tracking"""
+    process_finished = pyqtSignal()
+    
+    def __init__(self, album, album_card, parent_page, downloads_page, plex_client):
+        super().__init__(parent_page)
+        self.album = album
+        self.album_card = album_card
+        self.parent_page = parent_page
+        self.downloads_page = downloads_page
+        self.plex_client = plex_client
+        self.matching_engine = MusicMatchingEngine()
+        
+        # State tracking
+        self.total_tracks = len(album.tracks)
+        self.matched_tracks_count = 0
+        self.tracks_to_download_count = 0
+        self.downloaded_tracks_count = 0
+        self.analysis_complete = False
+        
+        # Initialize attributes to prevent crash on close
+        self.download_in_progress = False
+        self.cancel_requested = False
+        self.permanently_failed_tracks = []
+        
+        print(f"📊 Total album tracks: {self.total_tracks}")
+        
+        # Track analysis results
+        self.analysis_results = []
+        self.missing_tracks = []
+        
+        # Worker tracking
+        self.active_workers = []
+        self.fallback_pools = []
+
+        # Status Polling
+        self.download_status_pool = QThreadPool()
+        self.download_status_pool.setMaxThreadCount(1)
+        self._is_status_update_running = False
+
+        self.download_status_timer = QTimer(self)
+        self.download_status_timer.timeout.connect(self.poll_all_download_statuses)
+        self.download_status_timer.start(2000) 
+
+        self.active_downloads = [] 
+        
+        print("🎨 Setting up album modal UI...")
+        self.setup_ui()
+        print("✅ Album modal initialization complete")
+
+    def generate_smart_search_queries(self, artist_name, track_name):
+        """Generate multiple search query variations for better matching"""
+        queries = []
+
+        # Step 1: Use the original, full track name
+        if artist_name:
+            # Attempt 1: Full Artist + Full Track Name
+            queries.append(f"{artist_name} {track_name}".strip())
+
+            # Attempt 2: Full Track Name + First Word of Artist
+            artist_words = artist_name.split()
+            if artist_words:
+                first_word = artist_words[0]
+                if first_word.lower() == 'the' and len(artist_words) > 1:
+                    first_word = artist_words[1]
+                
+                if len(first_word) > 1:
+                    queries.append(f"{track_name} {first_word}".strip())
+
+        # Attempt 3: Full Track Name only
+        queries.append(track_name.strip())
+
+        # Step 2: Clean the track name for the final fallback
+        cleaned_name = re.sub(r'\s*\([^)]*\)', '', track_name).strip()
+        cleaned_name = re.sub(r'\s*\[[^\]]*\]', '', cleaned_name).strip()
+
+        # Attempt 4: Cleaned Track Name only (if different from original)
+        if cleaned_name and cleaned_name.lower() != track_name.lower():
+            queries.append(cleaned_name.strip())
+
+        # Remove duplicates while preserving order
+        unique_queries = []
+        for query in queries:
+            if query and query not in unique_queries:
+                unique_queries.append(query)
+        
+        print(f"🧠 Generated {len(unique_queries)} smart queries for '{track_name}'. Sequence: {unique_queries}")
+        return unique_queries
+
+    def setup_ui(self):
+        """Set up the enhanced modal UI"""
+        self.setWindowTitle(f"Download Missing Tracks - {self.album.name}")
+        self.resize(1200, 900)
+        self.setWindowFlags(Qt.WindowType.Window)
+        
+        self.setStyleSheet("""
+            QDialog { background-color: #1e1e1e; color: #ffffff; }
+            QLabel { color: #ffffff; }
+            QPushButton {
+                background-color: #1db954; color: #000000; border: none;
+                border-radius: 6px; font-size: 13px; font-weight: bold;
+                padding: 10px 20px; min-width: 100px;
+            }
+            QPushButton:hover { background-color: #1ed760; }
+            QPushButton:disabled { background-color: #404040; color: #888888; }
+        """)
+        
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(25, 25, 25, 25)
+        main_layout.setSpacing(15)
+        
+        top_section = self.create_compact_top_section()
+        main_layout.addWidget(top_section)
+        
+        progress_section = self.create_progress_section()
+        main_layout.addWidget(progress_section)
+        
+        table_section = self.create_track_table()
+        main_layout.addWidget(table_section, stretch=1)
+        
+        button_section = self.create_buttons()
+        main_layout.addWidget(button_section)
+        
+    def create_compact_top_section(self):
+        """Create compact top section with header and dashboard combined"""
+        top_frame = QFrame()
+        top_frame.setStyleSheet("""
+            QFrame {
+                background-color: #2d2d2d; border: 1px solid #444444;
+                border-radius: 8px; padding: 15px;
+            }
+        """)
+        
+        layout = QVBoxLayout(top_frame)
+        layout.setSpacing(15)
+        
+        header_layout = QHBoxLayout()
+        title_section = QVBoxLayout()
+        title_section.setSpacing(2)
+        
+        title = QLabel("Download Missing Album Tracks")
+        title.setFont(QFont("Arial", 16, QFont.Weight.Bold))
+        title.setStyleSheet("color: #1db954;")
+        
+        subtitle = QLabel(f"Album: {self.album.name} by {', '.join(self.album.artists)}")
+        subtitle.setFont(QFont("Arial", 11))
+        subtitle.setStyleSheet("color: #aaaaaa;")
+        
+        title_section.addWidget(title)
+        title_section.addWidget(subtitle)
+        
+        dashboard_layout = QHBoxLayout()
+        dashboard_layout.setSpacing(20)
+        
+        self.total_card = self.create_compact_counter_card("📀 Total", str(self.total_tracks), "#1db954")
+        self.matched_card = self.create_compact_counter_card("✅ Found", "0", "#4CAF50")
+        self.download_card = self.create_compact_counter_card("⬇️ Missing", "0", "#ff6b6b")
+        self.downloaded_card = self.create_compact_counter_card("✅ Downloaded", "0", "#4CAF50")
+        
+        dashboard_layout.addWidget(self.total_card)
+        dashboard_layout.addWidget(self.matched_card)
+        dashboard_layout.addWidget(self.download_card)
+        dashboard_layout.addWidget(self.downloaded_card)
+        dashboard_layout.addStretch()
+        
+        header_layout.addLayout(title_section)
+        header_layout.addStretch()
+        header_layout.addLayout(dashboard_layout)
+        
+        layout.addLayout(header_layout)
+        return top_frame
+        
+    def create_compact_counter_card(self, title, count, color):
+        """Create a compact counter card widget"""
+        card = QFrame()
+        card.setStyleSheet(f"""
+            QFrame {{
+                background-color: #3a3a3a; border: 2px solid {color};
+                border-radius: 6px; padding: 8px 12px; min-width: 80px;
+            }}
+        """)
+        
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
+        
+        count_label = QLabel(count)
+        count_label.setFont(QFont("Arial", 16, QFont.Weight.Bold))
+        count_label.setStyleSheet(f"color: {color}; background: transparent;")
+        count_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        title_label = QLabel(title)
+        title_label.setFont(QFont("Arial", 9))
+        title_label.setStyleSheet("color: #cccccc; background: transparent;")
+        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        layout.addWidget(count_label)
+        layout.addWidget(title_label)
+        
+        if "Total" in title: self.total_count_label = count_label
+        elif "Found" in title: self.matched_count_label = count_label
+        elif "Missing" in title: self.download_count_label = count_label
+        elif "Downloaded" in title: self.downloaded_count_label = count_label
+            
+        return card
+        
+    def create_progress_section(self):
+        """Create compact dual progress bar section"""
+        progress_frame = QFrame()
+        progress_frame.setStyleSheet("""
+            QFrame {
+                background-color: #2d2d2d; border: 1px solid #444444;
+                border-radius: 8px; padding: 12px;
+            }
+        """)
+        
+        layout = QVBoxLayout(progress_frame)
+        layout.setSpacing(8)
+        
+        analysis_container = QVBoxLayout()
+        analysis_container.setSpacing(4)
+        
+        analysis_label = QLabel("🔍 Plex Analysis")
+        analysis_label.setFont(QFont("Arial", 11, QFont.Weight.Bold))
+        analysis_label.setStyleSheet("color: #cccccc;")
+        
+        self.analysis_progress = QProgressBar()
+        self.analysis_progress.setFixedHeight(20)
+        self.analysis_progress.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid #555555; border-radius: 10px; text-align: center;
+                background-color: #444444; color: #ffffff; font-size: 11px; font-weight: bold;
+            }
+            QProgressBar::chunk { background-color: #1db954; border-radius: 9px; }
+        """)
+        self.analysis_progress.setVisible(False)
+        
+        analysis_container.addWidget(analysis_label)
+        analysis_container.addWidget(self.analysis_progress)
+        
+        download_container = QVBoxLayout()
+        download_container.setSpacing(4)
+        
+        download_label = QLabel("⬇️ Download Progress")
+        download_label.setFont(QFont("Arial", 11, QFont.Weight.Bold))
+        download_label.setStyleSheet("color: #cccccc;")
+        
+        self.download_progress = QProgressBar()
+        self.download_progress.setFixedHeight(20)
+        self.download_progress.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid #555555; border-radius: 10px; text-align: center;
+                background-color: #444444; color: #ffffff; font-size: 11px; font-weight: bold;
+            }
+            QProgressBar::chunk { background-color: #ff6b6b; border-radius: 9px; }
+        """)
+        self.download_progress.setVisible(False)
+        
+        download_container.addWidget(download_label)
+        download_container.addWidget(self.download_progress)
+        
+        layout.addLayout(analysis_container)
+        layout.addLayout(download_container)
+        
+        return progress_frame
+        
+    def create_track_table(self):
+        """Create enhanced track table"""
+        table_frame = QFrame()
+        table_frame.setStyleSheet("""
+            QFrame {
+                background-color: #2d2d2d; border: 1px solid #444444;
+                border-radius: 8px; padding: 0px;
+            }
+        """)
+        
+        layout = QVBoxLayout(table_frame)
+        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setSpacing(10)
+        
+        header_label = QLabel("📋 Album Track Analysis")
+        header_label.setFont(QFont("Arial", 13, QFont.Weight.Bold))
+        header_label.setStyleSheet("color: #ffffff; padding: 5px;")
+        
+        self.track_table = QTableWidget()
+        self.track_table.setColumnCount(5)
+        self.track_table.setHorizontalHeaderLabels(["Track", "Artist", "Duration", "Matched", "Status"])
+        self.track_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.track_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
+        self.track_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Interactive)
+        self.track_table.setColumnWidth(2, 90)
+        self.track_table.setColumnWidth(3, 140)
+        
+        self.track_table.setStyleSheet("""
+            QTableWidget {
+                background-color: #3a3a3a; alternate-background-color: #424242;
+                selection-background-color: #1db954; selection-color: #000000;
+                gridline-color: #555555; color: #ffffff; border: 1px solid #555555;
+                font-size: 12px;
+            }
+            QHeaderView::section {
+                background-color: #1db954; color: #000000; font-weight: bold;
+                font-size: 13px; padding: 12px 8px; border: none;
+            }
+            QTableWidget::item { padding: 12px 8px; border-bottom: 1px solid #4a4a4a; }
+        """)
+        
+        self.track_table.setAlternatingRowColors(True)
+        self.track_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.track_table.verticalHeader().setDefaultSectionSize(35)
+        self.track_table.verticalHeader().setVisible(False)
+        
+        self.populate_track_table()
+        
+        layout.addWidget(header_label)
+        layout.addWidget(self.track_table)
+        
+        return table_frame
+    
+    def populate_track_table(self):
+        """Populate track table with album tracks"""
+        self.track_table.setRowCount(len(self.album.tracks))
+        for i, track in enumerate(self.album.tracks):
+            self.track_table.setItem(i, 0, QTableWidgetItem(track.name))
+            artist_name = track.artists[0] if track.artists else "Unknown"
+            self.track_table.setItem(i, 1, QTableWidgetItem(artist_name))
+            duration = self.format_duration(track.duration_ms)
+            duration_item = QTableWidgetItem(duration)
+            duration_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.track_table.setItem(i, 2, duration_item)
+            matched_item = QTableWidgetItem("⏳ Pending")
+            matched_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.track_table.setItem(i, 3, matched_item)
+            status_item = QTableWidgetItem("—")
+            status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.track_table.setItem(i, 4, status_item)
+            for col in range(5):
+                self.track_table.item(i, col).setFlags(self.track_table.item(i, col).flags() & ~Qt.ItemFlag.ItemIsEditable)
+
+    def format_duration(self, duration_ms):
+        """Convert milliseconds to MM:SS format"""
+        seconds = duration_ms // 1000
+        return f"{seconds // 60}:{seconds % 60:02d}"
+        
+    def create_buttons(self):
+        """Create improved button section"""
+        button_frame = QFrame(styleSheet="background-color: transparent; padding: 10px;")
+        layout = QHBoxLayout(button_frame)
+        layout.setSpacing(15)
+        layout.setContentsMargins(0, 10, 0, 0)
+
+        self.correct_failed_btn = QPushButton("🔧 Correct Failed Matches")
+        self.correct_failed_btn.setFixedWidth(220)
+        self.correct_failed_btn.setStyleSheet("""
+            QPushButton { background-color: #ffc107; color: #000000; border-radius: 20px; font-weight: bold; }
+            QPushButton:hover { background-color: #ffca28; }
+        """)
+        self.correct_failed_btn.clicked.connect(self.on_correct_failed_matches_clicked)
+        self.correct_failed_btn.hide()
+        
+        self.begin_search_btn = QPushButton("Begin Search")
+        self.begin_search_btn.setFixedSize(160, 40)
+        self.begin_search_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #1db954; color: #000000; border: none;
+                border-radius: 20px; font-size: 14px; font-weight: bold;
+            }
+            QPushButton:hover { background-color: #1ed760; }
+        """)
+        self.begin_search_btn.clicked.connect(self.on_begin_search_clicked)
+        
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setFixedSize(110, 40)
+        self.cancel_btn.setStyleSheet("""
+            QPushButton { background-color: #d32f2f; color: #ffffff; border-radius: 20px;}
+            QPushButton:hover { background-color: #f44336; }
+        """)
+        self.cancel_btn.clicked.connect(self.on_cancel_clicked)
+        self.cancel_btn.hide()
+        
+        self.close_btn = QPushButton("Close")
+        self.close_btn.setFixedSize(110, 40)
+        self.close_btn.setStyleSheet("""
+            QPushButton { background-color: #616161; color: #ffffff; border-radius: 20px;}
+            QPushButton:hover { background-color: #757575; }
+        """)
+        self.close_btn.clicked.connect(self.on_close_clicked)
+        
+        layout.addStretch()
+        layout.addWidget(self.begin_search_btn)
+        layout.addWidget(self.cancel_btn)
+        layout.addWidget(self.correct_failed_btn)
+        layout.addWidget(self.close_btn)
+        
+        return button_frame
+
+    def on_begin_search_clicked(self):
+        """Handle Begin Search button click - starts Plex analysis"""
+        # Trigger UI updates on album card
+        if self.album_card:
+            self.album_card.set_download_in_progress()
+
+        self.begin_search_btn.hide()
+        self.cancel_btn.show()
+        self.analysis_progress.setVisible(True)
+        self.analysis_progress.setMaximum(self.total_tracks)
+        self.analysis_progress.setValue(0)
+        self.download_in_progress = True
+        self.start_plex_analysis()
+
+    def start_plex_analysis(self):
+        """Start Plex analysis for album tracks"""
+        from ui.pages.sync import PlaylistTrackAnalysisWorker
+        worker = PlaylistTrackAnalysisWorker(self.album.tracks, self.plex_client)
+        worker.signals.analysis_started.connect(self.on_analysis_started)
+        worker.signals.track_analyzed.connect(self.on_track_analyzed)
+        worker.signals.analysis_completed.connect(self.on_analysis_completed)
+        worker.signals.analysis_failed.connect(self.on_analysis_failed)
+        self.active_workers.append(worker)
+        QThreadPool.globalInstance().start(worker)
+            
+    def on_analysis_started(self, total_tracks):
+        print(f"🔍 Album analysis started for {total_tracks} tracks")
+        
+    def on_track_analyzed(self, track_index, result):
+        """Handle individual track analysis completion with live UI updates"""
+        self.analysis_progress.setValue(track_index)
+        if result.exists_in_plex:
+            matched_text = f"✅ Found ({result.confidence:.1f})"
+            self.matched_tracks_count += 1
+            self.matched_count_label.setText(str(self.matched_tracks_count))
+        else:
+            matched_text = "❌ Missing"
+            self.tracks_to_download_count += 1
+            self.download_count_label.setText(str(self.tracks_to_download_count))
+        self.track_table.setItem(track_index - 1, 3, QTableWidgetItem(matched_text))
+        
+    def on_analysis_completed(self, results):
+        """Handle analysis completion"""
+        self.analysis_complete = True
+        self.analysis_results = results
+        self.missing_tracks = [r for r in results if not r.exists_in_plex]
+        print(f"✅ Album analysis complete: {len(self.missing_tracks)} to download")
+        if self.missing_tracks:
+            self.start_download_progress()
+        else:
+            self.download_in_progress = False
+            self.cancel_btn.hide()
+            self.process_finished.emit() 
+            QMessageBox.information(self, "Analysis Complete", "All album tracks already exist in Plex! No downloads needed.")
+            
+    def on_analysis_failed(self, error_message):
+        print(f"❌ Album analysis failed: {error_message}")
+        QMessageBox.critical(self, "Analysis Failed", f"Failed to analyze album tracks: {error_message}")
+        self.cancel_btn.hide()
+        self.begin_search_btn.show()
+
+    def start_download_progress(self):
+        """Start actual download progress tracking"""
+        self.download_progress.setVisible(True)
+        self.download_progress.setMaximum(len(self.missing_tracks))
+        self.download_progress.setValue(0)
+        self.start_parallel_downloads()
+    
+    def start_parallel_downloads(self):
+        """Start multiple track downloads in parallel for better performance"""
+        self.active_parallel_downloads = 0
+        self.download_queue_index = 0
+        self.failed_downloads = 0
+        self.completed_downloads = 0
+        self.successful_downloads = 0
+        self.start_next_batch_of_downloads()
+    
+    def start_next_batch_of_downloads(self, max_concurrent=3):
+        """Start the next batch of downloads up to the concurrent limit"""
+        while (self.active_parallel_downloads < max_concurrent and 
+               self.download_queue_index < len(self.missing_tracks)):
+            track_result = self.missing_tracks[self.download_queue_index]
+            track = track_result.spotify_track
+            track_index = self.find_track_index_in_album(track)
+            self.track_table.setItem(track_index, 4, QTableWidgetItem("🔍 Searching..."))
+            self.search_and_download_track_parallel(track, self.download_queue_index, track_index)
+            self.active_parallel_downloads += 1
+            self.download_queue_index += 1
+        
+        if (self.download_queue_index >= len(self.missing_tracks) and self.active_parallel_downloads == 0):
+            self.on_all_downloads_complete()
+    
+    def search_and_download_track_parallel(self, spotify_track, download_index, track_index):
+        """Search for track and download via infrastructure path - PARALLEL VERSION"""
+        artist_name = spotify_track.artists[0] if spotify_track.artists else ""
+        search_queries = self.generate_smart_search_queries(artist_name, spotify_track.name)
+        self.start_track_search_with_queries_parallel(spotify_track, search_queries, track_index, track_index, download_index)
+    
+    def start_track_search_with_queries_parallel(self, spotify_track, search_queries, track_index, table_index, download_index):
+        """Start track search with parallel completion handling"""
+        if not hasattr(self, 'parallel_search_tracking'):
+            self.parallel_search_tracking = {}
+        
+        self.parallel_search_tracking[download_index] = {
+            'spotify_track': spotify_track, 'track_index': track_index,
+            'table_index': table_index, 'download_index': download_index,
+            'completed': False, 'used_sources': set(), 'candidates': [], 'retry_count': 0
+        }
+        self.start_search_worker_parallel(search_queries, spotify_track, track_index, table_index, 0, download_index)
+
+    def start_search_worker_parallel(self, queries, spotify_track, track_index, table_index, query_index, download_index):
+        """Start search worker with parallel completion handling."""
+        if query_index >= len(queries):
+            self.on_parallel_track_failed(download_index, "All search strategies failed")
+            return
+
+        query = queries[query_index]
+        worker = self.ParallelSearchWorker(self.parent_page.soulseek_client, query)
+        
+        worker.signals.search_completed.connect(
+            lambda r, q: self.on_search_query_completed_parallel(r, queries, spotify_track, track_index, table_index, query_index, q, download_index)
+        )
+        worker.signals.search_failed.connect(
+            lambda q, e: self.on_search_query_completed_parallel([], queries, spotify_track, track_index, table_index, query_index, q, download_index)
+        )
+        QThreadPool.globalInstance().start(worker)
+
+    def on_search_query_completed_parallel(self, results, queries, spotify_track, track_index, table_index, query_index, query, download_index):
+        """Handle completion of a parallel search query. If it fails, trigger the next query."""
+        if hasattr(self, 'cancel_requested') and self.cancel_requested: return
+            
+        valid_candidates = self.get_valid_candidates(results, spotify_track, query)
+        
+        if valid_candidates:
+            # Cache the candidates for future retries
+            self.parallel_search_tracking[download_index]['candidates'] = valid_candidates
+            best_match = valid_candidates[0]
+            self.start_validated_download_parallel(best_match, spotify_track, track_index, table_index, download_index)
+            return
+
+        next_query_index = query_index + 1
+        if next_query_index < len(queries):
+            self.start_search_worker_parallel(queries, spotify_track, track_index, table_index, next_query_index, download_index)
+        else:
+            self.on_parallel_track_failed(download_index, f"No valid results after trying all {len(queries)} queries.")
+
+    def start_validated_download_parallel(self, slskd_result, spotify_metadata, track_index, table_index, download_index):
+        """Start download with validated metadata"""
+        track_info = self.parallel_search_tracking[download_index]
+
+        # Reset state if this track was previously marked as completed (for retries)
+        if track_info.get('completed', False):
+            print(f"🔄 Resetting state for manually retried track (index: {download_index}).")
+            track_info['completed'] = False
+            
+            if self.failed_downloads > 0:
+                self.failed_downloads -= 1
+            
+            self.active_parallel_downloads += 1
+            
+            if self.completed_downloads > 0:
+                self.completed_downloads -= 1
+
+        # Add the new download source to used sources to prevent retrying with same user/file
+        source_key = f"{getattr(slskd_result, 'username', 'unknown')}_{slskd_result.filename}"
+        track_info['used_sources'].add(source_key)
+        
+        # Update UI to show the new download has been queued
+        spotify_based_result = self.create_spotify_based_search_result_from_validation(slskd_result, spotify_metadata)
+        self.track_table.setItem(table_index, 4, QTableWidgetItem("... Queued"))
+        
+        # Start the actual download process
+        self.start_matched_download_via_infrastructure_parallel(spotify_based_result, track_index, table_index, download_index)
+    
+    def start_matched_download_via_infrastructure_parallel(self, spotify_based_result, track_index, table_index, download_index):
+        """Start infrastructure download with parallel completion tracking"""
+        try:
+            artist = type('Artist', (), {'name': spotify_based_result.artist})()
+            download_item = self.downloads_page._start_download_with_artist(spotify_based_result, artist)
+            
+            if download_item:
+                self.active_downloads.append({
+                    'download_index': download_index, 'track_index': track_index,
+                    'table_index': table_index, 'download_id': download_item.download_id,
+                    'slskd_result': spotify_based_result, 'candidates': self.parallel_search_tracking[download_index]['candidates']
+                })
+            else:
+                self.on_parallel_track_failed(download_index, "Failed to start download")
+        except Exception as e:
+            self.on_parallel_track_failed(download_index, str(e))
+    
+    def poll_all_download_statuses(self):
+        """Poll download statuses for active downloads"""
+        if self._is_status_update_running or not self.active_downloads:
+            return
+        self._is_status_update_running = True
+        
+        # Create a snapshot of data needed by the worker thread
+        items_to_check = []
+        for d in self.active_downloads:
+            if d.get('slskd_result') and hasattr(d['slskd_result'], 'filename'):
+                items_to_check.append({
+                    'widget_id': d['download_index'], 
+                    'download_id': d.get('download_id'),
+                    'file_path': d['slskd_result'].filename,
+                    'api_missing_count': d.get('api_missing_count', 0)
+                })
+
+        if not items_to_check:
+            self._is_status_update_running = False
+            return
+        
+        # Import the worker from sync.py
+        from ui.pages.sync import SyncStatusProcessingWorker
+        worker = SyncStatusProcessingWorker(
+            self.parent_page.soulseek_client, 
+            items_to_check
+        )
+        
+        worker.signals.completed.connect(self._handle_processed_status_updates)
+        worker.signals.error.connect(lambda e: print(f"Album Status Worker Error: {e}"))
+        self.download_status_pool.start(worker)
+
+    def _handle_processed_status_updates(self, results):
+        """Handle status updates from the background worker and trigger retry logic"""
+        import time
+        
+        # Create a lookup for faster access to active download items
+        active_downloads_map = {d['download_index']: d for d in self.active_downloads}
+
+        for result in results:
+            download_index = result['widget_id']
+            new_status = result['status']
+            
+            download_info = active_downloads_map.get(download_index)
+            if not download_info:
+                continue
+
+            # Update the main download_info object with the latest missing count
+            if 'api_missing_count' in result:
+                 download_info['api_missing_count'] = result['api_missing_count']
+
+            # Update the download_id if the worker found a match by filename
+            if result.get('transfer_id') and download_info.get('download_id') != result['transfer_id']:
+                print(f"ℹ️ Corrected download ID for '{download_info['slskd_result'].filename}'")
+                download_info['download_id'] = result['transfer_id']
+
+            # Handle terminal states (completed, failed, cancelled)
+            if new_status in ['failed', 'cancelled']:
+                if download_info in self.active_downloads:
+                    self.active_downloads.remove(download_info)
+                self.retry_parallel_download_with_fallback(download_info)
+
+            elif new_status == 'completed':
+                if download_info in self.active_downloads:
+                    self.active_downloads.remove(download_info)
+                self.on_parallel_track_completed(download_index, success=True)
+
+            # Handle transient states (downloading, queued)
+            elif new_status == 'downloading':
+                 progress = result.get('progress', 0)
+                 self.track_table.setItem(download_info['table_index'], 4, QTableWidgetItem(f"⏬ Downloading ({progress}%)"))
+                 
+                 # Reset queue timer if it exists
+                 if 'queued_start_time' in download_info:
+                     del download_info['queued_start_time']
+
+                 # Add timeout for downloads stuck at 0%
+                 if progress < 1:
+                     if 'downloading_start_time' not in download_info:
+                         download_info['downloading_start_time'] = time.time()
+                     # 90-second timeout for being stuck at 0%
+                     elif time.time() - download_info['downloading_start_time'] > 90:
+                         print(f"⚠️ Download for '{download_info['slskd_result'].filename}' is stuck at 0%. Retrying.")
+                         if download_info in self.active_downloads:
+                             self.active_downloads.remove(download_info)
+                         self.retry_parallel_download_with_fallback(download_info)
+                 else:
+                     # Progress is being made, reset the timer
+                     if 'downloading_start_time' in download_info:
+                         del download_info['downloading_start_time']
+
+            elif new_status == 'queued':
+                 self.track_table.setItem(download_info['table_index'], 4, QTableWidgetItem("... Queued"))
+                 # Start a timer to detect if it's stuck in queue
+                 if 'queued_start_time' not in download_info:
+                     download_info['queued_start_time'] = time.time()
+                 elif time.time() - download_info['queued_start_time'] > 90: # 90-second timeout
+                     print(f"⚠️ Download for '{download_info['slskd_result'].filename}' is stuck in queue. Retrying.")
+                     if download_info in self.active_downloads:
+                         self.active_downloads.remove(download_info)
+                     self.retry_parallel_download_with_fallback(download_info)
+        
+        self._is_status_update_running = False
+
+    def retry_parallel_download_with_fallback(self, failed_download_info):
+        """Retries a failed download by selecting the next-best cached candidate"""
+        download_index = failed_download_info['download_index']
+        track_info = self.parallel_search_tracking[download_index]
+        
+        track_info['retry_count'] += 1
+        if track_info['retry_count'] > 2: # Max 3 attempts total (1 initial + 2 retries)
+            self.on_parallel_track_failed(download_index, "All retries failed.")
+            return
+
+        candidates = failed_download_info.get('candidates', [])
+        used_sources = track_info.get('used_sources', set())
+        
+        next_candidate = None
+        for candidate in candidates:
+            source_key = f"{getattr(candidate, 'username', 'unknown')}_{candidate.filename}"
+            if source_key not in used_sources:
+                next_candidate = candidate
+                break
+
+        if not next_candidate:
+            self.on_parallel_track_failed(download_index, "No alternative sources in cache")
+            return
+
+        print(f"🔄 Retrying album download {download_index + 1} with next candidate: {next_candidate.filename}")
+        self.track_table.setItem(failed_download_info['table_index'], 4, QTableWidgetItem(f"🔄 Retrying ({track_info['retry_count']})..."))
+        
+        self.start_validated_download_parallel(
+            next_candidate, track_info['spotify_track'], track_info['track_index'],
+            track_info['table_index'], download_index
+        )
+
+    def on_parallel_track_completed(self, download_index, success):
+        """Handle completion of a parallel track download"""
+        track_info = self.parallel_search_tracking.get(download_index)
+        if not track_info or track_info.get('completed', False): return
+        
+        track_info['completed'] = True
+        if success:
+            self.track_table.setItem(track_info['table_index'], 4, QTableWidgetItem("✅ Downloaded"))
+            self.downloaded_tracks_count += 1
+            self.downloaded_count_label.setText(str(self.downloaded_tracks_count))
+            self.successful_downloads += 1
+        else:
+            self.track_table.setItem(track_info['table_index'], 4, QTableWidgetItem("❌ Failed"))
+            self.failed_downloads += 1
+            if track_info not in self.permanently_failed_tracks:
+                self.permanently_failed_tracks.append(track_info)
+            self.update_failed_matches_button()
+        
+        self.completed_downloads += 1
+        self.active_parallel_downloads -= 1
+        self.download_progress.setValue(self.completed_downloads)
+        self.start_next_batch_of_downloads()
+    
+    def on_parallel_track_failed(self, download_index, reason):
+        """Handle failure of a parallel track download"""
+        print(f"❌ Album parallel download {download_index + 1} failed: {reason}")
+        self.on_parallel_track_completed(download_index, False)
+    
+    def update_failed_matches_button(self):
+        """Shows, hides, and updates the counter on the 'Correct Failed Matches' button"""
+        count = len(self.permanently_failed_tracks)
+        if count > 0:
+            self.correct_failed_btn.setText(f"🔧 Correct {count} Failed Match{'es' if count > 1 else ''}")
+            self.correct_failed_btn.show()
+        else:
+            self.correct_failed_btn.hide()
+
+    def find_track_index_in_album(self, spotify_track):
+        """Find the table row index for a given Spotify track"""
+        for i, album_track in enumerate(self.album.tracks):
+            if album_track.id == spotify_track.id:
+                return i
+        return None
+        
+    def on_all_downloads_complete(self):
+        """Handle completion of all downloads"""
+        self.download_in_progress = False
+        print("🎉 All album downloads completed!")
+        self.cancel_btn.hide()
+        
+        # Emit process_finished signal to unlock UI
+        self.process_finished.emit()
+
+        # Determine the final message based on success or failure
+        if self.permanently_failed_tracks:
+            final_message = f"Completed downloading {self.successful_downloads}/{len(self.missing_tracks)} missing album tracks!\n\nYou can now manually correct any failed downloads or close this window."
+            
+            # If there are failures, ensure the modal is visible and bring it to the front
+            if self.isHidden():
+                self.show()
+            self.activateWindow()
+            self.raise_()
+        else:
+            final_message = f"Completed downloading {self.successful_downloads}/{len(self.missing_tracks)} missing album tracks!\n\nAll tracks were downloaded successfully!"
+
+        QMessageBox.information(self, "Downloads Complete", final_message)
+
+    def get_valid_candidates(self, results, spotify_track, query):
+        """Score and filter search results, then perform strict artist verification"""
+        if not results:
+            return []
+
+        # Get initial confident matches based on title, bitrate, etc.
+        initial_candidates = self.matching_engine.find_best_slskd_matches(spotify_track, results)
+
+        if not initial_candidates:
+            print(f"⚠️ No initial candidates found for '{spotify_track.name}' from query '{query}'.")
+            return []
+            
+        print(f"✅ Found {len(initial_candidates)} initial candidates for '{spotify_track.name}'. Now verifying artist...")
+
+        # Perform strict artist verification on the initial candidates
+        verified_candidates = []
+        spotify_artist_name = spotify_track.artists[0] if spotify_track.artists else ""
+        
+        # Robust normalization for both artist name and file path
+        normalized_spotify_artist = re.sub(r'[^a-zA-Z0-9]', '', spotify_artist_name).lower()
+
+        for candidate in initial_candidates:
+            # The 'filename' from Soulseek includes the full folder path
+            slskd_full_path = candidate.filename
+            
+            # Apply the same robust normalization to the Soulseek path
+            normalized_slskd_path = re.sub(r'[^a-zA-Z0-9]', '', slskd_full_path).lower()
+            
+            # Check if the cleaned artist's name is in the cleaned folder path
+            if normalized_spotify_artist in normalized_slskd_path:
+                print(f"✔️ Artist '{spotify_artist_name}' VERIFIED in path: '{slskd_full_path}'")
+                verified_candidates.append(candidate)
+            else:
+                print(f"❌ Artist '{spotify_artist_name}' NOT found in path: '{slskd_full_path}'. Discarding candidate.")
+
+        if verified_candidates:
+            best_confidence = verified_candidates[0].confidence
+            print(f"✅ Found {len(verified_candidates)} VERIFIED matches for '{spotify_track.name}'. Best score: {best_confidence:.2f}")
+        else:
+            print(f"⚠️ No verified matches found for '{spotify_track.name}' after checking file paths.")
+
+        return verified_candidates
+    
+    def create_spotify_based_search_result_from_validation(self, slskd_result, spotify_metadata):
+        """Create SpotifyBasedSearchResult from validation results"""
+        class SpotifyBasedSearchResult:
+            def __init__(self):
+                self.filename = getattr(slskd_result, 'filename', f"{spotify_metadata.name}.flac")
+                self.username = getattr(slskd_result, 'username', 'unknown')
+                self.size = getattr(slskd_result, 'size', 0)
+                self.quality = getattr(slskd_result, 'quality', 'flac')
+                self.artist = spotify_metadata.artists[0] if spotify_metadata.artists else "Unknown"
+                self.title = spotify_metadata.name
+                self.album = spotify_metadata.album
+        return SpotifyBasedSearchResult()
+
+    # Inner class for the search worker
+    class ParallelSearchWorker(QRunnable):
+        def __init__(self, soulseek_client, query):
+            super().__init__()
+            self.soulseek_client = soulseek_client
+            self.query = query
+            self.signals = self.create_signals()
+
+        def create_signals(self):
+            class Signals(QObject):
+                search_completed = pyqtSignal(list, str)
+                search_failed = pyqtSignal(str, str)
+            return Signals()
+
+        def run(self):
+            loop = None
+            try:
+                import asyncio
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                search_result = loop.run_until_complete(self.soulseek_client.search(self.query))
+                results_list = search_result[0] if isinstance(search_result, tuple) and search_result else []
+                self.signals.search_completed.emit(results_list, self.query)
+            except Exception as e:
+                self.signals.search_failed.emit(self.query, str(e))
+            finally:
+                if loop: loop.close()
+        
+    def on_cancel_clicked(self):
+        """Handle Cancel button"""
+        self.cancel_operations()
+        self.process_finished.emit()
+        self.reject()
+        
+    def on_close_clicked(self):
+        """Handle Close button"""
+        if self.cancel_requested or not self.download_in_progress:
+            self.cancel_operations()
+            self.process_finished.emit()
+        self.reject()
+        
+    def cancel_operations(self):
+        """Cancel any ongoing operations"""
+        print("🛑 Cancelling album download operations...")
+        self.cancel_requested = True
+        
+        # Stop workers
+        for worker in self.active_workers:
+            if hasattr(worker, 'cancel'):
+                worker.cancel()
+        self.active_workers.clear()
+        
+        # Stop polling
+        self.download_status_timer.stop()
+        print("🛑 Album modal operations cancelled successfully.")
+        
+    def on_correct_failed_matches_clicked(self):
+        """Handle failed matches correction using ManualMatchModal from sync.py"""
+        if not self.permanently_failed_tracks: 
+            return
+            
+        # Import the ManualMatchModal from sync.py
+        from ui.pages.sync import ManualMatchModal
+        
+        manual_modal = ManualMatchModal(self)
+        manual_modal.track_resolved.connect(self.on_manual_match_resolved)
+        manual_modal.exec()
+
+    def on_manual_match_resolved(self, resolved_track_info):
+        """Handle a track being successfully resolved by the ManualMatchModal"""
+        original_failed_track = next((t for t in self.permanently_failed_tracks if t['download_index'] == resolved_track_info['download_index']), None)
+        if original_failed_track:
+            self.permanently_failed_tracks.remove(original_failed_track)
+        self.update_failed_matches_button()
+
 class ArtistsPage(QWidget):
     def __init__(self, downloads_page=None, parent=None):
         super().__init__(parent)
@@ -1829,62 +2752,152 @@ class ArtistsPage(QWidget):
         self.albums_status.setText(f"Failed to load albums: {error}")
     
     def on_album_download_requested(self, album: Album):
-        """Handle album download request from an AlbumCard."""
-        print(f"Download requested for album: {album.name} by {', '.join(album.artists)}")
+        """Handle album download request from an AlbumCard using new modal system."""
+        print(f"🎵 Download requested for album: {album.name} by {', '.join(album.artists)}")
         
-        # Store the album object that needs to be downloaded
-        self.album_to_download = album
-        
-        # Open the album search dialog to find a source on Soulseek
-        dialog = AlbumSearchDialog(album, self)
-        dialog.album_selected.connect(self.on_album_selected_for_download)
-        dialog.exec()
-    
-    def on_album_selected_for_download(self, album_result: AlbumResult):
-        """
-        Handles album selection from the search dialog and delegates the
-        matched album download process to the main DownloadsPage.
-        """
-        print(f"Selected album for download: {album_result.album_title} by {album_result.artist}")
-        
-        if self.downloads_page:
-            # Start tracking this album download
-            album_id = f"{self.album_to_download.id}"
-            self.start_album_download_tracking(album_id, album_result, self.album_to_download)
-            
-            # Delegate to the DownloadsPage to handle the matched download
-            # This will open the Spotify matching modal and add to the central queue
-            print("🚀 Delegating to DownloadsPage to start matched album download...")
-            self.downloads_page.start_matched_album_download(album_result)
-        else:
-            QMessageBox.critical(self, "Error", "Downloads page is not connected. Cannot start download.")
-    
-    def start_album_download_tracking(self, album_id: str, album_result: AlbumResult, spotify_album: Album):
-        """Start tracking downloads for an album"""
-        # Find the album card for this album
+        # Find the album card for this album to pass to modal
         album_card = None
         for i in range(self.albums_grid_layout.count()):
             item = self.albums_grid_layout.itemAt(i)
             if item and item.widget():
                 card = item.widget()
-                if hasattr(card, 'album') and card.album.id == spotify_album.id:
+                if hasattr(card, 'album') and card.album.id == album.id:
                     album_card = card
                     break
         
-        if album_card:
-            # Initialize tracking for this album
-            self.album_downloads[album_id] = {
-                'total_tracks': album_result.track_count,
-                'completed_tracks': 0,
-                'active_downloads': [],
-                'album_card': album_card,
-                'album_result': album_result,
-                'spotify_album': spotify_album
-            }
+        if not album_card:
+            QMessageBox.critical(self, "Error", "Could not find album card for tracking.")
+            return
             
-            # Update album card to show download in progress
-            album_card.set_download_in_progress()
-            print(f"📊 Started tracking album: {spotify_album.name} ({album_result.track_count} tracks)")
+        # Check if we have necessary clients
+        if not self.downloads_page:
+            QMessageBox.critical(self, "Error", "Downloads page is not connected. Cannot start download.")
+            return
+            
+        if not self.plex_client:
+            QMessageBox.critical(self, "Error", "Plex client is not available. Cannot verify existing tracks.")
+            return
+        
+        print("🚀 Fetching album tracks and creating DownloadMissingAlbumTracksModal...")
+        
+        # First, we need to fetch the tracks for this album
+        try:
+            # Get the full album data with tracks from Spotify
+            album_data = self.spotify_client.get_album(album.id)
+            if not album_data or not album_data.get('tracks'):
+                QMessageBox.critical(self, "Error", f"Could not fetch tracks for album '{album.name}'. Please try again.")
+                return
+            
+            # Import Track class for track creation
+            from core.spotify_client import Track
+            
+            # Convert track data to Track objects
+            tracks = []
+            track_items = album_data['tracks']['items']
+            
+            for track_data in track_items:
+                # Add missing fields that are required by Track.from_spotify_track()
+                track_data['album'] = {
+                    'name': album_data['name'],
+                    'id': album_data['id']
+                }
+                # Album tracks don't have popularity field, so set it to 0
+                if 'popularity' not in track_data:
+                    track_data['popularity'] = 0
+                    
+                track = Track.from_spotify_track(track_data)
+                tracks.append(track)
+                
+            print(f"✅ Fetched {len(tracks)} tracks for album '{album.name}'")
+            
+            # Create a copy of the album with tracks added
+            album_with_tracks = album
+            album_with_tracks.tracks = tracks  # Add tracks attribute dynamically
+            
+            # Create and show the new sophisticated modal
+            modal = DownloadMissingAlbumTracksModal(
+                album=album_with_tracks,  # Use the album with tracks
+                album_card=album_card,
+                parent_page=self,
+                downloads_page=self.downloads_page,
+                plex_client=self.plex_client
+            )
+            
+            # Connect the process finished signal to handle cleanup
+            modal.process_finished.connect(lambda: self.on_album_download_process_finished(album.id, album_card))
+            
+            # Show the modal
+            modal.exec()
+            
+        except Exception as e:
+            print(f"❌ Error fetching album tracks: {e}")
+            QMessageBox.critical(self, "Error", f"Failed to fetch album tracks: {str(e)}\n\nPlease check your Spotify connection and try again.")
+    
+    def on_album_download_process_finished(self, album_id: str, album_card):
+        """Handle cleanup when album download process is finished"""
+        print(f"🏁 Album download process finished for album: {album_id}")
+        
+        # Reset the album card state if needed
+        if album_card and hasattr(album_card, 'set_download_completed'):
+            album_card.set_download_completed()
+        
+        print("✅ Album download process cleanup completed")
+    
+    # === LEGACY METHODS - NO LONGER USED WITH NEW MODAL SYSTEM ===
+    # These methods were part of the old manual album download flow
+    # Keeping them commented for reference but they are replaced by DownloadMissingAlbumTracksModal
+    
+    # def on_album_selected_for_download(self, album_result: AlbumResult):
+    #     """
+    #     [DEPRECATED] Handles album selection from the search dialog and delegates the
+    #     matched album download process to the main DownloadsPage.
+    #     REPLACED BY: DownloadMissingAlbumTracksModal which handles everything internally
+    #     """
+    #     print(f"Selected album for download: {album_result.album_title} by {album_result.artist}")
+    #     
+    #     if self.downloads_page:
+    #         # Start tracking this album download
+    #         album_id = f"{self.album_to_download.id}"
+    #         self.start_album_download_tracking(album_id, album_result, self.album_to_download)
+    #         
+    #         # Delegate to the DownloadsPage to handle the matched download
+    #         # This will open the Spotify matching modal and add to the central queue
+    #         print("🚀 Delegating to DownloadsPage to start matched album download...")
+    #         self.downloads_page.start_matched_album_download(album_result)
+    #     else:
+    #         QMessageBox.critical(self, "Error", "Downloads page is not connected. Cannot start download.")
+    
+    # def start_album_download_tracking(self, album_id: str, album_result: AlbumResult, spotify_album: Album):
+    #     """
+    #     [DEPRECATED] Start tracking downloads for an album
+    #     REPLACED BY: DownloadMissingAlbumTracksModal handles its own tracking
+    #     """
+    #     # Find the album card for this album
+    #     album_card = None
+    #     for i in range(self.albums_grid_layout.count()):
+    #         item = self.albums_grid_layout.itemAt(i)
+    #         if item and item.widget():
+    #             card = item.widget()
+    #             if hasattr(card, 'album') and card.album.id == spotify_album.id:
+    #                 album_card = card
+    #                 break
+    #     
+    #     if album_card:
+    #         # Initialize tracking for this album
+    #         self.album_downloads[album_id] = {
+    #             'total_tracks': album_result.track_count,
+    #             'completed_tracks': 0,
+    #             'active_downloads': [],
+    #             'album_card': album_card,
+    #             'album_result': album_result,
+    #             'spotify_album': spotify_album
+    #         }
+    #         
+    #         # Update album card to show download in progress
+    #         album_card.set_download_in_progress()
+    #         print(f"📊 Started tracking album: {spotify_album.name} ({album_result.track_count} tracks)")
+    
+    # === END LEGACY METHODS ===
     
     def poll_album_download_statuses(self):
         """Poll download statuses for tracked albums"""
