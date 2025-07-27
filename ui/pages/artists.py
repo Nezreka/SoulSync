@@ -2472,10 +2472,14 @@ class ArtistsPage(QWidget):
         header.setStyleSheet("""
             QFrame {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 rgba(40, 40, 40, 0.9),
-                    stop:1 rgba(30, 30, 30, 0.95));
-                border-radius: 12px;
-                border: 1px solid rgba(60, 60, 60, 0.4);
+                    stop:0 rgba(50, 50, 55, 0.95),
+                    stop:0.3 rgba(42, 42, 47, 0.97),
+                    stop:0.7 rgba(35, 35, 40, 0.98),
+                    stop:1 rgba(28, 28, 33, 0.99));
+                border-radius: 16px;
+                border: 1px solid rgba(80, 80, 85, 0.3);
+                box-shadow: 0px 6px 20px rgba(0, 0, 0, 0.2),
+                           inset 0px 1px 0px rgba(255, 255, 255, 0.05);
             }
         """)
         
@@ -2492,6 +2496,8 @@ class ArtistsPage(QWidget):
             color: #ffffff;
             text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
             letter-spacing: 1px;
+            background: transparent;
+            border: none;
         """)
         
         self.artist_stats_label = QLabel()
@@ -2499,6 +2505,8 @@ class ArtistsPage(QWidget):
         self.artist_stats_label.setStyleSheet("""
             color: #c8c8c8;
             opacity: 0.9;
+            background: transparent;
+            border: none;
         """)
         
         artist_info_layout.addWidget(self.artist_name_label)
@@ -2511,15 +2519,27 @@ class ArtistsPage(QWidget):
         self.header_search_input.setFixedWidth(300)
         self.header_search_input.setStyleSheet("""
             QLineEdit {
-                background: rgba(60, 60, 60, 0.8);
-                border: 1px solid rgba(100, 100, 100, 0.4);
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(70, 70, 75, 0.9),
+                    stop:1 rgba(55, 55, 60, 0.95));
+                border: 1px solid rgba(120, 120, 125, 0.4);
                 border-radius: 18px;
                 padding: 0 16px;
                 color: #ffffff;
-                font-size: 12px;
+                font-size: 13px;
+                font-weight: 500;
+                box-shadow: inset 0px 2px 4px rgba(0, 0, 0, 0.1);
             }
             QLineEdit:focus {
                 border: 1px solid rgba(29, 185, 84, 0.8);
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(75, 75, 80, 0.95),
+                    stop:1 rgba(60, 60, 65, 1.0));
+                box-shadow: inset 0px 2px 4px rgba(0, 0, 0, 0.15),
+                           0px 0px 0px 2px rgba(29, 185, 84, 0.2);
+            }
+            QLineEdit::placeholder {
+                color: rgba(200, 200, 200, 0.7);
             }
         """)
         self.header_search_input.returnPressed.connect(self.perform_new_artist_search)
@@ -2529,15 +2549,29 @@ class ArtistsPage(QWidget):
         back_btn.setFixedHeight(36)
         back_btn.setStyleSheet("""
             QPushButton {
-                background: transparent;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(29, 185, 84, 0.12),
+                    stop:1 rgba(20, 160, 70, 0.08));
                 border: 1px solid rgba(29, 185, 84, 0.6);
                 border-radius: 18px;
                 color: #1db954;
-                font-size: 12px;
+                font-size: 13px;
+                font-weight: 600;
                 padding: 0 16px;
+                box-shadow: 0px 2px 8px rgba(29, 185, 84, 0.15);
             }
             QPushButton:hover {
-                background: rgba(29, 185, 84, 0.1);
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(29, 185, 84, 0.2),
+                    stop:1 rgba(20, 160, 70, 0.15));
+                border: 1px solid rgba(29, 185, 84, 0.8);
+                box-shadow: 0px 4px 12px rgba(29, 185, 84, 0.25);
+            }
+            QPushButton:pressed {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(20, 160, 70, 0.25),
+                    stop:1 rgba(29, 185, 84, 0.2));
+                box-shadow: inset 0px 2px 4px rgba(0, 0, 0, 0.1);
             }
         """)
         back_btn.clicked.connect(self.return_to_search)
