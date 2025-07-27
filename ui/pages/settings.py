@@ -645,7 +645,7 @@ class SettingsPage(QWidget):
 
         # Transfer folder path
         transfer_path_container = QVBoxLayout()
-        transfer_path_label = QLabel("Matched Transfer Dir:")
+        transfer_path_label = QLabel("Matched Transfer Dir (Plex Music Dir?):")
         transfer_path_label.setStyleSheet("color: #ffffff; font-size: 12px;")
         transfer_path_container.addWidget(transfer_path_label)
         

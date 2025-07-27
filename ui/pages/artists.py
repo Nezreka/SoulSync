@@ -975,16 +975,21 @@ class AlbumCard(QFrame):
         self.setStyleSheet("""
             AlbumCard {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 rgba(40, 40, 40, 0.9),
-                    stop:1 rgba(30, 30, 30, 0.95));
-                border-radius: 10px;
-                border: 1px solid rgba(70, 70, 70, 0.5);
+                    stop:0 rgba(45, 45, 50, 0.95),
+                    stop:0.5 rgba(35, 35, 40, 0.97),
+                    stop:1 rgba(28, 28, 33, 0.99));
+                border-radius: 12px;
+                border: 1px solid rgba(80, 80, 85, 0.4);
+                box-shadow: 0px 4px 12px rgba(0, 0, 0, 0.25);
             }
             AlbumCard:hover {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 rgba(50, 50, 50, 0.95),
-                    stop:1 rgba(40, 40, 40, 0.98));
-                border: 1px solid rgba(29, 185, 84, 0.6);
+                    stop:0 rgba(55, 55, 60, 0.98),
+                    stop:0.5 rgba(45, 45, 50, 0.99),
+                    stop:1 rgba(38, 38, 43, 1.0));
+                border: 1px solid rgba(29, 185, 84, 0.8);
+                box-shadow: 0px 8px 20px rgba(0, 0, 0, 0.35), 
+                           0px 0px 0px 1px rgba(29, 185, 84, 0.2);
             }
         """)
         
@@ -2482,12 +2487,19 @@ class ArtistsPage(QWidget):
         artist_info_layout = QVBoxLayout()
         
         self.artist_name_label = QLabel()
-        self.artist_name_label.setFont(QFont("Arial", 20, QFont.Weight.Bold))
-        self.artist_name_label.setStyleSheet("color: #ffffff;")
+        self.artist_name_label.setFont(QFont("Arial", 24, QFont.Weight.Bold))
+        self.artist_name_label.setStyleSheet("""
+            color: #ffffff;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+            letter-spacing: 1px;
+        """)
         
         self.artist_stats_label = QLabel()
-        self.artist_stats_label.setFont(QFont("Arial", 11))
-        self.artist_stats_label.setStyleSheet("color: #b3b3b3;")
+        self.artist_stats_label.setFont(QFont("Arial", 12))
+        self.artist_stats_label.setStyleSheet("""
+            color: #c8c8c8;
+            opacity: 0.9;
+        """)
         
         artist_info_layout.addWidget(self.artist_name_label)
         artist_info_layout.addWidget(self.artist_stats_label)
