@@ -117,6 +117,9 @@ class MainWindow(QMainWindow):
         
         # Connect media player signals between sidebar and downloads page
         self.setup_media_player_connections()
+        
+        # Connect settings change signals for live updates
+        self.setup_settings_connections()
     
     def setup_status_monitoring(self):
         # Start status monitoring thread
@@ -148,6 +151,21 @@ class MainWindow(QMainWindow):
         self.sidebar.media_player.volume_changed.connect(self.downloads_page.handle_sidebar_volume)
         
         logger.info("Media player connections established between sidebar and downloads page")
+    
+    def setup_settings_connections(self):
+        """Connect settings change signals for live updates across pages"""
+        self.settings_page.settings_changed.connect(self.on_settings_changed)
+        logger.info("Settings change connections established")
+    
+    def on_settings_changed(self, key: str, value: str):
+        """Handle settings changes and broadcast to relevant pages"""
+        logger.info(f"Settings changed: {key} = {value}")
+        
+        # Broadcast to all pages that need to know about path changes
+        if hasattr(self.downloads_page, 'on_paths_updated'):
+            self.downloads_page.on_paths_updated(key, value)
+        if hasattr(self.artists_page, 'on_paths_updated'):
+            self.artists_page.on_paths_updated(key, value)
     
     def change_page(self, page_id: str):
         page_map = {

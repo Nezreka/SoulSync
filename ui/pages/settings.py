@@ -162,6 +162,8 @@ class SettingsGroup(QGroupBox):
         """)
 
 class SettingsPage(QWidget):
+    settings_changed = pyqtSignal(str, str)  # Signal for when settings paths change
+    
     def __init__(self, parent=None):
         super().__init__(parent)
         self.config_manager = None
@@ -299,6 +301,10 @@ class SettingsPage(QWidget):
             config_manager.set('soulseek.api_key', self.api_key_input.text())
             config_manager.set('soulseek.download_path', self.download_path_input.text())
             config_manager.set('soulseek.transfer_path', self.transfer_path_input.text())
+            
+            # Emit signals for path changes to update other pages immediately
+            self.settings_changed.emit('soulseek.download_path', self.download_path_input.text())
+            self.settings_changed.emit('soulseek.transfer_path', self.transfer_path_input.text())
             
             # Show success message
             QMessageBox.information(self, "Success", "Settings saved successfully!")
