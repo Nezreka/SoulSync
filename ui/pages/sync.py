@@ -1944,6 +1944,9 @@ class SyncOptionsPanel(QFrame):
         layout.addLayout(quality_layout)
 
 class SyncPage(QWidget):
+    # Signals for dashboard activity tracking
+    sync_activity = pyqtSignal(str, str, str, str)  # icon, title, subtitle, time
+    
     def __init__(self, spotify_client=None, plex_client=None, soulseek_client=None, downloads_page=None, parent=None):
         super().__init__(parent)
         self.spotify_client = spotify_client
@@ -2037,6 +2040,9 @@ class SyncPage(QWidget):
         
         # Store the worker
         self.active_sync_workers[playlist.id] = sync_worker
+        
+        # Emit activity signal for sync start
+        self.sync_activity.emit("🔄", "Sync Started", f"Syncing playlist '{playlist.name}'", "Now")
         
         # Start the worker
         self.thread_pool.start(sync_worker)
@@ -2335,6 +2341,11 @@ class SyncPage(QWidget):
 
         # Pass the snapshot_id to the save function
         self._update_and_save_sync_status(playlist_id, result, snapshot_id)
+        
+        # Emit activity signal for sync completion
+        playlist_name = playlist_item.name if playlist_item else "Unknown Playlist"
+        success_msg = f"Completed: {result.matched_tracks}/{result.total_tracks} tracks"
+        self.sync_activity.emit("✅", "Sync Complete", f"'{playlist_name}' - {success_msg}", "Now")
 
         # Continue sequential sync if in progress
         if self.is_sequential_syncing:
@@ -2369,6 +2380,10 @@ class SyncPage(QWidget):
         
         # Update any open modals
         self.update_open_modals_error(playlist_id, error_msg)
+        
+        # Emit activity signal for sync error
+        playlist_name = playlist_item.name if playlist_item else "Unknown Playlist"
+        self.sync_activity.emit("❌", "Sync Failed", f"'{playlist_name}' - {error_msg}", "Now")
         
         # Continue sequential sync if in progress (even on error)
         if self.is_sequential_syncing:
