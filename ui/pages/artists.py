@@ -1603,12 +1603,28 @@ class DownloadMissingAlbumTracksModal(QDialog):
     
     def populate_track_table(self):
         """Populate track table with album tracks"""
-        self.track_table.setRowCount(len(self.album.tracks))
-        for i, track in enumerate(self.album.tracks):
-            self.track_table.setItem(i, 0, QTableWidgetItem(track.name))
-            artist_name = track.artists[0] if track.artists else "Unknown"
+        # Filter out invalid tracks before populating table
+        valid_tracks = []
+        for track in self.album.tracks:
+            if self.is_valid_track(track):
+                valid_tracks.append(track)
+            else:
+                print(f"⚠️ Skipping invalid track: name='{getattr(track, 'name', 'None')}', artists={getattr(track, 'artists', 'None')}, duration={getattr(track, 'duration_ms', 'None')}")
+        
+        # Update album tracks to only include valid ones
+        self.album.tracks = valid_tracks
+        self.total_tracks = len(valid_tracks)
+        
+        self.track_table.setRowCount(len(valid_tracks))
+        for i, track in enumerate(valid_tracks):
+            # Use defensive get methods for track data
+            track_name = getattr(track, 'name', '') or 'Unknown Track'
+            artist_name = track.artists[0] if track.artists else "Unknown Artist"
+            duration_ms = getattr(track, 'duration_ms', 0) or 0
+            
+            self.track_table.setItem(i, 0, QTableWidgetItem(track_name))
             self.track_table.setItem(i, 1, QTableWidgetItem(artist_name))
-            duration = self.format_duration(track.duration_ms)
+            duration = self.format_duration(duration_ms)
             duration_item = QTableWidgetItem(duration)
             duration_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.track_table.setItem(i, 2, duration_item)
@@ -1620,6 +1636,28 @@ class DownloadMissingAlbumTracksModal(QDialog):
             self.track_table.setItem(i, 4, status_item)
             for col in range(5):
                 self.track_table.item(i, col).setFlags(self.track_table.item(i, col).flags() & ~Qt.ItemFlag.ItemIsEditable)
+    
+    def is_valid_track(self, track) -> bool:
+        """Check if a track has valid data for display and download"""
+        # Check if track has a valid name
+        track_name = getattr(track, 'name', None)
+        if not track_name or track_name.strip() == '':
+            return False
+        
+        # Check if track has valid artists
+        artists = getattr(track, 'artists', None)
+        if not artists or len(artists) == 0:
+            return False
+        
+        # Check if track has valid duration (allow 0 duration but not None/missing attribute)
+        duration_ms = getattr(track, 'duration_ms', None)
+        if duration_ms is None:
+            return False
+        
+        # Allow 0 duration (some tracks like intros can be very short)
+        # Only reject if the duration attribute is completely missing
+        
+        return True
 
     def format_duration(self, duration_ms):
         """Convert milliseconds to MM:SS format"""
