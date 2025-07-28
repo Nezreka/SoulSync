@@ -112,6 +112,7 @@ class MusicMatchingEngine:
             r'\s-\s.*',
             r'\s*\(deluxe\s*edition?\)',
             r'\s*\(expanded\s*edition?\)',
+            r'\s*\(platinum\s*edition?\)',  # Fix for "Fearless (Platinum Edition)"
             r'\s*\(remastered?\)',
             r'\s*\(remaster\)',
             r'\s*\(anniversary\s*edition?\)',
@@ -122,7 +123,9 @@ class MusicMatchingEngine:
             r'\s*\[remastered?\]',
             r'\s*\[.*version\]',
             r'\s*-\s*deluxe',
+            r'\s*-\s*platinum\s*edition?',  # Handle "Album - Platinum Edition"
             r'\s*-\s*remastered?',
+            r'\s+platinum\s*edition?$',  # Handle "Album Platinum Edition" at end
             r'\s*\d{4}\s*remaster',  # Year remaster
             r'\s*\(\d{4}\s*remaster\)'
         ]
