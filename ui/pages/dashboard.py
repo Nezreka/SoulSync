@@ -46,6 +46,7 @@ class DashboardDataProvider(QObject):
     metadata_progress_updated = pyqtSignal(bool, str, int, int, float)  # running, artist, processed, total, percentage
     sync_progress_updated = pyqtSignal(str, int)  # current_playlist, progress
     system_stats_updated = pyqtSignal(str, str)  # uptime, memory
+    activity_item_added = pyqtSignal(str, str, str, str)  # icon, title, subtitle, time
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -92,6 +93,9 @@ class DashboardDataProvider(QObject):
     def increment_completed_downloads(self):
         """Increment the session completed downloads counter"""
         self.session_completed_downloads += 1
+        
+        # Emit signal for activity feed
+        self.activity_item_added.emit("📥", "Download Complete", "File downloaded successfully", "Now")
     
     def update_service_status(self, service: str, connected: bool, response_time: float = 0.0, error: str = ""):
         if service in self.service_status:
@@ -588,16 +592,16 @@ class ActivityItem(QWidget):
         text_layout = QVBoxLayout()
         text_layout.setSpacing(2)
         
-        title_label = QLabel(title)
-        title_label.setFont(QFont("Arial", 10, QFont.Weight.Medium))
-        title_label.setStyleSheet("color: #ffffff;")
+        self.title_label = QLabel(title)
+        self.title_label.setFont(QFont("Arial", 10, QFont.Weight.Medium))
+        self.title_label.setStyleSheet("color: #ffffff;")
         
-        subtitle_label = QLabel(subtitle)
-        subtitle_label.setFont(QFont("Arial", 9))
-        subtitle_label.setStyleSheet("color: #b3b3b3;")
+        self.subtitle_label = QLabel(subtitle)
+        self.subtitle_label.setFont(QFont("Arial", 9))
+        self.subtitle_label.setStyleSheet("color: #b3b3b3;")
         
-        text_layout.addWidget(title_label)
-        text_layout.addWidget(subtitle_label)
+        text_layout.addWidget(self.title_label)
+        text_layout.addWidget(self.subtitle_label)
         
         # Time
         time_label = QLabel(time)
@@ -621,9 +625,16 @@ class DashboardPage(QWidget):
         self.data_provider.metadata_progress_updated.connect(self.on_metadata_progress_updated)
         self.data_provider.sync_progress_updated.connect(self.on_sync_progress_updated)
         self.data_provider.system_stats_updated.connect(self.on_system_stats_updated)
+        self.data_provider.activity_item_added.connect(self.add_activity_item)
         
         # Service status cards
         self.service_cards = {}
+        
+        # Track previous service status to only show changes in activity
+        self.previous_service_status = {}
+        
+        # Track if placeholder exists
+        self.has_placeholder = True
         
         # Stats cards
         self.stats_cards = {}
@@ -865,6 +876,9 @@ class DashboardPage(QWidget):
             card.status_indicator.setStyleSheet("color: #ffaa00;")  # Orange
             card.status_text.setText("Testing connection...")
             
+            # Add activity item for test initiation
+            self.add_activity_item("🔍", f"Testing {service.capitalize()}", "Connection test initiated", "Now")
+            
             # Start test
             self.data_provider.test_service_connection(service)
     
@@ -887,12 +901,15 @@ class DashboardPage(QWidget):
         if service in self.service_cards:
             self.service_cards[service].update_status(connected, response_time, error)
             
-            # Add activity item for status change
-            status = "Connected" if connected else "Disconnected"
-            icon = "✅" if connected else "❌"
-            self.add_activity_item(icon, f"{service.capitalize()} {status}", 
-                                 f"Response time: {response_time:.0f}ms" if connected else f"Error: {error}" if error else "Connection test completed", 
-                                 "Now")
+            # Only add activity item if status actually changed
+            if service not in self.previous_service_status or self.previous_service_status[service] != connected:
+                self.previous_service_status[service] = connected
+                
+                status = "Connected" if connected else "Disconnected"
+                icon = "✅" if connected else "❌"
+                self.add_activity_item(icon, f"{service.capitalize()} {status}", 
+                                     f"Response time: {response_time:.0f}ms" if connected else f"Error: {error}" if error else "Connection test completed", 
+                                     "Now")
     
     def on_download_stats_updated(self, active_count: int, finished_count: int, total_speed: float):
         """Handle download statistics updates"""
@@ -938,11 +955,17 @@ class DashboardPage(QWidget):
     
     def add_activity_item(self, icon: str, title: str, subtitle: str, time_ago: str = "Now"):
         """Add new activity item to the feed"""
+        print(f"[DEBUG] Adding activity: {title} - Current count: {self.activity_layout.count()}")
+        
         # Remove placeholder if it exists
-        if self.activity_layout.count() == 1:
-            item = self.activity_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+        if self.has_placeholder:
+            print("[DEBUG] Removing placeholder item")
+            # Clear the entire layout
+            while self.activity_layout.count():
+                item = self.activity_layout.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
+            self.has_placeholder = False
         
         # Add separator if there are existing items
         if self.activity_layout.count() > 0:
@@ -950,13 +973,16 @@ class DashboardPage(QWidget):
             separator.setFixedHeight(1)
             separator.setStyleSheet("background: #404040;")
             self.activity_layout.insertWidget(0, separator)
+            print(f"[DEBUG] Added separator - Count now: {self.activity_layout.count()}")
         
         # Add new activity item at the top
         new_item = ActivityItem(icon, title, subtitle, time_ago)
         self.activity_layout.insertWidget(0, new_item)
+        print(f"[DEBUG] Added new item - Count now: {self.activity_layout.count()}")
         
-        # Limit to 5 most recent items
-        while self.activity_layout.count() > 9:  # 5 items + 4 separators
+        # Limit to 5 most recent items (5 items + 4 separators = 9 total)
+        while self.activity_layout.count() > 9:
+            print(f"[DEBUG] Removing old item - Count: {self.activity_layout.count()}")
             item = self.activity_layout.takeAt(self.activity_layout.count() - 1)
             if item.widget():
                 item.widget().deleteLater()
