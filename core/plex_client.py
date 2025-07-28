@@ -414,6 +414,59 @@ class PlexClient:
             logger.error(f"Error getting library stats: {e}")
             return {}
     
+    def get_all_artists(self) -> List[PlexArtist]:
+        """Get all artists from the music library"""
+        if not self.ensure_connection() or not self.music_library:
+            logger.error("Not connected to Plex server or no music library")
+            return []
+        
+        try:
+            artists = self.music_library.searchArtists()
+            logger.info(f"Found {len(artists)} artists in Plex library")
+            return artists
+        except Exception as e:
+            logger.error(f"Error getting all artists: {e}")
+            return []
+    
+    def update_artist_genres(self, artist: PlexArtist, genres: List[str]):
+        """Update artist genres"""
+        try:
+            # Clear existing genres first
+            for genre in artist.genres:
+                artist.removeGenre(genre)
+            
+            # Add new genres
+            for genre in genres:
+                artist.addGenre(genre)
+            
+            logger.info(f"Updated genres for {artist.title}: {genres}")
+            return True
+        except Exception as e:
+            logger.error(f"Error updating genres for {artist.title}: {e}")
+            return False
+    
+    def update_artist_poster(self, artist: PlexArtist, image_data: bytes):
+        """Update artist poster image"""
+        try:
+            # Upload poster using Plex API
+            upload_url = f"{self.server._baseurl}/library/metadata/{artist.ratingKey}/posters"
+            headers = {
+                'X-Plex-Token': self.server._token,
+                'Content-Type': 'image/jpeg'
+            }
+            
+            response = requests.post(upload_url, data=image_data, headers=headers)
+            response.raise_for_status()
+            
+            # Refresh artist to see changes
+            artist.refresh()
+            logger.info(f"Updated poster for {artist.title}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error updating poster for {artist.title}: {e}")
+            return False
+    
     def update_track_metadata(self, track_id: str, metadata: Dict[str, Any]) -> bool:
         if not self.ensure_connection():
             return False
