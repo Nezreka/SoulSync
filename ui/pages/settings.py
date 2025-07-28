@@ -5,6 +5,101 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QFont
 from config.settings import config_manager
 
+class SlskdDetectionThread(QThread):
+    progress_updated = pyqtSignal(int, str)  # progress value, current url
+    detection_completed = pyqtSignal(str)  # found_url (empty if not found)
+    
+    def __init__(self):
+        super().__init__()
+        self.cancelled = False
+    
+    def cancel(self):
+        self.cancelled = True
+    
+    def run(self):
+        import requests
+        import socket
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        
+        def get_local_network_range():
+            """Get the local network IP range"""
+            try:
+                # Get local IP
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.connect(("8.8.8.8", 80))
+                local_ip = s.getsockname()[0]
+                s.close()
+                
+                # Generate network range (assumes /24 subnet)
+                ip_parts = local_ip.split('.')
+                network_base = f"{ip_parts[0]}.{ip_parts[1]}.{ip_parts[2]}"
+                return network_base, local_ip
+            except:
+                return None, None
+        
+        def test_url(url):
+            """Test if slskd is running at the given URL"""
+            try:
+                response = requests.get(f"{url}/api/v0/session", timeout=1)
+                if response.status_code in [200, 401]:
+                    return url
+            except:
+                pass
+            return None
+        
+        # Build candidate list
+        candidates = []
+        
+        # Local candidates
+        local_candidates = [
+            "http://localhost:5030",
+            "http://127.0.0.1:5030", 
+            "http://localhost:5031",
+            "http://127.0.0.1:5031",
+            "http://localhost:8080",
+            "http://127.0.0.1:8080"
+        ]
+        candidates.extend(local_candidates)
+        
+        # Network candidates
+        network_base, local_ip = get_local_network_range()
+        if network_base and local_ip:
+            # Common network IPs to check (router, common static IPs)
+            priority_ips = [1, 2, 100, 101, 102, 150, 200]
+            ports = [5030, 5031, 8080]
+            
+            for ip_suffix in priority_ips:
+                test_ip = f"{network_base}.{ip_suffix}"
+                if test_ip != local_ip:  # Skip local IP (already tested)
+                    for port in ports:
+                        candidates.append(f"http://{test_ip}:{port}")
+        
+        found_url = None
+        
+        # Test candidates sequentially for more predictable progress
+        for i, url in enumerate(candidates):
+            if self.cancelled:
+                break
+            
+            # Emit progress update before testing
+            progress_percent = int((i / len(candidates)) * 100)
+            self.progress_updated.emit(progress_percent, url)
+            
+            # Test the URL
+            result = test_url(url)
+            if result:
+                found_url = result
+                # Emit final progress
+                self.progress_updated.emit(100, f"Found: {result}")
+                break
+            
+            # Small delay to make progress visible
+            import time
+            time.sleep(0.05)
+        
+        # Emit completion signal
+        self.detection_completed.emit(found_url or "")
+
 class ServiceTestThread(QThread):
     test_completed = pyqtSignal(str, bool, str)  # service, success, message
     
@@ -170,6 +265,8 @@ class SettingsPage(QWidget):
         self.form_inputs = {}
         self.test_thread = None
         self.test_buttons = {}
+        self.detection_thread = None
+        self.detection_dialog = None
         self.setup_ui()
         self.load_config_values()
     
@@ -282,6 +379,14 @@ class SettingsPage(QWidget):
             self.download_path_input.setText(soulseek_config.get('download_path', './downloads'))
             self.transfer_path_input.setText(soulseek_config.get('transfer_path', './Transfer'))
             
+            # Load logging config (read-only display)
+            logging_config = config_manager.get_logging_config()
+            if hasattr(self, 'log_level_display'):
+                self.log_level_display.setText(logging_config.get('level', 'DEBUG'))
+            
+            if hasattr(self, 'log_path_display'):
+                self.log_path_display.setText(logging_config.get('path', 'logs/app.log'))
+            
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to load configuration: {e}")
     
@@ -370,6 +475,290 @@ class SettingsPage(QWidget):
             'api_key': self.api_key_input.text()
         }
         self.start_service_test('soulseek', test_config)
+    
+    def auto_detect_slskd(self):
+        """Auto-detect slskd URL using background thread"""
+        # Don't start new detection if one is already running
+        if self.detection_thread and self.detection_thread.isRunning():
+            return
+        
+        # Create animated loading dialog
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
+        from PyQt6.QtCore import QTimer, QPropertyAnimation, QRect
+        from PyQt6.QtGui import QPainter, QColor
+        
+        self.detection_dialog = QDialog(self)
+        self.detection_dialog.setWindowTitle("Auto-detecting slskd")
+        self.detection_dialog.setModal(True)
+        self.detection_dialog.setFixedSize(350, 150)
+        self.detection_dialog.setWindowFlags(self.detection_dialog.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        
+        # Apply dark theme styling
+        self.detection_dialog.setStyleSheet("""
+            QDialog {
+                background-color: #282828;
+                color: #ffffff;
+                border: 1px solid #404040;
+                border-radius: 8px;
+            }
+            QLabel {
+                color: #ffffff;
+                font-size: 14px;
+            }
+            QPushButton {
+                background-color: #404040;
+                border: 1px solid #606060;
+                border-radius: 4px;
+                color: #ffffff;
+                padding: 8px 16px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #505050;
+            }
+        """)
+        
+        layout = QVBoxLayout(self.detection_dialog)
+        layout.setSpacing(20)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Title label
+        title_label = QLabel("Searching for slskd instances...")
+        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(title_label)
+        
+        # Status label
+        self.status_label = QLabel("Checking local machine...")
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.status_label.setStyleSheet("color: #b3b3b3; font-size: 12px;")
+        layout.addWidget(self.status_label)
+        
+        # Animated loading bar container
+        loading_container = QLabel()
+        loading_container.setFixedHeight(8)
+        loading_container.setStyleSheet("""
+            QLabel {
+                background-color: #404040;
+                border: 1px solid #606060;
+                border-radius: 4px;
+            }
+        """)
+        layout.addWidget(loading_container)
+        
+        # Animated green bar
+        self.loading_bar = QLabel(loading_container)
+        self.loading_bar.setFixedHeight(6)
+        self.loading_bar.setStyleSheet("""
+            background-color: #1db954;
+            border-radius: 3px;
+            border: none;
+        """)
+        
+        # Start animation
+        self.loading_animation = QPropertyAnimation(self.loading_bar, b"geometry")
+        self.loading_animation.setDuration(1500)  # 1.5 seconds
+        self.loading_animation.setStartValue(QRect(1, 1, 0, 6))
+        self.loading_animation.setEndValue(QRect(1, 1, loading_container.width() - 2, 6))
+        self.loading_animation.setLoopCount(-1)  # Infinite loop
+        self.loading_animation.start()
+        
+        # Cancel button
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.cancel_detection)
+        button_layout.addWidget(cancel_btn)
+        
+        layout.addLayout(button_layout)
+        
+        # Start detection thread
+        self.detection_thread = SlskdDetectionThread()
+        self.detection_thread.progress_updated.connect(self.on_detection_progress, Qt.ConnectionType.QueuedConnection)
+        self.detection_thread.detection_completed.connect(self.on_detection_completed, Qt.ConnectionType.QueuedConnection)
+        self.detection_thread.start()
+        
+        self.detection_dialog.show()
+    
+    def cancel_detection(self):
+        """Cancel the ongoing detection"""
+        if self.detection_thread:
+            self.detection_thread.cancel()
+        
+        # Close dialog
+        if hasattr(self, 'detection_dialog') and self.detection_dialog:
+            if hasattr(self, 'loading_animation'):
+                self.loading_animation.stop()
+            self.detection_dialog.close()
+            self.detection_dialog = None
+    
+    def on_detection_progress(self, progress_value, current_url):
+        """Handle progress updates from detection thread"""
+        if hasattr(self, 'status_label') and self.status_label:
+            if "localhost" in current_url or "127.0.0.1" in current_url:
+                self.status_label.setText("Checking local machine...")
+            else:
+                self.status_label.setText("Checking network...")
+    
+    def on_detection_completed(self, found_url):
+        """Handle detection completion"""
+        # Stop animation and close dialog
+        if hasattr(self, 'loading_animation'):
+            self.loading_animation.stop()
+        
+        if hasattr(self, 'detection_dialog') and self.detection_dialog:
+            self.detection_dialog.close()
+            self.detection_dialog = None
+        
+        if self.detection_thread:
+            self.detection_thread.deleteLater()
+            self.detection_thread = None
+        
+        if found_url:
+            self.slskd_url_input.setText(found_url)
+            self.show_success_dialog(found_url)
+        else:
+            QMessageBox.warning(self, "Auto-detect Failed", 
+                              "Could not find slskd running on local machine or network.\n\n"
+                              "Please ensure slskd is running and try:\n"
+                              "• Check if slskd service is started\n"
+                              "• Verify firewall allows access to slskd port\n"
+                              "• Enter the URL manually if on a different network\n\n"
+                              "Common URLs:\n"
+                              "• http://localhost:5030 (local default)\n"
+                              "• http://192.168.1.100:5030 (network example)")
+    
+    def show_success_dialog(self, found_url):
+        """Show custom success dialog with copy functionality"""
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit
+        from PyQt6.QtCore import Qt
+        from PyQt6.QtGui import QClipboard
+        
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Auto-detect Success")
+        dialog.setModal(True)
+        dialog.setFixedSize(380, 160)
+        dialog.setWindowFlags(dialog.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        
+        # Apply dark theme styling
+        dialog.setStyleSheet("""
+            QDialog {
+                background-color: #282828;
+                color: #ffffff;
+                border: 1px solid #404040;
+                border-radius: 8px;
+            }
+            QLabel {
+                color: #ffffff;
+                font-size: 12px;
+            }
+            QTextEdit {
+                background-color: #404040;
+                border: 1px solid #606060;
+                border-radius: 4px;
+                color: #ffffff;
+                font-size: 11px;
+                font-family: 'Courier New', monospace;
+                padding: 8px;
+            }
+            QPushButton {
+                background-color: #404040;
+                border: 1px solid #606060;
+                border-radius: 4px;
+                color: #ffffff;
+                padding: 6px 12px;
+                font-size: 11px;
+                min-width: 50px;
+                min-height: 28px;
+            }
+            QPushButton:hover {
+                background-color: #505050;
+            }
+            #copyButton {
+                background-color: #1db954;
+                border: 1px solid #1db954;
+                color: #000000;
+                font-weight: bold;
+                min-height: 28px;
+            }
+            #copyButton:hover {
+                background-color: #1ed760;
+            }
+        """)
+        
+        layout = QVBoxLayout(dialog)
+        layout.setSpacing(8)
+        layout.setContentsMargins(15, 15, 15, 15)
+        
+        # Success message
+        location_type = "locally" if "localhost" in found_url or "127.0.0.1" in found_url else "on network"
+        success_label = QLabel(f"✓ Found slskd running {location_type}!")
+        success_label.setStyleSheet("color: #1db954; font-size: 13px; font-weight: bold;")
+        success_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(success_label)
+        
+        # URL display with copy functionality
+        url_label = QLabel("Detected URL:")
+        layout.addWidget(url_label)
+        
+        url_container = QHBoxLayout()
+        url_container.setSpacing(5)
+        
+        url_display = QTextEdit()
+        url_display.setPlainText(found_url)
+        url_display.setReadOnly(True)
+        url_display.setFixedHeight(30)
+        url_display.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        url_container.addWidget(url_display)
+        
+        copy_btn = QPushButton("Copy")
+        copy_btn.setObjectName("copyButton")
+        copy_btn.setFixedSize(55, 30)
+        copy_btn.clicked.connect(lambda: self.copy_to_clipboard(found_url, copy_btn))
+        url_container.addWidget(copy_btn)
+        
+        layout.addLayout(url_container)
+        
+        # Info text
+        info_label = QLabel("URL automatically filled in settings above.")
+        info_label.setStyleSheet("color: #b3b3b3; font-size: 9px; font-style: italic;")
+        info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(info_label)
+        
+        # OK button
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        
+        ok_btn = QPushButton("OK")
+        ok_btn.setFixedSize(60, 28)
+        ok_btn.clicked.connect(dialog.accept)
+        ok_btn.setDefault(True)
+        button_layout.addWidget(ok_btn)
+        
+        layout.addLayout(button_layout)
+        
+        dialog.exec()
+    
+    def copy_to_clipboard(self, text, button):
+        """Copy text to clipboard and show feedback"""
+        from PyQt6.QtWidgets import QApplication
+        from PyQt6.QtCore import QTimer
+        
+        clipboard = QApplication.clipboard()
+        clipboard.setText(text)
+        
+        # Show feedback
+        original_text = button.text()
+        button.setText("Copied!")
+        button.setEnabled(False)
+        
+        # Reset button after 1 second
+        QTimer.singleShot(1000, lambda: self.reset_copy_button(button, original_text))
+    
+    def reset_copy_button(self, button, original_text):
+        """Reset copy button to original state"""
+        button.setText(original_text)
+        button.setEnabled(True)
     
     def browse_download_path(self):
         """Open a directory dialog to select download path"""
@@ -539,11 +928,20 @@ class SettingsPage(QWidget):
         slskd_url_label.setStyleSheet("color: #ffffff; font-size: 11px;")
         soulseek_layout.addWidget(slskd_url_label)
         
+        url_input_layout = QHBoxLayout()
         self.slskd_url_input = QLineEdit()
         self.slskd_url_input.setStyleSheet(self.get_input_style())
         self.slskd_url_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.form_inputs['soulseek.slskd_url'] = self.slskd_url_input
-        soulseek_layout.addWidget(self.slskd_url_input)
+        
+        detect_btn = QPushButton("Auto-detect")
+        detect_btn.setFixedSize(80, 30)
+        detect_btn.clicked.connect(self.auto_detect_slskd)
+        detect_btn.setStyleSheet(self.get_test_button_style())
+        
+        url_input_layout.addWidget(self.slskd_url_input)
+        url_input_layout.addWidget(detect_btn)
+        soulseek_layout.addLayout(url_input_layout)
         
         # API Key
         api_key_label = QLabel("API Key:")
@@ -670,30 +1068,43 @@ class SettingsPage(QWidget):
         logging_layout.setContentsMargins(16, 20, 16, 16)
         logging_layout.setSpacing(12)
         
-        # Log level
+        # Log level (read-only)
         log_level_layout = QHBoxLayout()
         log_level_label = QLabel("Log Level:")
         log_level_label.setStyleSheet("color: #ffffff; font-size: 12px;")
         
-        log_level_combo = QComboBox()
-        log_level_combo.addItems(["DEBUG", "INFO", "WARNING", "ERROR"])
-        log_level_combo.setCurrentText("DEBUG")
-        log_level_combo.setStyleSheet(self.get_combo_style())
-        log_level_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.log_level_display = QLabel("DEBUG")
+        self.log_level_display.setStyleSheet("""
+            color: #b3b3b3; 
+            font-size: 11px; 
+            background-color: #404040;
+            border: 1px solid #606060;
+            border-radius: 4px;
+            padding: 8px;
+        """)
+        self.log_level_display.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         
         log_level_layout.addWidget(log_level_label)
-        log_level_layout.addWidget(log_level_combo)
+        log_level_layout.addWidget(self.log_level_display)
         
-        # Log file path
+        # Log file path (read-only)
         log_path_container = QVBoxLayout()
         log_path_label = QLabel("Log File Path:")
         log_path_label.setStyleSheet("color: #ffffff; font-size: 12px;")
         log_path_container.addWidget(log_path_label)
         
-        log_path_input = QLineEdit("logs/app.log")
-        log_path_input.setStyleSheet(self.get_input_style())
-        log_path_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        log_path_container.addWidget(log_path_input)
+        self.log_path_display = QLabel("logs/app.log")
+        self.log_path_display.setStyleSheet("""
+            color: #b3b3b3; 
+            font-size: 11px; 
+            background-color: #404040;
+            border: 1px solid #606060;
+            border-radius: 4px;
+            padding: 8px;
+            font-family: 'Courier New', monospace;
+        """)
+        self.log_path_display.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        log_path_container.addWidget(self.log_path_display)
         
         logging_layout.addLayout(log_level_layout)
         logging_layout.addLayout(log_path_container)
