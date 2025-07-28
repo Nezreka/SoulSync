@@ -664,34 +664,6 @@ class SettingsPage(QWidget):
         download_layout.addLayout(path_container)
         download_layout.addLayout(transfer_path_container)
         
-        # Sync Settings
-        sync_group = SettingsGroup("Sync Settings")
-        sync_layout = QVBoxLayout(sync_group)
-        sync_layout.setContentsMargins(16, 20, 16, 16)
-        sync_layout.setSpacing(12)
-        
-        # Auto-sync checkbox
-        auto_sync = QCheckBox("Auto-sync playlists every hour")
-        auto_sync.setChecked(True)
-        auto_sync.setStyleSheet(self.get_checkbox_style())
-        
-        # Sync interval
-        interval_layout = QHBoxLayout()
-        interval_label = QLabel("Sync Interval (minutes):")
-        interval_label.setStyleSheet("color: #ffffff; font-size: 12px;")
-        
-        interval_spin = QSpinBox()
-        interval_spin.setRange(5, 1440)  # 5 minutes to 24 hours
-        interval_spin.setValue(60)
-        interval_spin.setStyleSheet(self.get_spin_style())
-        interval_spin.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        
-        interval_layout.addWidget(interval_label)
-        interval_layout.addWidget(interval_spin)
-        
-        sync_layout.addWidget(auto_sync)
-        sync_layout.addLayout(interval_layout)
-        
         # Logging Settings
         logging_group = SettingsGroup("Logging Settings")
         logging_layout = QVBoxLayout(logging_group)
@@ -727,8 +699,8 @@ class SettingsPage(QWidget):
         logging_layout.addLayout(log_path_container)
         
         layout.addWidget(download_group)
-        layout.addWidget(sync_group)
         layout.addWidget(logging_group)
+        layout.addStretch()  # Push content to top, prevent stretching
         
         return column
     
