@@ -6,6 +6,12 @@ from PyQt6.QtGui import QFont, QPalette, QColor
 import time
 import asyncio
 import threading
+try:
+    import resource
+    HAS_RESOURCE = True
+except ImportError:
+    HAS_RESOURCE = False
+import os
 from typing import Optional, Dict, Any
 from datetime import datetime
 from dataclasses import dataclass
@@ -39,12 +45,14 @@ class DashboardDataProvider(QObject):
     download_stats_updated = pyqtSignal(int, int, float)  # active, finished, speed
     metadata_progress_updated = pyqtSignal(bool, str, int, int, float)  # running, artist, processed, total, percentage
     sync_progress_updated = pyqtSignal(str, int)  # current_playlist, progress
+    system_stats_updated = pyqtSignal(str, str)  # uptime, memory
     
     def __init__(self, parent=None):
         super().__init__(parent)
         self.service_clients = {}
         self.downloads_page = None
         self.sync_page = None
+        self.app_start_time = None
         
         # Data storage
         self.service_status = {
@@ -55,10 +63,14 @@ class DashboardDataProvider(QObject):
         self.download_stats = DownloadStats()
         self.metadata_progress = MetadataProgress()
         
-        # Update timers
+        # Update timers with different frequencies
         self.download_stats_timer = QTimer()
         self.download_stats_timer.timeout.connect(self.update_download_stats)
         self.download_stats_timer.start(2000)  # Update every 2 seconds
+        
+        self.system_stats_timer = QTimer()
+        self.system_stats_timer.timeout.connect(self.update_system_stats)
+        self.system_stats_timer.start(10000)  # Update every 10 seconds
     
     def set_service_clients(self, spotify_client, plex_client, soulseek_client):
         self.service_clients = {
@@ -70,6 +82,9 @@ class DashboardDataProvider(QObject):
     def set_page_references(self, downloads_page, sync_page):
         self.downloads_page = downloads_page
         self.sync_page = sync_page
+    
+    def set_app_start_time(self, start_time):
+        self.app_start_time = start_time
     
     def update_service_status(self, service: str, connected: bool, response_time: float = 0.0, error: str = ""):
         if service in self.service_status:
@@ -85,11 +100,12 @@ class DashboardDataProvider(QObject):
                 active_count = len(self.downloads_page.download_queue.active_queue.download_items)
                 finished_count = len(self.downloads_page.download_queue.finished_queue.download_items)
                 
-                # Calculate total speed from active downloads
+                # Calculate total speed from active downloads (in bytes/sec)
                 total_speed = 0.0
                 for item in self.downloads_page.download_queue.active_queue.download_items:
-                    if hasattr(item, 'download_speed') and item.download_speed:
-                        total_speed += item.download_speed
+                    if hasattr(item, 'download_speed') and isinstance(item.download_speed, (int, float)) and item.download_speed > 0:
+                        # download_speed is already in bytes/sec from slskd API
+                        total_speed += float(item.download_speed)
                 
                 self.download_stats.active_count = active_count
                 self.download_stats.finished_count = finished_count
@@ -106,6 +122,78 @@ class DashboardDataProvider(QObject):
                 self.sync_progress_updated.emit("", active_syncs)
             except Exception as e:
                 pass  # Silent failure for stats updates
+    
+    def update_system_stats(self):
+        """Update system statistics (uptime and memory)"""
+        try:
+            uptime_str = self.get_uptime_string()
+            memory_str = self.get_memory_usage()
+            self.system_stats_updated.emit(uptime_str, memory_str)
+        except Exception as e:
+            pass
+    
+    def get_uptime_string(self):
+        """Get formatted uptime string"""
+        if not self.app_start_time:
+            return "Unknown"
+        
+        try:
+            uptime_seconds = time.time() - self.app_start_time
+            
+            if uptime_seconds < 60:
+                return f"{int(uptime_seconds)}s"
+            elif uptime_seconds < 3600:
+                minutes = int(uptime_seconds / 60)
+                return f"{minutes}m"
+            elif uptime_seconds < 86400:
+                hours = int(uptime_seconds / 3600)
+                minutes = int((uptime_seconds % 3600) / 60)
+                return f"{hours}h {minutes}m"
+            else:
+                days = int(uptime_seconds / 86400)
+                hours = int((uptime_seconds % 86400) / 3600)
+                return f"{days}d {hours}h"
+        except Exception:
+            return "Unknown"
+    
+    def get_memory_usage(self):
+        """Get formatted memory usage string"""
+        try:
+            # Try using resource module first (Unix-like systems)
+            if HAS_RESOURCE and hasattr(resource, 'RUSAGE_SELF'):
+                usage = resource.getrusage(resource.RUSAGE_SELF)
+                # ru_maxrss is in KB on Linux, bytes on macOS
+                max_rss = usage.ru_maxrss
+                
+                # Detect platform and convert accordingly
+                import platform
+                if platform.system() == 'Darwin':  # macOS
+                    memory_mb = max_rss / (1024 * 1024)
+                else:  # Linux
+                    memory_mb = max_rss / 1024
+                
+                return f"~{memory_mb:.0f} MB"
+            
+            # Windows fallback: try psutil if available
+            try:
+                import psutil
+                process = psutil.Process(os.getpid())
+                memory_mb = process.memory_info().rss / (1024 * 1024)
+                return f"~{memory_mb:.0f} MB"
+            except ImportError:
+                pass
+            
+            # Linux fallback: try reading /proc/self/status
+            if os.path.exists('/proc/self/status'):
+                with open('/proc/self/status', 'r') as f:
+                    for line in f:
+                        if line.startswith('VmRSS:'):
+                            kb = int(line.split()[1])
+                            return f"~{kb / 1024:.0f} MB"
+            
+            return "N/A"
+        except Exception:
+            return "N/A"
     
     def test_service_connection(self, service: str):
         """Test connection to a specific service"""
@@ -149,7 +237,6 @@ class DashboardDataProvider(QObject):
             del self._test_threads[service]
     
     def on_service_test_completed(self, service: str, connected: bool, response_time: float, error: str):
-        print(f"DEBUG: on_service_test_completed called: {service}, {connected}, {response_time}, {error}")
         self.update_service_status(service, connected, response_time, error)
 
 class ServiceTestThread(QThread):
@@ -161,37 +248,28 @@ class ServiceTestThread(QThread):
         self.client = client
     
     def run(self):
-        print(f"DEBUG: ServiceTestThread.run() started for {self.service}")
         start_time = time.time()
         connected = False
         error = ""
         
         try:
             if self.service == 'spotify':
-                print(f"DEBUG: Testing Spotify authentication...")
                 connected = self.client.is_authenticated()
-                print(f"DEBUG: Spotify result: {connected}")
             elif self.service == 'plex':
-                print(f"DEBUG: Testing Plex connection...")
                 connected = self.client.is_connected()
-                print(f"DEBUG: Plex result: {connected}")
             elif self.service == 'soulseek':
-                print(f"DEBUG: Testing Soulseek connection...")
                 # Run async method in new event loop
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 try:
                     connected = loop.run_until_complete(self.client.check_connection())
-                    print(f"DEBUG: Soulseek result: {connected}")
                 finally:
                     loop.close()
         except Exception as e:
-            print(f"DEBUG: Exception in {self.service} test: {e}")
             error = str(e)
             connected = False
         
         response_time = (time.time() - start_time) * 1000  # Convert to milliseconds
-        print(f"DEBUG: Emitting test_completed for {self.service}: connected={connected}, time={response_time:.0f}ms, error='{error}'")
         self.test_completed.emit(self.service, connected, response_time, error)
         
         # Ensure thread finishes properly
@@ -535,6 +613,7 @@ class DashboardPage(QWidget):
         self.data_provider.download_stats_updated.connect(self.on_download_stats_updated)
         self.data_provider.metadata_progress_updated.connect(self.on_metadata_progress_updated)
         self.data_provider.sync_progress_updated.connect(self.on_sync_progress_updated)
+        self.data_provider.system_stats_updated.connect(self.on_system_stats_updated)
         
         # Service status cards
         self.service_cards = {}
@@ -551,6 +630,10 @@ class DashboardPage(QWidget):
     def set_page_references(self, downloads_page, sync_page):
         """Called from main window to provide page references for live data"""
         self.data_provider.set_page_references(downloads_page, sync_page)
+    
+    def set_app_start_time(self, start_time):
+        """Called from main window to provide app start time for uptime calculation"""
+        self.data_provider.set_app_start_time(start_time)
     
     def setup_ui(self):
         self.setStyleSheet("""
@@ -760,17 +843,14 @@ class DashboardPage(QWidget):
     
     def test_service_connection(self, service: str):
         """Test connection to a specific service"""
-        print(f"DEBUG: Dashboard test_service_connection called for {service}")
         if service in self.service_cards:
             card = self.service_cards[service]
             
             # Prevent multiple simultaneous tests
             if hasattr(self.data_provider, '_test_threads') and service in self.data_provider._test_threads:
                 if self.data_provider._test_threads[service].isRunning():
-                    print(f"DEBUG: Test already running for {service}")
                     return
             
-            print(f"DEBUG: Updating UI for {service} test")
             card.test_button.setText("Testing...")
             card.test_button.setEnabled(False)
             
@@ -779,7 +859,6 @@ class DashboardPage(QWidget):
             card.status_text.setText("Testing connection...")
             
             # Start test
-            print(f"DEBUG: Calling data_provider.test_service_connection for {service}")
             self.data_provider.test_service_connection(service)
     
     def toggle_metadata_update(self):
@@ -817,9 +896,12 @@ class DashboardPage(QWidget):
             self.stats_cards['finished_downloads'].update_values(str(finished_count), "Completed today")
         
         if 'download_speed' in self.stats_cards:
-            if total_speed > 1024 * 1024:  # MB/s
+            # Format speed based on magnitude
+            if total_speed <= 0:
+                speed_text = "0 B/s"
+            elif total_speed >= 1024 * 1024:  # MB/s
                 speed_text = f"{total_speed / (1024 * 1024):.1f} MB/s"
-            elif total_speed > 1024:  # KB/s
+            elif total_speed >= 1024:  # KB/s
                 speed_text = f"{total_speed / 1024:.1f} KB/s"
             else:
                 speed_text = f"{total_speed:.0f} B/s"
@@ -833,6 +915,14 @@ class DashboardPage(QWidget):
         """Handle sync progress updates"""
         if 'active_syncs' in self.stats_cards:
             self.stats_cards['active_syncs'].update_values(str(active_syncs), "Playlists syncing")
+    
+    def on_system_stats_updated(self, uptime: str, memory: str):
+        """Handle system statistics updates"""
+        if 'uptime' in self.stats_cards:
+            self.stats_cards['uptime'].update_values(uptime, "Application runtime")
+        
+        if 'memory' in self.stats_cards:
+            self.stats_cards['memory'].update_values(memory, "Current usage")
     
     def on_stat_card_clicked(self, card_title: str):
         """Handle stat card clicks for detailed views"""
@@ -879,6 +969,8 @@ class DashboardPage(QWidget):
                 thread.deleteLater()
             self.data_provider._test_threads.clear()
         
-        # Stop the data provider timer
+        # Stop the data provider timers
         if hasattr(self.data_provider, 'download_stats_timer'):
             self.data_provider.download_stats_timer.stop()
+        if hasattr(self.data_provider, 'system_stats_timer'):
+            self.data_provider.system_stats_timer.stop()
