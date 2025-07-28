@@ -4682,6 +4682,13 @@ class TabbedDownloadManager(QTabWidget):
             
             self.update_tab_counts()
             
+            # Emit signal for session download tracking
+            parent_page = self.parent()
+            while parent_page and not hasattr(parent_page, 'download_session_completed'):
+                parent_page = parent_page.parent()
+            if parent_page and hasattr(parent_page, 'download_session_completed'):
+                parent_page.download_session_completed.emit()
+            
             # Performance monitoring
             end_time = time.time()
             duration_ms = (end_time - start_time) * 1000
@@ -4794,6 +4801,9 @@ class DownloadsPage(QWidget):
     track_loading_started = pyqtSignal(object)  # Track result object when streaming starts
     track_loading_finished = pyqtSignal(object)  # Track result object when streaming completes
     track_loading_progress = pyqtSignal(float, object)  # Progress percentage (0-100), track result object
+    
+    # Signal for dashboard stats tracking
+    download_session_completed = pyqtSignal()  # Emitted when a download completes (for session tracking)
     
     # Signal for clear completed downloads completion (thread-safe communication)
     clear_completed_finished = pyqtSignal(bool, object)  # backend_success, ui_callback

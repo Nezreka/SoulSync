@@ -166,6 +166,11 @@ class MainWindow(QMainWindow):
         self.dashboard_page.set_page_references(self.downloads_page, self.sync_page)
         self.dashboard_page.set_app_start_time(self.app_start_time)
         
+        # Connect download completion signal for session tracking
+        self.downloads_page.download_session_completed.connect(
+            self.dashboard_page.data_provider.increment_completed_downloads
+        )
+        
         self.stacked_widget.addWidget(self.dashboard_page)
         self.stacked_widget.addWidget(self.sync_page)
         self.stacked_widget.addWidget(self.downloads_page)

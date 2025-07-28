@@ -63,6 +63,9 @@ class DashboardDataProvider(QObject):
         self.download_stats = DownloadStats()
         self.metadata_progress = MetadataProgress()
         
+        # Session-based counters (reset on app restart)
+        self.session_completed_downloads = 0
+        
         # Update timers with different frequencies
         self.download_stats_timer = QTimer()
         self.download_stats_timer.timeout.connect(self.update_download_stats)
@@ -86,6 +89,10 @@ class DashboardDataProvider(QObject):
     def set_app_start_time(self, start_time):
         self.app_start_time = start_time
     
+    def increment_completed_downloads(self):
+        """Increment the session completed downloads counter"""
+        self.session_completed_downloads += 1
+    
     def update_service_status(self, service: str, connected: bool, response_time: float = 0.0, error: str = ""):
         if service in self.service_status:
             self.service_status[service].connected = connected
@@ -108,10 +115,10 @@ class DashboardDataProvider(QObject):
                         total_speed += float(item.download_speed)
                 
                 self.download_stats.active_count = active_count
-                self.download_stats.finished_count = finished_count
+                self.download_stats.finished_count = self.session_completed_downloads  # Use session counter
                 self.download_stats.total_speed = total_speed
                 
-                self.download_stats_updated.emit(active_count, finished_count, total_speed)
+                self.download_stats_updated.emit(active_count, self.session_completed_downloads, total_speed)
             except Exception as e:
                 pass  # Silent failure for stats updates
         
