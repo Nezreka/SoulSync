@@ -156,6 +156,10 @@ class MainWindow(QMainWindow):
         self.artists_page = ArtistsPage(downloads_page=self.downloads_page)
         self.settings_page = SettingsPage()
         
+        # Configure dashboard with service clients and page references
+        self.dashboard_page.set_service_clients(self.spotify_client, self.plex_client, self.soulseek_client)
+        self.dashboard_page.set_page_references(self.downloads_page, self.sync_page)
+        
         self.stacked_widget.addWidget(self.dashboard_page)
         self.stacked_widget.addWidget(self.sync_page)
         self.stacked_widget.addWidget(self.downloads_page)
@@ -254,6 +258,10 @@ class MainWindow(QMainWindow):
     
     def update_service_status(self, service: str, connected: bool):
         self.sidebar.update_service_status(service, connected)
+        
+        # Update dashboard with service status
+        if hasattr(self.dashboard_page, 'data_provider'):
+            self.dashboard_page.data_provider.update_service_status(service, connected)
         
         # Force a refresh of the Spotify client if needed
         if service == "spotify" and not connected:

@@ -1,25 +1,222 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-                           QFrame, QGridLayout, QScrollArea, QSizePolicy)
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QFont, QPalette
+                           QFrame, QGridLayout, QScrollArea, QSizePolicy, QPushButton,
+                           QProgressBar, QTextEdit, QSpacerItem, QGroupBox, QFormLayout)
+from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, QObject
+from PyQt6.QtGui import QFont, QPalette, QColor
+import time
+import asyncio
+import threading
+from typing import Optional, Dict, Any
+from datetime import datetime
+from dataclasses import dataclass
+
+@dataclass
+class ServiceStatus:
+    name: str
+    connected: bool
+    last_check: datetime
+    response_time: float = 0.0
+    error: Optional[str] = None
+
+@dataclass
+class DownloadStats:
+    active_count: int = 0
+    finished_count: int = 0
+    total_speed: float = 0.0
+    total_transferred: int = 0
+
+@dataclass
+class MetadataProgress:
+    is_running: bool = False
+    current_artist: str = ""
+    processed_count: int = 0
+    total_count: int = 0
+    progress_percentage: float = 0.0
+
+class DashboardDataProvider(QObject):
+    # Signals for real-time updates
+    service_status_updated = pyqtSignal(str, bool, float, str)  # service, connected, response_time, error
+    download_stats_updated = pyqtSignal(int, int, float)  # active, finished, speed
+    metadata_progress_updated = pyqtSignal(bool, str, int, int, float)  # running, artist, processed, total, percentage
+    sync_progress_updated = pyqtSignal(str, int)  # current_playlist, progress
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.service_clients = {}
+        self.downloads_page = None
+        self.sync_page = None
+        
+        # Data storage
+        self.service_status = {
+            'spotify': ServiceStatus('Spotify', False, datetime.now()),
+            'plex': ServiceStatus('Plex', False, datetime.now()),
+            'soulseek': ServiceStatus('Soulseek', False, datetime.now())
+        }
+        self.download_stats = DownloadStats()
+        self.metadata_progress = MetadataProgress()
+        
+        # Update timers
+        self.download_stats_timer = QTimer()
+        self.download_stats_timer.timeout.connect(self.update_download_stats)
+        self.download_stats_timer.start(2000)  # Update every 2 seconds
+    
+    def set_service_clients(self, spotify_client, plex_client, soulseek_client):
+        self.service_clients = {
+            'spotify': spotify_client,
+            'plex': plex_client, 
+            'soulseek': soulseek_client
+        }
+    
+    def set_page_references(self, downloads_page, sync_page):
+        self.downloads_page = downloads_page
+        self.sync_page = sync_page
+    
+    def update_service_status(self, service: str, connected: bool, response_time: float = 0.0, error: str = ""):
+        if service in self.service_status:
+            self.service_status[service].connected = connected
+            self.service_status[service].last_check = datetime.now()
+            self.service_status[service].response_time = response_time
+            self.service_status[service].error = error
+            self.service_status_updated.emit(service, connected, response_time, error)
+    
+    def update_download_stats(self):
+        if self.downloads_page and hasattr(self.downloads_page, 'download_queue'):
+            try:
+                active_count = len(self.downloads_page.download_queue.active_queue.download_items)
+                finished_count = len(self.downloads_page.download_queue.finished_queue.download_items)
+                
+                # Calculate total speed from active downloads
+                total_speed = 0.0
+                for item in self.downloads_page.download_queue.active_queue.download_items:
+                    if hasattr(item, 'download_speed') and item.download_speed:
+                        total_speed += item.download_speed
+                
+                self.download_stats.active_count = active_count
+                self.download_stats.finished_count = finished_count
+                self.download_stats.total_speed = total_speed
+                
+                self.download_stats_updated.emit(active_count, finished_count, total_speed)
+            except Exception as e:
+                pass  # Silent failure for stats updates
+        
+        # Update sync stats
+        if self.sync_page and hasattr(self.sync_page, 'active_sync_workers'):
+            try:
+                active_syncs = len(self.sync_page.active_sync_workers)
+                self.sync_progress_updated.emit("", active_syncs)
+            except Exception as e:
+                pass  # Silent failure for stats updates
+    
+    def test_service_connection(self, service: str):
+        """Test connection to a specific service"""
+        print(f"DEBUG: Testing {service} connection")
+        print(f"DEBUG: Available service clients: {list(self.service_clients.keys())}")
+        
+        if service not in self.service_clients:
+            print(f"DEBUG: Service {service} not found in service_clients")
+            return
+        
+        print(f"DEBUG: Service client for {service}: {self.service_clients[service]}")
+        
+        # Clean up any existing test thread for this service
+        if hasattr(self, '_test_threads') and service in self._test_threads:
+            old_thread = self._test_threads[service]
+            if old_thread.isRunning():
+                old_thread.quit()
+                old_thread.wait()
+            old_thread.deleteLater()
+        
+        # Initialize test threads dict if needed
+        if not hasattr(self, '_test_threads'):
+            self._test_threads = {}
+        
+        # Run connection test in background thread
+        test_thread = ServiceTestThread(service, self.service_clients[service])
+        test_thread.test_completed.connect(self.on_service_test_completed)
+        test_thread.finished.connect(lambda: self._cleanup_test_thread(service))
+        self._test_threads[service] = test_thread
+        print(f"DEBUG: Starting test thread for {service}")
+        test_thread.start()
+    
+    def _cleanup_test_thread(self, service: str):
+        """Clean up completed test thread"""
+        if hasattr(self, '_test_threads') and service in self._test_threads:
+            thread = self._test_threads[service]
+            if thread.isRunning():
+                thread.quit()
+                thread.wait(1000)  # Wait up to 1 second
+            thread.deleteLater()
+            del self._test_threads[service]
+    
+    def on_service_test_completed(self, service: str, connected: bool, response_time: float, error: str):
+        print(f"DEBUG: on_service_test_completed called: {service}, {connected}, {response_time}, {error}")
+        self.update_service_status(service, connected, response_time, error)
+
+class ServiceTestThread(QThread):
+    test_completed = pyqtSignal(str, bool, float, str)  # service, connected, response_time, error
+    
+    def __init__(self, service: str, client, parent=None):
+        super().__init__(parent)
+        self.service = service
+        self.client = client
+    
+    def run(self):
+        print(f"DEBUG: ServiceTestThread.run() started for {self.service}")
+        start_time = time.time()
+        connected = False
+        error = ""
+        
+        try:
+            if self.service == 'spotify':
+                print(f"DEBUG: Testing Spotify authentication...")
+                connected = self.client.is_authenticated()
+                print(f"DEBUG: Spotify result: {connected}")
+            elif self.service == 'plex':
+                print(f"DEBUG: Testing Plex connection...")
+                connected = self.client.is_connected()
+                print(f"DEBUG: Plex result: {connected}")
+            elif self.service == 'soulseek':
+                print(f"DEBUG: Testing Soulseek connection...")
+                # Run async method in new event loop
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    connected = loop.run_until_complete(self.client.check_connection())
+                    print(f"DEBUG: Soulseek result: {connected}")
+                finally:
+                    loop.close()
+        except Exception as e:
+            print(f"DEBUG: Exception in {self.service} test: {e}")
+            error = str(e)
+            connected = False
+        
+        response_time = (time.time() - start_time) * 1000  # Convert to milliseconds
+        print(f"DEBUG: Emitting test_completed for {self.service}: connected={connected}, time={response_time:.0f}ms, error='{error}'")
+        self.test_completed.emit(self.service, connected, response_time, error)
+        
+        # Ensure thread finishes properly
+        self.quit()
 
 class StatCard(QFrame):
-    def __init__(self, title: str, value: str, subtitle: str = "", parent=None):
+    def __init__(self, title: str, value: str, subtitle: str = "", clickable: bool = False, parent=None):
         super().__init__(parent)
+        self.clickable = clickable
+        self.title_text = title
         self.setup_ui(title, value, subtitle)
     
     def setup_ui(self, title: str, value: str, subtitle: str):
         self.setFixedHeight(120)
-        self.setStyleSheet("""
-            StatCard {
+        hover_style = "border: 1px solid #1db954;" if self.clickable else ""
+        self.setStyleSheet(f"""
+            StatCard {{
                 background: #282828;
                 border-radius: 8px;
                 border: 1px solid #404040;
-            }
-            StatCard:hover {
+            }}
+            StatCard:hover {{
                 background: #333333;
-                border: 1px solid #1db954;
-            }
+                {hover_style}
+            }}
         """)
         
         layout = QVBoxLayout(self)
@@ -27,25 +224,255 @@ class StatCard(QFrame):
         layout.setSpacing(5)
         
         # Title
-        title_label = QLabel(title)
-        title_label.setFont(QFont("Arial", 10))
-        title_label.setStyleSheet("color: #b3b3b3;")
+        self.title_label = QLabel(title)
+        self.title_label.setFont(QFont("Arial", 10))
+        self.title_label.setStyleSheet("color: #b3b3b3;")
         
         # Value
-        value_label = QLabel(value)
-        value_label.setFont(QFont("Arial", 24, QFont.Weight.Bold))
-        value_label.setStyleSheet("color: #ffffff;")
+        self.value_label = QLabel(value)
+        self.value_label.setFont(QFont("Arial", 24, QFont.Weight.Bold))
+        self.value_label.setStyleSheet("color: #ffffff;")
         
         # Subtitle
+        self.subtitle_label = None
         if subtitle:
-            subtitle_label = QLabel(subtitle)
-            subtitle_label.setFont(QFont("Arial", 9))
-            subtitle_label.setStyleSheet("color: #b3b3b3;")
-            layout.addWidget(subtitle_label)
+            self.subtitle_label = QLabel(subtitle)
+            self.subtitle_label.setFont(QFont("Arial", 9))
+            self.subtitle_label.setStyleSheet("color: #b3b3b3;")
+            layout.addWidget(self.subtitle_label)
         
-        layout.addWidget(title_label)
-        layout.addWidget(value_label)
+        layout.addWidget(self.title_label)
+        layout.addWidget(self.value_label)
         layout.addStretch()
+    
+    def update_values(self, value: str, subtitle: str = ""):
+        self.value_label.setText(value)
+        if self.subtitle_label and subtitle:
+            self.subtitle_label.setText(subtitle)
+    
+    def mousePressEvent(self, event):
+        if self.clickable:
+            self.parent().on_stat_card_clicked(self.title_text)
+        super().mousePressEvent(event)
+
+class ServiceStatusCard(QFrame):
+    def __init__(self, service_name: str, parent=None):
+        super().__init__(parent)
+        self.service_name = service_name
+        self.setup_ui()
+    
+    def setup_ui(self):
+        self.setFixedHeight(140)
+        self.setStyleSheet("""
+            ServiceStatusCard {
+                background: #282828;
+                border-radius: 8px;
+                border: 1px solid #404040;
+            }
+            ServiceStatusCard:hover {
+                background: #333333;
+            }
+        """)
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(15, 12, 15, 12)
+        layout.setSpacing(8)
+        
+        # Header with service name and status indicator
+        header_layout = QHBoxLayout()
+        header_layout.setSpacing(10)
+        
+        self.service_label = QLabel(self.service_name)
+        self.service_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        self.service_label.setStyleSheet("color: #ffffff;")
+        
+        self.status_indicator = QLabel("●")
+        self.status_indicator.setFont(QFont("Arial", 16))
+        self.status_indicator.setStyleSheet("color: #ff4444;")  # Red by default
+        
+        header_layout.addWidget(self.service_label)
+        header_layout.addStretch()
+        header_layout.addWidget(self.status_indicator)
+        
+        # Status details
+        self.status_text = QLabel("Disconnected")
+        self.status_text.setFont(QFont("Arial", 9))
+        self.status_text.setStyleSheet("color: #b3b3b3;")
+        
+        self.response_time_label = QLabel("Response: --")
+        self.response_time_label.setFont(QFont("Arial", 8))
+        self.response_time_label.setStyleSheet("color: #888888;")
+        
+        # Test connection button
+        self.test_button = QPushButton("Test Connection")
+        self.test_button.setFixedHeight(24)
+        self.test_button.setFont(QFont("Arial", 8))
+        self.test_button.setStyleSheet("""
+            QPushButton {
+                background: #1db954;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 4px 8px;
+            }
+            QPushButton:hover {
+                background: #1ed760;
+            }
+            QPushButton:pressed {
+                background: #169c46;
+            }
+            QPushButton:disabled {
+                background: #555555;
+                color: #999999;
+            }
+        """)
+        
+        layout.addLayout(header_layout)
+        layout.addWidget(self.status_text)
+        layout.addWidget(self.response_time_label)
+        layout.addStretch()
+        layout.addWidget(self.test_button)
+    
+    def update_status(self, connected: bool, response_time: float = 0.0, error: str = ""):
+        if connected:
+            self.status_indicator.setStyleSheet("color: #1db954;")  # Green
+            self.status_text.setText("Connected")
+            self.response_time_label.setText(f"Response: {response_time:.0f}ms")
+        else:
+            self.status_indicator.setStyleSheet("color: #ff4444;")  # Red
+            self.status_text.setText("Disconnected")
+            if error:
+                self.status_text.setText(f"Error: {error[:30]}..." if len(error) > 30 else f"Error: {error}")
+            self.response_time_label.setText("Response: --")
+        
+        # Brief visual feedback
+        self.test_button.setText("Testing..." if not connected and error == "" else "Test Connection")
+        self.test_button.setEnabled(True)
+
+class MetadataUpdaterWidget(QFrame):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setup_ui()
+    
+    def setup_ui(self):
+        self.setStyleSheet("""
+            MetadataUpdaterWidget {
+                background: #282828;
+                border-radius: 8px;
+                border: 1px solid #404040;
+            }
+        """)
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 15, 20, 15)
+        layout.setSpacing(12)
+        
+        # Header
+        header_label = QLabel("Plex Metadata Updater")
+        header_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+        header_label.setStyleSheet("color: #ffffff;")
+        
+        # Control section
+        control_layout = QHBoxLayout()
+        control_layout.setSpacing(15)
+        
+        self.start_button = QPushButton("Begin Metadata Update")
+        self.start_button.setFixedHeight(36)
+        self.start_button.setFont(QFont("Arial", 10, QFont.Weight.Medium))
+        self.start_button.setStyleSheet("""
+            QPushButton {
+                background: #1db954;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 16px;
+            }
+            QPushButton:hover {
+                background: #1ed760;
+            }
+            QPushButton:pressed {
+                background: #169c46;
+            }
+            QPushButton:disabled {
+                background: #555555;
+                color: #999999;
+            }
+        """)
+        
+        # Current artist display
+        artist_info_layout = QVBoxLayout()
+        
+        current_label = QLabel("Current Artist:")
+        current_label.setFont(QFont("Arial", 9))
+        current_label.setStyleSheet("color: #b3b3b3;")
+        
+        self.current_artist_label = QLabel("Not running")
+        self.current_artist_label.setFont(QFont("Arial", 11, QFont.Weight.Medium))
+        self.current_artist_label.setStyleSheet("color: #ffffff;")
+        
+        artist_info_layout.addWidget(current_label)
+        artist_info_layout.addWidget(self.current_artist_label)
+        
+        control_layout.addWidget(self.start_button)
+        control_layout.addLayout(artist_info_layout)
+        control_layout.addStretch()
+        
+        # Progress section
+        progress_layout = QVBoxLayout()
+        progress_layout.setSpacing(8)
+        
+        progress_info_layout = QHBoxLayout()
+        
+        self.progress_label = QLabel("Progress: 0%")
+        self.progress_label.setFont(QFont("Arial", 10))
+        self.progress_label.setStyleSheet("color: #ffffff;")
+        
+        self.count_label = QLabel("0 / 0 artists")
+        self.count_label.setFont(QFont("Arial", 9))
+        self.count_label.setStyleSheet("color: #b3b3b3;")
+        
+        progress_info_layout.addWidget(self.progress_label)
+        progress_info_layout.addStretch()
+        progress_info_layout.addWidget(self.count_label)
+        
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setFixedHeight(8)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setStyleSheet("""
+            QProgressBar {
+                border: none;
+                border-radius: 4px;
+                background: #555555;
+            }
+            QProgressBar::chunk {
+                background: #1db954;
+                border-radius: 4px;
+            }
+        """)
+        
+        progress_layout.addLayout(progress_info_layout)
+        progress_layout.addWidget(self.progress_bar)
+        
+        layout.addWidget(header_label)
+        layout.addLayout(control_layout)
+        layout.addLayout(progress_layout)
+    
+    def update_progress(self, is_running: bool, current_artist: str, processed: int, total: int, percentage: float):
+        if is_running:
+            self.start_button.setText("Stop Update")
+            self.start_button.setEnabled(True)
+            self.current_artist_label.setText(current_artist if current_artist else "Initializing...")
+            self.progress_label.setText(f"Progress: {percentage:.1f}%")
+            self.count_label.setText(f"{processed} / {total} artists")
+            self.progress_bar.setValue(int(percentage))
+        else:
+            self.start_button.setText("Begin Metadata Update")
+            self.start_button.setEnabled(True)
+            self.current_artist_label.setText("Not running")
+            self.progress_label.setText("Progress: 0%")
+            self.count_label.setText("0 / 0 artists")
+            self.progress_bar.setValue(0)
 
 class ActivityItem(QWidget):
     def __init__(self, icon: str, title: str, subtitle: str, time: str, parent=None):
@@ -101,7 +528,29 @@ class ActivityItem(QWidget):
 class DashboardPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        
+        # Initialize data provider
+        self.data_provider = DashboardDataProvider()
+        self.data_provider.service_status_updated.connect(self.on_service_status_updated)
+        self.data_provider.download_stats_updated.connect(self.on_download_stats_updated)
+        self.data_provider.metadata_progress_updated.connect(self.on_metadata_progress_updated)
+        self.data_provider.sync_progress_updated.connect(self.on_sync_progress_updated)
+        
+        # Service status cards
+        self.service_cards = {}
+        
+        # Stats cards
+        self.stats_cards = {}
+        
         self.setup_ui()
+    
+    def set_service_clients(self, spotify_client, plex_client, soulseek_client):
+        """Called from main window to provide service client references"""
+        self.data_provider.set_service_clients(spotify_client, plex_client, soulseek_client)
+    
+    def set_page_references(self, downloads_page, sync_page):
+        """Called from main window to provide page references for live data"""
+        self.data_provider.set_page_references(downloads_page, sync_page)
     
     def setup_ui(self):
         self.setStyleSheet("""
@@ -110,23 +559,65 @@ class DashboardPage(QWidget):
             }
         """)
         
-        main_layout = QVBoxLayout(self)
+        # Main scroll area
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll_area.setStyleSheet("""
+            QScrollArea {
+                border: none;
+                background: #191414;
+            }
+            QScrollBar:vertical {
+                background: #333333;
+                width: 12px;
+                border-radius: 6px;
+            }
+            QScrollBar::handle:vertical {
+                background: #555555;
+                border-radius: 6px;
+                min-height: 20px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #666666;
+            }
+        """)
+        
+        # Scroll content widget
+        scroll_content = QWidget()
+        scroll_area.setWidget(scroll_content)
+        
+        main_layout = QVBoxLayout(scroll_content)
         main_layout.setContentsMargins(30, 30, 30, 30)
-        main_layout.setSpacing(30)
+        main_layout.setSpacing(25)
         
         # Header
         header = self.create_header()
         main_layout.addWidget(header)
         
-        # Stats grid
-        stats_grid = self.create_stats_grid()
-        main_layout.addWidget(stats_grid)
+        # Service Status Section
+        service_section = self.create_service_status_section()
+        main_layout.addWidget(service_section)
         
-        # Recent activity
+        # System Stats Section
+        stats_section = self.create_stats_section()
+        main_layout.addWidget(stats_section)
+        
+        # Plex Metadata Updater
+        metadata_section = self.create_metadata_section()
+        main_layout.addWidget(metadata_section)
+        
+        # Recent Activity
         activity_section = self.create_activity_section()
         main_layout.addWidget(activity_section)
         
         main_layout.addStretch()
+        
+        # Set main layout
+        page_layout = QVBoxLayout(self)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        page_layout.addWidget(scroll_area)
     
     def create_header(self):
         header = QWidget()
@@ -135,12 +626,12 @@ class DashboardPage(QWidget):
         layout.setSpacing(5)
         
         # Welcome message
-        welcome_label = QLabel("Welcome back!")
+        welcome_label = QLabel("System Dashboard")
         welcome_label.setFont(QFont("Arial", 28, QFont.Weight.Bold))
         welcome_label.setStyleSheet("color: #ffffff;")
         
         # Subtitle
-        subtitle_label = QLabel("Here's what's happening with your music library")
+        subtitle_label = QLabel("Monitor your music system health and manage operations")
         subtitle_label.setFont(QFont("Arial", 14))
         subtitle_label.setStyleSheet("color: #b3b3b3;")
         
@@ -149,26 +640,87 @@ class DashboardPage(QWidget):
         
         return header
     
-    def create_stats_grid(self):
-        stats_widget = QWidget()
-        grid = QGridLayout(stats_widget)
-        grid.setSpacing(20)
+    def create_service_status_section(self):
+        section = QWidget()
+        layout = QVBoxLayout(section)
+        layout.setSpacing(15)
         
-        # Sample stats - these will be populated with real data later
-        stats = [
-            ("Spotify Playlists", "12", "3 synced today"),
-            ("Plex Tracks", "2,847", "156 added this week"),
-            ("Missing Tracks", "23", "Ready to download"),
-            ("Artists Scanned", "89", "Metadata updated"),
-            ("Downloads", "5", "In progress"),
-            ("Sync Status", "98%", "Up to date")
+        # Section header
+        header_label = QLabel("Service Status")
+        header_label.setFont(QFont("Arial", 16, QFont.Weight.Bold))
+        header_label.setStyleSheet("color: #ffffff;")
+        
+        # Service cards grid
+        cards_layout = QHBoxLayout()
+        cards_layout.setSpacing(20)
+        
+        # Create service status cards
+        services = ['Spotify', 'Plex', 'Soulseek']
+        for service in services:
+            card = ServiceStatusCard(service)
+            card.test_button.clicked.connect(lambda checked, s=service.lower(): self.test_service_connection(s))
+            self.service_cards[service.lower()] = card
+            cards_layout.addWidget(card)
+        
+        cards_layout.addStretch()
+        
+        layout.addWidget(header_label)
+        layout.addLayout(cards_layout)
+        
+        return section
+    
+    def create_stats_section(self):
+        section = QWidget()
+        layout = QVBoxLayout(section)
+        layout.setSpacing(15)
+        
+        # Section header
+        header_label = QLabel("System Statistics")
+        header_label.setFont(QFont("Arial", 16, QFont.Weight.Bold))
+        header_label.setStyleSheet("color: #ffffff;")
+        
+        # Stats grid
+        stats_grid = QGridLayout()
+        stats_grid.setSpacing(20)
+        
+        # Create stats cards
+        stats_data = [
+            ("Active Downloads", "0", "Currently downloading", "active_downloads"),
+            ("Finished Downloads", "0", "Completed today", "finished_downloads"),
+            ("Download Speed", "0 KB/s", "Combined speed", "download_speed"),
+            ("Active Syncs", "0", "Playlists syncing", "active_syncs"),
+            ("System Uptime", "0m", "Application runtime", "uptime"),
+            ("Memory Usage", "--", "Current usage", "memory")
         ]
         
-        for i, (title, value, subtitle) in enumerate(stats):
-            card = StatCard(title, value, subtitle)
-            grid.addWidget(card, i // 3, i % 3)
+        for i, (title, value, subtitle, key) in enumerate(stats_data):
+            card = StatCard(title, value, subtitle, clickable=False)
+            self.stats_cards[key] = card
+            stats_grid.addWidget(card, i // 3, i % 3)
         
-        return stats_widget
+        layout.addWidget(header_label)
+        layout.addLayout(stats_grid)
+        
+        return section
+    
+    def create_metadata_section(self):
+        section = QWidget()
+        layout = QVBoxLayout(section)
+        layout.setSpacing(15)
+        
+        # Section header
+        header_label = QLabel("Tools & Operations")
+        header_label.setFont(QFont("Arial", 16, QFont.Weight.Bold))
+        header_label.setStyleSheet("color: #ffffff;")
+        
+        # Metadata updater widget
+        self.metadata_widget = MetadataUpdaterWidget()
+        self.metadata_widget.start_button.clicked.connect(self.toggle_metadata_update)
+        
+        layout.addWidget(header_label)
+        layout.addWidget(self.metadata_widget)
+        
+        return section
     
     def create_activity_section(self):
         activity_widget = QWidget()
@@ -194,27 +746,139 @@ class DashboardPage(QWidget):
         activity_layout.setContentsMargins(0, 0, 0, 0)
         activity_layout.setSpacing(1)
         
-        # Sample activity items
-        activities = [
-            ("🔄", "Playlist Sync", "Synced 'Favorites' playlist to Plex", "2 min ago"),
-            ("📥", "Download Complete", "Downloaded 'Song Title' by Artist", "5 min ago"),
-            ("🎵", "Artist Updated", "Updated metadata for 'Artist Name'", "1 hour ago"),
-            ("✅", "Sync Complete", "All playlists synchronized successfully", "3 hours ago"),
-            ("📊", "Library Scan", "Scanned 156 new tracks in Plex", "1 day ago")
-        ]
+        # Activity feed will be populated dynamically
+        self.activity_layout = activity_layout
         
-        for icon, title, subtitle, time in activities:
-            item = ActivityItem(icon, title, subtitle, time)
-            activity_layout.addWidget(item)
-            
-            # Add separator (except for last item)
-            if (icon, title, subtitle, time) != activities[-1]:
-                separator = QFrame()
-                separator.setFixedHeight(1)
-                separator.setStyleSheet("background: #404040;")
-                activity_layout.addWidget(separator)
+        # Add initial placeholder
+        placeholder_item = ActivityItem("📊", "System Started", "Dashboard initialized successfully", "Now")
+        activity_layout.addWidget(placeholder_item)
         
         layout.addWidget(header_label)
         layout.addWidget(activity_container)
         
         return activity_widget
+    
+    def test_service_connection(self, service: str):
+        """Test connection to a specific service"""
+        print(f"DEBUG: Dashboard test_service_connection called for {service}")
+        if service in self.service_cards:
+            card = self.service_cards[service]
+            
+            # Prevent multiple simultaneous tests
+            if hasattr(self.data_provider, '_test_threads') and service in self.data_provider._test_threads:
+                if self.data_provider._test_threads[service].isRunning():
+                    print(f"DEBUG: Test already running for {service}")
+                    return
+            
+            print(f"DEBUG: Updating UI for {service} test")
+            card.test_button.setText("Testing...")
+            card.test_button.setEnabled(False)
+            
+            # Update status to testing state
+            card.status_indicator.setStyleSheet("color: #ffaa00;")  # Orange
+            card.status_text.setText("Testing connection...")
+            
+            # Start test
+            print(f"DEBUG: Calling data_provider.test_service_connection for {service}")
+            self.data_provider.test_service_connection(service)
+    
+    def toggle_metadata_update(self):
+        """Toggle metadata update process"""
+        # This will be implemented with actual functionality later
+        # For now, just show placeholder behavior
+        current_text = self.metadata_widget.start_button.text()
+        if "Begin" in current_text:
+            # Start metadata update (placeholder)
+            self.metadata_widget.update_progress(True, "Sample Artist", 0, 100, 0.0)
+            self.add_activity_item("🎵", "Metadata Update", "Started Plex metadata update process", "Now")
+        else:
+            # Stop metadata update (placeholder)
+            self.metadata_widget.update_progress(False, "", 0, 0, 0.0)
+            self.add_activity_item("⏹️", "Metadata Update", "Stopped metadata update process", "Now")
+    
+    def on_service_status_updated(self, service: str, connected: bool, response_time: float, error: str):
+        """Handle service status updates from data provider"""
+        if service in self.service_cards:
+            self.service_cards[service].update_status(connected, response_time, error)
+            
+            # Add activity item for status change
+            status = "Connected" if connected else "Disconnected"
+            icon = "✅" if connected else "❌"
+            self.add_activity_item(icon, f"{service.capitalize()} {status}", 
+                                 f"Response time: {response_time:.0f}ms" if connected else f"Error: {error}" if error else "Connection test completed", 
+                                 "Now")
+    
+    def on_download_stats_updated(self, active_count: int, finished_count: int, total_speed: float):
+        """Handle download statistics updates"""
+        if 'active_downloads' in self.stats_cards:
+            self.stats_cards['active_downloads'].update_values(str(active_count), "Currently downloading")
+        
+        if 'finished_downloads' in self.stats_cards:
+            self.stats_cards['finished_downloads'].update_values(str(finished_count), "Completed today")
+        
+        if 'download_speed' in self.stats_cards:
+            if total_speed > 1024 * 1024:  # MB/s
+                speed_text = f"{total_speed / (1024 * 1024):.1f} MB/s"
+            elif total_speed > 1024:  # KB/s
+                speed_text = f"{total_speed / 1024:.1f} KB/s"
+            else:
+                speed_text = f"{total_speed:.0f} B/s"
+            self.stats_cards['download_speed'].update_values(speed_text, "Combined speed")
+    
+    def on_metadata_progress_updated(self, is_running: bool, current_artist: str, processed: int, total: int, percentage: float):
+        """Handle metadata update progress"""
+        self.metadata_widget.update_progress(is_running, current_artist, processed, total, percentage)
+    
+    def on_sync_progress_updated(self, current_playlist: str, active_syncs: int):
+        """Handle sync progress updates"""
+        if 'active_syncs' in self.stats_cards:
+            self.stats_cards['active_syncs'].update_values(str(active_syncs), "Playlists syncing")
+    
+    def on_stat_card_clicked(self, card_title: str):
+        """Handle stat card clicks for detailed views"""
+        # This can be implemented later for detailed views
+        pass
+    
+    def add_activity_item(self, icon: str, title: str, subtitle: str, time_ago: str = "Now"):
+        """Add new activity item to the feed"""
+        # Remove placeholder if it exists
+        if self.activity_layout.count() == 1:
+            item = self.activity_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        
+        # Add separator if there are existing items
+        if self.activity_layout.count() > 0:
+            separator = QFrame()
+            separator.setFixedHeight(1)
+            separator.setStyleSheet("background: #404040;")
+            self.activity_layout.insertWidget(0, separator)
+        
+        # Add new activity item at the top
+        new_item = ActivityItem(icon, title, subtitle, time_ago)
+        self.activity_layout.insertWidget(0, new_item)
+        
+        # Limit to 5 most recent items
+        while self.activity_layout.count() > 9:  # 5 items + 4 separators
+            item = self.activity_layout.takeAt(self.activity_layout.count() - 1)
+            if item.widget():
+                item.widget().deleteLater()
+    
+    def closeEvent(self, event):
+        """Clean up threads when dashboard is closed"""
+        self.cleanup_threads()
+        super().closeEvent(event)
+    
+    def cleanup_threads(self):
+        """Clean up all running test threads"""
+        if hasattr(self.data_provider, '_test_threads'):
+            for service, thread in self.data_provider._test_threads.items():
+                if thread.isRunning():
+                    thread.quit()
+                    thread.wait(1000)  # Wait up to 1 second
+                thread.deleteLater()
+            self.data_provider._test_threads.clear()
+        
+        # Stop the data provider timer
+        if hasattr(self.data_provider, 'download_stats_timer'):
+            self.data_provider.download_stats_timer.stop()
