@@ -19,6 +19,7 @@ from dataclasses import dataclass
 import requests
 from PIL import Image
 import io
+from core.matching_engine import MusicMatchingEngine
 
 class MetadataUpdateWorker(QThread):
     """Worker thread for updating Plex artist metadata using Spotify data"""
@@ -33,6 +34,7 @@ class MetadataUpdateWorker(QThread):
         self.artists = artists
         self.plex_client = plex_client
         self.spotify_client = spotify_client
+        self.matching_engine = MusicMatchingEngine()
         self.should_stop = False
         self.processed_count = 0
         self.successful_count = 0
@@ -132,16 +134,37 @@ class MetadataUpdateWorker(QThread):
             return True  # Process if we can't determine status
     
     def update_artist_metadata(self, artist):
-        """Update a single artist's metadata"""
+        """
+        Update a single artist's metadata by finding the best match on Spotify.
+        """
         try:
             artist_name = getattr(artist, 'title', 'Unknown Artist')
             
-            # Search for artist on Spotify
-            spotify_artists = self.spotify_client.search_artists(artist_name, limit=1)
+            # --- IMPROVED ARTIST MATCHING ---
+            # 1. Search for top 5 potential artists on Spotify
+            spotify_artists = self.spotify_client.search_artists(artist_name, limit=5)
             if not spotify_artists:
                 return False, "Not found on Spotify"
             
-            spotify_artist = spotify_artists[0]
+            # 2. Find the best match using the matching engine
+            best_match = None
+            highest_score = 0.0
+            
+            plex_artist_normalized = self.matching_engine.normalize_string(artist_name)
+
+            for spotify_artist in spotify_artists:
+                spotify_artist_normalized = self.matching_engine.normalize_string(spotify_artist.name)
+                score = self.matching_engine.similarity_score(plex_artist_normalized, spotify_artist_normalized)
+                
+                if score > highest_score:
+                    highest_score = score
+                    best_match = spotify_artist
+
+            # 3. If no suitable match is found, exit
+            if not best_match or highest_score < 0.7: # Confidence threshold
+                 return False, f"No confident match found (best: '{getattr(best_match, 'name', 'N/A')}', score: {highest_score:.2f})"
+
+            spotify_artist = best_match
             changes_made = []
             
             # Update photo if needed
@@ -155,7 +178,8 @@ class MetadataUpdateWorker(QThread):
                 changes_made.append("genres")
             
             if changes_made:
-                return True, f"Updated {', '.join(changes_made)}"
+                details = f"Updated {', '.join(changes_made)} (match: '{spotify_artist.name}', score: {highest_score:.2f})"
+                return True, details
             else:
                 return True, "Already up to date"
                 
