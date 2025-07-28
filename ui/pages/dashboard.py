@@ -955,11 +955,8 @@ class DashboardPage(QWidget):
     
     def add_activity_item(self, icon: str, title: str, subtitle: str, time_ago: str = "Now"):
         """Add new activity item to the feed"""
-        print(f"[DEBUG] Adding activity: {title} - Current count: {self.activity_layout.count()}")
-        
         # Remove placeholder if it exists
         if self.has_placeholder:
-            print("[DEBUG] Removing placeholder item")
             # Clear the entire layout
             while self.activity_layout.count():
                 item = self.activity_layout.takeAt(0)
@@ -973,16 +970,13 @@ class DashboardPage(QWidget):
             separator.setFixedHeight(1)
             separator.setStyleSheet("background: #404040;")
             self.activity_layout.insertWidget(0, separator)
-            print(f"[DEBUG] Added separator - Count now: {self.activity_layout.count()}")
         
         # Add new activity item at the top
         new_item = ActivityItem(icon, title, subtitle, time_ago)
         self.activity_layout.insertWidget(0, new_item)
-        print(f"[DEBUG] Added new item - Count now: {self.activity_layout.count()}")
         
         # Limit to 5 most recent items (5 items + 4 separators = 9 total)
         while self.activity_layout.count() > 9:
-            print(f"[DEBUG] Removing old item - Count: {self.activity_layout.count()}")
             item = self.activity_layout.takeAt(self.activity_layout.count() - 1)
             if item.widget():
                 item.widget().deleteLater()

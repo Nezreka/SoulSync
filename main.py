@@ -171,6 +171,11 @@ class MainWindow(QMainWindow):
             self.dashboard_page.data_provider.increment_completed_downloads
         )
         
+        # Connect sync activities to dashboard
+        self.sync_page.sync_activity.connect(
+            self.dashboard_page.add_activity_item
+        )
+        
         self.stacked_widget.addWidget(self.dashboard_page)
         self.stacked_widget.addWidget(self.sync_page)
         self.stacked_widget.addWidget(self.downloads_page)
