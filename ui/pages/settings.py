@@ -466,6 +466,31 @@ class SettingsPage(QWidget):
         self.form_inputs['spotify.client_secret'] = self.client_secret_input
         spotify_layout.addWidget(self.client_secret_input)
         
+        # Callback URL info
+        callback_info_label = QLabel("Required Redirect URI:")
+        callback_info_label.setStyleSheet("color: #b3b3b3; font-size: 11px; margin-top: 8px;")
+        spotify_layout.addWidget(callback_info_label)
+        
+        callback_url_label = QLabel("http://localhost:8888/callback")
+        callback_url_label.setStyleSheet("""
+            color: #1db954; 
+            font-size: 11px; 
+            font-family: 'Courier New', monospace;
+            background-color: rgba(29, 185, 84, 0.1);
+            border: 1px solid rgba(29, 185, 84, 0.3);
+            border-radius: 4px;
+            padding: 6px 8px;
+            margin-bottom: 8px;
+        """)
+        callback_url_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        spotify_layout.addWidget(callback_url_label)
+        
+        # Helper text
+        helper_text = QLabel("Add this URL to your Spotify app's 'Redirect URIs' in the Spotify Developer Dashboard")
+        helper_text.setStyleSheet("color: #888888; font-size: 10px; font-style: italic;")
+        helper_text.setWordWrap(True)
+        spotify_layout.addWidget(helper_text)
+        
         # Plex settings
         plex_frame = QFrame()
         plex_layout = QVBoxLayout(plex_frame)
