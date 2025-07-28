@@ -15,6 +15,276 @@ import os
 from typing import Optional, Dict, Any
 from datetime import datetime
 from dataclasses import dataclass
+import requests
+from PIL import Image
+import io
+
+class MetadataUpdateWorker(QThread):
+    """Worker thread for updating Plex artist metadata using Spotify data"""
+    progress_updated = pyqtSignal(str, int, int, float)  # current_artist, processed, total, percentage
+    artist_updated = pyqtSignal(str, bool, str)  # artist_name, success, details
+    finished = pyqtSignal(int, int, int)  # total_processed, successful, failed
+    error = pyqtSignal(str)  # error_message
+    artists_loaded = pyqtSignal(int, int)  # total_artists, artists_to_process
+    
+    def __init__(self, artists, plex_client, spotify_client):
+        super().__init__()
+        self.artists = artists
+        self.plex_client = plex_client
+        self.spotify_client = spotify_client
+        self.should_stop = False
+        self.processed_count = 0
+        self.successful_count = 0
+        self.failed_count = 0
+    
+    def stop(self):
+        self.should_stop = True
+    
+    def run(self):
+        """Process all artists one by one"""
+        try:
+            # Load artists in background if not provided
+            if self.artists is None:
+                all_artists = self.plex_client.get_all_artists()
+                if not all_artists:
+                    self.error.emit("No artists found in Plex library")
+                    return
+                
+                # Filter artists that need processing
+                artists_to_process = [artist for artist in all_artists if self.artist_needs_processing(artist)]
+                self.artists = artists_to_process
+                
+                # Emit loaded signal
+                self.artists_loaded.emit(len(all_artists), len(artists_to_process))
+                
+                if not artists_to_process:
+                    self.finished.emit(0, 0, 0)
+                    return
+            
+            total_artists = len(self.artists)
+            
+            for i, artist in enumerate(self.artists):
+                if self.should_stop:
+                    break
+                
+                artist_name = getattr(artist, 'title', 'Unknown Artist')
+                self.progress_updated.emit(artist_name, i, total_artists, (i / total_artists) * 100)
+                
+                try:
+                    success, details = self.update_artist_metadata(artist)
+                    self.processed_count += 1
+                    
+                    if success:
+                        self.successful_count += 1
+                    else:
+                        self.failed_count += 1
+                    
+                    self.artist_updated.emit(artist_name, success, details)
+                    
+                except Exception as e:
+                    self.failed_count += 1
+                    self.artist_updated.emit(artist_name, False, f"Error: {str(e)}")
+                
+                # Small delay to prevent overwhelming the APIs
+                self.msleep(500)
+            
+            self.finished.emit(self.processed_count, self.successful_count, self.failed_count)
+            
+        except Exception as e:
+            self.error.emit(f"Metadata update failed: {str(e)}")
+    
+    def artist_needs_processing(self, artist):
+        """Check if an artist needs metadata processing using smart detection"""
+        try:
+            # Check if artist has a valid photo
+            has_valid_photo = self.artist_has_valid_photo(artist)
+            
+            # Check if artist has genres (more than just basic ones)
+            existing_genres = set(genre.tag if hasattr(genre, 'tag') else str(genre) 
+                                for genre in (artist.genres or []))
+            has_good_genres = len(existing_genres) >= 2  # At least 2 genres indicates Spotify processing
+            
+            # Process if missing photo OR insufficient genres
+            return not has_valid_photo or not has_good_genres
+            
+        except Exception as e:
+            print(f"Error checking artist {getattr(artist, 'title', 'Unknown')}: {e}")
+            return True  # Process if we can't determine status
+    
+    def update_artist_metadata(self, artist):
+        """Update a single artist's metadata"""
+        try:
+            artist_name = getattr(artist, 'title', 'Unknown Artist')
+            
+            # Search for artist on Spotify
+            spotify_artists = self.spotify_client.search_artists(artist_name, limit=1)
+            if not spotify_artists:
+                return False, "Not found on Spotify"
+            
+            spotify_artist = spotify_artists[0]
+            changes_made = []
+            
+            # Update photo if needed
+            photo_updated = self.update_artist_photo(artist, spotify_artist)
+            if photo_updated:
+                changes_made.append("photo")
+            
+            # Update genres
+            genres_updated = self.update_artist_genres(artist, spotify_artist)
+            if genres_updated:
+                changes_made.append("genres")
+            
+            if changes_made:
+                return True, f"Updated {', '.join(changes_made)}"
+            else:
+                return True, "Already up to date"
+                
+        except Exception as e:
+            return False, str(e)
+    
+    def update_artist_photo(self, artist, spotify_artist):
+        """Update artist photo from Spotify"""
+        try:
+            # Check if artist already has a good photo
+            if self.artist_has_valid_photo(artist):
+                return False
+            
+            # Get the largest image from Spotify
+            if not spotify_artist.get('images'):
+                return False
+                
+            largest_image = max(spotify_artist['images'], key=lambda x: x['width'] * x['height'])
+            image_url = largest_image['url']
+            
+            # Download and validate image
+            response = requests.get(image_url, timeout=10)
+            response.raise_for_status()
+            
+            # Validate and convert image
+            image_data = self.validate_and_convert_image(response.content)
+            if not image_data:
+                return False
+            
+            # Upload to Plex
+            return self.upload_artist_poster(artist, image_data)
+            
+        except Exception as e:
+            print(f"Error updating photo for {getattr(artist, 'title', 'Unknown')}: {e}")
+            return False
+    
+    def update_artist_genres(self, artist, spotify_artist):
+        """Update artist genres from Spotify and albums"""
+        try:
+            # Get existing genres
+            existing_genres = set(genre.tag if hasattr(genre, 'tag') else str(genre) 
+                                for genre in (artist.genres or []))
+            
+            # Get Spotify artist genres
+            spotify_genres = set(spotify_artist.get('genres', []))
+            
+            # Get genres from all albums
+            album_genres = set()
+            try:
+                for album in artist.albums():
+                    if hasattr(album, 'genres') and album.genres:
+                        album_genres.update(genre.tag if hasattr(genre, 'tag') else str(genre) 
+                                          for genre in album.genres)
+            except Exception:
+                pass  # Albums might not be accessible
+            
+            # Combine all genres (prioritize Spotify genres)
+            all_genres = spotify_genres.union(album_genres)
+            
+            # Filter out empty/invalid genres
+            all_genres = {g for g in all_genres if g and g.strip() and len(g.strip()) > 1}
+            
+            print(f"[DEBUG] Artist '{artist.title}': Existing={existing_genres}, Spotify={spotify_genres}, Albums={album_genres}, Combined={all_genres}")
+            
+            # Only update if we have new genres and they're different
+            if all_genres and (not existing_genres or all_genres != existing_genres):
+                # Convert to list and limit to 10 genres
+                genre_list = list(all_genres)[:10]
+                
+                print(f"[DEBUG] Updating genres for '{artist.title}' to: {genre_list}")
+                
+                # Use Plex API to update genres
+                success = self.plex_client.update_artist_genres(artist, genre_list)
+                if success:
+                    print(f"[DEBUG] Successfully updated genres for '{artist.title}'")
+                    return True
+                else:
+                    print(f"[DEBUG] Failed to update genres for '{artist.title}'")
+                    return False
+            else:
+                print(f"[DEBUG] No genre update needed for '{artist.title}' - already has good genres")
+                return False
+            
+        except Exception as e:
+            print(f"Error updating genres for {getattr(artist, 'title', 'Unknown')}: {e}")
+            return False
+    
+    def artist_has_valid_photo(self, artist):
+        """Check if artist has a valid photo"""
+        try:
+            if not hasattr(artist, 'thumb') or not artist.thumb:
+                return False
+            
+            thumb_url = str(artist.thumb)
+            if 'default' in thumb_url.lower() or len(thumb_url) < 50:
+                return False
+            
+            return True
+            
+        except Exception:
+            return False
+    
+    def validate_and_convert_image(self, image_data):
+        """Validate and convert image for Plex compatibility"""
+        try:
+            # Open and validate image
+            image = Image.open(io.BytesIO(image_data))
+            
+            # Check minimum dimensions
+            width, height = image.size
+            if width < 200 or height < 200:
+                return None
+            
+            # Convert to JPEG for consistency
+            if image.format != 'JPEG':
+                buffer = io.BytesIO()
+                image.convert('RGB').save(buffer, format='JPEG', quality=95)
+                return buffer.getvalue()
+            
+            return image_data
+            
+        except Exception:
+            return None
+    
+    def upload_artist_poster(self, artist, image_data):
+        """Upload poster to Plex"""
+        try:
+            # Use Plex client's update method if available
+            if hasattr(self.plex_client, 'update_artist_poster'):
+                return self.plex_client.update_artist_poster(artist, image_data)
+            
+            # Fallback: direct Plex API call
+            server = self.plex_client.server
+            upload_url = f"{server._baseurl}/library/metadata/{artist.ratingKey}/posters"
+            headers = {
+                'X-Plex-Token': server._token,
+                'Content-Type': 'image/jpeg'
+            }
+            
+            response = requests.post(upload_url, data=image_data, headers=headers)
+            response.raise_for_status()
+            
+            # Refresh artist to see changes
+            artist.refresh()
+            return True
+            
+        except Exception as e:
+            print(f"Error uploading poster: {e}")
+            return False
 
 @dataclass
 class ServiceStatus:
@@ -884,17 +1154,121 @@ class DashboardPage(QWidget):
     
     def toggle_metadata_update(self):
         """Toggle metadata update process"""
-        # This will be implemented with actual functionality later
-        # For now, just show placeholder behavior
         current_text = self.metadata_widget.start_button.text()
         if "Begin" in current_text:
-            # Start metadata update (placeholder)
-            self.metadata_widget.update_progress(True, "Sample Artist", 0, 100, 0.0)
-            self.add_activity_item("🎵", "Metadata Update", "Started Plex metadata update process", "Now")
+            # Start metadata update
+            self.start_metadata_update()
         else:
-            # Stop metadata update (placeholder)
-            self.metadata_widget.update_progress(False, "", 0, 0, 0.0)
-            self.add_activity_item("⏹️", "Metadata Update", "Stopped metadata update process", "Now")
+            # Stop metadata update
+            self.stop_metadata_update()
+    
+    def start_metadata_update(self):
+        """Start the Plex metadata update process"""
+        if not hasattr(self, 'data_provider') or not self.data_provider.service_clients.get('plex'):
+            self.add_activity_item("❌", "Metadata Update", "Plex client not available", "Now")
+            return
+            
+        if not self.data_provider.service_clients.get('spotify'):
+            self.add_activity_item("❌", "Metadata Update", "Spotify client not available", "Now")
+            return
+        
+        try:
+            # Start the metadata update worker (it will handle artist retrieval in background)
+            self.metadata_worker = MetadataUpdateWorker(
+                None,  # Artists will be loaded in the worker thread
+                self.data_provider.service_clients['plex'],
+                self.data_provider.service_clients['spotify']
+            )
+            
+            # Connect signals
+            self.metadata_worker.progress_updated.connect(self.on_metadata_progress)
+            self.metadata_worker.artist_updated.connect(self.on_artist_updated)
+            self.metadata_worker.finished.connect(self.on_metadata_finished)
+            self.metadata_worker.error.connect(self.on_metadata_error)
+            self.metadata_worker.artists_loaded.connect(self.on_artists_loaded)
+            
+            # Update UI and start
+            self.metadata_widget.update_progress(True, "Loading artists...", 0, 0, 0.0)
+            self.add_activity_item("🎵", "Metadata Update", "Loading artists from Plex library...", "Now")
+            
+            self.metadata_worker.start()
+            
+        except Exception as e:
+            self.add_activity_item("❌", "Metadata Update", f"Failed to start: {str(e)}", "Now")
+    
+    def on_artists_loaded(self, total_artists, artists_to_process):
+        """Handle when artists are loaded and filtered"""
+        if artists_to_process == 0:
+            self.add_activity_item("✅", "Metadata Update", "All artists already have good metadata", "Now")
+        else:
+            self.add_activity_item("🎵", "Metadata Update", f"Processing {artists_to_process} of {total_artists} artists", "Now")
+    
+    def stop_metadata_update(self):
+        """Stop the metadata update process"""
+        if hasattr(self, 'metadata_worker') and self.metadata_worker.isRunning():
+            self.metadata_worker.stop()
+            self.metadata_worker.wait(3000)  # Wait up to 3 seconds
+            if self.metadata_worker.isRunning():
+                self.metadata_worker.terminate()
+        
+        self.metadata_widget.update_progress(False, "", 0, 0, 0.0)
+        self.add_activity_item("⏹️", "Metadata Update", "Stopped metadata update process", "Now")
+    
+    def artist_needs_processing(self, artist):
+        """Check if an artist needs metadata processing using smart detection"""
+        try:
+            # Check if artist has a valid photo
+            has_valid_photo = self.artist_has_valid_photo(artist)
+            
+            # Check if artist has genres (more than just basic ones)
+            existing_genres = set(genre.tag if hasattr(genre, 'tag') else str(genre) 
+                                for genre in (artist.genres or []))
+            has_good_genres = len(existing_genres) >= 2  # At least 2 genres indicates Spotify processing
+            
+            # Process if missing photo OR insufficient genres
+            return not has_valid_photo or not has_good_genres
+            
+        except Exception as e:
+            print(f"Error checking artist {getattr(artist, 'title', 'Unknown')}: {e}")
+            return True  # Process if we can't determine status
+    
+    def artist_has_valid_photo(self, artist):
+        """Check if artist has a valid photo"""
+        try:
+            if not hasattr(artist, 'thumb') or not artist.thumb:
+                return False
+            
+            # Quick check for suspicious URLs (default Plex placeholders often contain 'default' or are very short)
+            thumb_url = str(artist.thumb)
+            if 'default' in thumb_url.lower() or len(thumb_url) < 50:
+                return False
+            
+            return True
+            
+        except Exception:
+            return False
+    
+    def on_metadata_progress(self, current_artist, processed, total, percentage):
+        """Handle metadata update progress"""
+        self.metadata_widget.update_progress(True, current_artist, processed, total, percentage)
+    
+    def on_artist_updated(self, artist_name, success, details):
+        """Handle individual artist update completion"""
+        if success:
+            self.add_activity_item("✅", "Artist Updated", f"'{artist_name}' - {details}", "Now")
+        else:
+            self.add_activity_item("❌", "Artist Failed", f"'{artist_name}' - {details}", "Now")
+    
+    def on_metadata_finished(self, total_processed, successful, failed):
+        """Handle metadata update completion"""
+        self.metadata_widget.update_progress(False, "", 0, 0, 0.0)
+        summary = f"Processed {total_processed} artists: {successful} updated, {failed} failed"
+        self.add_activity_item("🎵", "Metadata Complete", summary, "Now")
+    
+    def on_metadata_error(self, error_message):
+        """Handle metadata update error"""
+        self.metadata_widget.update_progress(False, "", 0, 0, 0.0)
+        self.add_activity_item("❌", "Metadata Error", error_message, "Now")
     
     def on_service_status_updated(self, service: str, connected: bool, response_time: float, error: str):
         """Handle service status updates from data provider"""
