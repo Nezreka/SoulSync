@@ -2,6 +2,7 @@
 
 import sys
 import asyncio
+import time
 from pathlib import Path
 from PyQt6.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QStackedWidget
 from PyQt6.QtCore import QThread, pyqtSignal, QTimer
@@ -61,6 +62,10 @@ class ServiceStatusThread(QThread):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        
+        # Track application start time for uptime calculation
+        self.app_start_time = time.time()
+        
         self.spotify_client = SpotifyClient()
         self.plex_client = PlexClient()
         self.soulseek_client = SoulseekClient()
@@ -159,6 +164,7 @@ class MainWindow(QMainWindow):
         # Configure dashboard with service clients and page references
         self.dashboard_page.set_service_clients(self.spotify_client, self.plex_client, self.soulseek_client)
         self.dashboard_page.set_page_references(self.downloads_page, self.sync_page)
+        self.dashboard_page.set_app_start_time(self.app_start_time)
         
         self.stacked_widget.addWidget(self.dashboard_page)
         self.stacked_widget.addWidget(self.sync_page)
