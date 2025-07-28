@@ -211,7 +211,27 @@ class MainWindow(QMainWindow):
     
     def on_settings_changed(self, key: str, value: str):
         """Handle settings changes and broadcast to relevant pages"""
-        logger.info(f"Settings changed: {key} = {value}")
+        # Reinitialize service clients when their settings change
+        if key.startswith('spotify.'):
+            try:
+                self.spotify_client._setup_client()
+            except Exception as e:
+                logger.error("Failed to reinitialize Spotify client")
+        
+        elif key.startswith('plex.'):
+            try:
+                # Reset Plex connection to force reconnection with new settings
+                self.plex_client.server = None
+                self.plex_client.music_library = None
+                self.plex_client._connection_attempted = False
+            except Exception as e:
+                logger.error("Failed to reset Plex client")
+        
+        elif key.startswith('soulseek.'):
+            try:
+                self.soulseek_client._setup_client()
+            except Exception as e:
+                logger.error("Failed to reinitialize Soulseek client")
         
         # Broadcast to all pages that need to know about path changes
         if hasattr(self.downloads_page, 'on_paths_updated'):

@@ -411,6 +411,14 @@ class SettingsPage(QWidget):
             self.settings_changed.emit('soulseek.download_path', self.download_path_input.text())
             self.settings_changed.emit('soulseek.transfer_path', self.transfer_path_input.text())
             
+            # Emit signals for service configuration changes to reinitialize clients
+            self.settings_changed.emit('spotify.client_id', self.client_id_input.text())
+            self.settings_changed.emit('spotify.client_secret', self.client_secret_input.text())
+            self.settings_changed.emit('plex.base_url', self.plex_url_input.text())
+            self.settings_changed.emit('plex.token', self.plex_token_input.text())
+            self.settings_changed.emit('soulseek.slskd_url', self.slskd_url_input.text())
+            self.settings_changed.emit('soulseek.api_key', self.api_key_input.text())
+            
             # Show success message
             QMessageBox.information(self, "Success", "Settings saved successfully!")
             
@@ -752,13 +760,17 @@ class SettingsPage(QWidget):
         button.setText("Copied!")
         button.setEnabled(False)
         
-        # Reset button after 1 second
-        QTimer.singleShot(1000, lambda: self.reset_copy_button(button, original_text))
-    
-    def reset_copy_button(self, button, original_text):
-        """Reset copy button to original state"""
-        button.setText(original_text)
-        button.setEnabled(True)
+        # Reset button after 1 second with safe reference check
+        def safe_reset():
+            try:
+                if button and not button.isHidden():  # Check if button still exists and is valid
+                    button.setText(original_text)
+                    button.setEnabled(True)
+            except RuntimeError:
+                # Button was deleted, ignore silently
+                pass
+        
+        QTimer.singleShot(1000, safe_reset)
     
     def browse_download_path(self):
         """Open a directory dialog to select download path"""
