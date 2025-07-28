@@ -149,12 +149,11 @@ class MetadataUpdateWorker(QThread):
             if self.artist_has_valid_photo(artist):
                 return False
             
-            # Get the largest image from Spotify
-            if not spotify_artist.get('images'):
+            # Get the image URL from Spotify
+            if not spotify_artist.image_url:
                 return False
                 
-            largest_image = max(spotify_artist['images'], key=lambda x: x['width'] * x['height'])
-            image_url = largest_image['url']
+            image_url = spotify_artist.image_url
             
             # Download and validate image
             response = requests.get(image_url, timeout=10)
@@ -180,7 +179,7 @@ class MetadataUpdateWorker(QThread):
                                 for genre in (artist.genres or []))
             
             # Get Spotify artist genres
-            spotify_genres = set(spotify_artist.get('genres', []))
+            spotify_genres = set(spotify_artist.genres or [])
             
             # Get genres from all albums
             album_genres = set()
