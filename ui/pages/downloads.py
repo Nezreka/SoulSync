@@ -4687,7 +4687,7 @@ class TabbedDownloadManager(QTabWidget):
             while parent_page and not hasattr(parent_page, 'download_session_completed'):
                 parent_page = parent_page.parent()
             if parent_page and hasattr(parent_page, 'download_session_completed'):
-                parent_page.download_session_completed.emit()
+                parent_page.download_session_completed.emit(download_item.title, download_item.artist)
             
             # Performance monitoring
             end_time = time.time()
@@ -4802,8 +4802,11 @@ class DownloadsPage(QWidget):
     track_loading_finished = pyqtSignal(object)  # Track result object when streaming completes
     track_loading_progress = pyqtSignal(float, object)  # Progress percentage (0-100), track result object
     
-    # Signal for dashboard stats tracking
-    download_session_completed = pyqtSignal()  # Emitted when a download completes (for session tracking)
+    # Signal for dashboard stats tracking  
+    download_session_completed = pyqtSignal(str, str)  # Emitted when a download completes (title, artist)
+    
+    # Signals for dashboard activity tracking
+    download_activity = pyqtSignal(str, str, str, str)  # icon, title, subtitle, time
     
     # Signal for clear completed downloads completion (thread-safe communication)
     clear_completed_finished = pyqtSignal(bool, object)  # backend_success, ui_callback
@@ -6321,6 +6324,9 @@ class DownloadsPage(QWidget):
         self.search_btn.setEnabled(False)
         self.update_search_status(f"Searching for '{query}'... Results will appear as they are found", "#1db954")
         
+        # Emit activity signal for search start
+        self.download_activity.emit("🔍", "Search Started", f"Searching for '{query}'", "Now")
+        
         # Show loading animations
         self.start_search_animations()
         
@@ -6566,6 +6572,10 @@ class DownloadsPage(QWidget):
         # Show filter controls when we have results
         self.filter_container.setVisible(True)
         
+        # Emit activity signal for search completion
+        search_query = self.search_input.text().strip()
+        self.download_activity.emit("✅", "Search Complete", f"Found {total_results} results for '{search_query}'", "Now")
+        
         # Update status based on whether there are more results to load
         if self.displayed_results < total_results:
             remaining = total_results - self.displayed_results
@@ -6712,18 +6722,32 @@ class DownloadsPage(QWidget):
                 if '.' in name_without_ext:
                     name_without_ext = '.'.join(name_without_ext.split('.')[:-1])
                 
-                # Remove track number prefix
+                # Remove track number prefix - handle multiple formats
                 import re
-                track_number_match = re.match(r'^(\d+)\.\s*(.+)', name_without_ext)
-                if track_number_match:
-                    name_without_track_num = track_number_match.group(2)
-                else:
-                    name_without_track_num = name_without_ext
+                name_without_track_num = name_without_ext
+                
+                # Try different track number patterns
+                track_patterns = [
+                    r'^(\d+)\.\s*(.+)',        # "06. Artist - Track"
+                    r'^(\d+)\s*-\s*(.+)',      # "06 - Artist - Track" 
+                    r'^(\d+)\s+(.+)'           # "06 Artist - Track"
+                ]
+                
+                for pattern in track_patterns:
+                    match = re.match(pattern, name_without_ext)
+                    if match:
+                        name_without_track_num = match.group(2)
+                        break
                 
                 # Extract artist (first part before " - ")
                 parts = name_without_track_num.split(' - ')
                 if len(parts) >= 2:
+                    # First part is artist, second part is track title
                     artist = parts[0].strip()
+                    # Verify this doesn't look like a track number
+                    if re.match(r'^\d+$', artist.strip()):
+                        # If first part is just a number, use username as fallback
+                        artist = search_result.username
                 else:
                     artist = search_result.username
                 
@@ -6772,6 +6796,9 @@ class DownloadsPage(QWidget):
             )
             
             print(f"[DEBUG] Created download item with album context: album='{album_name}', track_number={track_number}")
+            
+            # Emit activity signal for download start
+            self.download_activity.emit("📥", "Download Started", f"'{title}' by {artist}", "Now")
             
             # Create and start download thread
             download_thread = DownloadThread(self.soulseek_client, search_result, download_item)
@@ -6974,15 +7001,28 @@ class DownloadsPage(QWidget):
                     name_without_ext = '.'.join(name_without_ext.split('.')[:-1])
                 
                 import re
-                track_number_match = re.match(r'^(\d+)\.\s*(.+)', name_without_ext)
-                if track_number_match:
-                    name_without_track_num = track_number_match.group(2)
-                else:
-                    name_without_track_num = name_without_ext
+                name_without_track_num = name_without_ext
+                
+                # Try different track number patterns
+                track_patterns = [
+                    r'^(\d+)\.\s*(.+)',        # "06. Artist - Track"
+                    r'^(\d+)\s*-\s*(.+)',      # "06 - Artist - Track" 
+                    r'^(\d+)\s+(.+)'           # "06 Artist - Track"
+                ]
+                
+                for pattern in track_patterns:
+                    match = re.match(pattern, name_without_ext)
+                    if match:
+                        name_without_track_num = match.group(2)
+                        break
                 
                 parts = name_without_track_num.split(' - ')
                 if len(parts) >= 2:
                     original_artist = parts[0].strip()
+                    # Verify this doesn't look like a track number
+                    if re.match(r'^\d+$', original_artist.strip()):
+                        # If first part is just a number, use username as fallback
+                        original_artist = search_result.username
                 else:
                     original_artist = search_result.username
             
@@ -7030,6 +7070,9 @@ class DownloadsPage(QWidget):
             if download_item:
                 download_item.matched_artist = artist
                 print(f"✅ Matched artist '{artist.name}' assigned to download item '{download_item.title}'")
+            
+            # Emit activity signal for download start (with matched artist)
+            self.download_activity.emit("📥", "Download Started", f"'{title}' by {artist.name if artist else original_artist}", "Now")
             
             # Start the download thread
             download_thread = DownloadThread(self.soulseek_client, search_result, download_item)
@@ -8967,6 +9010,10 @@ class DownloadsPage(QWidget):
         # Update download item status to failed
         download_item.status = "failed"
         download_item.progress = 0
+        
+        # Emit activity signal for download failure
+        self.download_activity.emit("❌", "Download Failed", f"'{download_item.title}' - {error_msg}", "Now")
+        
         # Error logged to console for debugging
     
     def on_download_progress(self, message, download_item):
@@ -9354,6 +9401,12 @@ class DownloadsPage(QWidget):
         if new_status in ['completed', 'cancelled', 'failed']:
             # Move to finished queue
             self.download_queue.move_to_finished(download_item)
+            
+            # Emit specific activity signal for failures
+            if new_status == 'failed':
+                self.download_activity.emit("❌", "Download Failed", f"'{download_item.title}' by {download_item.artist}", "Now")
+            elif new_status == 'cancelled':
+                self.download_activity.emit("⏹️", "Download Cancelled", f"'{download_item.title}' by {download_item.artist}", "Now")
             
             # Cleanup API if needed
             if new_status in ['cancelled', 'failed'] and hasattr(download_item, 'download_id'):

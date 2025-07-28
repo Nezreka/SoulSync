@@ -176,6 +176,11 @@ class MainWindow(QMainWindow):
             self.dashboard_page.add_activity_item
         )
         
+        # Connect download activities to dashboard
+        self.downloads_page.download_activity.connect(
+            self.dashboard_page.add_activity_item
+        )
+        
         self.stacked_widget.addWidget(self.dashboard_page)
         self.stacked_widget.addWidget(self.sync_page)
         self.stacked_widget.addWidget(self.downloads_page)
