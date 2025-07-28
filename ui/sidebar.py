@@ -914,8 +914,8 @@ class ModernSidebar(QWidget):
         # Navigation buttons
         nav_items = [
             ("dashboard", "Dashboard", "📊"),
-            ("sync", "Playlist Sync", "🔄"),
-            ("downloads", "Downloads", "📥"),
+            ("sync", "Sync", "🔄"),
+            ("downloads", "Search", "📥"),
             ("artists", "Artists", "🎵"),
             ("settings", "Settings", "⚙️")
         ]
