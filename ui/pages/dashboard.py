@@ -6,6 +6,7 @@ from PyQt6.QtGui import QFont, QPalette, QColor
 import time
 import asyncio
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 try:
     import resource
     HAS_RESOURCE = True
@@ -36,6 +37,8 @@ class MetadataUpdateWorker(QThread):
         self.processed_count = 0
         self.successful_count = 0
         self.failed_count = 0
+        self.max_workers = 4  # Same as your previous implementation
+        self.thread_lock = threading.Lock()
     
     def stop(self):
         self.should_stop = True
@@ -63,30 +66,47 @@ class MetadataUpdateWorker(QThread):
             
             total_artists = len(self.artists)
             
-            for i, artist in enumerate(self.artists):
+            # Process artists in parallel using ThreadPoolExecutor
+            def process_single_artist(artist):
+                """Process a single artist and return results"""
                 if self.should_stop:
-                    break
-                
+                    return None
+                    
                 artist_name = getattr(artist, 'title', 'Unknown Artist')
-                self.progress_updated.emit(artist_name, i, total_artists, (i / total_artists) * 100)
                 
                 try:
                     success, details = self.update_artist_metadata(artist)
-                    self.processed_count += 1
-                    
-                    if success:
-                        self.successful_count += 1
-                    else:
-                        self.failed_count += 1
-                    
-                    self.artist_updated.emit(artist_name, success, details)
-                    
+                    return (artist_name, success, details)
                 except Exception as e:
-                    self.failed_count += 1
-                    self.artist_updated.emit(artist_name, False, f"Error: {str(e)}")
+                    return (artist_name, False, f"Error: {str(e)}")
+            
+            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                # Submit all tasks
+                future_to_artist = {executor.submit(process_single_artist, artist): artist 
+                                  for artist in self.artists}
                 
-                # Small delay to prevent overwhelming the APIs
-                self.msleep(500)
+                # Process completed tasks as they finish
+                for future in as_completed(future_to_artist):
+                    if self.should_stop:
+                        break
+                        
+                    result = future.result()
+                    if result is None:  # Task was cancelled
+                        continue
+                        
+                    artist_name, success, details = result
+                    
+                    with self.thread_lock:
+                        self.processed_count += 1
+                        if success:
+                            self.successful_count += 1
+                        else:
+                            self.failed_count += 1
+                    
+                    # Emit progress and result signals
+                    progress_percent = (self.processed_count / total_artists) * 100
+                    self.progress_updated.emit(artist_name, self.processed_count, total_artists, progress_percent)
+                    self.artist_updated.emit(artist_name, success, details)
             
             self.finished.emit(self.processed_count, self.successful_count, self.failed_count)
             
