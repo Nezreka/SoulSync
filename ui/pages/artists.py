@@ -1892,9 +1892,45 @@ class DownloadMissingAlbumTracksModal(QDialog):
         # Start the actual download process
         self.start_matched_download_via_infrastructure_parallel(spotify_based_result, track_index, table_index, download_index)
     
+    def find_existing_download_for_track(self, spotify_based_result):
+        """Find existing download item in queue that matches this track"""
+        if not self.downloads_page or not hasattr(self.downloads_page, 'download_queue'):
+            return None
+            
+        target_title = spotify_based_result.title if hasattr(spotify_based_result, 'title') else spotify_based_result.filename
+        target_artist = spotify_based_result.artist if hasattr(spotify_based_result, 'artist') else ""
+        
+        # Check active queue for existing downloads
+        if hasattr(self.downloads_page.download_queue, 'active_queue'):
+            for item in self.downloads_page.download_queue.active_queue.download_items:
+                # Match by title and artist similarity
+                if (hasattr(item, 'title') and hasattr(item, 'artist') and 
+                    item.title.lower().strip() == target_title.lower().strip()):
+                    # For better matching, also check artist if available
+                    if target_artist and hasattr(item, 'artist'):
+                        if target_artist.lower() in item.artist.lower() or item.artist.lower() in target_artist.lower():
+                            return item
+                    else:
+                        return item  # Match by title only if no artist info
+        return None
+    
+    def cancel_existing_download(self, download_item):
+        """Cancel an existing download item"""
+        if download_item and hasattr(download_item, 'cancel_download'):
+            print(f"🚫 Cancelling existing queued download: '{download_item.title}' by {download_item.artist}")
+            download_item.cancel_download()
+            return True
+        return False
+
     def start_matched_download_via_infrastructure_parallel(self, spotify_based_result, track_index, table_index, download_index):
         """Start infrastructure download with parallel completion tracking"""
         try:
+            # Check for existing download and cancel if found
+            existing_download = self.find_existing_download_for_track(spotify_based_result)
+            if existing_download:
+                print(f"⚠️ Found existing download for '{spotify_based_result.title}', canceling before retry...")
+                self.cancel_existing_download(existing_download)
+            
             artist = type('Artist', (), {'name': spotify_based_result.artist})()
             download_item = self.downloads_page._start_download_with_artist(spotify_based_result, artist)
             
