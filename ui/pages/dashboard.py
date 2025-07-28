@@ -90,12 +90,12 @@ class DashboardDataProvider(QObject):
     def set_app_start_time(self, start_time):
         self.app_start_time = start_time
     
-    def increment_completed_downloads(self):
+    def increment_completed_downloads(self, title="Unknown Track", artist="Unknown Artist"):
         """Increment the session completed downloads counter"""
         self.session_completed_downloads += 1
         
-        # Emit signal for activity feed
-        self.activity_item_added.emit("📥", "Download Complete", "File downloaded successfully", "Now")
+        # Emit signal for activity feed with specific track info
+        self.activity_item_added.emit("📥", "Download Complete", f"'{title}' by {artist}", "Now")
     
     def update_service_status(self, service: str, connected: bool, response_time: float = 0.0, error: str = ""):
         if service in self.service_status:
