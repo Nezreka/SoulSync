@@ -6,6 +6,8 @@ from plexapi.exceptions import PlexApiException, NotFound
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
 import requests
+from datetime import datetime, timedelta
+import re
 from utils.logging_config import get_logger
 from config.settings import config_manager
 
@@ -439,7 +441,11 @@ class PlexClient:
             for genre in genres:
                 artist.addGenre(genre)
             
-            logger.info(f"Updated genres for {artist.title}: {genres}")
+            # Use safe logging to avoid Unicode encoding errors
+            try:
+                logger.info(f"Updated genres for {artist.title}: {len(genres)} genres")
+            except UnicodeEncodeError:
+                logger.info(f"Updated genres for artist (ID: {artist.ratingKey}): {len(genres)} genres")
             return True
         except Exception as e:
             logger.error(f"Error updating genres for {artist.title}: {e}")
@@ -465,6 +471,123 @@ class PlexClient:
             
         except Exception as e:
             logger.error(f"Error updating poster for {artist.title}: {e}")
+            return False
+    
+    def parse_update_timestamp(self, artist: PlexArtist) -> Optional[datetime]:
+        """Parse the last update timestamp from artist summary"""
+        try:
+            # Get artist summary which stores our timestamp
+            summary = getattr(artist, 'summary', '') or ''
+            
+            # Look for timestamp pattern: -updatedAtYYYY-MM-DD
+            pattern = r'-updatedAt(\d{4}-\d{2}-\d{2})'
+            match = re.search(pattern, summary)
+            
+            if match:
+                date_str = match.group(1)
+                return datetime.strptime(date_str, '%Y-%m-%d')
+            
+            return None
+            
+        except Exception as e:
+            logger.debug(f"Error parsing timestamp for {artist.title}: {e}")
+            return None
+    
+    def is_artist_ignored(self, artist: PlexArtist) -> bool:
+        """Check if artist is manually marked to be ignored"""
+        try:
+            # Check summary field where we store timestamps and ignore flags
+            summary = getattr(artist, 'summary', '') or ''
+            return '-IgnoreUpdate' in summary
+        except Exception as e:
+            logger.debug(f"Error checking ignore status for {artist.title}: {e}")
+            return False
+    
+    def needs_update_by_age(self, artist: PlexArtist, refresh_interval_days: int) -> bool:
+        """Check if artist needs updating based on age threshold"""
+        try:
+            # First check if artist is manually ignored
+            if self.is_artist_ignored(artist):
+                logger.debug(f"Artist {artist.title} is manually ignored")
+                return False
+            
+            # If refresh_interval_days is 0, always update (full refresh)
+            if refresh_interval_days == 0:
+                return True
+            
+            last_update = self.parse_update_timestamp(artist)
+            
+            # If no timestamp found, needs update
+            if last_update is None:
+                return True
+            
+            # Check if last update is older than threshold
+            threshold_date = datetime.now() - timedelta(days=refresh_interval_days)
+            return last_update < threshold_date
+            
+        except Exception as e:
+            logger.debug(f"Error checking update age for {artist.title}: {e}")
+            return True  # Default to needing update if error
+    
+    def update_artist_biography(self, artist: PlexArtist) -> bool:
+        """Update artist summary with current timestamp"""
+        try:
+            # Get current summary/biography
+            current_summary = getattr(artist, 'summary', '') or ''
+            print(f"[DEBUG] Original summary for '{artist.title}': '{current_summary[:100]}...'")
+            
+            # Preserve any IgnoreUpdate flag
+            ignore_flag = ''
+            if '-IgnoreUpdate' in current_summary:
+                ignore_flag = '-IgnoreUpdate'
+                # Remove IgnoreUpdate flag temporarily for processing
+                current_summary = current_summary.replace('-IgnoreUpdate', '').strip()
+            
+            # Remove existing timestamp if present (ensures only one timestamp)
+            pattern = r'\s*-updatedAt\d{4}-\d{2}-\d{2}\s*'
+            clean_summary = re.sub(pattern, '', current_summary).strip()
+            
+            # Build new summary with timestamp
+            today = datetime.now().strftime('%Y-%m-%d')
+            
+            # Add timestamp to summary field
+            new_summary = clean_summary
+            if ignore_flag:
+                new_summary = f"{new_summary}\n\n{ignore_flag}".strip()
+            new_summary = f"{new_summary}\n\n-updatedAt{today}".strip()
+            
+            print(f"[DEBUG] Setting summary for '{artist.title}': ending with '{new_summary[-50:]}'")
+            
+            # Use the correct Plex API syntax with .value (testing without lock first)
+            artist.edit(**{
+                'summary.value': new_summary
+            })
+            print(f"[DEBUG] Called artist.edit with summary.value (no lock) for '{artist.title}'")
+            
+            # Add a small delay to let the edit process
+            import time
+            time.sleep(0.5)
+            
+            # Reload to see the changes
+            artist.reload()
+            print(f"[DEBUG] Called artist.reload() for '{artist.title}'")
+            
+            # Check if edit worked
+            updated_summary = getattr(artist, 'summary', '') or ''
+            print(f"[DEBUG] Summary after reload for '{artist.title}': ending with '{updated_summary[-50:]}'")
+            
+            if updated_summary and '-updatedAt' in updated_summary:
+                logger.info(f"Updated summary timestamp for {artist.title}")
+                return True
+            else:
+                print(f"[DEBUG] Timestamp not found in summary after reload for '{artist.title}'")
+                return False
+            
+        except Exception as e:
+            print(f"[DEBUG] Exception in update_artist_biography for '{artist.title}': {e}")
+            logger.error(f"Error updating summary for {artist.title}: {e}")
+            import traceback
+            traceback.print_exc()
             return False
     
     def update_track_metadata(self, track_id: str, metadata: Dict[str, Any]) -> bool:
