@@ -1,20 +1,17 @@
 {
   "spotify": {
-    "client_id": "512b25bd9e0d4ecd82140f6d1ce0c8e6",
-    "client_secret": "c3844dcbedbc4e09a6242a14b2e89e89"
+    "client_id": "YOUR CLIENT ID",
+    "client_secret": "YOUR CLIENT SECRET"
   },
   "plex": {
     "base_url": "http://192.168.86.36:32400",
-    "token": "a9hTgvasV1aJMLSdoBkr"
+    "token": "YOUR PLEX TOKEN"
   },
   "soulseek": {
     "slskd_url": "http://localhost:5030",
-    "api_key": "1234567891234567",
+    "api_key": "YOUR SLSKD API KEY",
     "download_path": "E:/Broque Projects/newMusic/downloads",
     "transfer_path": "E:/Broque Projects/newMusic/Transfer"
-  },
-  "database": {
-    "path": "database/artists.db"
   },
   "logging": {
     "path": "logs/app.log",
