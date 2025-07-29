@@ -1,5 +1,5 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
-                           QLabel, QFrame, QSizePolicy, QSpacerItem, QSlider, QProgressBar)
+                           QLabel, QFrame, QSizePolicy, QSpacerItem, QSlider, QProgressBar, QApplication)
 from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QRect, QTimer, pyqtProperty
 from PyQt6.QtGui import QFont, QPalette, QIcon, QPixmap, QPainter, QFontMetrics, QColor, QLinearGradient
 
@@ -253,6 +253,109 @@ class SidebarButton(QPushButton):
                     border: 1px solid rgba(255, 255, 255, 0.05);
                 }
             """)
+
+class CryptoDonationWidget(QWidget):
+    """Widget for displaying crypto donation addresses"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setup_ui()
+    
+    def setup_ui(self):
+        self.setStyleSheet("""
+            CryptoDonationWidget {
+                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                                          stop: 0 transparent,
+                                          stop: 0.3 rgba(255, 255, 255, 0.02),
+                                          stop: 1 rgba(255, 255, 255, 0.04)); 
+                border-top: 1px solid rgba(255, 255, 255, 0.08);
+                border-bottom-right-radius: 12px;
+            }
+        """)
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 15, 0, 15)
+        layout.setSpacing(8)
+        
+        # Donation title
+        donation_title = QLabel("Support Development")
+        donation_title.setFont(QFont("SF Pro Text", 10, QFont.Weight.Bold))
+        donation_title.setMinimumHeight(16)
+        donation_title.setStyleSheet("""
+            color: rgba(255, 255, 255, 0.9); 
+            padding: 0 20px; 
+            margin-bottom: 5px;
+            letter-spacing: 0.2px;
+            font-weight: 600;
+        """)
+        layout.addWidget(donation_title)
+        
+        # Crypto addresses
+        crypto_addresses = [
+            ("BTC", "Bitcoin", "3JVWrRSkozAQSmw5DXYVxYKsM9bndPTqdS"),
+            ("ETH", "Ethereum", "0x343fC48c2cd1C6332b0df9a58F86e6520a026AC5")
+        ]
+        
+        for symbol, name, address in crypto_addresses:
+            crypto_item = self.create_crypto_item(symbol, name, address)
+            layout.addWidget(crypto_item)
+    
+    def create_crypto_item(self, symbol: str, name: str, address: str):
+        """Create a clickable crypto donation item"""
+        item = QFrame()
+        item.setFixedHeight(32)
+        item.setCursor(Qt.CursorShape.PointingHandCursor)
+        item.setStyleSheet("""
+            QFrame {
+                background: transparent;
+                border-radius: 8px;
+                margin: 0 12px;
+            }
+            QFrame:hover {
+                background: rgba(255, 255, 255, 0.06);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+            }
+        """)
+        
+        layout = QHBoxLayout(item)
+        layout.setContentsMargins(12, 4, 12, 4)
+        layout.setSpacing(6)
+        
+        # Crypto name
+        name_label = QLabel(name)
+        name_label.setFont(QFont("SF Pro Text", 9, QFont.Weight.Medium))
+        name_label.setStyleSheet("""
+            color: rgba(255, 255, 255, 0.8);
+            font-weight: 500;
+        """)
+        
+        # Address (truncated)
+        address_short = f"{address[:6]}...{address[-4:]}"
+        address_label = QLabel(address_short)
+        address_label.setFont(QFont("SF Pro Text", 8))
+        address_label.setStyleSheet("""
+            color: rgba(255, 255, 255, 0.5);
+            font-family: 'Courier New', monospace;
+        """)
+        
+        layout.addWidget(name_label)
+        layout.addStretch()
+        layout.addWidget(address_label)
+        
+        # Store full address for copying
+        item.full_address = address
+        item.crypto_name = name
+        item.mousePressEvent = lambda event: self.copy_address(address, name)
+        
+        return item
+    
+    def copy_address(self, address: str, crypto_name: str):
+        """Copy crypto address to clipboard"""
+        clipboard = QApplication.clipboard()
+        clipboard.setText(address)
+        
+        # Brief visual feedback (could add a tooltip or status message here)
+        print(f"Copied {crypto_name} address to clipboard: {address}")
 
 class StatusIndicator(QWidget):
     def __init__(self, service_name: str, parent=None):
@@ -915,8 +1018,15 @@ class ModernSidebar(QWidget):
         self.media_player = MediaPlayer()
         layout.addWidget(self.media_player)
         
-        # Small spacer between media player and status
-        layout.addItem(QSpacerItem(20, 10, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed))
+        # Small spacer between media player and crypto
+        layout.addItem(QSpacerItem(20, 8, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed))
+        
+        # Crypto Donation section
+        crypto_section = CryptoDonationWidget()
+        layout.addWidget(crypto_section)
+        
+        # Small spacer between crypto and status
+        layout.addItem(QSpacerItem(20, 8, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed))
         
         # Status section
         status_section = self.create_status_section()
