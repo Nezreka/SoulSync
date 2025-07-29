@@ -7585,9 +7585,15 @@ class DownloadsPage(QWidget):
             print(f"📂 Copying file to: {new_file_path}")
             shutil.copy2(original_file_path, new_file_path)
             
-            # Download cover art if in album mode
+            # Download cover art for both albums and singles
             if album_info and album_info['is_album']:
+                # Album track - download to album directory
                 self._download_cover_art(artist, album_info, os.path.dirname(new_file_path))
+            else:
+                # Single track - create minimal album_info for cover art download
+                single_album_info = self._create_single_track_album_info(download_item, artist)
+                if single_album_info:
+                    self._download_cover_art(artist, single_album_info, os.path.dirname(new_file_path))
             
             print(f"✅ Successfully organized matched download: {new_file_path}")
             return new_file_path
@@ -7944,13 +7950,19 @@ class DownloadsPage(QWidget):
                 forced_album = getattr(download_item, '_force_album_name', 'Unknown Album')
                 print(f"    Forced album: '{forced_album}'")
                 
+                # Try to get album image URL from matched_album if available
+                album_image_url = None
+                if hasattr(download_item, 'matched_album') and download_item.matched_album:
+                    album_image_url = download_item.matched_album.image_url
+                
                 return {
                     'is_album': True,
                     'album_name': forced_album,
                     'track_number': getattr(download_item, 'track_number', 1),
                     'clean_track_name': download_item.title,
                     'confidence': 1.0,  # 100% confidence since it's forced
-                    'source': 'forced_user_selection'
+                    'source': 'forced_user_selection',
+                    'album_image_url': album_image_url
                 }
             
             # PRIORITY 1: Always try Spotify API first for clean metadata
@@ -8027,6 +8039,12 @@ class DownloadsPage(QWidget):
                     download_item._spotify_clean_title = clean_track_name
                     download_item._spotify_clean_album = album_name
                     
+                    # Extract album image URL from detailed track data
+                    album_image_url = None
+                    if detailed_track.get('album', {}).get('images'):
+                        # Get the largest image (first one in Spotify's array)
+                        album_image_url = detailed_track['album']['images'][0]['url']
+                    
                     if is_album:
                         print(f"🎯 Spotify detection: Album track - '{album_name}'")
                         return {
@@ -8034,7 +8052,8 @@ class DownloadsPage(QWidget):
                             'album_name': album_name,
                             'track_number': track_num,
                             'spotify_track': best_match,
-                            'clean_track_name': clean_track_name
+                            'clean_track_name': clean_track_name,
+                            'album_image_url': album_image_url
                         }
                     else:
                         print(f"🎯 Spotify detection: Single track - using clean track name")
@@ -8043,7 +8062,8 @@ class DownloadsPage(QWidget):
                             'album_name': clean_track_name,  # Use clean track name for single structure
                             'track_number': 1,
                             'spotify_track': best_match,
-                            'clean_track_name': clean_track_name
+                            'clean_track_name': clean_track_name,
+                            'album_image_url': album_image_url
                         }
                         
                 else:
@@ -8067,12 +8087,18 @@ class DownloadsPage(QWidget):
                     download_item._spotify_clean_title = clean_track_name
                     download_item._spotify_clean_album = album_name
                     
+                    # Try to get album image URL from matched_album if available
+                    album_image_url = None
+                    if hasattr(download_item, 'matched_album') and download_item.matched_album:
+                        album_image_url = download_item.matched_album.image_url
+                    
                     return {
                         'is_album': is_album,
                         'album_name': album_name if is_album else clean_track_name,
                         'track_number': track_num if is_album else 1,
                         'spotify_track': best_match,
-                        'clean_track_name': clean_track_name
+                        'clean_track_name': clean_track_name,
+                        'album_image_url': album_image_url
                     }
             
             # PRIORITY 2: Fallback to Soulseek album context if Spotify search failed
@@ -8089,12 +8115,18 @@ class DownloadsPage(QWidget):
                 download_item._spotify_clean_title = clean_title
                 download_item._spotify_clean_album = clean_album
                 
+                # Try to get album image URL from matched_album if available
+                album_image_url = None
+                if hasattr(download_item, 'matched_album') and download_item.matched_album:
+                    album_image_url = download_item.matched_album.image_url
+                
                 return {
                     'is_album': True,
                     'album_name': clean_album,
                     'track_number': track_num,
                     'spotify_track': None,
-                    'clean_track_name': clean_title
+                    'clean_track_name': clean_title,
+                    'album_image_url': album_image_url
                 }
             
             # PRIORITY 3: Complete fallback - single track with cleaned title
@@ -8103,37 +8135,44 @@ class DownloadsPage(QWidget):
             
             download_item._spotify_clean_title = clean_title
             
+            # Try to get album image URL from matched_album if available
+            album_image_url = None
+            if hasattr(download_item, 'matched_album') and download_item.matched_album:
+                album_image_url = download_item.matched_album.image_url
+            
             return {
                 'is_album': False,
                 'album_name': clean_title,  # Use clean track name as single name
                 'track_number': 1,
                 'spotify_track': None,
-                'clean_track_name': clean_title
+                'clean_track_name': clean_title,
+                'album_image_url': album_image_url
             }
             
         except Exception as e:
             print(f"❌ Error detecting album info: {e}")
             # Emergency fallback to single structure with basic cleaning
             clean_title = self._clean_track_title(download_item.title, artist.name)
+            
+            # Try to get album image URL from matched_album if available
+            album_image_url = None
+            if hasattr(download_item, 'matched_album') and download_item.matched_album:
+                album_image_url = download_item.matched_album.image_url
+            
             return {
                 'is_album': False,
                 'album_name': clean_title,
                 'track_number': 1,
                 'spotify_track': None,
-                'clean_track_name': clean_title
+                'clean_track_name': clean_title,
+                'album_image_url': album_image_url
             }
     
     def _download_cover_art(self, artist: Artist, album_info: dict, target_dir: str):
-        """Download cover art for the album"""
+        """Download cover art for the album, prioritizing album artwork from Spotify"""
         try:
             import requests
             import os
-            
-            # Use artist image as fallback for now
-            # Could be enhanced to get actual album artwork
-            if not artist.image_url:
-                print("📷 No artist image available for cover art")
-                return
             
             cover_path = os.path.join(target_dir, "cover.jpg")
             
@@ -8142,8 +8181,49 @@ class DownloadsPage(QWidget):
                 print("📷 Cover art already exists")
                 return
             
-            print(f"📷 Downloading cover art from: {artist.image_url}")
-            response = requests.get(artist.image_url, timeout=10)
+            image_url = None
+            source_description = ""
+            
+            # Priority 1: Use album artwork from album_info if available
+            if album_info.get('album_image_url'):
+                image_url = album_info['album_image_url']
+                source_description = f"album artwork for '{album_info.get('album_name', 'Unknown Album')}'"
+                print(f"📷 Using album artwork from album_info")
+            
+            # Priority 2: Try to get album artwork via Spotify search if we have album name
+            elif album_info.get('album_name') and hasattr(self, 'spotify_client'):
+                try:
+                    print(f"📷 Searching Spotify for album artwork: '{album_info['album_name']}' by '{artist.name}'")
+                    # Search for the specific album
+                    search_query = f"album:{album_info['album_name']} artist:{artist.name}"
+                    albums = self.spotify_client.search_albums(search_query, limit=1)
+                    
+                    if albums and len(albums) > 0:
+                        album = albums[0]
+                        if album.image_url:
+                            image_url = album.image_url
+                            source_description = f"Spotify album artwork for '{album.name}'"
+                            print(f"📷 Found album artwork via Spotify search")
+                        else:
+                            print(f"📷 Album found but no image available")
+                    else:
+                        print(f"📷 No album found in Spotify search")
+                except Exception as e:
+                    print(f"📷 Error searching Spotify for album artwork: {e}")
+            
+            # Priority 3: Fall back to artist image
+            if not image_url and artist.image_url:
+                image_url = artist.image_url
+                source_description = f"artist image for '{artist.name}'"
+                print(f"📷 Falling back to artist image")
+            
+            # No image available
+            if not image_url:
+                print("📷 No cover art available (no album artwork or artist image)")
+                return
+            
+            print(f"📷 Downloading {source_description} from: {image_url}")
+            response = requests.get(image_url, timeout=10)
             response.raise_for_status()
             
             with open(cover_path, 'wb') as f:
@@ -8153,6 +8233,43 @@ class DownloadsPage(QWidget):
             
         except Exception as e:
             print(f"❌ Error downloading cover art: {e}")
+    
+    def _create_single_track_album_info(self, download_item, artist: Artist) -> Optional[dict]:
+        """Create album_info dict for single track cover art download"""
+        try:
+            # Check if we have matched_album from Spotify matching
+            if hasattr(download_item, 'matched_album') and download_item.matched_album:
+                album = download_item.matched_album
+                print(f"📷 Single track has matched album: '{album.name}' with image: {bool(album.image_url)}")
+                return {
+                    'album_name': album.name,
+                    'album_image_url': album.image_url,
+                    'is_album': False,  # This is still a single track
+                    'track_number': 1,
+                    'clean_track_name': download_item.title
+                }
+            
+            # If no matched_album, try to detect from track title or existing album field
+            album_name = None
+            if hasattr(download_item, 'album') and download_item.album and download_item.album.strip():
+                album_name = download_item.album.strip()
+                print(f"📷 Using album name from download_item: '{album_name}'")
+            else:
+                print(f"📷 No album information available for single track")
+                return None
+            
+            # Create basic album_info for cover art search
+            return {
+                'album_name': album_name,
+                'album_image_url': None,  # Will be searched in _download_cover_art
+                'is_album': False,  # This is still a single track
+                'track_number': 1,
+                'clean_track_name': download_item.title
+            }
+            
+        except Exception as e:
+            print(f"❌ Error creating single track album info: {e}")
+            return None
     
     def _extract_track_number(self, download_item, spotify_track=None) -> int:
         """Extract track number from various sources"""
