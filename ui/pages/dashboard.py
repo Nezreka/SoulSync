@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                            QFrame, QGridLayout, QScrollArea, QSizePolicy, QPushButton,
-                           QProgressBar, QTextEdit, QSpacerItem, QGroupBox, QFormLayout)
+                           QProgressBar, QTextEdit, QSpacerItem, QGroupBox, QFormLayout, QComboBox)
 from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, QObject
 from PyQt6.QtGui import QFont, QPalette, QColor
 import time
@@ -29,12 +29,13 @@ class MetadataUpdateWorker(QThread):
     error = pyqtSignal(str)  # error_message
     artists_loaded = pyqtSignal(int, int)  # total_artists, artists_to_process
     
-    def __init__(self, artists, plex_client, spotify_client):
+    def __init__(self, artists, plex_client, spotify_client, refresh_interval_days=30):
         super().__init__()
         self.artists = artists
         self.plex_client = plex_client
         self.spotify_client = spotify_client
         self.matching_engine = MusicMatchingEngine()
+        self.refresh_interval_days = refresh_interval_days
         self.should_stop = False
         self.processed_count = 0
         self.successful_count = 0
@@ -116,18 +117,11 @@ class MetadataUpdateWorker(QThread):
             self.error.emit(f"Metadata update failed: {str(e)}")
     
     def artist_needs_processing(self, artist):
-        """Check if an artist needs metadata processing using smart detection"""
+        """Check if an artist needs metadata processing using age-based detection"""
         try:
-            # Check if artist has a valid photo
-            has_valid_photo = self.artist_has_valid_photo(artist)
-            
-            # Check if artist has genres (more than just basic ones)
-            existing_genres = set(genre.tag if hasattr(genre, 'tag') else str(genre) 
-                                for genre in (artist.genres or []))
-            has_good_genres = len(existing_genres) >= 2  # At least 2 genres indicates Spotify processing
-            
-            # Process if missing photo OR insufficient genres
-            return not has_valid_photo or not has_good_genres
+            # Use PlexClient's age-based checking with configured interval
+            # This also handles the ignore flag check internally
+            return self.plex_client.needs_update_by_age(artist, self.refresh_interval_days)
             
         except Exception as e:
             print(f"Error checking artist {getattr(artist, 'title', 'Unknown')}: {e}")
@@ -178,9 +172,16 @@ class MetadataUpdateWorker(QThread):
                 changes_made.append("genres")
             
             if changes_made:
+                # Update artist biography with timestamp to track last update
+                biography_updated = self.plex_client.update_artist_biography(artist)
+                if biography_updated:
+                    changes_made.append("timestamp")
+                
                 details = f"Updated {', '.join(changes_made)} (match: '{spotify_artist.name}', score: {highest_score:.2f})"
                 return True, details
             else:
+                # Even if no metadata changes, update biography to record we checked this artist
+                self.plex_client.update_artist_biography(artist)
                 return True, "Already up to date"
                 
         except Exception as e:
@@ -774,6 +775,11 @@ class MetadataUpdaterWidget(QFrame):
         header_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
         header_label.setStyleSheet("color: #ffffff;")
         
+        # Info label
+        info_label = QLabel("(type -IgnoreUpdate into artist summary to ignore metadata updates on this artist)")
+        info_label.setFont(QFont("Arial", 9))
+        info_label.setStyleSheet("color: #b3b3b3; margin-bottom: 5px;")
+        
         # Control section
         control_layout = QHBoxLayout()
         control_layout.setSpacing(15)
@@ -801,6 +807,59 @@ class MetadataUpdaterWidget(QFrame):
             }
         """)
         
+        # Refresh interval dropdown
+        refresh_info_layout = QVBoxLayout()
+        
+        refresh_label = QLabel("Refresh Interval:")
+        refresh_label.setFont(QFont("Arial", 9))
+        refresh_label.setStyleSheet("color: #b3b3b3;")
+        
+        self.refresh_interval_combo = QComboBox()
+        self.refresh_interval_combo.setFixedHeight(32)
+        self.refresh_interval_combo.setFont(QFont("Arial", 10))
+        self.refresh_interval_combo.addItems([
+            "6 months",
+            "3 months", 
+            "1 month",
+            "2 weeks",
+            "1 week",
+            "Full refresh"
+        ])
+        self.refresh_interval_combo.setCurrentText("1 month")  # Default selection
+        self.refresh_interval_combo.setStyleSheet("""
+            QComboBox {
+                background: #333333;
+                color: #ffffff;
+                border: 1px solid #555555;
+                border-radius: 4px;
+                padding: 4px 8px;
+                min-width: 100px;
+            }
+            QComboBox:hover {
+                border: 1px solid #1db954;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 20px;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                border-left: 5px solid transparent;
+                border-right: 5px solid transparent;
+                border-top: 5px solid #ffffff;
+                margin-right: 5px;
+            }
+            QComboBox QAbstractItemView {
+                background: #333333;
+                color: #ffffff;
+                border: 1px solid #555555;
+                selection-background-color: #1db954;
+            }
+        """)
+        
+        refresh_info_layout.addWidget(refresh_label)
+        refresh_info_layout.addWidget(self.refresh_interval_combo)
+        
         # Current artist display
         artist_info_layout = QVBoxLayout()
         
@@ -816,6 +875,7 @@ class MetadataUpdaterWidget(QFrame):
         artist_info_layout.addWidget(self.current_artist_label)
         
         control_layout.addWidget(self.start_button)
+        control_layout.addLayout(refresh_info_layout)
         control_layout.addLayout(artist_info_layout)
         control_layout.addStretch()
         
@@ -857,6 +917,7 @@ class MetadataUpdaterWidget(QFrame):
         progress_layout.addWidget(self.progress_bar)
         
         layout.addWidget(header_label)
+        layout.addWidget(info_label)
         layout.addLayout(control_layout)
         layout.addLayout(progress_layout)
     
@@ -875,6 +936,20 @@ class MetadataUpdaterWidget(QFrame):
             self.progress_label.setText("Progress: 0%")
             self.count_label.setText("0 / 0 artists")
             self.progress_bar.setValue(0)
+    
+    def get_refresh_interval_days(self) -> int:
+        """Convert dropdown selection to number of days"""
+        interval_map = {
+            "6 months": 180,
+            "3 months": 90,
+            "1 month": 30,
+            "2 weeks": 14,
+            "1 week": 7,
+            "Full refresh": 0  # 0 means update everything
+        }
+        
+        selected = self.refresh_interval_combo.currentText()
+        return interval_map.get(selected, 30)  # Default to 1 month
 
 class ActivityItem(QWidget):
     def __init__(self, icon: str, title: str, subtitle: str, time: str, parent=None):
@@ -1216,11 +1291,15 @@ class DashboardPage(QWidget):
             return
         
         try:
+            # Get refresh interval from dropdown
+            refresh_interval_days = self.metadata_widget.get_refresh_interval_days()
+            
             # Start the metadata update worker (it will handle artist retrieval in background)
             self.metadata_worker = MetadataUpdateWorker(
                 None,  # Artists will be loaded in the worker thread
                 self.data_provider.service_clients['plex'],
-                self.data_provider.service_clients['spotify']
+                self.data_provider.service_clients['spotify'],
+                refresh_interval_days
             )
             
             # Connect signals
