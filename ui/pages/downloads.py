@@ -4940,10 +4940,6 @@ class DownloadsPage(QWidget):
         content_splitter.setStretchFactor(1, 0)  # Controls panel stays fixed width when possible
         
         main_layout.addWidget(content_splitter)
-        
-        # Optional: Compact status bar at bottom
-        status_bar = self.create_compact_status_bar()
-        main_layout.addWidget(status_bar)
     
     def create_elegant_header(self):
         """Create an elegant, minimal header"""
