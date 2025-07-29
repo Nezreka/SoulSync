@@ -138,31 +138,34 @@ class SidebarButton(QPushButton):
         self.setup_ui()
     
     def setup_ui(self):
-        self.setFixedHeight(50)
-        self.setFixedWidth(200)
+        self.setFixedHeight(52)
+        self.setFixedWidth(216)  # Adjusted for new sidebar width
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(20, 0, 20, 0)
-        layout.setSpacing(15)
+        layout.setContentsMargins(18, 0, 18, 0)
+        layout.setSpacing(16)
         
-        # Icon label
+        # Icon label with better styling
         self.icon_label = QLabel(self.icon_text)
-        self.icon_label.setFixedSize(24, 24)
+        self.icon_label.setFixedSize(28, 28)
         self.icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.icon_label.setStyleSheet("""
             QLabel {
-                color: #b3b3b3;
+                color: rgba(255, 255, 255, 0.7);
                 font-size: 16px;
-                font-weight: bold;
-                border-radius: 12px;
-                background: rgba(255, 255, 255, 0.1);
+                font-weight: 600;
+                border-radius: 14px;
+                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 1,
+                                          stop: 0 rgba(255, 255, 255, 0.08),
+                                          stop: 1 rgba(255, 255, 255, 0.04));
+                border: 1px solid rgba(255, 255, 255, 0.05);
             }
         """)
         
-        # Text label
+        # Text label with improved typography
         self.text_label = QLabel(self.text)
-        self.text_label.setFont(QFont("Arial", 11, QFont.Weight.Medium))
+        self.text_label.setFont(QFont("SF Pro Text", 12, QFont.Weight.Medium))
         
         layout.addWidget(self.icon_label)
         layout.addWidget(self.text_label)
@@ -178,25 +181,41 @@ class SidebarButton(QPushButton):
         if self.is_active:
             self.setStyleSheet("""
                 SidebarButton {
-                    background: rgba(29, 185, 84, 0.15);
-                    border-left: 4px solid #1db954;
-                    border-radius: 12px;
+                    background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 1,
+                                              stop: 0 rgba(29, 185, 84, 0.18),
+                                              stop: 0.5 rgba(29, 185, 84, 0.12),
+                                              stop: 1 rgba(29, 185, 84, 0.08));
+                    border-left: 3px solid #1ed760;
+                    border-radius: 16px;
                     text-align: left;
                     padding: 0px;
+                    border: 1px solid rgba(29, 185, 84, 0.2);
                 }
                 SidebarButton:hover {
-                    background: rgba(29, 185, 84, 0.25);
-                    transform: scale(1.02);
+                    background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 1,
+                                              stop: 0 rgba(29, 185, 84, 0.25),
+                                              stop: 0.5 rgba(29, 185, 84, 0.18),
+                                              stop: 1 rgba(29, 185, 84, 0.12));
+                    transform: translateX(4px);
+                    border: 1px solid rgba(29, 185, 84, 0.3);
                 }
             """)
-            self.text_label.setStyleSheet("color: #1db954; font-weight: bold; background: transparent;")
+            self.text_label.setStyleSheet("""
+                color: #1ed760; 
+                font-weight: 600; 
+                background: transparent;
+                letter-spacing: 0.1px;
+            """)
             self.icon_label.setStyleSheet("""
                 QLabel {
-                    color: #1db954;
+                    color: #1ed760;
                     font-size: 16px;
-                    font-weight: bold;
+                    font-weight: 700;
                     border-radius: 14px;
-                    background: rgba(29, 185, 84, 0.25);
+                    background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 1,
+                                              stop: 0 rgba(29, 185, 84, 0.25),
+                                              stop: 1 rgba(30, 215, 96, 0.2));
+                    border: 1px solid rgba(29, 185, 84, 0.3);
                 }
             """)
         else:
@@ -204,23 +223,34 @@ class SidebarButton(QPushButton):
                 SidebarButton {
                     background: transparent;
                     border: none;
-                    border-radius: 12px;
+                    border-radius: 16px;
                     text-align: left;
                     padding: 0px;
                 }
                 SidebarButton:hover {
-                    background: rgba(255, 255, 255, 0.08);
-                    border-left: 2px solid rgba(255, 255, 255, 0.3);
+                    background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 1,
+                                              stop: 0 rgba(255, 255, 255, 0.06),
+                                              stop: 1 rgba(255, 255, 255, 0.03));
+                    border-left: 2px solid rgba(255, 255, 255, 0.2);
+                    transform: translateX(2px);
+                    border: 1px solid rgba(255, 255, 255, 0.08);
                 }
             """)
-            self.text_label.setStyleSheet("color: #b3b3b3; background: transparent;")
+            self.text_label.setStyleSheet("""
+                color: rgba(255, 255, 255, 0.8); 
+                background: transparent;
+                letter-spacing: 0.1px;
+            """)
             self.icon_label.setStyleSheet("""
                 QLabel {
-                    color: #b3b3b3;
+                    color: rgba(255, 255, 255, 0.7);
                     font-size: 16px;
-                    font-weight: bold;
+                    font-weight: 600;
                     border-radius: 14px;
-                    background: rgba(255, 255, 255, 0.08);
+                    background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 1,
+                                              stop: 0 rgba(255, 255, 255, 0.08),
+                                              stop: 1 rgba(255, 255, 255, 0.04));
+                    border: 1px solid rgba(255, 255, 255, 0.05);
                 }
             """)
 
@@ -232,27 +262,28 @@ class StatusIndicator(QWidget):
         self.setup_ui()
     
     def setup_ui(self):
-        self.setFixedHeight(35)  # Ensure enough height
+        self.setFixedHeight(38)  # Slightly taller for better proportions
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(15, 8, 15, 8)
-        layout.setSpacing(12)
+        layout.setContentsMargins(20, 8, 20, 8)
+        layout.setSpacing(14)
         
-        # Status dot with rounded background
+        # Status dot with more elegant design
         self.status_dot = QLabel("●")
-        self.status_dot.setFixedSize(16, 16)
+        self.status_dot.setFixedSize(18, 18)
         self.status_dot.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.status_dot.setStyleSheet("""
             QLabel {
-                border-radius: 8px;
-                font-size: 12px;
-                font-weight: bold;
+                border-radius: 9px;
+                font-size: 10px;
+                font-weight: 700;
+                border: 1px solid rgba(255, 255, 255, 0.1);
             }
         """)
         
-        # Service name
+        # Service name with better typography
         self.service_label = QLabel(self.service_name)
-        self.service_label.setFont(QFont("Arial", 10, QFont.Weight.Medium))
-        self.service_label.setMinimumWidth(80)  # Ensure text doesn't get cut off
+        self.service_label.setFont(QFont("SF Pro Text", 10, QFont.Weight.Medium))
+        self.service_label.setMinimumWidth(85)
         
         layout.addWidget(self.status_dot)
         layout.addWidget(self.service_label)
@@ -265,25 +296,39 @@ class StatusIndicator(QWidget):
         if connected:
             self.status_dot.setStyleSheet("""
                 QLabel {
-                    color: #1db954;
-                    background: rgba(29, 185, 84, 0.15);
-                    border-radius: 8px;
-                    font-size: 12px;
-                    font-weight: bold;
+                    color: #1ed760;
+                    background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 1,
+                                              stop: 0 rgba(29, 185, 84, 0.2),
+                                              stop: 1 rgba(30, 215, 96, 0.15));
+                    border-radius: 9px;
+                    font-size: 10px;
+                    font-weight: 700;
+                    border: 1px solid rgba(29, 185, 84, 0.3);
                 }
             """)
-            self.service_label.setStyleSheet("color: #ffffff; font-weight: 500;")
+            self.service_label.setStyleSheet("""
+                color: rgba(255, 255, 255, 0.95); 
+                font-weight: 500;
+                letter-spacing: 0.1px;
+            """)
         else:
             self.status_dot.setStyleSheet("""
                 QLabel {
-                    color: #e22134;
-                    background: rgba(226, 33, 52, 0.15);
-                    border-radius: 8px;
-                    font-size: 12px;
-                    font-weight: bold;
+                    color: #ff6b6b;
+                    background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 1,
+                                              stop: 0 rgba(255, 107, 107, 0.15),
+                                              stop: 1 rgba(255, 107, 107, 0.1));
+                    border-radius: 9px;
+                    font-size: 10px;
+                    font-weight: 700;
+                    border: 1px solid rgba(255, 107, 107, 0.2);
                 }
             """)
-            self.service_label.setStyleSheet("color: #b3b3b3; font-weight: 400;")
+            self.service_label.setStyleSheet("""
+                color: rgba(255, 255, 255, 0.5); 
+                font-weight: 400;
+                letter-spacing: 0.1px;
+            """)
 
 class LoadingAnimation(QWidget):
     """Thin horizontal loading animation for media player with dual-mode capability"""
@@ -466,27 +511,29 @@ class MediaPlayer(QWidget):
         self.setup_ui()
     
     def setup_ui(self):
-        self.setFixedHeight(65)  # Start collapsed with more breathing room
+        self.setFixedHeight(70)  # Slightly taller for better proportions
         self.setStyleSheet("""
             MediaPlayer {
                 background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-                                          stop: 0 #1e1e1e,
-                                          stop: 1 #141414);
+                                          stop: 0 rgba(255, 255, 255, 0.05),
+                                          stop: 0.3 rgba(255, 255, 255, 0.02),
+                                          stop: 1 transparent);
                 border: 1px solid rgba(255, 255, 255, 0.08);
-                border-radius: 12px;
-                margin: 0 6px;
+                border-radius: 16px;
+                margin: 0 8px;
             }
             MediaPlayer:hover {
-                border: 1px solid rgba(255, 255, 255, 0.12);
+                border: 1px solid rgba(29, 185, 84, 0.15);
                 background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-                                          stop: 0 #212121,
-                                          stop: 1 #171717);
+                                          stop: 0 rgba(29, 185, 84, 0.06),
+                                          stop: 0.3 rgba(255, 255, 255, 0.03),
+                                          stop: 1 transparent);
             }
         """)
         
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 10, 16, 10)
-        layout.setSpacing(10)
+        layout.setContentsMargins(18, 12, 18, 12)
+        layout.setSpacing(12)
         
         # Loading animation at the top
         self.loading_animation = LoadingAnimation()
@@ -506,12 +553,13 @@ class MediaPlayer(QWidget):
         self.no_track_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.no_track_label.setStyleSheet("""
             QLabel {
-                color: #6a6a6a;
+                color: rgba(255, 255, 255, 0.4);
                 font-size: 11px;
-                font-weight: 400;
-                padding: 12px;
+                font-weight: 500;
+                padding: 14px;
                 background: transparent;
-                letter-spacing: 0.5px;
+                letter-spacing: 0.3px;
+                font-family: 'SF Pro Text', -apple-system, sans-serif;
             }
         """)
         layout.addWidget(self.no_track_label)
@@ -526,16 +574,17 @@ class MediaPlayer(QWidget):
         self.track_info = ScrollingLabel("No track")
         self.track_info.setStyleSheet("""
             ScrollingLabel {
-                color: #ffffff;
+                color: rgba(255, 255, 255, 0.95);
                 font-size: 13px;
                 font-weight: 600;
                 background: transparent;
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                letter-spacing: 0.2px;
-                padding: 2px 0px;
+                font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                letter-spacing: 0.1px;
+                padding: 3px 0px;
             }
             ScrollingLabel:hover {
                 color: #1ed760;
+                font-weight: 700;
             }
         """)
         self.track_info.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -834,11 +883,16 @@ class ModernSidebar(QWidget):
         self.setup_ui()
     
     def setup_ui(self):
-        self.setFixedWidth(220)
+        self.setFixedWidth(240)  # Slightly wider for better proportions
         self.setStyleSheet("""
             ModernSidebar {
-                background: #121212;
-                border-right: 1px solid #282828;
+                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 1,
+                                          stop: 0 #0d1117,
+                                          stop: 0.3 #121212,
+                                          stop: 1 #0a0a0a);
+                border-right: 1px solid rgba(29, 185, 84, 0.1);
+                border-top-right-radius: 12px;
+                border-bottom-right-radius: 12px;
             }
         """)
         
@@ -870,29 +924,43 @@ class ModernSidebar(QWidget):
     
     def create_header(self):
         header = QWidget()
-        header.setFixedHeight(85)
+        header.setFixedHeight(95)
         header.setStyleSheet("""
             QWidget {
-                background: #121212; 
-                border-bottom: 1px solid #282828;
-                border-bottom-left-radius: 8px;
-                border-bottom-right-radius: 8px;
+                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                                          stop: 0 rgba(29, 185, 84, 0.08),
+                                          stop: 0.4 rgba(29, 185, 84, 0.03),
+                                          stop: 1 transparent);
+                border-bottom: 1px solid rgba(29, 185, 84, 0.15);
+                border-top-right-radius: 12px;
             }
         """)
         
         layout = QVBoxLayout(header)
-        layout.setContentsMargins(20, 22, 20, 22)
-        layout.setSpacing(3)
+        layout.setContentsMargins(24, 24, 24, 20)
+        layout.setSpacing(4)
         
-        # App name
+        # App name with gradient text effect
         app_name = QLabel("SoulSync")
-        app_name.setFont(QFont("Arial", 19, QFont.Weight.Bold))
-        app_name.setStyleSheet("color: #ffffff; letter-spacing: -0.5px;")
+        app_name.setFont(QFont("SF Pro Display", 20, QFont.Weight.Bold))
+        app_name.setStyleSheet("""
+            color: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0,
+                                 stop: 0 #ffffff,
+                                 stop: 0.6 #1ed760,
+                                 stop: 1 #1db954);
+            letter-spacing: -0.8px;
+            font-weight: 700;
+        """)
         
-        # Subtitle
+        # Subtitle with better typography
         subtitle = QLabel("Music Sync & Manager")
-        subtitle.setFont(QFont("Arial", 10))
-        subtitle.setStyleSheet("color: #b3b3b3; opacity: 0.8;")
+        subtitle.setFont(QFont("SF Pro Text", 10, QFont.Weight.Medium))
+        subtitle.setStyleSheet("""
+            color: rgba(255, 255, 255, 0.65);
+            letter-spacing: 0.2px;
+            font-weight: 500;
+            margin-top: 2px;
+        """)
         
         layout.addWidget(app_name)
         layout.addWidget(subtitle)
@@ -903,13 +971,13 @@ class ModernSidebar(QWidget):
         nav_widget = QWidget()
         nav_widget.setStyleSheet("""
             QWidget {
-                background: #121212;
-                border-radius: 8px;
+                background: transparent;
+                border-radius: 12px;
             }
         """)
         layout = QVBoxLayout(nav_widget)
-        layout.setContentsMargins(8, 20, 8, 20)
-        layout.setSpacing(6)
+        layout.setContentsMargins(12, 25, 12, 25)
+        layout.setSpacing(8)
         
         # Navigation buttons
         nav_items = [
@@ -933,24 +1001,32 @@ class ModernSidebar(QWidget):
     
     def create_status_section(self):
         status_widget = QWidget()
-        status_widget.setFixedHeight(140)  # Increased height
+        status_widget.setFixedHeight(150)  # Slightly taller for better proportions
         status_widget.setStyleSheet("""
             QWidget {
-                background: #181818; 
-                border-top: 1px solid #282828;
-                border-top-left-radius: 8px;
-                border-top-right-radius: 8px;
+                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                                          stop: 0 transparent,
+                                          stop: 0.3 rgba(255, 255, 255, 0.02),
+                                          stop: 1 rgba(255, 255, 255, 0.04)); 
+                border-top: 1px solid rgba(255, 255, 255, 0.08);
+                border-bottom-right-radius: 12px;
             }
         """)
         
         layout = QVBoxLayout(status_widget)
-        layout.setContentsMargins(0, 18, 0, 18)  # Better margins
-        layout.setSpacing(6)  # Tighter spacing between items
+        layout.setContentsMargins(0, 20, 0, 20)
+        layout.setSpacing(8)
         
-        # Status title
-        status_title = QLabel("Connection Status")
-        status_title.setFont(QFont("Arial", 11, QFont.Weight.Bold))
-        status_title.setStyleSheet("color: #ffffff; padding: 0 15px; margin-bottom: 5px;")
+        # Status title with better typography
+        status_title = QLabel("Service Status")
+        status_title.setFont(QFont("SF Pro Text", 11, QFont.Weight.Bold))
+        status_title.setStyleSheet("""
+            color: rgba(255, 255, 255, 0.9); 
+            padding: 0 20px; 
+            margin-bottom: 8px;
+            letter-spacing: 0.2px;
+            font-weight: 600;
+        """)
         layout.addWidget(status_title)
         
         # Status indicators
