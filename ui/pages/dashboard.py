@@ -77,6 +77,10 @@ class MetadataUpdateWorker(QThread):
                     
                 artist_name = getattr(artist, 'title', 'Unknown Artist')
                 
+                # Double-check ignore flag right before processing (in case it was added after loading)
+                if self.plex_client.is_artist_ignored(artist):
+                    return (artist_name, True, "Skipped (ignored)")
+                
                 try:
                     success, details = self.update_artist_metadata(artist)
                     return (artist_name, success, details)
