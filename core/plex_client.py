@@ -484,7 +484,8 @@ class PlexClient:
             
             if match:
                 date_str = match.group(1)
-                return datetime.strptime(date_str, '%Y-%m-%d')
+                parsed_date = datetime.strptime(date_str, '%Y-%m-%d')
+                return parsed_date
             
             return None
             
