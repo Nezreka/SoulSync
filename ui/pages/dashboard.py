@@ -175,6 +175,11 @@ class MetadataUpdateWorker(QThread):
             if genres_updated:
                 changes_made.append("genres")
             
+            # Update album artwork
+            albums_updated = self.update_album_artwork(artist, spotify_artist)
+            if albums_updated > 0:
+                changes_made.append(f"{albums_updated} album art")
+            
             if changes_made:
                 # Update artist biography with timestamp to track last update
                 biography_updated = self.plex_client.update_artist_biography(artist)
@@ -269,6 +274,162 @@ class MetadataUpdateWorker(QThread):
             
         except Exception as e:
             print(f"Error updating genres for {getattr(artist, 'title', 'Unknown')}: {e}")
+            return False
+    
+    def update_album_artwork(self, artist, spotify_artist):
+        """Update album artwork for all albums by this artist"""
+        try:
+            updated_count = 0
+            skipped_count = 0
+            
+            # Get all albums for this artist
+            try:
+                albums = list(artist.albums())
+            except Exception:
+                print(f"Could not access albums for artist '{artist.title}'")
+                return 0
+            
+            if not albums:
+                print(f"No albums found for artist '{artist.title}'")
+                return 0
+            
+            print(f"🎨 Checking artwork for {len(albums)} albums by '{artist.title}'...")
+            
+            for album in albums:
+                try:
+                    album_title = getattr(album, 'title', 'Unknown Album')
+                    
+                    # Check if album already has good artwork (debug=True to see detection logic)
+                    if self.album_has_valid_artwork(album, debug=True):
+                        skipped_count += 1
+                        continue
+                    
+                    print(f"Album '{album_title}' needs artwork - searching Spotify...")
+                    
+                    # Search for this specific album on Spotify
+                    album_query = f"album:{album_title} artist:{spotify_artist.name}"
+                    spotify_albums = self.spotify_client.search_albums(album_query, limit=3)
+                    
+                    if not spotify_albums:
+                        print(f"No Spotify results for album '{album_title}'")
+                        continue
+                    
+                    # Find the best matching album
+                    best_album = None
+                    highest_score = 0.0
+                    
+                    plex_album_normalized = self.matching_engine.normalize_string(album_title)
+                    
+                    for spotify_album in spotify_albums:
+                        spotify_album_normalized = self.matching_engine.normalize_string(spotify_album.name)
+                        score = self.matching_engine.similarity_score(plex_album_normalized, spotify_album_normalized)
+                        
+                        if score > highest_score:
+                            highest_score = score
+                            best_album = spotify_album
+                    
+                    # If we found a good match with artwork, download it
+                    if best_album and highest_score > 0.7 and best_album.image_url:
+                        print(f"Found Spotify match: '{best_album.name}' (score: {highest_score:.2f})")
+                        
+                        # Download and upload the artwork
+                        if self.download_and_upload_album_artwork(album, best_album.image_url):
+                            updated_count += 1
+                        
+                    else:
+                        print(f"No good Spotify match for album '{album_title}' (best score: {highest_score:.2f})")
+                
+                except Exception as e:
+                    print(f"Error processing album '{getattr(album, 'title', 'Unknown')}': {e}")
+                    continue
+            
+            total_processed = updated_count + skipped_count
+            print(f"🎨 Artwork summary for '{artist.title}': {updated_count} updated, {skipped_count} skipped (already have good artwork)")
+            
+            if updated_count == 0 and skipped_count == len(albums):
+                print(f"  ✅ All albums already have good artwork - no Spotify API calls needed!")
+            return updated_count
+            
+        except Exception as e:
+            print(f"Error updating album artwork for artist '{getattr(artist, 'title', 'Unknown')}': {e}")
+            return 0
+            
+    def album_has_valid_artwork(self, album, debug=False):
+        """Check if album has valid artwork - conservative approach"""
+        try:
+            album_title = getattr(album, 'title', 'Unknown Album')
+            
+            # Check if album has any thumb at all
+            if not hasattr(album, 'thumb') or not album.thumb:
+                if debug: print(f"  🎨 Album '{album_title}' has NO THUMB - needs update")
+                return False
+            
+            thumb_url = str(album.thumb)
+            if debug: print(f"  🔍 Album '{album_title}' artwork URL: {thumb_url}")
+            
+            # CONSERVATIVE APPROACH: Only mark as "needs update" in very obvious cases
+            
+            # Case 1: Completely empty or None
+            if not thumb_url or thumb_url.strip() == '':
+                if debug: print(f"  🎨 Album '{album_title}' has empty URL - needs update")
+                return False
+            
+            # Case 2: Obvious placeholder text in URL
+            obvious_placeholders = [
+                'no-image',
+                'placeholder',
+                'missing',
+                'default-album',
+                'blank.jpg',
+                'empty.png'
+            ]
+            
+            thumb_lower = thumb_url.lower()
+            for placeholder in obvious_placeholders:
+                if placeholder in thumb_lower:
+                    if debug: print(f"  🎨 Album '{album_title}' has obvious placeholder ({placeholder}) - needs update")
+                    return False
+            
+            # Case 3: Extremely short URLs (likely broken)
+            if len(thumb_url) < 20:
+                if debug: print(f"  🎨 Album '{album_title}' has very short URL ({len(thumb_url)} chars) - needs update")
+                return False
+            
+            # OTHERWISE: Assume it has valid artwork and SKIP updating
+            if debug: print(f"  ✅ Album '{album_title}' appears to have artwork - SKIPPING (URL: {len(thumb_url)} chars)")
+            return True
+            
+        except Exception as e:
+            if debug: print(f"  ❌ Error checking artwork for album '{album_title}': {e}")
+            # If we can't check, be conservative and skip updating
+            return True
+    
+    def download_and_upload_album_artwork(self, album, image_url):
+        """Download artwork from Spotify and upload to Plex"""
+        try:
+            album_title = getattr(album, 'title', 'Unknown Album')
+            
+            # Download image from Spotify
+            response = requests.get(image_url, timeout=10)
+            response.raise_for_status()
+            
+            # Validate and convert image (reuse existing function)
+            image_data = self.validate_and_convert_image(response.content)
+            if not image_data:
+                print(f"Invalid image data for album '{album_title}'")
+                return False
+            
+            # Upload to Plex using our new method
+            success = self.plex_client.update_album_poster(album, image_data)
+            if success:
+                print(f"✅ Updated artwork for album '{album_title}'")
+            else:
+                print(f"❌ Failed to upload artwork for album '{album_title}'")
+            
+            return success
+            
+        except Exception as e:
+            print(f"Error downloading/uploading artwork for album '{getattr(album, 'title', 'Unknown')}': {e}")
             return False
     
     def artist_has_valid_photo(self, artist):
