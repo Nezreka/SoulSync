@@ -2475,17 +2475,19 @@ class AlbumResultItem(QFrame):
         self.setStyleSheet("""
             AlbumResultItem {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 rgba(45, 45, 45, 0.9),
-                    stop:1 rgba(35, 35, 35, 0.95));
-                border-radius: 16px;
-                border: 1px solid rgba(80, 80, 80, 0.4);
-                margin: 8px 4px;
+                    stop:0 rgba(52, 52, 58, 0.95),
+                    stop:1 rgba(42, 42, 48, 0.98));
+                border-radius: 20px;
+                border: 1px solid rgba(75, 75, 82, 0.5);
+                margin: 10px 5px;
+                box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
             }
             AlbumResultItem:hover {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 rgba(55, 55, 55, 0.95),
-                    stop:1 rgba(45, 45, 45, 0.98));
-                border: 1px solid rgba(29, 185, 84, 0.7);
+                    stop:0 rgba(60, 60, 68, 0.98),
+                    stop:1 rgba(50, 50, 58, 1.0));
+                border: 1px solid rgba(29, 185, 84, 0.8);
+                box-shadow: 0 8px 24px rgba(29, 185, 84, 0.2);
             }
         """)
         
@@ -2505,26 +2507,32 @@ class AlbumResultItem(QFrame):
         # Album icon with expand indicator
         icon_container = QVBoxLayout()
         album_icon = QLabel("💿")
-        album_icon.setFixedSize(32, 32)
+        album_icon.setFixedSize(48, 48)  # Larger for better presence
         album_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         album_icon.setStyleSheet("""
             QLabel {
-                font-size: 20px;
-                background: rgba(29, 185, 84, 0.1);
-                border-radius: 16px;
-                border: 1px solid rgba(29, 185, 84, 0.3);
+                font-size: 24px;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(29, 185, 84, 0.2),
+                    stop:1 rgba(24, 156, 71, 0.15));
+                border-radius: 24px;
+                border: 2px solid rgba(29, 185, 84, 0.4);
+                color: rgba(29, 185, 84, 1.0);
             }
         """)
         
         # Expand indicator
         self.expand_indicator = QLabel("▶")
-        self.expand_indicator.setFixedSize(16, 16)
+        self.expand_indicator.setFixedSize(20, 20)  # Slightly larger
         self.expand_indicator.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.expand_indicator.setStyleSheet("""
             QLabel {
-                color: rgba(29, 185, 84, 0.8);
-                font-size: 12px;
+                color: rgba(29, 185, 84, 0.9);
+                font-size: 14px;
                 font-weight: bold;
+                background: rgba(29, 185, 84, 0.1);
+                border-radius: 10px;
+                border: 1px solid rgba(29, 185, 84, 0.2);
             }
         """)
         
@@ -2579,48 +2587,58 @@ class AlbumResultItem(QFrame):
         
         # Download button
         self.download_btn = QPushButton("⬇️ Download Album")
-        self.download_btn.setFixedSize(150, 32)
+        self.download_btn.setFixedSize(160, 36)  # Slightly larger for better presence
         self.download_btn.clicked.connect(self.request_album_download)
         self.download_btn.setStyleSheet("""
             QPushButton {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 rgba(29, 185, 84, 0.9),
+                    stop:0 rgba(29, 185, 84, 0.95),
                     stop:1 rgba(24, 156, 71, 0.9));
-                border: none;
-                border-radius: 16px;
+                border: 2px solid rgba(29, 185, 84, 0.3);
+                border-radius: 18px;
                 color: #000000;
-                font-size: 11px;
+                font-size: 12px;
                 font-weight: bold;
-                padding: 6px 10px;
+                padding: 8px 12px;
             }
             QPushButton:hover {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 rgba(30, 215, 96, 1.0),
                     stop:1 rgba(25, 180, 80, 1.0));
+                border: 2px solid rgba(29, 185, 84, 0.6);
+                transform: scale(1.02);
+            }
+            QPushButton:pressed {
+                transform: scale(0.98);
             }
         """)
         
         # Matched Download button
-        self.matched_download_btn = QPushButton("📱 Matched Album DL")
-        self.matched_download_btn.setFixedSize(150, 32)
+        self.matched_download_btn = QPushButton("🎯 Matched Album")
+        self.matched_download_btn.setFixedSize(160, 36)  # Match the other button
         self.matched_download_btn.clicked.connect(self.request_matched_album_download)
         self.matched_download_btn.setToolTip("Download Album with Spotify Matching")
         self.matched_download_btn.setStyleSheet("""
             QPushButton {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 rgba(147, 51, 234, 0.9),
+                    stop:0 rgba(147, 51, 234, 0.95),
                     stop:1 rgba(124, 43, 200, 0.9));
-                border: none;
-                border-radius: 16px;
-                color: #000000;
-                font-size: 11px;
+                border: 2px solid rgba(147, 51, 234, 0.3);
+                border-radius: 18px;
+                color: #ffffff;
+                font-size: 12px;
                 font-weight: bold;
-                padding: 6px 10px;
+                padding: 8px 12px;
             }
             QPushButton:hover {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 rgba(167, 71, 254, 1.0),
                     stop:1 rgba(144, 63, 220, 1.0));
+                border: 2px solid rgba(147, 51, 234, 0.6);
+                transform: scale(1.02);
+            }
+            QPushButton:pressed {
+                transform: scale(0.98);
             }
         """)
         
@@ -2628,7 +2646,7 @@ class AlbumResultItem(QFrame):
         download_buttons_layout.addWidget(self.matched_download_btn)
         
         # Set minimum width to ensure buttons always visible
-        self.setMinimumWidth(380)  # Increased to accommodate both buttons
+        self.setMinimumWidth(420)  # Increased to accommodate larger buttons
         
         # Assembly header
         header_layout.addLayout(icon_container)
@@ -2753,17 +2771,19 @@ class SearchResultItem(QFrame):
         self.setStyleSheet("""
             SearchResultItem {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 rgba(42, 42, 42, 0.9),
-                    stop:1 rgba(32, 32, 32, 0.95));
-                border-radius: 16px;
-                border: 1px solid rgba(64, 64, 64, 0.4);
-                margin: 6px 3px;
+                    stop:0 rgba(48, 48, 52, 0.95),
+                    stop:1 rgba(38, 38, 42, 0.98));
+                border-radius: 18px;
+                border: 1px solid rgba(70, 70, 76, 0.5);
+                margin: 8px 4px;
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
             }
             SearchResultItem:hover {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 rgba(50, 50, 50, 0.95),
-                    stop:1 rgba(40, 40, 40, 0.98));
-                border: 1px solid rgba(29, 185, 84, 0.7);
+                    stop:0 rgba(55, 55, 60, 0.98),
+                    stop:1 rgba(45, 45, 50, 1.0));
+                border: 1px solid rgba(29, 185, 84, 0.8);
+                box-shadow: 0 6px 20px rgba(29, 185, 84, 0.15);
             }
         """)
         
@@ -2775,23 +2795,25 @@ class SearchResultItem(QFrame):
         left_section = QHBoxLayout()
         left_section.setSpacing(12)  # Increased from 8px for better separation
         
-        # Enhanced music icon with better sizing
+        # Enhanced music icon with modern styling
         music_icon = QLabel("🎵")
-        music_icon.setFixedSize(40, 40)  # Increased from 32x32 for better presence
+        music_icon.setFixedSize(44, 44)  # Slightly larger for better presence
         music_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         music_icon.setStyleSheet("""
             QLabel {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 rgba(29, 185, 84, 0.4),
-                    stop:1 rgba(29, 185, 84, 0.2));
-                border-radius: 20px;
-                border: 1px solid rgba(29, 185, 84, 0.5);
-                font-size: 16px;
+                    stop:0 rgba(29, 185, 84, 0.3),
+                    stop:1 rgba(24, 156, 71, 0.2));
+                border-radius: 22px;
+                border: 2px solid rgba(29, 185, 84, 0.4);
+                font-size: 18px;
+                color: rgba(29, 185, 84, 1.0);
             }
             QLabel:hover {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 rgba(29, 185, 84, 0.6),
-                    stop:1 rgba(29, 185, 84, 0.4));
+                    stop:0 rgba(29, 185, 84, 0.5),
+                    stop:1 rgba(24, 156, 71, 0.3));
+                border: 2px solid rgba(29, 185, 84, 0.7);
             }
         """)
         
@@ -2813,83 +2835,92 @@ class SearchResultItem(QFrame):
         
         # Play button for streaming preview
         self.play_btn = QPushButton("▶️")
-        self.play_btn.setFixedSize(42, 42)  # Increased from 36x36 for better clickability
+        self.play_btn.setFixedSize(46, 46)  # Larger for better accessibility
         self.play_btn.clicked.connect(self.request_stream)
         self.play_btn.setStyleSheet("""
             QPushButton {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 rgba(255, 193, 7, 0.9),
+                    stop:0 rgba(255, 193, 7, 0.95),
                     stop:1 rgba(255, 152, 0, 0.9));
-                border: none;
-                border-radius: 21px;
+                border: 2px solid rgba(255, 193, 7, 0.3);
+                border-radius: 23px;
                 color: #000000;
-                font-size: 16px;
+                font-size: 18px;
                 font-weight: bold;
             }
             QPushButton:hover {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 rgba(255, 213, 79, 1.0),
                     stop:1 rgba(255, 171, 64, 1.0));
+                border: 2px solid rgba(255, 193, 7, 0.6);
+                transform: scale(1.05);
             }
             QPushButton:pressed {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 rgba(255, 152, 0, 1.0),
                     stop:1 rgba(245, 124, 0, 1.0));
+                transform: scale(0.95);
             }
         """)
         
         # Download button
         self.download_btn = QPushButton("⬇️")
-        self.download_btn.setFixedSize(42, 42)  # Increased from 36x36 for better clickability
+        self.download_btn.setFixedSize(46, 46)  # Match play button size
         self.download_btn.clicked.connect(self.request_download)
         self.download_btn.setStyleSheet("""
             QPushButton {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 rgba(29, 185, 84, 0.9),
+                    stop:0 rgba(29, 185, 84, 0.95),
                     stop:1 rgba(24, 156, 71, 0.9));
-                border: none;
-                border-radius: 21px;
+                border: 2px solid rgba(29, 185, 84, 0.3);
+                border-radius: 23px;
                 color: #000000;
-                font-size: 16px;
+                font-size: 18px;
                 font-weight: bold;
             }
             QPushButton:hover {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 rgba(30, 215, 96, 1.0),
                     stop:1 rgba(25, 180, 80, 1.0));
+                border: 2px solid rgba(29, 185, 84, 0.6);
+                transform: scale(1.05);
             }
             QPushButton:pressed {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 rgba(24, 156, 71, 1.0),
                     stop:1 rgba(20, 130, 60, 1.0));
+                transform: scale(0.95);
             }
         """)
         
         # Matched Download button
-        self.matched_download_btn = QPushButton("📱")
-        self.matched_download_btn.setFixedSize(42, 42)
+        self.matched_download_btn = QPushButton("🎯")
+        self.matched_download_btn.setFixedSize(46, 46)  # Match other buttons
         self.matched_download_btn.clicked.connect(self.request_matched_download)
         self.matched_download_btn.setToolTip("Download with Spotify Matching")
         self.matched_download_btn.setStyleSheet("""
             QPushButton {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 rgba(147, 51, 234, 0.9),
+                    stop:0 rgba(147, 51, 234, 0.95),
                     stop:1 rgba(124, 43, 200, 0.9));
-                border: none;
-                border-radius: 21px;
-                color: #000000;
-                font-size: 16px;
+                border: 2px solid rgba(147, 51, 234, 0.3);
+                border-radius: 23px;
+                color: #ffffff;
+                font-size: 18px;
                 font-weight: bold;
             }
             QPushButton:hover {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 rgba(167, 71, 254, 1.0),
                     stop:1 rgba(144, 63, 220, 1.0));
+                border: 2px solid rgba(147, 51, 234, 0.6);
+                transform: scale(1.05);
             }
             QPushButton:pressed {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 rgba(124, 43, 200, 1.0),
                     stop:1 rgba(104, 33, 180, 1.0));
+                transform: scale(0.95);
             }
         """)
         
