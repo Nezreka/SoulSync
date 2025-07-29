@@ -534,7 +534,6 @@ class PlexClient:
         try:
             # Get current summary/biography
             current_summary = getattr(artist, 'summary', '') or ''
-            print(f"[DEBUG] Original summary for '{artist.title}': '{current_summary[:100]}...'")
             
             # Preserve any IgnoreUpdate flag
             ignore_flag = ''
@@ -556,13 +555,10 @@ class PlexClient:
                 new_summary = f"{new_summary}\n\n{ignore_flag}".strip()
             new_summary = f"{new_summary}\n\n-updatedAt{today}".strip()
             
-            print(f"[DEBUG] Setting summary for '{artist.title}': ending with '{new_summary[-50:]}'")
-            
-            # Use the correct Plex API syntax with .value (testing without lock first)
+            # Use the correct Plex API syntax with .value
             artist.edit(**{
                 'summary.value': new_summary
             })
-            print(f"[DEBUG] Called artist.edit with summary.value (no lock) for '{artist.title}'")
             
             # Add a small delay to let the edit process
             import time
@@ -570,24 +566,18 @@ class PlexClient:
             
             # Reload to see the changes
             artist.reload()
-            print(f"[DEBUG] Called artist.reload() for '{artist.title}'")
             
             # Check if edit worked
             updated_summary = getattr(artist, 'summary', '') or ''
-            print(f"[DEBUG] Summary after reload for '{artist.title}': ending with '{updated_summary[-50:]}'")
             
             if updated_summary and '-updatedAt' in updated_summary:
                 logger.info(f"Updated summary timestamp for {artist.title}")
                 return True
             else:
-                print(f"[DEBUG] Timestamp not found in summary after reload for '{artist.title}'")
                 return False
             
         except Exception as e:
-            print(f"[DEBUG] Exception in update_artist_biography for '{artist.title}': {e}")
             logger.error(f"Error updating summary for {artist.title}: {e}")
-            import traceback
-            traceback.print_exc()
             return False
     
     def update_track_metadata(self, track_id: str, metadata: Dict[str, Any]) -> bool:
