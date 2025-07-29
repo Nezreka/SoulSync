@@ -240,14 +240,8 @@ class PlaylistTrackAnalysisWorker(QRunnable):
                         return match_result.plex_track, match_result.confidence
 
             # --- Final Fallback: Title-only search if no artist-based match was found ---
-            if not all_potential_matches:
-                print(f"🎤 No artist-based matches found. Performing final title-only fallback for '{original_title}'")
-                for query_title in unique_title_variations:
-                    title_only_matches = self.plex_client.search_tracks(title=query_title, artist="", limit=10)
-                    for track in title_only_matches:
-                        if track.id not in found_match_ids:
-                            all_potential_matches.append(track)
-                            found_match_ids.add(track.id)
+            # Removed title-only fallback to prevent false positives
+            # A track by a different artist is NOT the same track
             
             if not all_potential_matches:
                 print(f"❌ No Plex candidates found for '{original_title}' after all strategies.")

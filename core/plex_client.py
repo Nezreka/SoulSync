@@ -373,10 +373,9 @@ class PlexClient:
                         logger.warning(f"Index mismatch: cannot store original track for '{track_info.title}'")
                 return tracks
 
-            # --- Stage 3: Title-Only Fallback Search ---
-            logger.debug(f"Stage 3: Performing title-only search for '{title}'")
-            stage3_results = self.music_library.searchTracks(title=title, limit=limit)
-            add_candidates(stage3_results)
+            # --- Stage 3: Title-Only Fallback REMOVED ---
+            # Removed to prevent false positives where tracks with same title 
+            # but different artists are incorrectly matched
             
             tracks = [PlexTrackInfo.from_plex_track(track) for track in candidate_tracks[:limit]]
     
