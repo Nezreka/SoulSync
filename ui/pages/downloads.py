@@ -7965,8 +7965,18 @@ class DownloadsPage(QWidget):
                     'album_image_url': album_image_url
                 }
             
-            # PRIORITY 1: Always try Spotify API first for clean metadata
-            print(f"🔍 Searching Spotify for track info (PRIORITY 1)...")
+            # PRIORITY 1: Try album-aware search if we have album context
+            if hasattr(download_item, 'album') and download_item.album and download_item.album.strip() and download_item.album != "Unknown Album":
+                print(f"🎯 ALBUM-AWARE SEARCH: Looking for '{download_item.title}' in album '{download_item.album}'")
+                album_result = self._search_track_in_album_context(download_item, artist)
+                if album_result:
+                    print(f"✅ Found track in album context - using album classification")
+                    return album_result
+                else:
+                    print(f"⚠️ Track not found in album context, falling back to individual search")
+            
+            # PRIORITY 2: Fallback to individual track search for clean metadata
+            print(f"🔍 Searching Spotify for individual track info (PRIORITY 2)...")
             
             # Clean the track title before searching - remove artist prefix
             clean_title = self._clean_track_title(download_item.title, artist.name)
@@ -8101,7 +8111,7 @@ class DownloadsPage(QWidget):
                         'album_image_url': album_image_url
                     }
             
-            # PRIORITY 2: Fallback to Soulseek album context if Spotify search failed
+            # PRIORITY 3: Fallback to Soulseek album context if Spotify search failed
             print(f"🔍 No good Spotify match found (confidence: {best_confidence:.2f}), checking Soulseek album context...")
             
             if hasattr(download_item, 'album') and download_item.album and download_item.album != "Unknown Album":
@@ -8129,7 +8139,7 @@ class DownloadsPage(QWidget):
                     'album_image_url': album_image_url
                 }
             
-            # PRIORITY 3: Complete fallback - single track with cleaned title
+            # PRIORITY 4: Complete fallback - single track with cleaned title
             print(f"🎯 No album context found, defaulting to single track structure with cleaned title")
             clean_title = self._clean_track_title(download_item.title, artist.name)
             
@@ -8167,6 +8177,72 @@ class DownloadsPage(QWidget):
                 'clean_track_name': clean_title,
                 'album_image_url': album_image_url
             }
+    
+    def _search_track_in_album_context(self, download_item, artist: Artist) -> Optional[dict]:
+        """Search for a track within its album context to avoid promotional single confusion"""
+        try:
+            album_name = download_item.album
+            track_title = download_item.title
+            
+            print(f"🎯 Album-aware search: '{track_title}' in album '{album_name}' by '{artist.name}'")
+            
+            # Clean the album name for better search results
+            clean_album = self._clean_album_title(album_name, artist.name)
+            clean_track = self._clean_track_title(track_title, artist.name)
+            
+            # Search for the specific album first
+            album_query = f"album:{clean_album} artist:{artist.name}"
+            print(f"🔍 Searching albums: {album_query}")
+            albums = self.spotify_client.search_albums(album_query, limit=5)
+            
+            if not albums:
+                print(f"❌ No albums found for query: {album_query}")
+                return None
+            
+            # Check each album to see if our track is in it
+            for album in albums:
+                print(f"🎵 Checking album: '{album.name}' ({album.total_tracks} tracks)")
+                
+                # Get tracks from this album
+                album_tracks_data = self.spotify_client.get_album_tracks(album.id)
+                if not album_tracks_data or 'items' not in album_tracks_data:
+                    print(f"❌ Could not get tracks for album: {album.name}")
+                    continue
+                
+                # Check if our track is in this album
+                for track_data in album_tracks_data['items']:
+                    track_name = track_data['name']
+                    track_number = track_data['track_number']
+                    
+                    # Calculate similarity between our track and this album track
+                    similarity = self.matching_engine.similarity_score(
+                        self.matching_engine.normalize_string(clean_track),
+                        self.matching_engine.normalize_string(track_name)
+                    )
+                    
+                    if similarity > 0.7:  # Good match threshold
+                        print(f"✅ FOUND: '{track_name}' (track #{track_number}) matches '{clean_track}' (similarity: {similarity:.2f})")
+                        print(f"🎯 Forcing album classification for track in '{album.name}'")
+                        
+                        # Return album info - force album classification!
+                        return {
+                            'is_album': True,  # Always true - we found it in an album!
+                            'album_name': album.name,
+                            'track_number': track_number,
+                            'clean_track_name': track_name,  # Use Spotify's clean name
+                            'album_image_url': album.image_url,
+                            'confidence': similarity,
+                            'source': 'album_context_search'
+                        }
+                
+                print(f"❌ Track '{clean_track}' not found in album '{album.name}'")
+            
+            print(f"❌ Track '{clean_track}' not found in any matching albums")
+            return None
+            
+        except Exception as e:
+            print(f"❌ Error in album-aware search: {e}")
+            return None
     
     def _download_cover_art(self, artist: Artist, album_info: dict, target_dir: str):
         """Download cover art for the album, prioritizing album artwork from Spotify"""
