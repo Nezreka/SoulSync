@@ -19,86 +19,238 @@ class SlskdDetectionThread(QThread):
     def run(self):
         import requests
         import socket
+        import ipaddress
+        import subprocess
+        import platform
         from concurrent.futures import ThreadPoolExecutor, as_completed
         
-        def get_local_network_range():
-            """Get the local network IP range"""
+        def get_network_info():
+            """Get comprehensive network information with subnet detection"""
             try:
-                # Get local IP
+                # Get local IP using socket method
                 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                 s.connect(("8.8.8.8", 80))
                 local_ip = s.getsockname()[0]
                 s.close()
                 
-                # Generate network range (assumes /24 subnet)
-                ip_parts = local_ip.split('.')
-                network_base = f"{ip_parts[0]}.{ip_parts[1]}.{ip_parts[2]}"
-                return network_base, local_ip
-            except:
-                return None, None
+                # Try to get actual subnet mask
+                try:
+                    if platform.system() == "Windows":
+                        # Windows: Use netsh to get subnet info
+                        result = subprocess.run(['netsh', 'interface', 'ip', 'show', 'config'], 
+                                              capture_output=True, text=True, timeout=3)
+                        # Parse output for subnet mask (simplified)
+                        subnet_mask = "255.255.255.0"  # Default fallback
+                    else:
+                        # Linux/Mac: Try to parse network interfaces
+                        result = subprocess.run(['ip', 'route', 'show'], 
+                                              capture_output=True, text=True, timeout=3)
+                        subnet_mask = "255.255.255.0"  # Default fallback
+                except:
+                    subnet_mask = "255.255.255.0"  # Default /24
+                
+                # Calculate network range
+                network = ipaddress.IPv4Network(f"{local_ip}/{subnet_mask}", strict=False)
+                return str(network.network_address), str(network.netmask), local_ip, network
+                
+            except Exception as e:
+                # Fallback to original method
+                try:
+                    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    s.connect(("8.8.8.8", 80))
+                    local_ip = s.getsockname()[0]
+                    s.close()
+                    
+                    ip_parts = local_ip.split('.')
+                    network_base = f"{ip_parts[0]}.{ip_parts[1]}.{ip_parts[2]}.0"
+                    network = ipaddress.IPv4Network(f"{network_base}/24", strict=False)
+                    return network_base, "255.255.255.0", local_ip, network
+                except:
+                    return None, None, None, None
         
-        def test_url(url):
-            """Test if slskd is running at the given URL"""
+        def get_active_ips_from_arp():
+            """Get active IP addresses from ARP table"""
+            active_ips = set()
             try:
-                response = requests.get(f"{url}/api/v0/session", timeout=1)
-                if response.status_code in [200, 401]:
-                    return url
+                if platform.system() == "Windows":
+                    result = subprocess.run(['arp', '-a'], capture_output=True, text=True, timeout=5)
+                else:
+                    result = subprocess.run(['arp', '-a'], capture_output=True, text=True, timeout=5)
+                
+                # Parse ARP output for IP addresses
+                import re
+                ip_pattern = r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b'
+                ips = re.findall(ip_pattern, result.stdout)
+                active_ips.update(ips)
             except:
                 pass
-            return None
+            return active_ips
         
-        # Build candidate list
-        candidates = []
+        def generate_comprehensive_targets(network_info):
+            """Generate comprehensive list of scan targets with priorities"""
+            if not network_info[3]:  # network object
+                return []
+            
+            network, local_ip = network_info[3], network_info[2]
+            targets = []
+            
+            # Enhanced port list for slskd detection
+            slskd_ports = [5030, 5031, 8080, 3000, 9000, 38477, 2416]
+            
+            # Priority 1: Infrastructure IPs (router, DNS, etc.)
+            infrastructure_ips = [1, 2, 254, 253]
+            for host_num in infrastructure_ips:
+                try:
+                    ip = str(network.network_address + host_num)
+                    if ip != local_ip and ip in network:
+                        for port in slskd_ports:
+                            targets.append((f"http://{ip}:{port}", 1))  # Priority 1
+                except:
+                    continue
+            
+            # Priority 2: Get active IPs from ARP table
+            active_ips = get_active_ips_from_arp()
+            for ip in active_ips:
+                try:
+                    if ipaddress.IPv4Address(ip) in network and ip != local_ip:
+                        for port in slskd_ports:
+                            targets.append((f"http://{ip}:{port}", 2))  # Priority 2
+                except:
+                    continue
+            
+            # Priority 3: Common static IP ranges
+            static_ranges = [
+                range(100, 201),  # .100-.200 (common static)
+                range(10, 100),   # .10-.99 (DHCP range)
+                range(201, 254),  # .201-.253 (high static)
+            ]
+            
+            for ip_range in static_ranges:
+                for host_num in ip_range:
+                    try:
+                        ip = str(network.network_address + host_num)
+                        if ip != local_ip and ip in network:
+                            # Only add if not already in active IPs (avoid duplicates)
+                            if ip not in active_ips:
+                                for port in [5030, 5031, 8080]:  # Limit ports for full sweep
+                                    targets.append((f"http://{ip}:{port}", 3))  # Priority 3
+                    except:
+                        continue
+            
+            # Sort by priority and return
+            targets.sort(key=lambda x: x[1])
+            return [target[0] for target in targets]
         
-        # Local candidates
+        def test_url_enhanced(url, timeout=2):
+            """Enhanced URL testing with slskd-specific validation"""
+            try:
+                # Test main API endpoint
+                response = requests.get(f"{url}/api/v0/session", timeout=timeout)
+                if response.status_code in [200, 401]:
+                    # Additional validation: check if it's really slskd
+                    try:
+                        app_response = requests.get(f"{url}/api/v0/application", timeout=1)
+                        if app_response.status_code == 200:
+                            data = app_response.json()
+                            if 'name' in data and 'slskd' in data.get('name', '').lower():
+                                return url, 'verified'
+                    except:
+                        pass
+                    return url, 'probable'
+            except requests.exceptions.ConnectRefused:
+                pass
+            except requests.exceptions.Timeout:
+                pass
+            except:
+                pass
+            return None, None
+        
+        def parallel_scan(targets, max_workers=15):
+            """Scan targets in parallel with progressive timeout"""
+            found_url = None
+            completed_count = 0
+            
+            # Split into batches for better progress reporting
+            batch_size = max(1, len(targets) // 10)  # 10 progress updates
+            
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                # Submit all tasks
+                future_to_url = {
+                    executor.submit(test_url_enhanced, target): target 
+                    for target in targets
+                }
+                
+                # Process completed tasks
+                for future in as_completed(future_to_url):
+                    if self.cancelled:
+                        # Cancel remaining futures
+                        for f in future_to_url:
+                            f.cancel()
+                        break
+                    
+                    completed_count += 1
+                    progress = int((completed_count / len(targets)) * 100)
+                    current_url = future_to_url[future]
+                    
+                    # Update progress
+                    self.progress_updated.emit(progress, f"Scanning {current_url.split('//')[1]}")
+                    
+                    # Check result
+                    try:
+                        result_url, confidence = future.result()
+                        if result_url:
+                            found_url = result_url
+                            self.progress_updated.emit(100, f"Found: {result_url}")
+                            
+                            # Cancel remaining futures for faster completion
+                            for f in future_to_url:
+                                if not f.done():
+                                    f.cancel()
+                            break
+                    except:
+                        continue
+            
+            return found_url
+        
+        # Main detection logic
+        found_url = None
+        
+        # Phase 1: Test local candidates first (fast)
+        self.progress_updated.emit(5, "Checking local machine...")
         local_candidates = [
             "http://localhost:5030",
             "http://127.0.0.1:5030", 
-            "http://localhost:5031",
+            "http://localhost:5031", 
             "http://127.0.0.1:5031",
             "http://localhost:8080",
-            "http://127.0.0.1:8080"
+            "http://127.0.0.1:8080",
+            "http://localhost:3000",
+            "http://127.0.0.1:3000"
         ]
-        candidates.extend(local_candidates)
         
-        # Network candidates
-        network_base, local_ip = get_local_network_range()
-        if network_base and local_ip:
-            # Common network IPs to check (router, common static IPs)
-            priority_ips = [1, 2, 100, 101, 102, 150, 200]
-            ports = [5030, 5031, 8080]
-            
-            for ip_suffix in priority_ips:
-                test_ip = f"{network_base}.{ip_suffix}"
-                if test_ip != local_ip:  # Skip local IP (already tested)
-                    for port in ports:
-                        candidates.append(f"http://{test_ip}:{port}")
-        
-        found_url = None
-        
-        # Test candidates sequentially for more predictable progress
-        for i, url in enumerate(candidates):
+        for url in local_candidates:
             if self.cancelled:
                 break
-            
-            # Emit progress update before testing
-            progress_percent = int((i / len(candidates)) * 100)
-            self.progress_updated.emit(progress_percent, url)
-            
-            # Test the URL
-            result = test_url(url)
-            if result:
-                found_url = result
-                # Emit final progress
-                self.progress_updated.emit(100, f"Found: {result}")
+            result_url, confidence = test_url_enhanced(url, timeout=1)
+            if result_url:
+                found_url = result_url
                 break
-            
-            # Small delay to make progress visible
-            import time
-            time.sleep(0.05)
         
-        # Emit completion signal
-        self.detection_completed.emit(found_url or "")
+        # Phase 2: Network scanning if not found locally
+        if not found_url and not self.cancelled:
+            self.progress_updated.emit(10, "Analyzing network...")
+            
+            network_info = get_network_info()
+            if network_info[0]:  # If we got network info
+                targets = generate_comprehensive_targets(network_info)
+                
+                if targets:
+                    self.progress_updated.emit(15, f"Scanning {len(targets)} network targets...")
+                    found_url = parallel_scan(targets)
+        
+        # Emit completion
+        if not self.cancelled:
+            self.detection_completed.emit(found_url or "")
 
 class ServiceTestThread(QThread):
     test_completed = pyqtSignal(str, bool, str)  # service, success, message
