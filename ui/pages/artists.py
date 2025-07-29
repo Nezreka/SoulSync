@@ -1275,9 +1275,8 @@ class AlbumCard(QFrame):
     
     def mousePressEvent(self, event):
         """Handle click for download"""
-        # Don't allow downloads if already downloading or owned
+        # Don't allow downloads if already downloading
         if (event.button() == Qt.MouseButton.LeftButton and 
-            not self.is_owned and 
             not self.progress_overlay.isVisible()):
             self.download_requested.emit(self.album)
         super().mousePressEvent(event)
