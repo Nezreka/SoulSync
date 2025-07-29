@@ -472,6 +472,28 @@ class PlexClient:
             logger.error(f"Error updating poster for {artist.title}: {e}")
             return False
     
+    def update_album_poster(self, album, image_data: bytes):
+        """Update album poster image"""
+        try:
+            # Upload poster using Plex API
+            upload_url = f"{self.server._baseurl}/library/metadata/{album.ratingKey}/posters"
+            headers = {
+                'X-Plex-Token': self.server._token,
+                'Content-Type': 'image/jpeg'
+            }
+            
+            response = requests.post(upload_url, data=image_data, headers=headers)
+            response.raise_for_status()
+            
+            # Refresh album to see changes
+            album.refresh()
+            logger.info(f"Updated poster for album '{album.title}' by '{album.parentTitle}'")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error updating poster for album '{album.title}': {e}")
+            return False
+    
     def parse_update_timestamp(self, artist: PlexArtist) -> Optional[datetime]:
         """Parse the last update timestamp from artist summary"""
         try:
