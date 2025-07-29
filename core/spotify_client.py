@@ -183,8 +183,17 @@ class SpotifyClient:
             self.sp = None
     
     def is_authenticated(self) -> bool:
-        """Check if Spotify client is set up (fast check, no API calls)"""
-        return self.sp is not None
+        """Check if Spotify client is authenticated and working"""
+        if self.sp is None:
+            return False
+        
+        try:
+            # Make a simple API call to verify authentication
+            self.sp.current_user()
+            return True
+        except Exception as e:
+            logger.debug(f"Spotify authentication check failed: {e}")
+            return False
     
     def _ensure_user_id(self) -> bool:
         """Ensure user_id is loaded (may make API call)"""

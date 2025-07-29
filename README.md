@@ -1,74 +1,28 @@
-# SoulSync: Your Ultimate Music Library Manager
-
-SoulSync is a powerful desktop application designed to seamlessly synchronize your Spotify playlists with your Plex media server, intelligently sourcing and downloading any missing tracks from the Soulseek network. It's the all-in-one tool for curating and completing your perfect high-quality music library.
-
----
-
-## Key Features
-
-* **Dashboard Overview**: Get a quick summary of your library, recent activities, and sync status.
-* **Advanced Music Search**: Find individual tracks and full albums on Soulseek with live, progressive results.
-* **Intelligent Metadata Matching**: Use the "Matched Download" feature to link downloads with official Spotify artist and album metadata for perfect organization.
-* **Track Streaming**: Preview any search result before downloading with the built-in audio streaming feature.
-* **Sophisticated Download Queue**: Manage active and finished downloads in a clean, tabbed interface with real-time progress updates.
-* **Playlist Synchronization**: Load your Spotify playlists, compare them against your Plex library, and automatically identify and download missing tracks.
-* **Manual Correction**: For failed downloads, a manual correction modal allows you to perform a new search and select the correct track to resolve the issue.
-* **Centralized Configuration**: Easily configure and test connections to Spotify, Plex, and your slskd (Soulseek) client from a single settings page.
-
----
-
-## Core Functionality in Detail
-
-### Dashboard
-
-The Dashboard is your central hub, providing an at-a-glance overview of your music ecosystem.
-
-* **Stat Cards**: View key metrics like the number of Spotify playlists, total Plex tracks, missing tracks ready for download, and active downloads.
-* **Recent Activity**: A live feed shows the latest actions performed by the app, such as playlist syncs, completed downloads, and library scans.
-
-### Downloads
-
-The Downloads page is the heart of the application, where you can discover and acquire new music.
-
-* **Live Search**: As you type, search results from the Soulseek network appear in real-time. The app intelligently groups results into individual tracks and full albums.
-* **Filtering and Sorting**: Easily filter results to show only albums or singles, filter by file format (FLAC, MP3, etc.), and sort by relevance, quality, size, speed, and more.
-* **Matched Downloads**: Before downloading an album or track, you can have the app match it to the official Spotify database. This ensures the files are tagged and organized perfectly with the correct artist, album, and track information when saved.
-* **Download Queue**: All downloads are managed in a robust queue.
-    * **Active Queue**: Shows in-progress and queued downloads with real-time status and progress bars.
-    * **Finished Queue**: A history of completed, cancelled, or failed downloads.
-
-### Playlist Sync
-
-The Sync page connects your streaming world with your local library.
-
-* **Spotify Integration**: Load all of your public and private Spotify playlists directly into the application.
-* **Plex Library Analysis**: The app scans your Plex music library to determine which tracks from your Spotify playlists you already own.
-* **Download Missing Tracks**: For any track that's in a Spotify playlist but not in your Plex library, the app provides a dedicated modal to automatically search for and download the missing files.
-
-### Artists
-
-The Artists page is designed for high-level management of your music library.
-
-* **Artist Management**: View artists present in your library with statistics like album and track counts.
-* **Discography Tools**: The UI includes controls to update artist metadata and initiate downloads for an artist's complete discography.
-
-### Settings
-
-The Settings page allows you to configure all the external services SoulSync connects to.
-
-* **Service Configuration**: Input your API credentials and URLs for Spotify, Plex, and your slskd client.
-* **Connection Testing**: Each service can be tested with the click of a button to ensure your configuration is working correctly before you start syncing or downloading.
-* **Download Preferences**: Set your preferred audio quality, download paths, and other sync-related options.
-
----
-
-## How It Works
-
-SoulSync is built with a modern, non-blocking architecture to ensure a smooth and responsive user experience, even during heavy network activity.
-
-* **UI Framework**: The entire user interface is built with **PyQt6**, a powerful framework for creating native desktop applications.
-* **Concurrency**: To prevent the UI from freezing during searches, API calls, and downloads, the application makes extensive use of PyQt's `QThreadPool` and `QRunnable`. Long-running tasks are offloaded to background worker threads, which communicate back to the main UI thread using signals (`pyqtSignal`).
-* **Service Integration**:
-    * **Spotify**: Connects to the Spotify API to fetch playlist data, user information, and rich track/album metadata for the "Matched Download" feature.
-    * **Plex**: Interacts with your Plex Media Server to scan your existing music library and identify which tracks you already have.
-    * **Soulseek**: Communicates with a **slskd** client via its HTTP API. slskd is a modern, headless Soulseek client that runs as a background service, which this application uses to perform searches and manage downloads.
+🎵 SoulSync - Automated Music Discovery and Collection ManagerSoulSync is a powerful desktop application designed to bridge the gap between your music streaming habits on Spotify and your personal, high-quality music library in Plex. It automates the process of discovering new music, finding missing tracks from your favorite playlists, and sourcing them from the Soulseek network via slskd.The core philosophy of SoulSync is to let you enjoy music discovery on Spotify while it handles the tedious work of building and maintaining a pristine, locally-hosted music collection for you in Plex.✨ Core FeaturesSpotify Playlist Sync: Intelligently scans your Spotify playlists, using snapshot IDs to efficiently detect changes and avoid re-scanning unmodified playlists. It then performs a deep comparison against your Plex music library to accurately identify any missing tracks, saving you from the tedious task of manual cross-referencing.Artist Discography Explorer: Go beyond playlists and explore the complete discography of any artist. Search for an artist, and SoulSync will fetch their entire catalog of albums and singles from Spotify. It then instantly cross-references this catalog with your Plex library to show you, at a glance, which albums you already own and which ones you're missing.Automated Downloads via Soulseek: SoulSync seamlessly integrates with slskd, a headless Soulseek client, to find and download your missing music. It automatically generates multiple, optimized search queries for each track and prioritizes high-quality formats like FLAC, ensuring your library is of the highest fidelity.Intelligent Matching Engine: At the heart of SoulSync is a robust matching algorithm. It normalizes and compares metadata between Spotify, Plex, and Soulseek, cleverly handling variations like "(Deluxe Edition)", "(Remastered)", feature tags, and typos to ensure you get the correct version of the track or album with minimal manual intervention.Centralized Dashboard: The main dashboard provides a real-time, at-a-glance overview of your connected services (Spotify, Plex, Soulseek), live download statistics (active downloads, speed), and a feed of the most recent application activities.Plex Metadata Enhancement: Keep your Plex library looking beautiful and organized. SoulSync can automatically fetch high-quality artist posters and detailed genre information from Spotify and apply them to the artists in your Plex library, ensuring a rich and consistent browsing experience.⚙️ How It WorksThe application follows a clear, automated workflow to enhance and expand your music library:Connect Services: First, you authenticate with your Spotify and Plex accounts and connect to your running slskd instance through the settings panel. This gives SoulSync the access it needs to work its magic.Analyze: Navigate to the Sync page and select a Spotify playlist. SoulSync fetches all tracks and compares them against your Plex library. This comparison uses a sophisticated matching engine that looks at track title, artist, album, and duration to make an accurate assessment.Identify Missing: After the analysis, the application generates a clear, actionable list of tracks that are present in the Spotify playlist but are not found in your Plex library.Search & Download: For each missing track, SoulSync generates multiple optimized search queries to increase the likelihood of finding a high-quality match. It then uses the slskd API to search the Soulseek network, prioritizing FLAC files and reliable users, and automatically queues them for download.Organize: Once a download is complete, SoulSync automatically organizes the file into a dedicated Transfer directory. It creates a clean folder structure based on the artist and album (/Transfer/Artist Name/Artist Name - Album Name/Track.flac), making it simple for you to move the files into your main Plex music folder.🚀 Getting StartedFollow these steps to get SoulSync up and running on your system.PrerequisitesBefore you begin, ensure you have the following installed and configured:Python 3.8+: The core runtime for the application.Plex Media Server: You need a running Plex server with an existing music library that SoulSync can scan.slskd: A headless Soulseek client. This is the engine that powers the downloading feature. You must have this running on your local network. Download and setup instructions here.Spotify Account: A regular or premium Spotify account is required to access your playlists and artist data.InstallationClone the repository:git clone https://github.com/Nezreka/SoulSync
+cd soulsync-app
+Install dependencies:pip install -r requirements.txt
+⚠️ First-Time Setup: A Critical StepIMPORTANT: SoulSync will not function until you provide your API keys and service details. You must do this before you start using the app's features. You have two options for this initial setup:Option 1 (Recommended): Use the In-App Settings PageLaunch the application (python main.py).The very first thing you should do is navigate to the Settings page using the sidebar.Fill in all the required fields for Spotify, Plex, and Soulseek.Click "Save Settings". The app is now ready to use.Option 2: Edit the config.json File ManuallyLocate the Configuration File: Before launching the app, find the config.json file in the config/ directory of the project.Configure API Keys and URLs: Open the file and fill in the details as described below.Configuration DetailsOpen the config.json file and fill in the details for Spotify, Plex, and Soulseek.❗ Important: slskd API Key SetupThe slskd API key is crucial for the application to communicate with your Soulseek client.Find your slskd config file: This is typically a slskd.yml or slskd.json file located where you installed slskd.Locate the API key: Inside the slskd configuration, find the api_key value you have set. It will look something like this:# slskd.yml example
+api:
+  key: "your-secret-api-key-goes-here"
+Copy and Paste: Copy the exact API key from your slskd configuration.Update config.json: Paste the key into the api_key field under the soulseek section in the SoulSync app's config.json file.Alternatively, you can paste this key directly into the API Key field in the Settings menu within the application after launching it.{
+  "spotify": {
+    "client_id": "YOUR_SPOTIFY_CLIENT_ID",
+    "client_secret": "YOUR_SPOTIFY_CLIENT_SECRET"
+  },
+  "plex": {
+    "base_url": "http://YOUR_PLEX_SERVER_IP:32400",
+    "token": "YOUR_PLEX_TOKEN"
+  },
+  "soulseek": {
+    "slskd_url": "http://YOUR_SLSKD_IP:5030",
+    "api_key": "PASTE_YOUR_SLSKD_API_KEY_HERE",
+    "download_path": "./downloads",
+    "transfer_path": "./Transfer"
+  },
+  "logging": {
+    "level": "INFO",
+    "path": "logs/app.log"
+  }
+}
+🖥️ UsageRun the main application file to launch the GUI:python main.py
+PagesDashboard: Provides a high-level overview of system status and recent activities.Sync: Load your Spotify playlists, analyze them against your Plex library, and initiate the process of finding and downloading missing tracks.Downloads: Monitor your active and completed downloads from Soulseek in real-time.Artists: A powerful tool to search for any artist, view their discography, and see which albums you already own in Plex. You can initiate downloads for missing albums directly from this page.Settings: Configure all your service credentials and application paths.🐍 Key ComponentsThe application is structured into several core modules:main.py: The main entry point for the PyQt6 application.core/: Contains the business logic for interacting with external services.spotify_client.py: Handles all communication with the Spotify API.plex_client.py: Manages interactions with the Plex Media Server API.soulseek_client.py: Communicates with the slskd headless client.matching_engine.py: The brain of the application, responsible for intelligent metadata comparison and matching.ui/: Contains all the PyQt6 graphical user interface components.sidebar.py: The main navigation sidebar.pages/: Each file corresponds to a different page in the application (dashboard.py, sync.py, etc.).config/: Manages application settings via config.json.utils/: Utility scripts, including logging configuration.🤝 ContributingContributions are welcome! Please feel free to submit a pull request or open an issue for any bugs or feature requests.📜 LicenseThis project is licensed under the MIT License. See the LICENSE file for details.
