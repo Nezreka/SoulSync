@@ -1,8 +1,0 @@
-create me an app with python. it will have an elegant and animated and virant theme and layout similar to the Spotify desktop app or web app. 
-The app will connect to both spotify and my plex media server so i want a central file called config.json that stores all of the api and login information for connected services.
-The app will have multiple functionalities.
-the app will pull the data for all spotify user playlists. it will sync the playlists to plex mediaserver using an extensive, robust matching system, multiple methods.
-The app will connect to soulseek and search for flac or user selected quality to download albums and singles by an artist with an extensive matching system.
-the app will update the music metadata on plex based off the spotify metadata that is provided. including album art.
-
-the core functionality should feel and look like spotify. 
