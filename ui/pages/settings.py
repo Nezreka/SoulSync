@@ -157,11 +157,11 @@ class SlskdDetectionThread(QThread):
                     except:
                         pass
                     return url, 'probable'
-            except requests.exceptions.ConnectRefused:
+            except requests.exceptions.ConnectionError:
                 pass
             except requests.exceptions.Timeout:
                 pass
-            except:
+            except Exception:
                 pass
             return None, None
         
