@@ -239,8 +239,7 @@ class SoulseekClient:
             session = aiohttp.ClientSession()
             
             headers = self._get_headers()
-            logger.debug(f"Making {method} request to: {url}")
-            logger.debug(f"Headers: {headers}")
+         
             if 'json' in kwargs:
                 logger.debug(f"JSON payload: {kwargs['json']}")
             
@@ -251,8 +250,7 @@ class SoulseekClient:
                 **kwargs
             ) as response:
                 response_text = await response.text()
-                logger.debug(f"Response status: {response.status}")
-                logger.debug(f"Response text: {response_text[:500]}...")  # First 500 chars
+             
                 
                 if response.status in [200, 201, 204]:  # Accept 200 OK, 201 Created, and 204 No Content
                     try:
@@ -297,8 +295,7 @@ class SoulseekClient:
             session = aiohttp.ClientSession()
             
             headers = self._get_headers()
-            logger.debug(f"Making direct {method} request to: {url}")
-            logger.debug(f"Headers: {headers}")
+          
             if 'json' in kwargs:
                 logger.debug(f"JSON payload: {kwargs['json']}")
             
@@ -309,8 +306,7 @@ class SoulseekClient:
                 **kwargs
             ) as response:
                 response_text = await response.text()
-                logger.debug(f"Response status: {response.status}")
-                logger.debug(f"Response text: {response_text[:500]}...")  # First 500 chars
+             
                 
                 if response.status == 200:
                     try:
@@ -342,7 +338,7 @@ class SoulseekClient:
         all_tracks = []
         albums_by_path = defaultdict(list)
         
-        logger.debug(f"Processing {len(responses_data)} user responses")
+        
         
         # Audio file extensions to filter for
         audio_extensions = {'.mp3', '.flac', '.ogg', '.aac', '.wma', '.wav', '.m4a'}
@@ -350,7 +346,7 @@ class SoulseekClient:
         for response_data in responses_data:
             username = response_data.get('username', '')
             files = response_data.get('files', [])
-            logger.debug(f"User {username} has {len(files)} files")
+            
             
             for file_data in files:
                 filename = file_data.get('filename', '')
@@ -396,11 +392,7 @@ class SoulseekClient:
         # Individual tracks are those not part of any album
         individual_tracks = [track for track in all_tracks if track.filename not in album_track_filenames]
         
-        logger.info(f"Found {len(individual_tracks)} individual tracks and {len(album_results)} albums")
-        logger.debug(f"Album detection details: {len(albums_by_path)} potential albums processed")
-        for (username, album_path), tracks in list(albums_by_path.items())[:3]:  # Log first 3 for debugging
-            logger.debug(f"Album: {username}/{album_path} -> {len(tracks)} tracks")
-        
+       
         return individual_tracks, album_results
     
     def _extract_album_path(self, filename: str) -> Optional[str]:
