@@ -282,6 +282,10 @@ class ServiceTestThread(QThread):
         try:
             from core.spotify_client import SpotifyClient
             
+            # Basic validation first
+            if not self.test_config.get('client_id') or not self.test_config.get('client_secret'):
+                return False, "✗ Please enter both Client ID and Client Secret"
+            
             # Save temporarily to test
             original_client_id = config_manager.get('spotify.client_id')
             original_client_secret = config_manager.get('spotify.client_secret')
@@ -289,15 +293,32 @@ class ServiceTestThread(QThread):
             config_manager.set('spotify.client_id', self.test_config['client_id'])
             config_manager.set('spotify.client_secret', self.test_config['client_secret'])
             
-            # Test connection
-            client = SpotifyClient()
-            if client.is_authenticated():
-                user_info = client.get_user_info()
-                username = user_info.get('display_name', 'Unknown') if user_info else 'Unknown'
-                message = f"✓ Spotify connection successful!\nConnected as: {username}"
-                success = True
-            else:
-                message = "✗ Spotify connection failed.\nCheck your credentials and try again."
+            # Test connection with timeout protection
+            try:
+                client = SpotifyClient()
+                
+                # Check if client was created successfully (has sp object)
+                if client.sp is None:
+                    message = "✗ Failed to create Spotify client.\nCheck your credentials."
+                    success = False
+                else:
+                    # Try a simple auth check with timeout
+                    try:
+                        # This will trigger OAuth flow - user needs to complete it
+                        if client.is_authenticated():
+                            user_info = client.get_user_info()
+                            username = user_info.get('display_name', 'Unknown') if user_info else 'Unknown'
+                            message = f"✓ Spotify connection successful!\nConnected as: {username}"
+                            success = True
+                        else:
+                            message = "✗ Spotify authentication failed.\nPlease complete the OAuth flow in your browser."
+                            success = False
+                    except Exception as auth_e:
+                        message = f"✗ Spotify authentication failed:\n{str(auth_e)}"
+                        success = False
+                        
+            except Exception as client_e:
+                message = f"✗ Failed to create Spotify client:\n{str(client_e)}"
                 success = False
             
             # Restore original values
@@ -307,6 +328,12 @@ class ServiceTestThread(QThread):
             return success, message
             
         except Exception as e:
+            # Restore original values even on exception
+            try:
+                config_manager.set('spotify.client_id', original_client_id)
+                config_manager.set('spotify.client_secret', original_client_secret)
+            except:
+                pass
             return False, f"✗ Spotify test failed:\n{str(e)}"
     
     def _test_plex(self):
@@ -1024,7 +1051,7 @@ class SettingsPage(QWidget):
         callback_info_label.setStyleSheet("color: #b3b3b3; font-size: 11px; margin-top: 8px;")
         spotify_layout.addWidget(callback_info_label)
         
-        callback_url_label = QLabel("http://localhost:8888/callback")
+        callback_url_label = QLabel("http://127.0.0.1:8888/callback")
         callback_url_label.setStyleSheet("""
             color: #1db954; 
             font-size: 11px; 

@@ -36,8 +36,8 @@ class ServiceStatusThread(QThread):
     def run(self):
         while self.running:
             try:
-                # Check Spotify authentication
-                spotify_status = self.spotify_client.is_authenticated()
+                # Check Spotify authentication - but don't trigger OAuth
+                spotify_status = self.spotify_client.sp is not None
                 self.status_updated.emit("spotify", spotify_status)
                 
                 # Check Plex connection
@@ -48,11 +48,11 @@ class ServiceStatusThread(QThread):
                 soulseek_status = self.soulseek_client.is_configured()
                 self.status_updated.emit("soulseek", soulseek_status)
                 
-                self.msleep(3000)  # Check every 3 seconds
+                self.msleep(10000)  # Check every 10 seconds (less aggressive)
                 
             except Exception as e:
                 logger.error(f"Error checking service status: {e}")
-                self.msleep(5000)
+                self.msleep(10000)
     
     def stop(self):
         self.running = False
