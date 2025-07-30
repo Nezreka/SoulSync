@@ -196,7 +196,6 @@ class SidebarButton(QPushButton):
                                               stop: 0 rgba(29, 185, 84, 0.25),
                                               stop: 0.5 rgba(29, 185, 84, 0.18),
                                               stop: 1 rgba(29, 185, 84, 0.12));
-                    transform: translateX(4px);
                     border: 1px solid rgba(29, 185, 84, 0.3);
                 }
             """)
@@ -232,7 +231,6 @@ class SidebarButton(QPushButton):
                                               stop: 0 rgba(255, 255, 255, 0.06),
                                               stop: 1 rgba(255, 255, 255, 0.03));
                     border-left: 2px solid rgba(255, 255, 255, 0.2);
-                    transform: translateX(2px);
                     border: 1px solid rgba(255, 255, 255, 0.08);
                 }
             """)
@@ -631,7 +629,6 @@ class MediaPlayer(QWidget):
                                           stop: 0 rgba(29, 185, 84, 0.08),
                                           stop: 0.5 rgba(26, 26, 26, 0.95),
                                           stop: 1 rgba(18, 18, 18, 1.0));
-                transform: translateY(-1px);
             }
         """)
         
@@ -716,11 +713,9 @@ class MediaPlayer(QWidget):
             }
             QPushButton:hover {
                 background: #1fdf64;
-                transform: scale(1.04);
             }
             QPushButton:pressed {
                 background: #1ca851;
-                transform: scale(0.96);
             }
             QPushButton:disabled {
                 background: #535353;
@@ -814,7 +809,6 @@ class MediaPlayer(QWidget):
             }
             QSlider::handle:horizontal:hover {
                 background: #1ed760;
-                transform: scale(1.2);
             }
             QSlider::sub-page:horizontal {
                 background: #1ed760;
@@ -839,11 +833,9 @@ class MediaPlayer(QWidget):
                 background: rgba(255, 255, 255, 0.15);
                 border: 1px solid #ffffff;
                 color: #ffffff;
-                transform: scale(1.05);
             }
             QPushButton:pressed {
                 background: rgba(255, 255, 255, 0.25);
-                transform: scale(0.95);
             }
             QPushButton:disabled {
                 background: transparent;

@@ -2480,14 +2480,12 @@ class AlbumResultItem(QFrame):
                 border-radius: 20px;
                 border: 1px solid rgba(75, 75, 82, 0.5);
                 margin: 10px 5px;
-                box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
             }
             AlbumResultItem:hover {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 rgba(60, 60, 68, 0.98),
                     stop:1 rgba(50, 50, 58, 1.0));
                 border: 1px solid rgba(29, 185, 84, 0.8);
-                box-shadow: 0 8px 24px rgba(29, 185, 84, 0.2);
             }
         """)
         
@@ -2606,10 +2604,11 @@ class AlbumResultItem(QFrame):
                     stop:0 rgba(30, 215, 96, 1.0),
                     stop:1 rgba(25, 180, 80, 1.0));
                 border: 2px solid rgba(29, 185, 84, 0.6);
-                transform: scale(1.02);
             }
             QPushButton:pressed {
-                transform: scale(0.98);
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(20, 150, 70, 1.0),
+                    stop:1 rgba(15, 120, 60, 1.0));
             }
         """)
         
@@ -2635,10 +2634,11 @@ class AlbumResultItem(QFrame):
                     stop:0 rgba(167, 71, 254, 1.0),
                     stop:1 rgba(144, 63, 220, 1.0));
                 border: 2px solid rgba(147, 51, 234, 0.6);
-                transform: scale(1.02);
             }
             QPushButton:pressed {
-                transform: scale(0.98);
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(120, 50, 200, 1.0),
+                    stop:1 rgba(100, 40, 180, 1.0));
             }
         """)
         
@@ -2776,14 +2776,12 @@ class SearchResultItem(QFrame):
                 border-radius: 18px;
                 border: 1px solid rgba(70, 70, 76, 0.5);
                 margin: 8px 4px;
-                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
             }
             SearchResultItem:hover {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 rgba(55, 55, 60, 0.98),
                     stop:1 rgba(45, 45, 50, 1.0));
                 border: 1px solid rgba(29, 185, 84, 0.8);
-                box-shadow: 0 6px 20px rgba(29, 185, 84, 0.15);
             }
         """)
         
@@ -2853,13 +2851,11 @@ class SearchResultItem(QFrame):
                     stop:0 rgba(255, 213, 79, 1.0),
                     stop:1 rgba(255, 171, 64, 1.0));
                 border: 2px solid rgba(255, 193, 7, 0.6);
-                transform: scale(1.05);
             }
             QPushButton:pressed {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 rgba(255, 152, 0, 1.0),
                     stop:1 rgba(245, 124, 0, 1.0));
-                transform: scale(0.95);
             }
         """)
         
@@ -2883,13 +2879,11 @@ class SearchResultItem(QFrame):
                     stop:0 rgba(30, 215, 96, 1.0),
                     stop:1 rgba(25, 180, 80, 1.0));
                 border: 2px solid rgba(29, 185, 84, 0.6);
-                transform: scale(1.05);
             }
             QPushButton:pressed {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 rgba(24, 156, 71, 1.0),
                     stop:1 rgba(20, 130, 60, 1.0));
-                transform: scale(0.95);
             }
         """)
         
@@ -2914,13 +2908,11 @@ class SearchResultItem(QFrame):
                     stop:0 rgba(167, 71, 254, 1.0),
                     stop:1 rgba(144, 63, 220, 1.0));
                 border: 2px solid rgba(147, 51, 234, 0.6);
-                transform: scale(1.05);
             }
             QPushButton:pressed {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 rgba(124, 43, 200, 1.0),
                     stop:1 rgba(104, 33, 180, 1.0));
-                transform: scale(0.95);
             }
         """)
         
@@ -5577,13 +5569,11 @@ class DownloadsPage(QWidget):
                     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                         stop:0 #1fdf64,
                         stop:1 #1ed760);
-                    transform: scale(1.02);
                 }
                 QPushButton:pressed {
                     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                         stop:0 #1ca851,
                         stop:1 #169c46);
-                    transform: scale(0.98);
                 }
             """)
         else:
@@ -5606,13 +5596,11 @@ class DownloadsPage(QWidget):
                         stop:1 rgba(80, 80, 80, 0.7));
                     border: 1px solid rgba(140, 140, 140, 0.4);
                     color: rgba(255, 255, 255, 0.9);
-                    transform: scale(1.02);
                 }
                 QPushButton:pressed {
                     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                         stop:0 rgba(60, 60, 60, 0.6),
                         stop:1 rgba(40, 40, 40, 0.8));
-                    transform: scale(0.98);
                 }
             """)
     
