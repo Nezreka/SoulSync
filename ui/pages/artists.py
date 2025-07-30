@@ -487,14 +487,31 @@ class PlexLibraryWorker(QThread):
                         if self._stop_requested:
                             return
                         
-                        # Search Plex for this combination
+                        # Search Plex for this combination (cleaned artist)
                         print(f"   🔍 Searching Plex: album='{album_name}', artist='{artist_clean}'")
                         plex_albums = self.plex_client.search_albums(album_name, artist_clean, limit=5)
                         print(f"   📀 Found {len(plex_albums)} Plex albums")
                         all_plex_matches.extend(plex_albums)
                         
-                        # Also try album-only search if artist+album didn't work
-                        if not plex_albums and artist_clean:
+                        # Backup search with original uncleaned artist name (for cases like "Tyler, The Creator")
+                        if not plex_albums and artist and artist != artist_clean:
+                            print(f"   🔄 Backup search with original artist: album='{album_name}', artist='{artist}'")
+                            original_artist_results = self.plex_client.search_albums(album_name, artist, limit=5)
+                            print(f"   📀 Found {len(original_artist_results)} albums (original artist)")
+                            all_plex_matches.extend(original_artist_results)
+                            
+                            # Additional fallback: remove commas (Tyler, The Creator -> Tyler The Creator)
+                            if not original_artist_results and ',' in artist:
+                                artist_no_comma = artist.replace(',', '').strip()
+                                # Clean up multiple spaces that might result from comma removal
+                                artist_no_comma = ' '.join(artist_no_comma.split())
+                                print(f"   🔄 Comma-removal fallback: album='{album_name}', artist='{artist_no_comma}'")
+                                no_comma_results = self.plex_client.search_albums(album_name, artist_no_comma, limit=5)
+                                print(f"   📀 Found {len(no_comma_results)} albums (no comma)")
+                                all_plex_matches.extend(no_comma_results)
+                        
+                        # Also try album-only search if no results from artist searches
+                        if not all_plex_matches:  # Only if we haven't found anything yet for this album
                             print(f"   🔍 Trying album-only search: album='{album_name}'")
                             album_only_results = self.plex_client.search_albums(album_name, "", limit=5)
                             print(f"   📀 Found {len(album_only_results)} albums (album-only)")

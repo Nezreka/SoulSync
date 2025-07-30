@@ -1654,7 +1654,7 @@ class PlaylistItem(QFrame):
             }
             QPushButton:hover {
                 background: #1ed760;
-                cursor: pointer;
+                
             }
         """)
         self.operation_status_button.clicked.connect(self.on_status_clicked)

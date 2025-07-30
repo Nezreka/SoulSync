@@ -7602,8 +7602,34 @@ class DownloadsPage(QWidget):
                     counter += 1
                 new_file_path = f"{base} ({counter}){ext}"
             
-            print(f"📂 Copying file to: {new_file_path}")
-            shutil.copy2(original_file_path, new_file_path)
+            print(f"📂 Moving file to: {new_file_path}")
+            
+            # Verify source file exists before attempting move
+            if not os.path.exists(original_file_path):
+                print(f"❌ Source file not found: {original_file_path}")
+                return None
+                
+            # Move the file (this will delete the original automatically)
+            shutil.move(original_file_path, new_file_path)
+            
+            # Verify the move was successful
+            if not os.path.exists(new_file_path):
+                print(f"❌ File move failed - destination file not found: {new_file_path}")
+                return None
+                
+            if os.path.exists(original_file_path):
+                print(f"⚠️ Warning: Original file still exists after move: {original_file_path}")
+                try:
+                    os.remove(original_file_path)
+                    print(f"🗑️ Cleaned up remaining original file")
+                except Exception as cleanup_error:
+                    print(f"⚠️ Could not remove original file: {cleanup_error}")
+            
+            print(f"🧹 File successfully moved and original cleaned up")
+            
+            # Clean up any empty directories left in the downloads folder
+            downloads_path = config_manager.get('soulseek.download_path', './Downloads')
+            self._cleanup_empty_directories(downloads_path, original_file_path)
             
             # Download cover art for both albums and singles
             if album_info and album_info['is_album']:
