@@ -128,7 +128,7 @@ class MainWindow(QMainWindow):
             logger.error(f"Error running search maintenance: {e}")
     
     def init_ui(self):
-        self.setWindowTitle("NewMusic - Music Sync & Manager")
+        self.setWindowTitle("SoulSync - Music Sync & Manager")
         self.setGeometry(100, 100, 1400, 900)
         
         # Set dark theme palette
@@ -343,15 +343,15 @@ def main():
     log_file = logging_config.get('path', 'logs/newmusic.log')
     setup_logging(level=log_level, log_file=log_file)
     
-    logger.info("Starting NewMusic application")
+    logger.info("Starting Soulsync application")
     
     if not config_manager.config_path.exists():
         logger.error("Configuration file not found. Please check config/config.json")
         sys.exit(1)
     
     app = QApplication(sys.argv)
-    app.setApplicationName("NewMusic")
-    app.setApplicationVersion("1.0.0")
+    app.setApplicationName("SoulSync")
+    app.setApplicationVersion(".5")
     
     main_window = MainWindow()
     main_window.show()

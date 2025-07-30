@@ -945,10 +945,12 @@ class MetadataUpdaterWidget(QFrame):
         info_label.setFont(QFont("Arial", 9))
         info_label.setStyleSheet("color: #b3b3b3; margin-bottom: 5px;")
         
-        # Control section
-        control_layout = QHBoxLayout()
-        control_layout.setSpacing(15)
+        # Control section - reorganized for better balance
+        control_layout = QVBoxLayout()
+        control_layout.setSpacing(12)
         
+        # Top row: Button
+        button_layout = QHBoxLayout()
         self.start_button = QPushButton("Begin Metadata Update")
         self.start_button.setFixedHeight(36)
         self.start_button.setFont(QFont("Arial", 10, QFont.Weight.Medium))
@@ -971,9 +973,16 @@ class MetadataUpdaterWidget(QFrame):
                 color: #999999;
             }
         """)
+        button_layout.addWidget(self.start_button)
+        button_layout.addStretch()
+        
+        # Bottom row: Settings and status
+        settings_layout = QHBoxLayout()
+        settings_layout.setSpacing(25)
         
         # Refresh interval dropdown
         refresh_info_layout = QVBoxLayout()
+        refresh_info_layout.setSpacing(4)
         
         refresh_label = QLabel("Refresh Interval:")
         refresh_label.setFont(QFont("Arial", 9))
@@ -998,7 +1007,7 @@ class MetadataUpdaterWidget(QFrame):
                 border: 1px solid #555555;
                 border-radius: 4px;
                 padding: 4px 8px;
-                min-width: 100px;
+                min-width: 120px;
             }
             QComboBox:hover {
                 border: 1px solid #1db954;
@@ -1027,6 +1036,7 @@ class MetadataUpdaterWidget(QFrame):
         
         # Current artist display
         artist_info_layout = QVBoxLayout()
+        artist_info_layout.setSpacing(4)
         
         current_label = QLabel("Current Artist:")
         current_label.setFont(QFont("Arial", 9))
@@ -1039,10 +1049,12 @@ class MetadataUpdaterWidget(QFrame):
         artist_info_layout.addWidget(current_label)
         artist_info_layout.addWidget(self.current_artist_label)
         
-        control_layout.addWidget(self.start_button)
-        control_layout.addLayout(refresh_info_layout)
-        control_layout.addLayout(artist_info_layout)
-        control_layout.addStretch()
+        settings_layout.addLayout(refresh_info_layout)
+        settings_layout.addLayout(artist_info_layout)
+        settings_layout.addStretch()
+        
+        control_layout.addLayout(button_layout)
+        control_layout.addLayout(settings_layout)
         
         # Progress section
         progress_layout = QVBoxLayout()
