@@ -30,7 +30,7 @@ The application follows a clear, automated workflow to enhance and expand your m
 
 4. **Search & Download**: For each missing track, SoulSync generates multiple optimized search queries to increase the likelihood of finding a high-quality match. It then uses the slskd API to search the Soulseek network, prioritizing FLAC files and reliable users, and automatically queues them for download.
 
-5. **Organize**: Once a download is complete, SoulSync automatically organizes the file into a dedicated Transfer directory. It creates a clean folder structure based on the artist and album (`/Transfer/Artist Name/Artist Name - Album Name/Track.flac`), making it simple for you to move the files into your main Plex music folder.
+5. **Organize**: Once a download is complete, SoulSync automatically organizes the file from the download directory into the transfer directory. The download folder is where slskd places raw downloads, while the transfer folder is where processed and organized files go. SoulSync creates a clean folder structure in the transfer directory based on the artist and album (`/Transfer/Artist Name/Artist Name - Album Name/Track.flac`), making it simple for you to move the files into your main Plex music folder.
 
 ## 🚀 Getting Started
 
@@ -120,6 +120,11 @@ docker run -d \
 
 Open the `config.json` file and fill in the details for Spotify, Plex, and Soulseek.
 
+#### 📁 Important: Understanding Download vs Transfer Folders
+
+- **download_path**: This should be the exact same folder where slskd saves its downloads (e.g., the downloads folder you configured in slskd). SoulSync monitors this folder for completed downloads.
+- **transfer_path**: This is where SoulSync moves and organizes the processed files. Typically, this should be your main Plex music library folder, so the files are immediately available to Plex after processing.
+
 #### ❗ Important: slskd API Key Setup
 
 The slskd API key is crucial for the application to communicate with your Soulseek client.
@@ -149,8 +154,8 @@ Alternatively, you can paste this key directly into the API Key field in the Set
   "soulseek": {
     "slskd_url": "http://YOUR_SLSKD_IP:5030",
     "api_key": "PASTE_YOUR_SLSKD_API_KEY_HERE",
-    "download_path": "./downloads", YOUR SLSKD DOWNLOAD PATH
-    "transfer_path": "./Transfer" FOLDER TO TRANSFER PROCESSED FILES (Plex folder)
+    "download_path": "FULL_PATH_TO_SLSKD_DOWNLOADS_FOLDER",
+    "transfer_path": "FULL_PATH_TO_YOUR_PLEX_MUSIC_FOLDER"
   },
   "logging": {
     "level": "INFO",
