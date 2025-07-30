@@ -149,8 +149,8 @@ Alternatively, you can paste this key directly into the API Key field in the Set
   "soulseek": {
     "slskd_url": "http://YOUR_SLSKD_IP:5030",
     "api_key": "PASTE_YOUR_SLSKD_API_KEY_HERE",
-    "download_path": "./downloads",
-    "transfer_path": "./Transfer"
+    "download_path": "./downloads", YOUR SLSKD DOWNLOAD PATH
+    "transfer_path": "./Transfer" FOLDER TO TRANSFER PROCESSED FILES (Plex folder)
   },
   "logging": {
     "level": "INFO",
