@@ -2378,6 +2378,10 @@ class ArtistsPage(QWidget):
         self.setup_ui()
         self.setup_clients()
     
+    def set_toast_manager(self, toast_manager):
+        """Set the toast manager for showing notifications"""
+        self.toast_manager = toast_manager
+    
     def setup_clients(self):
         """Initialize client connections"""
         try:
@@ -3003,6 +3007,10 @@ class ArtistsPage(QWidget):
             print(f"🔄 Resuming existing download session for album: {album.name}")
             existing_session = self.active_album_sessions[album.id]
             existing_modal = existing_session.get('modal')
+            
+            # Show toast notification for already active session
+            if hasattr(self, 'toast_manager') and self.toast_manager:
+                self.toast_manager.info(f"Downloads already in progress for '{album.name}'")
             
             # Check if the modal still exists and is valid
             if existing_modal and not existing_modal.isVisible():

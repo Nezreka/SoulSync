@@ -1973,6 +1973,10 @@ class SyncPage(QWidget):
         self.show_initial_state()
         self.playlists_loaded = False
     
+    def set_toast_manager(self, toast_manager):
+        """Set the toast manager for showing notifications"""
+        self.toast_manager = toast_manager
+    
 
     def _update_and_save_sync_status(self, playlist_id, result, snapshot_id):
         """Updates the sync status for a given playlist and saves to file."""

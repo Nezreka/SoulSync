@@ -1206,6 +1206,10 @@ class DashboardPage(QWidget):
         """Called from main window to provide app start time for uptime calculation"""
         self.data_provider.set_app_start_time(start_time)
     
+    def set_toast_manager(self, toast_manager):
+        """Set the toast manager for showing notifications"""
+        self.toast_manager = toast_manager
+    
     def setup_ui(self):
         self.setStyleSheet("""
             DashboardPage {
@@ -1615,7 +1619,11 @@ class DashboardPage(QWidget):
         pass
     
     def add_activity_item(self, icon: str, title: str, subtitle: str, time_ago: str = "Now"):
-        """Add new activity item to the feed"""
+        """Add new activity item to the feed and potentially show a toast"""
+        # Show toast for immediate user actions (if toast manager is available)
+        if hasattr(self, 'toast_manager') and self.toast_manager:
+            self._maybe_show_toast(icon, title, subtitle)
+        
         # Remove placeholder if it exists
         if self.has_placeholder:
             # Clear the entire layout
@@ -1641,6 +1649,44 @@ class DashboardPage(QWidget):
             item = self.activity_layout.takeAt(self.activity_layout.count() - 1)
             if item.widget():
                 item.widget().deleteLater()
+    
+    def _maybe_show_toast(self, icon: str, title: str, subtitle: str):
+        """Determine if this activity should show a toast notification"""
+        from ui.components.toast_manager import ToastType
+        
+        # Success activities that deserve toasts
+        if icon == "✅" and any(keyword in title.lower() for keyword in ["download started", "sync completed", "complete"]):
+            self.toast_manager.success(f"{title}: {subtitle}")
+            return
+        
+        if icon == "📥" and "Download Started" in title:
+            self.toast_manager.success(f"{subtitle}")
+            return
+            
+        if icon == "🔍" and "Search Complete" in title:
+            self.toast_manager.info(f"{subtitle}")
+            return
+        
+        # Error activities that need immediate attention
+        if icon == "❌":
+            # Skip routine background errors
+            if any(skip_term in title.lower() for skip_term in ["metadata", "connection test", "routine"]):
+                return
+            
+            # Show errors for user-initiated actions
+            if any(keyword in title.lower() for keyword in ["download failed", "sync failed", "search failed"]):
+                self.toast_manager.error(f"{title}: {subtitle}")
+                return
+        
+        # Warning activities
+        if icon == "⚠️":
+            self.toast_manager.warning(f"{title}: {subtitle}")
+            return
+        
+        # Info activities for searches and connections
+        if icon == "🔍" and "Search Started" in title:
+            self.toast_manager.info(f"{subtitle}")
+            return
     
     def closeEvent(self, event):
         """Clean up threads when dashboard is closed"""
