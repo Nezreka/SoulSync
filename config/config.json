@@ -10,8 +10,8 @@
   "soulseek": {
     "slskd_url": "http://localhost:5030",
     "api_key": "YOUR SLSKD API KEY",
-    "download_path": "E:/Broque Projects/newMusic/downloads",
-    "transfer_path": "E:/Broque Projects/newMusic/Transfer"
+    "download_path": "./downloads",
+    "transfer_path": "./Transfer"
   },
   "logging": {
     "path": "logs/app.log",
