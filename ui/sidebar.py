@@ -614,23 +614,24 @@ class MediaPlayer(QWidget):
         self.setup_ui()
     
     def setup_ui(self):
-        self.setFixedHeight(70)  # Slightly taller for better proportions
+        self.setFixedHeight(85)  # More space for better proportions
         self.setStyleSheet("""
             MediaPlayer {
                 background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-                                          stop: 0 rgba(255, 255, 255, 0.05),
-                                          stop: 0.3 rgba(255, 255, 255, 0.02),
-                                          stop: 1 transparent);
-                border: 1px solid rgba(255, 255, 255, 0.08);
-                border-radius: 16px;
-                margin: 0 8px;
+                                          stop: 0 rgba(26, 26, 26, 0.95),
+                                          stop: 0.5 rgba(18, 18, 18, 0.98),
+                                          stop: 1 rgba(12, 12, 12, 1.0));
+                border: 1px solid rgba(255, 255, 255, 0.05);
+                border-radius: 12px;
+                margin: 8px 10px;
             }
             MediaPlayer:hover {
-                border: 1px solid rgba(29, 185, 84, 0.15);
+                border: 1px solid rgba(29, 185, 84, 0.2);
                 background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-                                          stop: 0 rgba(29, 185, 84, 0.06),
-                                          stop: 0.3 rgba(255, 255, 255, 0.03),
-                                          stop: 1 transparent);
+                                          stop: 0 rgba(29, 185, 84, 0.08),
+                                          stop: 0.5 rgba(26, 26, 26, 0.95),
+                                          stop: 1 rgba(18, 18, 18, 1.0));
+                transform: translateY(-1px);
             }
         """)
         
@@ -652,213 +653,213 @@ class MediaPlayer(QWidget):
         layout.addWidget(self.expanded_content)
         
         # No track message (shown when no music)
-        self.no_track_label = QLabel("No track playing")
+        self.no_track_label = QLabel("Start playing music to see controls")
         self.no_track_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.no_track_label.setStyleSheet("""
             QLabel {
-                color: rgba(255, 255, 255, 0.4);
-                font-size: 11px;
-                font-weight: 500;
-                padding: 14px;
+                color: #6a6a6a;
+                font-size: 12px;
+                font-weight: 400;
+                padding: 20px 16px;
                 background: transparent;
-                letter-spacing: 0.3px;
-                font-family: 'SF Pro Text', -apple-system, sans-serif;
+                letter-spacing: 0.2px;
+                font-family: 'Spotify Circular', -apple-system, sans-serif;
+                line-height: 1.4;
             }
         """)
         layout.addWidget(self.no_track_label)
     
     def create_header(self):
         header = QWidget()
-        layout = QHBoxLayout(header)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(12)
+        main_layout = QVBoxLayout(header)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(8)
+        
+        # Top row: Track info and play button
+        top_row = QHBoxLayout()
+        top_row.setContentsMargins(0, 0, 0, 0)
+        top_row.setSpacing(14)
         
         # Track info (expandable on click) - now with scrolling for long titles
         self.track_info = ScrollingLabel("No track")
         self.track_info.setStyleSheet("""
             ScrollingLabel {
-                color: rgba(255, 255, 255, 0.95);
-                font-size: 13px;
-                font-weight: 600;
+                color: #ffffff;
+                font-size: 14px;
+                font-weight: 700;
                 background: transparent;
-                font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                letter-spacing: 0.1px;
-                padding: 3px 0px;
+                font-family: 'Spotify Circular', 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
+                letter-spacing: -0.3px;
+                padding: 2px 0px;
+                line-height: 1.2;
             }
             ScrollingLabel:hover {
                 color: #1ed760;
-                font-weight: 700;
+                text-decoration: underline;
             }
         """)
         self.track_info.setCursor(Qt.CursorShape.PointingHandCursor)
         self.track_info.mousePressEvent = self.toggle_expansion
         
-        # Play/pause button
-        self.play_pause_btn = QPushButton("▶")
-        self.play_pause_btn.setFixedSize(36, 36)
+        # Play/pause button - more Spotify-like
+        self.play_pause_btn = QPushButton("▷")
+        self.play_pause_btn.setFixedSize(40, 40)
         self.play_pause_btn.setStyleSheet("""
             QPushButton {
-                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-                                          stop: 0 #1ed760,
-                                          stop: 1 #1db954);
+                background: #1ed760;
                 border: none;
-                border-radius: 18px;
+                border-radius: 20px;
                 color: #000000;
-                font-size: 14px;
+                font-size: 16px;
                 font-weight: 900;
-                font-family: Arial, sans-serif;
+                font-family: 'Arial', sans-serif;
             }
             QPushButton:hover {
-                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-                                          stop: 0 #1fdf64,
-                                          stop: 1 #1ed760);
-                transform: scale(1.06);
+                background: #1fdf64;
+                transform: scale(1.04);
             }
             QPushButton:pressed {
-                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-                                          stop: 0 #1ca851,
-                                          stop: 1 #169c46);
-                transform: scale(0.98);
+                background: #1ca851;
+                transform: scale(0.96);
             }
             QPushButton:disabled {
-                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-                                          stop: 0 #404040,
-                                          stop: 1 #2a2a2a);
-                color: #666666;
+                background: #535353;
+                color: #b3b3b3;
             }
         """)
         self.play_pause_btn.clicked.connect(self.on_play_pause_clicked)
         self.play_pause_btn.setEnabled(False)
         
-        layout.addWidget(self.track_info)
-        layout.addStretch()
-        layout.addWidget(self.play_pause_btn)
+        top_row.addWidget(self.track_info)
+        top_row.addStretch()
+        top_row.addWidget(self.play_pause_btn)
+        
+        # Bottom row: Artist info (always visible in collapsed mode)
+        self.artist_info = QLabel("Unknown Artist")
+        self.artist_info.setStyleSheet("""
+            QLabel {
+                color: #b3b3b3;
+                font-size: 11px;
+                font-weight: 400;
+                background: transparent;
+                font-family: 'Spotify Circular', -apple-system, BlinkMacSystemFont, sans-serif;
+                letter-spacing: 0.1px;
+                margin-top: 1px;
+            }
+        """)
+        
+        main_layout.addLayout(top_row)
+        main_layout.addWidget(self.artist_info)
         
         return header
     
     def create_expanded_content(self):
         content = QWidget()
         layout = QVBoxLayout(content)
-        layout.setContentsMargins(0, 5, 0, 0)
-        layout.setSpacing(8)
+        layout.setContentsMargins(0, 2, 0, 0)
+        layout.setSpacing(4)
         
-        # Artist and album info
-        self.artist_album_label = QLabel("Unknown Artist • Unknown Album")
-        self.artist_album_label.setStyleSheet("""
+        # Album info 
+        self.album_label = QLabel("Unknown Album")
+        self.album_label.setStyleSheet("""
             QLabel {
                 color: #a7a7a7;
                 font-size: 11px;
                 font-weight: 400;
                 background: transparent;
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                letter-spacing: 0.3px;
-                margin-top: 2px;
+                font-family: 'Spotify Circular', -apple-system, BlinkMacSystemFont, sans-serif;
+                letter-spacing: 0.1px;
             }
         """)
-        layout.addWidget(self.artist_album_label)
+        layout.addWidget(self.album_label)
         
-        # Control buttons
+        # Control buttons - more Spotify-like
         controls_layout = QHBoxLayout()
-        controls_layout.setContentsMargins(0, 0, 0, 0)
-        controls_layout.setSpacing(10)
+        controls_layout.setContentsMargins(0, 1, 0, 0)
+        controls_layout.setSpacing(6)
         
-        # Stop button
-        self.stop_btn = QPushButton("⏹")
-        self.stop_btn.setFixedSize(28, 28)
-        self.stop_btn.setStyleSheet("""
-            QPushButton {
-                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-                                          stop: 0 rgba(226, 33, 52, 0.15),
-                                          stop: 1 rgba(180, 28, 42, 0.15));
-                border: 1px solid rgba(226, 33, 52, 0.3);
-                border-radius: 14px;
-                color: #e22134;
-                font-size: 11px;
-                font-weight: 700;
-                font-family: Arial, sans-serif;
-            }
-            QPushButton:hover {
-                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-                                          stop: 0 rgba(226, 33, 52, 0.25),
-                                          stop: 1 rgba(180, 28, 42, 0.25));
-                border: 1px solid rgba(226, 33, 52, 0.5);
-                transform: scale(1.05);
-            }
-            QPushButton:pressed {
-                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-                                          stop: 0 rgba(180, 28, 42, 0.3),
-                                          stop: 1 rgba(150, 23, 35, 0.3));
-                transform: scale(0.95);
-            }
-            QPushButton:disabled {
-                background: rgba(100, 100, 100, 0.1);
-                border: 1px solid rgba(100, 100, 100, 0.2);
-                color: #666666;
-            }
-        """)
-        self.stop_btn.clicked.connect(self.on_stop_clicked)
-        self.stop_btn.setEnabled(False)
-        
-        # Volume control
+        # Volume control (Spotify style - more prominent)
         volume_layout = QHBoxLayout()
-        volume_layout.setSpacing(8)
+        volume_layout.setSpacing(10)
         
-        volume_icon = QLabel("♪")
+        volume_icon = QLabel("🔊")
         volume_icon.setStyleSheet("""
             QLabel {
-                color: #a7a7a7;
-                font-size: 12px;
-                font-weight: 600;
-                font-family: Arial, sans-serif;
-                padding: 0px 2px;
+                color: #b3b3b3;
+                font-size: 13px;
+                font-weight: 400;
+                padding: 0px;
             }
         """)
         
         self.volume_slider = QSlider(Qt.Orientation.Horizontal)
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setValue(70)  # Default 70% volume
-        self.volume_slider.setFixedWidth(65)
+        self.volume_slider.setFixedWidth(80)
+        self.volume_slider.setFixedHeight(20)
         self.volume_slider.setStyleSheet("""
             QSlider::groove:horizontal {
                 border: none;
-                height: 4px;
-                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0,
-                                          stop: 0 #383838,
-                                          stop: 1 #2a2a2a);
-                border-radius: 2px;
+                height: 3px;
+                background: #4f4f4f;
+                border-radius: 1px;
             }
             QSlider::handle:horizontal {
-                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-                                          stop: 0 #ffffff,
-                                          stop: 1 #e0e0e0);
-                border: 1px solid rgba(255, 255, 255, 0.3);
+                background: #ffffff;
+                border: none;
                 width: 12px;
                 height: 12px;
                 border-radius: 6px;
                 margin: -4px 0;
             }
             QSlider::handle:horizontal:hover {
-                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-                                          stop: 0 #1ed760,
-                                          stop: 1 #1db954);
-                border: 1px solid rgba(30, 215, 96, 0.5);
-                transform: scale(1.1);
+                background: #1ed760;
+                transform: scale(1.2);
             }
             QSlider::sub-page:horizontal {
-                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0,
-                                          stop: 0 #1ed760,
-                                          stop: 1 #1db954);
-                border-radius: 2px;
+                background: #1ed760;
+                border-radius: 1px;
             }
         """)
         self.volume_slider.valueChanged.connect(self.on_volume_changed)
         
+        # Stop button - more visible Spotify style
+        self.stop_btn = QPushButton("⏹")
+        self.stop_btn.setFixedSize(32, 32)
+        self.stop_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(255, 255, 255, 0.08);
+                border: 1px solid #b3b3b3;
+                border-radius: 16px;
+                color: #ffffff;
+                font-size: 12px;
+                font-weight: 500;
+            }
+            QPushButton:hover {
+                background: rgba(255, 255, 255, 0.15);
+                border: 1px solid #ffffff;
+                color: #ffffff;
+                transform: scale(1.05);
+            }
+            QPushButton:pressed {
+                background: rgba(255, 255, 255, 0.25);
+                transform: scale(0.95);
+            }
+            QPushButton:disabled {
+                background: transparent;
+                border: 1px solid #2a2a2a;
+                color: #535353;
+            }
+        """)
+        self.stop_btn.clicked.connect(self.on_stop_clicked)
+        self.stop_btn.setEnabled(False)
+        
         volume_layout.addWidget(volume_icon)
         volume_layout.addWidget(self.volume_slider)
         
-        controls_layout.addWidget(self.stop_btn)
-        controls_layout.addStretch()
         controls_layout.addLayout(volume_layout)
+        controls_layout.addStretch()
+        controls_layout.addWidget(self.stop_btn)
         
         layout.addLayout(controls_layout)
         
@@ -872,11 +873,11 @@ class MediaPlayer(QWidget):
         self.is_expanded = not self.is_expanded
         
         if self.is_expanded:
-            self.setFixedHeight(125)  # Slightly taller for better spacing
+            self.setFixedHeight(145)  # More space for the new layout
             self.expanded_content.setVisible(True)
             self.no_track_label.setVisible(False)
         else:
-            self.setFixedHeight(65)  # Match the updated collapsed height
+            self.setFixedHeight(85)  # Match the updated collapsed height
             self.expanded_content.setVisible(False)
     
     def set_track_info(self, track_result):
@@ -892,10 +893,13 @@ class MediaPlayer(QWidget):
         
         self.track_info.setText(track_name)
         
-        # Update artist and album
+        # Update artist and album info
         artist = getattr(track_result, 'artist', 'Unknown Artist')
         album = getattr(track_result, 'album', 'Unknown Album')
-        self.artist_album_label.setText(f"{artist} • {album}")
+        
+        # Update the separate artist and album labels
+        self.artist_info.setText(artist)
+        self.album_label.setText(album)
         
         # Enable controls
         self.play_pause_btn.setEnabled(True)
@@ -918,12 +922,12 @@ class MediaPlayer(QWidget):
         """Update play/pause button state"""
         self.is_playing = playing
         if playing:
-            self.play_pause_btn.setText("⏸")
+            self.play_pause_btn.setText("⏸︎")
             # Start scrolling animation when playing
             if self.track_info.should_scroll and not self.track_info.is_scrolling:
                 self.track_info.start_scroll_animation()
         else:
-            self.play_pause_btn.setText("▶")
+            self.play_pause_btn.setText("▷")
             # Optionally stop scrolling when paused (can be customized)
             # self.track_info.stop_scrolling()
     
@@ -938,8 +942,9 @@ class MediaPlayer(QWidget):
         
         # Update UI
         self.track_info.setText("No track")
-        self.artist_album_label.setText("Unknown Artist • Unknown Album")
-        self.play_pause_btn.setText("▶")
+        self.artist_info.setText("Unknown Artist")
+        self.album_label.setText("Unknown Album")
+        self.play_pause_btn.setText("▷")
         self.play_pause_btn.setEnabled(False)
         self.stop_btn.setEnabled(False)
         
