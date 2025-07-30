@@ -980,7 +980,6 @@ class AlbumCard(QFrame):
                     stop:1 rgba(28, 28, 33, 0.99));
                 border-radius: 12px;
                 border: 1px solid rgba(80, 80, 85, 0.4);
-                box-shadow: 0px 4px 12px rgba(0, 0, 0, 0.25);
             }
             AlbumCard:hover {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -988,8 +987,6 @@ class AlbumCard(QFrame):
                     stop:0.5 rgba(45, 45, 50, 0.99),
                     stop:1 rgba(38, 38, 43, 1.0));
                 border: 1px solid rgba(29, 185, 84, 0.8);
-                box-shadow: 0px 8px 20px rgba(0, 0, 0, 0.35), 
-                           0px 0px 0px 1px rgba(29, 185, 84, 0.2);
             }
         """)
         
@@ -2595,8 +2592,6 @@ class ArtistsPage(QWidget):
                     stop:1 rgba(28, 28, 33, 0.99));
                 border-radius: 16px;
                 border: 1px solid rgba(80, 80, 85, 0.3);
-                box-shadow: 0px 6px 20px rgba(0, 0, 0, 0.2),
-                           inset 0px 1px 0px rgba(255, 255, 255, 0.05);
             }
         """)
         
@@ -2611,7 +2606,6 @@ class ArtistsPage(QWidget):
         self.artist_name_label.setFont(QFont("Arial", 24, QFont.Weight.Bold))
         self.artist_name_label.setStyleSheet("""
             color: #ffffff;
-            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
             letter-spacing: 1px;
             background: transparent;
             border: none;
@@ -2645,15 +2639,12 @@ class ArtistsPage(QWidget):
                 color: #ffffff;
                 font-size: 13px;
                 font-weight: 500;
-                box-shadow: inset 0px 2px 4px rgba(0, 0, 0, 0.1);
             }
             QLineEdit:focus {
                 border: 1px solid rgba(29, 185, 84, 0.8);
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 rgba(75, 75, 80, 0.95),
                     stop:1 rgba(60, 60, 65, 1.0));
-                box-shadow: inset 0px 2px 4px rgba(0, 0, 0, 0.15),
-                           0px 0px 0px 2px rgba(29, 185, 84, 0.2);
             }
             QLineEdit::placeholder {
                 color: rgba(200, 200, 200, 0.7);
@@ -2675,20 +2666,17 @@ class ArtistsPage(QWidget):
                 font-size: 13px;
                 font-weight: 600;
                 padding: 0 16px;
-                box-shadow: 0px 2px 8px rgba(29, 185, 84, 0.15);
             }
             QPushButton:hover {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 rgba(29, 185, 84, 0.2),
                     stop:1 rgba(20, 160, 70, 0.15));
                 border: 1px solid rgba(29, 185, 84, 0.8);
-                box-shadow: 0px 4px 12px rgba(29, 185, 84, 0.25);
             }
             QPushButton:pressed {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 rgba(20, 160, 70, 0.25),
                     stop:1 rgba(29, 185, 84, 0.2));
-                box-shadow: inset 0px 2px 4px rgba(0, 0, 0, 0.1);
             }
         """)
         back_btn.clicked.connect(self.return_to_search)
