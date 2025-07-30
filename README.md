@@ -42,8 +42,50 @@ Before you begin, ensure you have the following installed and configured:
 
 - **Python 3.8+**: The core runtime for the application.
 - **Plex Media Server**: You need a running Plex server with an existing music library that SoulSync can scan.
-- **slskd**: A headless Soulseek client. This is the engine that powers the downloading feature. You must have this running on your local network. [Download and setup instructions here](https://github.com/slskd/slskd).
+- **slskd**: A headless Soulseek client. This is the engine that powers the downloading feature. See detailed setup instructions below.
 - **Spotify Account**: A regular or premium Spotify account is required to access your playlists and artist data.
+
+### Setting Up slskd
+
+This application requires **slskd**, a web-based Soulseek client, to handle music downloads. Here's how to set it up:
+
+#### Installing slskd
+
+**Option 1: Docker (Recommended)**
+```bash
+# Create directories for slskd
+mkdir -p ~/slskd/{config,downloads,incomplete}
+
+# Run slskd container
+docker run -d \
+  --name slskd \
+  -p 5030:5030 \
+  -p 50300:50300 \
+  -v ~/slskd/config:/app/config \
+  -v ~/slskd/downloads:/app/downloads \
+  -v ~/slskd/incomplete:/app/incomplete \
+  slskd/slskd:latest
+```
+
+**Option 2: Manual Installation**
+1. Download the latest release from [slskd GitHub releases](https://github.com/slskd/slskd/releases)
+2. Extract and run the executable
+3. Default web interface will be available at `http://localhost:5030`
+
+#### Configuring slskd
+
+1. **Initial Setup**: Open `http://localhost:5030` in your browser
+2. **Create Account**: Set up your admin username and password  
+3. **Soulseek Credentials**: Enter your Soulseek username and password
+4. **API Key**: Create a random 16-character API key:
+   - Generate a random string (letters and numbers) like `abc123def456ghi7`
+   - Add this to your slskd configuration file as the API key
+   - Use the same key in SoulSync configuration
+
+**Important Notes:**
+- slskd must be running before starting SoulSync
+- Make sure your Soulseek account has sharing enabled to avoid connection issues
+- The default port 5030 can be changed in slskd settings if needed
 
 ### Installation
 
