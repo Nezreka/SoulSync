@@ -20,6 +20,7 @@ from ui.pages.sync import SyncPage
 from ui.pages.downloads import DownloadsPage
 from ui.pages.artists import ArtistsPage
 from ui.pages.settings import SettingsPage
+from ui.components.toast_manager import ToastManager
 
 logger = get_logger("main")
 
@@ -154,6 +155,9 @@ class MainWindow(QMainWindow):
         # Create stacked widget for pages
         self.stacked_widget = QStackedWidget()
         
+        # Create toast manager
+        self.toast_manager = ToastManager(self)
+        
         # Create and add pages
         self.dashboard_page = DashboardPage()
         self.downloads_page = DownloadsPage(self.soulseek_client)
@@ -161,10 +165,17 @@ class MainWindow(QMainWindow):
         self.artists_page = ArtistsPage(downloads_page=self.downloads_page)
         self.settings_page = SettingsPage()
         
+        # Set toast manager for pages that need direct access
+        self.downloads_page.set_toast_manager(self.toast_manager)
+        self.sync_page.set_toast_manager(self.toast_manager)
+        self.artists_page.set_toast_manager(self.toast_manager)
+        self.settings_page.set_toast_manager(self.toast_manager)
+        
         # Configure dashboard with service clients and page references
         self.dashboard_page.set_service_clients(self.spotify_client, self.plex_client, self.soulseek_client)
         self.dashboard_page.set_page_references(self.downloads_page, self.sync_page)
         self.dashboard_page.set_app_start_time(self.app_start_time)
+        self.dashboard_page.set_toast_manager(self.toast_manager)
         
         # Connect download completion signal for session tracking
         self.downloads_page.download_session_completed.connect(

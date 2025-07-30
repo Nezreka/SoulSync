@@ -4922,6 +4922,10 @@ class DownloadsPage(QWidget):
         self.api_cleanup_finished.connect(self._handle_api_cleanup_completion)
         
         self.setup_ui()
+    
+    def set_toast_manager(self, toast_manager):
+        """Set the toast manager for showing notifications"""
+        self.toast_manager = toast_manager
 
 
 

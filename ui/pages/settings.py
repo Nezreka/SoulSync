@@ -449,6 +449,10 @@ class SettingsPage(QWidget):
         self.setup_ui()
         self.load_config_values()
     
+    def set_toast_manager(self, toast_manager):
+        """Set the toast manager for showing notifications"""
+        self.toast_manager = toast_manager
+    
     def on_test_completed(self, service, success, message):
         """Handle test completion from background thread"""
         # Re-enable the test button
