@@ -14,6 +14,7 @@ from core.soulseek_client import TrackResult
 import re
 import asyncio
 from core.matching_engine import MusicMatchingEngine
+from ui.components.toast_manager import ToastType
 
 # Define constants for storage
 STORAGE_DIR = "storage"
@@ -2042,6 +2043,12 @@ class SyncPage(QWidget):
         # Emit activity signal for sync start
         self.sync_activity.emit("🔄", "Sync Started", f"Syncing playlist '{playlist.name}'", "Now")
         
+        # Show toast notification for sync start
+        if hasattr(self, 'toast_manager') and self.toast_manager:
+            track_count = len(playlist.tracks) if hasattr(playlist, 'tracks') else 0
+            if track_count > 0:
+                self.toast_manager.show_toast(f"Starting sync for '{playlist.name}' ({track_count} tracks)", ToastType.INFO)
+        
         # Start the worker
         self.thread_pool.start(sync_worker)
         
@@ -2097,6 +2104,12 @@ class SyncPage(QWidget):
         # Log start
         if hasattr(self, 'log_area'):
             self.log_area.append(f"🔄 Starting sequential sync for playlist: {playlist.name}")
+        
+        # Show toast notification for sequential sync start
+        if hasattr(self, 'toast_manager') and self.toast_manager:
+            track_count = len(playlist.tracks) if hasattr(playlist, 'tracks') else 0
+            if track_count > 0:
+                self.toast_manager.show_toast(f"Starting sequential sync for '{playlist.name}' ({track_count} tracks)", ToastType.INFO)
         
         return True
     
@@ -2235,6 +2248,15 @@ class SyncPage(QWidget):
             if result.failed_tracks > 0:
                 msg += f", {result.failed_tracks} failed"
             self.log_area.append(msg)
+        
+        # Show toast notification for sequential sync completion
+        if hasattr(self, 'toast_manager') and self.toast_manager:
+            playlist_item = self.find_playlist_item_widget(playlist_id)
+            playlist_name = playlist_item.name if playlist_item else "Unknown Playlist"
+            if result.failed_tracks > 0:
+                self.toast_manager.show_toast(f"'{playlist_name}' sync completed: {result.matched_tracks}/{result.total_tracks} tracks, {result.failed_tracks} failed", ToastType.WARNING)
+            else:
+                self.toast_manager.show_toast(f"'{playlist_name}' sync completed: {result.matched_tracks} tracks added", ToastType.SUCCESS)
             
         # **THE FIX**: Defer processing the next item to allow the event loop to catch up.
         # This ensures UI updates (like the status label) are processed before moving on.
@@ -2262,6 +2284,12 @@ class SyncPage(QWidget):
         # Log error
         if hasattr(self, 'log_area'):
             self.log_area.append(f"❌ Sequential sync failed: {error_msg}")
+        
+        # Show toast notification for sequential sync error
+        if hasattr(self, 'toast_manager') and self.toast_manager:
+            playlist_item = self.find_playlist_item_widget(playlist_id)
+            playlist_name = playlist_item.name if playlist_id else "Unknown Playlist"
+            self.toast_manager.show_toast(f"Sequential sync failed for '{playlist_name}': {error_msg}", ToastType.ERROR)
 
         # **THE FIX**: Defer processing the next item to allow the event loop to catch up.
         if self.is_sequential_syncing:
@@ -2344,6 +2372,13 @@ class SyncPage(QWidget):
         playlist_name = playlist_item.name if playlist_item else "Unknown Playlist"
         success_msg = f"Completed: {result.matched_tracks}/{result.total_tracks} tracks"
         self.sync_activity.emit("✅", "Sync Complete", f"'{playlist_name}' - {success_msg}", "Now")
+        
+        # Show toast notification for sync completion
+        if hasattr(self, 'toast_manager') and self.toast_manager:
+            if result.failed_tracks > 0:
+                self.toast_manager.show_toast(f"Sync completed: {result.matched_tracks}/{result.total_tracks} tracks added, {result.failed_tracks} failed", ToastType.WARNING)
+            else:
+                self.toast_manager.show_toast(f"Sync completed: {result.matched_tracks} tracks added to queue", ToastType.SUCCESS)
 
         # Continue sequential sync if in progress
         if self.is_sequential_syncing:
@@ -2382,6 +2417,10 @@ class SyncPage(QWidget):
         # Emit activity signal for sync error
         playlist_name = playlist_item.name if playlist_item else "Unknown Playlist"
         self.sync_activity.emit("❌", "Sync Failed", f"'{playlist_name}' - {error_msg}", "Now")
+        
+        # Show toast notification for sync error
+        if hasattr(self, 'toast_manager') and self.toast_manager:
+            self.toast_manager.show_toast(f"Sync failed for '{playlist_name}': {error_msg}", ToastType.ERROR)
         
         # Continue sequential sync if in progress (even on error)
         if self.is_sequential_syncing:
