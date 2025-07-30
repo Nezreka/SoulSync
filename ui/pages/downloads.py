@@ -3910,8 +3910,8 @@ class CompactDownloadItem(QFrame):
             return self._completion_processed
     
     def setup_ui(self):
-        self.setMinimumHeight(70)  # Increased minimum to accommodate text properly
-        self.setMaximumHeight(120)  # Increased maximum for long track titles
+        self.setMinimumHeight(85)  # Further increased minimum to give more room for artist names
+        self.setMaximumHeight(140)  # Increased maximum for better text accommodation
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.setStyleSheet("""
             CompactDownloadItem {
@@ -3928,8 +3928,8 @@ class CompactDownloadItem(QFrame):
         
         # Main vertical layout for better space utilization
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 10, 12, 10)  # Increased margins for better text spacing
-        layout.setSpacing(8)  # Increased spacing between filename and bottom row
+        layout.setContentsMargins(12, 12, 12, 12)  # Further increased margins for better text spacing
+        layout.setSpacing(10)  # Increased spacing between filename and bottom row
         
         # Top row: Filename with text wrapping
         filename_with_ext = self.get_display_filename()
@@ -3942,15 +3942,16 @@ class CompactDownloadItem(QFrame):
         
         # Bottom row: Uploader, Progress/Status, and Action button
         bottom_layout = QHBoxLayout()
-        bottom_layout.setContentsMargins(0, 0, 0, 0)
-        bottom_layout.setSpacing(8)
+        bottom_layout.setContentsMargins(0, 2, 0, 0)  # Added small top margin for better spacing
+        bottom_layout.setSpacing(10)  # Increased spacing between elements
         
         # Uploader info - remove fixed width constraint and allow text wrapping
         self.uploader_label = QLabel()
         self.uploader_label.setFont(QFont("Segoe UI", 9, QFont.Weight.Normal))
         self.uploader_label.setStyleSheet("color: #b8b8b8; background: transparent;")
         self.uploader_label.setWordWrap(True)  # Enable text wrapping
-        self.uploader_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.uploader_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)  # Changed from Fixed to Minimum
+        self.uploader_label.setMinimumHeight(20)  # Ensure minimum height for text visibility
         self.uploader_label.setToolTip(f"Uploader: {self.artist}")
         self.uploader_label.setText(self.artist)  # Set text directly instead of using ellipsis function
         
@@ -4357,8 +4358,8 @@ class DownloadQueue(QFrame):
         """)
         
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 6, 12, 12)  # Further reduced padding
-        layout.setSpacing(6)  # Even tighter spacing for more compact layout
+        layout.setContentsMargins(12, 8, 12, 12)  # Slightly increased top padding
+        layout.setSpacing(8)  # Increased spacing for better visual breathing room
         
         # Header
         header_layout = QHBoxLayout()
@@ -4420,7 +4421,7 @@ class DownloadQueue(QFrame):
         queue_widget = QWidget()
         queue_layout = QVBoxLayout(queue_widget)
         queue_layout.setContentsMargins(0, 0, 0, 0)  # Remove any internal margins
-        queue_layout.setSpacing(4)  # Reduced from 8 to fit more compact items
+        queue_layout.setSpacing(6)  # Increased spacing between download items for better readability
         
         # Dynamic download items - initially empty
         self.queue_layout = queue_layout
