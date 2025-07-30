@@ -2779,15 +2779,23 @@ class ArtistsPage(QWidget):
         if not query:
             self.search_status.setText("Please enter an artist name")
             self.search_status.setStyleSheet("color: #ff6b6b; padding: 10px;")
+            if hasattr(self, 'toast_manager') and self.toast_manager:
+                self.toast_manager.warning("Please enter an artist name to search")
             return
         
         if not self.spotify_client or not self.spotify_client.is_authenticated():
             self.search_status.setText("Spotify not connected")
             self.search_status.setStyleSheet("color: #ff6b6b; padding: 10px;")
+            if hasattr(self, 'toast_manager') and self.toast_manager:
+                self.toast_manager.error("Spotify authentication required")
             return
         
         self.search_status.setText("🔍 Searching for artists...")
         self.search_status.setStyleSheet("color: #1db954; padding: 10px;")
+        
+        # Show toast for search start
+        if hasattr(self, 'toast_manager') and self.toast_manager:
+            self.toast_manager.info(f"Searching for artists: '{query}'")
         
         # Clear previous results
         self.clear_artist_results()
@@ -2815,10 +2823,17 @@ class ArtistsPage(QWidget):
         if not artist_matches:
             self.search_status.setText("No artists found")
             self.search_status.setStyleSheet("color: #ff6b6b; padding: 10px;")
+            if hasattr(self, 'toast_manager') and self.toast_manager:
+                query = self.search_input.text().strip()
+                self.toast_manager.warning(f"No artists found for '{query}'")
             return
         
         self.search_status.setText(f"Found {len(artist_matches)} artists")
         self.search_status.setStyleSheet("color: #1db954; padding: 10px;")
+        
+        # Show success toast
+        if hasattr(self, 'toast_manager') and self.toast_manager:
+            self.toast_manager.success(f"Found {len(artist_matches)} artists matching your search")
         
         # Display artist results
         for artist_match in artist_matches[:10]:  # Show top 10 results
@@ -2833,6 +2848,10 @@ class ArtistsPage(QWidget):
         """Handle artist search failure"""
         self.search_status.setText(f"Search failed: {error}")
         self.search_status.setStyleSheet("color: #ff6b6b; padding: 10px;")
+        
+        # Show error toast
+        if hasattr(self, 'toast_manager') and self.toast_manager:
+            self.toast_manager.error(f"Artist search failed: {error}")
     
     def on_artist_selected(self, artist):
         """Handle artist selection"""
@@ -2852,6 +2871,10 @@ class ArtistsPage(QWidget):
     def fetch_artist_albums(self, artist):
         """Fetch albums for selected artist"""
         self.albums_status.setText("Loading albums...")
+        
+        # Show toast for album loading
+        if hasattr(self, 'toast_manager') and self.toast_manager:
+            self.toast_manager.info(f"Loading albums for {artist.name}")
         
         # Clear previous albums
         self.clear_albums()
@@ -2910,6 +2933,10 @@ class ArtistsPage(QWidget):
     
     def start_plex_library_check(self, albums):
         """Start Plex library check in background"""
+        # Show toast for Plex check start
+        if hasattr(self, 'toast_manager') and self.toast_manager:
+            self.toast_manager.info("Checking your Plex library for owned albums...")
+        
         # Stop any existing Plex worker
         if self.plex_library_worker:
             self.plex_library_worker.stop()
@@ -2937,6 +2964,13 @@ class ArtistsPage(QWidget):
         missing_count = total_count - owned_count
         
         self.albums_status.setText(f"Found {total_count} albums • {owned_count} owned • {missing_count} available for download")
+        
+        # Show toast with Plex check results
+        if hasattr(self, 'toast_manager') and self.toast_manager:
+            if owned_count == 0:
+                self.toast_manager.info(f"No albums found in your Plex library ({total_count} available for download)")
+            else:
+                self.toast_manager.success(f"Found {owned_count} of {total_count} albums in your Plex library")
         
         print(f"✅ Plex check complete: {owned_count}/{total_count} albums owned")
     
@@ -2966,6 +3000,11 @@ class ArtistsPage(QWidget):
     def on_plex_library_check_failed(self, error):
         """Handle Plex library check failure"""
         print(f"Plex library check failed: {error}")
+        
+        # Show error toast
+        if hasattr(self, 'toast_manager') and self.toast_manager:
+            self.toast_manager.error("Plex connection failed - cannot check owned albums")
+        
         if self.current_albums:
             self.albums_status.setText(f"Found {len(self.current_albums)} albums • Plex check failed")
             # Display albums without ownership info
