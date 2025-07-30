@@ -7628,8 +7628,11 @@ class DownloadsPage(QWidget):
             print(f"🧹 File successfully moved and original cleaned up")
             
             # Clean up any empty directories left in the downloads folder
-            downloads_path = config_manager.get('soulseek.download_path', './Downloads')
-            self._cleanup_empty_directories(downloads_path, original_file_path)
+            try:
+                downloads_path = config_manager.get('soulseek.download_path', './Downloads')
+                self._cleanup_empty_directories(downloads_path, original_file_path)
+            except Exception as cleanup_error:
+                print(f"⚠️ Could not clean up empty directories: {cleanup_error}")
             
             # Download cover art for both albums and singles
             if album_info and album_info['is_album']:
