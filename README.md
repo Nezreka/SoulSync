@@ -51,7 +51,7 @@ This application requires **slskd**, a web-based Soulseek client, to handle musi
 
 #### Installing slskd
 
-**Option 1: Docker (Recommended)**
+**Option 1: Docker (MAYBE?)**
 ```bash
 # Create directories for slskd
 mkdir -p ~/slskd/{config,downloads,incomplete}
