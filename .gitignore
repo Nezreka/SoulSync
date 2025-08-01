@@ -1,3 +1,4 @@
 slskd/slskd.exe
 Storage/sync_status.json
 .spotify_cache
+slskd/config/slskd.example.yml
