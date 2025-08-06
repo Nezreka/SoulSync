@@ -223,10 +223,10 @@ class PlaylistTrackAnalysisWorker(QRunnable):
                 for query_title in unique_title_variations:
                     if self._cancelled: return None, 0.0
 
-                    # Use database check_track_exists method
+                    # Use database check_track_exists method with consistent thresholds
                     db_track, confidence = db.check_track_exists(query_title, artist_name, confidence_threshold=0.7)
                     
-                    if db_track and confidence >= 0.8:
+                    if db_track and confidence >= 0.7:
                         print(f"✔️ Database match found for '{original_title}' by '{artist_name}': '{db_track.title}' with confidence {confidence:.2f}")
                         
                         # Convert database track to format compatible with existing code
