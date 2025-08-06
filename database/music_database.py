@@ -2,7 +2,9 @@
 
 import sqlite3
 import json
+import logging
 import os
+import re
 import threading
 from datetime import datetime
 from typing import List, Optional, Dict, Any, Tuple
@@ -11,6 +13,8 @@ from pathlib import Path
 from utils.logging_config import get_logger
 
 logger = get_logger("music_database")
+# Temporarily enable debug logging for edition matching
+logger.setLevel(logging.DEBUG)
 
 @dataclass
 class DatabaseArtist:
@@ -578,38 +582,46 @@ class MusicDatabase:
     
     def check_track_exists(self, title: str, artist: str, confidence_threshold: float = 0.8) -> Tuple[Optional[DatabaseTrack], float]:
         """
-        Check if a track exists in the database with fuzzy matching and confidence scoring.
+        Check if a track exists in the database with enhanced fuzzy matching and confidence scoring.
+        Now uses the same sophisticated matching approach as album checking for consistency.
         Returns (track, confidence) tuple where confidence is 0.0-1.0
         """
         try:
-            # Search for potential matches
-            potential_matches = self.search_tracks(title=title, artist=artist, limit=20)
+            # Generate title variations for better matching (similar to album approach)
+            title_variations = self._generate_track_title_variations(title)
             
-            if not potential_matches:
-                return None, 0.0
+            logger.debug(f"🔍 Enhanced track matching for '{title}' by '{artist}': trying {len(title_variations)} variations")
+            for i, var in enumerate(title_variations):
+                logger.debug(f"  {i+1}. '{var}'")
             
-            # Simple confidence scoring based on string similarity
-            def calculate_confidence(db_track: DatabaseTrack) -> float:
-                title_similarity = self._string_similarity(title.lower().strip(), db_track.title.lower().strip())
-                artist_similarity = self._string_similarity(artist.lower().strip(), db_track.artist_name.lower().strip())
-                
-                # Weight title slightly more than artist
-                return (title_similarity * 0.6) + (artist_similarity * 0.4)
-            
-            # Find best match
             best_match = None
             best_confidence = 0.0
             
-            for track in potential_matches:
-                confidence = calculate_confidence(track)
-                if confidence > best_confidence:
-                    best_confidence = confidence
-                    best_match = track
+            # Try each title variation
+            for title_variation in title_variations:
+                # Search for potential matches with this variation
+                potential_matches = self.search_tracks(title=title_variation, artist=artist, limit=20)
+                
+                if not potential_matches:
+                    continue
+                
+                logger.debug(f"🎵 Found {len(potential_matches)} tracks for variation '{title_variation}'")
+                
+                # Score each potential match
+                for track in potential_matches:
+                    confidence = self._calculate_track_confidence(title, artist, track)
+                    logger.debug(f"  🎯 '{track.title}' confidence: {confidence:.3f}")
+                    
+                    if confidence > best_confidence:
+                        best_confidence = confidence
+                        best_match = track
             
             # Return match only if it meets threshold
-            if best_confidence >= confidence_threshold:
+            if best_match and best_confidence >= confidence_threshold:
+                logger.debug(f"✅ Enhanced track match found: '{title}' -> '{best_match.title}' (confidence: {best_confidence:.3f})")
                 return best_match, best_confidence
             else:
+                logger.debug(f"❌ No confident track match for '{title}' (best: {best_confidence:.3f}, threshold: {confidence_threshold})")
                 return None, best_confidence
             
         except Exception as e:
@@ -736,11 +748,12 @@ class MusicDatabase:
     def check_album_exists_with_completeness(self, title: str, artist: str, expected_track_count: Optional[int] = None, confidence_threshold: float = 0.8) -> Tuple[Optional[DatabaseAlbum], float, int, int, bool]:
         """
         Check if an album exists in the database with completeness information.
+        Enhanced to handle edition matching (standard <-> deluxe variants).
         Returns (album, confidence, owned_tracks, expected_tracks, is_complete)
         """
         try:
-            # First find the album match
-            album, confidence = self.check_album_exists(title, artist, confidence_threshold)
+            # Try enhanced edition-aware matching first with expected track count for Smart Edition Matching
+            album, confidence = self.check_album_exists_with_editions(title, artist, confidence_threshold, expected_track_count)
             
             if not album:
                 return None, 0.0, 0, 0, False
@@ -753,6 +766,301 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error checking album existence with completeness for '{title}' by '{artist}': {e}")
             return None, 0.0, 0, 0, False
+    
+    def check_album_exists_with_editions(self, title: str, artist: str, confidence_threshold: float = 0.8, expected_track_count: Optional[int] = None) -> Tuple[Optional[DatabaseAlbum], float]:
+        """
+        Enhanced album existence check that handles edition variants.
+        Matches standard albums with deluxe/platinum/special editions and vice versa.
+        """
+        try:
+            # Generate album title variations for edition matching
+            title_variations = self._generate_album_title_variations(title)
+            
+            logger.debug(f"🔍 Edition matching for '{title}' by '{artist}': trying {len(title_variations)} variations")
+            for i, var in enumerate(title_variations):
+                logger.debug(f"  {i+1}. '{var}'")
+            
+            best_match = None
+            best_confidence = 0.0
+            
+            for variation in title_variations:
+                # Search for this variation
+                albums = self.search_albums(title=variation, artist=artist, limit=10)
+                
+                if albums:
+                    logger.debug(f"📀 Found {len(albums)} albums for variation '{variation}'")
+                
+                if not albums:
+                    continue
+                
+                # Score each potential match with Smart Edition Matching
+                for album in albums:
+                    confidence = self._calculate_album_confidence(title, artist, album, expected_track_count)
+                    logger.debug(f"  🎯 '{album.title}' confidence: {confidence:.3f}")
+                    
+                    if confidence > best_confidence:
+                        best_confidence = confidence
+                        best_match = album
+            
+            # Return match only if it meets threshold
+            if best_match and best_confidence >= confidence_threshold:
+                logger.debug(f"✅ Edition match found: '{title}' -> '{best_match.title}' (confidence: {best_confidence:.3f})")
+                return best_match, best_confidence
+            else:
+                logger.debug(f"❌ No confident edition match for '{title}' (best: {best_confidence:.3f}, threshold: {confidence_threshold})")
+                return None, best_confidence
+                
+        except Exception as e:
+            logger.error(f"Error in edition-aware album matching for '{title}' by '{artist}': {e}")
+            return None, 0.0
+    
+    def _generate_album_title_variations(self, title: str) -> List[str]:
+        """Generate variations of album title to handle edition matching"""
+        variations = [title]  # Always include original
+        
+        # Clean up the title
+        title_lower = title.lower().strip()
+        
+        # Define edition patterns and their variations
+        edition_patterns = {
+            r'\s*\(deluxe\s*edition?\)': ['deluxe', 'deluxe edition'],
+            r'\s*\(expanded\s*edition?\)': ['expanded', 'expanded edition'],
+            r'\s*\(platinum\s*edition?\)': ['platinum', 'platinum edition'],
+            r'\s*\(special\s*edition?\)': ['special', 'special edition'],
+            r'\s*\(remastered?\)': ['remastered', 'remaster'],
+            r'\s*\(anniversary\s*edition?\)': ['anniversary', 'anniversary edition'],
+            r'\s*\(.*version\)': ['version'],
+            r'\s+deluxe\s*edition?$': ['deluxe', 'deluxe edition'],
+            r'\s+platinum\s*edition?$': ['platinum', 'platinum edition'],
+            r'\s+special\s*edition?$': ['special', 'special edition'],
+            r'\s*-\s*deluxe': ['deluxe'],
+            r'\s*-\s*platinum\s*edition?': ['platinum', 'platinum edition'],
+        }
+        
+        # Check if title contains any edition indicators
+        base_title = title
+        found_editions = []
+        
+        for pattern, edition_types in edition_patterns.items():
+            if re.search(pattern, title_lower):
+                # Remove the edition part to get base title
+                base_title = re.sub(pattern, '', title, flags=re.IGNORECASE).strip()
+                found_editions.extend(edition_types)
+                break
+        
+        # Add base title (without edition markers)
+        if base_title != title:
+            variations.append(base_title)
+        
+        # If we found a base title, add common edition variants
+        if base_title != title:
+            # Add common deluxe/platinum/special variants
+            common_editions = [
+                'deluxe edition',
+                'deluxe',
+                'platinum edition',
+                'platinum',
+                'special edition', 
+                'expanded edition',
+                'remastered',
+                'anniversary edition'
+            ]
+            
+            for edition in common_editions:
+                variations.extend([
+                    f"{base_title} ({edition.title()})",
+                    f"{base_title} ({edition})",
+                    f"{base_title} - {edition.title()}",
+                    f"{base_title} {edition.title()}",
+                ])
+        
+        # If original title is base form, add edition variants  
+        elif not any(re.search(pattern, title_lower) for pattern in edition_patterns.keys()):
+            # This appears to be a base album, add deluxe variants
+            common_editions = ['Deluxe Edition', 'Deluxe', 'Platinum Edition', 'Special Edition']
+            for edition in common_editions:
+                variations.extend([
+                    f"{title} ({edition})",
+                    f"{title} - {edition}",
+                    f"{title} {edition}",
+                ])
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_variations = []
+        for var in variations:
+            var_clean = var.strip()
+            if var_clean and var_clean.lower() not in seen:
+                seen.add(var_clean.lower())
+                unique_variations.append(var_clean)
+        
+        return unique_variations
+    
+    def _calculate_album_confidence(self, search_title: str, search_artist: str, db_album: DatabaseAlbum, expected_track_count: Optional[int] = None) -> float:
+        """Calculate confidence score for album match with Smart Edition Matching"""
+        try:
+            # Simple confidence based on string similarity
+            title_similarity = self._string_similarity(search_title.lower(), db_album.title.lower())
+            artist_similarity = self._string_similarity(search_artist.lower(), db_album.artist_name.lower())
+            
+            # Also try with cleaned versions (removing edition markers)
+            clean_search_title = self._clean_album_title_for_comparison(search_title)
+            clean_db_title = self._clean_album_title_for_comparison(db_album.title)
+            clean_title_similarity = self._string_similarity(clean_search_title, clean_db_title)
+            
+            # Use the best title similarity
+            best_title_similarity = max(title_similarity, clean_title_similarity)
+            
+            # Weight: 50% title, 50% artist (equal weight to prevent false positives)
+            # Also require minimum artist similarity to prevent matching wrong artists
+            confidence = (best_title_similarity * 0.5) + (artist_similarity * 0.5)
+            
+            # Apply artist similarity penalty: if artist match is too low, drastically reduce confidence
+            if artist_similarity < 0.6:  # Less than 60% artist match
+                confidence *= 0.3  # Reduce confidence by 70%
+            
+            # Smart Edition Matching: Boost confidence if we found a "better" edition
+            if expected_track_count and db_album.track_count and clean_title_similarity >= 0.8:
+                # If the cleaned titles match well, check if this is an edition upgrade
+                if db_album.track_count >= expected_track_count:
+                    # Found same/better edition (e.g., Deluxe when searching for Standard)
+                    edition_bonus = min(0.15, (db_album.track_count - expected_track_count) / expected_track_count * 0.1)
+                    confidence += edition_bonus
+                    logger.debug(f"  📀 Edition upgrade bonus: +{edition_bonus:.3f} ({db_album.track_count} >= {expected_track_count} tracks)")
+                elif db_album.track_count < expected_track_count * 0.8:
+                    # Found significantly smaller edition, apply penalty
+                    edition_penalty = 0.1
+                    confidence -= edition_penalty
+                    logger.debug(f"  📀 Edition downgrade penalty: -{edition_penalty:.3f} ({db_album.track_count} << {expected_track_count} tracks)")
+            
+            return min(confidence, 1.0)  # Cap at 1.0
+            
+        except Exception as e:
+            logger.error(f"Error calculating album confidence: {e}")
+            return 0.0
+    
+    def _generate_track_title_variations(self, title: str) -> List[str]:
+        """Generate variations of track title for better matching"""
+        variations = [title]  # Always include original
+        
+        # Clean up the title
+        title_lower = title.lower().strip()
+        
+        # Common track title variations
+        track_patterns = [
+            # Remove version/remix info
+            r'\s*\(.*version\)',
+            r'\s*\(.*remix\)',
+            r'\s*\(.*mix\)',
+            r'\s*\(.*edit\)',
+            r'\s*\(.*radio\)',
+            # Remove featuring artists
+            r'\s*\(.*feat\..*\)',
+            r'\s*\(.*featuring.*\)',
+            r'\s*\(.*ft\..*\)',
+            # Remove brackets/parentheses content
+            r'\s*\[.*\]',
+            r'\s*\(.*\)',
+            # Remove everything after dash
+            r'\s*-\s*.*'
+        ]
+        
+        for pattern in track_patterns:
+            # Apply pattern to original title
+            cleaned = re.sub(pattern, '', title, flags=re.IGNORECASE).strip()
+            if cleaned and cleaned.lower() != title_lower and cleaned not in variations:
+                variations.append(cleaned)
+            
+            # Apply pattern to lowercase version
+            cleaned_lower = re.sub(pattern, '', title_lower, flags=re.IGNORECASE).strip()
+            if cleaned_lower and cleaned_lower != title_lower:
+                # Convert back to proper case
+                cleaned_proper = cleaned_lower.title()
+                if cleaned_proper not in variations:
+                    variations.append(cleaned_proper)
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_variations = []
+        for var in variations:
+            var_key = var.lower().strip()
+            if var_key not in seen and var.strip():
+                seen.add(var_key)
+                unique_variations.append(var.strip())
+        
+        return unique_variations
+    
+    def _calculate_track_confidence(self, search_title: str, search_artist: str, db_track: DatabaseTrack) -> float:
+        """Calculate confidence score for track match with enhanced cleaning"""
+        try:
+            # Direct similarity
+            title_similarity = self._string_similarity(search_title.lower(), db_track.title.lower())
+            artist_similarity = self._string_similarity(search_artist.lower(), db_track.artist_name.lower())
+            
+            # Also try with cleaned versions (removing parentheses, brackets, etc.)
+            clean_search_title = self._clean_track_title_for_comparison(search_title)
+            clean_db_title = self._clean_track_title_for_comparison(db_track.title)
+            clean_title_similarity = self._string_similarity(clean_search_title, clean_db_title)
+            
+            # Use the best title similarity (direct or cleaned)
+            best_title_similarity = max(title_similarity, clean_title_similarity)
+            
+            # Weight: 50% title, 50% artist (equal weight to prevent false positives)
+            # Also require minimum artist similarity to prevent matching wrong artists
+            confidence = (best_title_similarity * 0.5) + (artist_similarity * 0.5)
+            
+            # Apply artist similarity penalty: if artist match is too low, drastically reduce confidence
+            if artist_similarity < 0.6:  # Less than 60% artist match
+                confidence *= 0.3  # Reduce confidence by 70%
+            
+            return confidence
+            
+        except Exception as e:
+            logger.error(f"Error calculating track confidence: {e}")
+            return 0.0
+    
+    def _clean_track_title_for_comparison(self, title: str) -> str:
+        """Clean track title for comparison by removing common noise"""
+        cleaned = title.lower().strip()
+        
+        # Remove common patterns that cause mismatches
+        patterns_to_remove = [
+            r'\s*\(.*\)',      # Remove anything in parentheses
+            r'\s*\[.*\]',      # Remove anything in brackets  
+            r'\s*-\s*.*',      # Remove everything after dash
+            r'\s*feat\..*',    # Remove featuring artists
+            r'\s*ft\..*',      # Remove ft. artists
+            r'\s*featuring.*', # Remove featuring
+        ]
+        
+        for pattern in patterns_to_remove:
+            cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE).strip()
+        
+        return cleaned
+    
+    def _clean_album_title_for_comparison(self, title: str) -> str:
+        """Clean album title by removing edition markers for comparison"""
+        cleaned = title.lower()
+        
+        # Remove common edition patterns
+        patterns = [
+            r'\s*\(deluxe\s*edition?\)',
+            r'\s*\(expanded\s*edition?\)', 
+            r'\s*\(platinum\s*edition?\)',
+            r'\s*\(special\s*edition?\)',
+            r'\s*\(remastered?\)',
+            r'\s*\(anniversary\s*edition?\)',
+            r'\s*\(.*version\)',
+            r'\s*-\s*deluxe\s*edition?',
+            r'\s*-\s*platinum\s*edition?',
+            r'\s+deluxe\s*edition?$',
+            r'\s+platinum\s*edition?$',
+        ]
+        
+        for pattern in patterns:
+            cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
+        
+        return cleaned.strip()
     
     def get_album_completion_stats(self, artist_name: str) -> Dict[str, int]:
         """

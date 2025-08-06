@@ -1128,30 +1128,17 @@ class AlbumCard(QFrame):
         self.overlay.setFixedSize(164, 164)
         self.overlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
-        if self.is_owned:
-            self.overlay.setStyleSheet("""
-                QLabel {
-                    background: rgba(29, 185, 84, 0.8);
-                    border-radius: 6px;
-                    color: white;
-                    font-size: 24px;
-                    font-weight: bold;
-                }
-            """)
-            self.overlay.setText("✓")
-        else:
-            self.overlay.setStyleSheet("""
-                QLabel {
-                    background: rgba(0, 0, 0, 0.7);
-                    border-radius: 6px;
-                    color: white;
-                    font-size: 16px;
-                    font-weight: bold;
-                }
-            """)
-            self.overlay.setText("📥\nDownload")
-            self.overlay.setCursor(Qt.CursorShape.PointingHandCursor)
-        
+        # Set up initial overlay appearance (will be updated by update_ownership)
+        self.overlay.setStyleSheet("""
+            QLabel {
+                background: rgba(0, 0, 0, 0.7);
+                border-radius: 6px;
+                color: white;
+                font-size: 16px;
+                font-weight: bold;
+            }
+        """)
+        self.overlay.setText("Loading...")
         self.overlay.hide()  # Initially hidden, shown on hover
         
         # Download progress overlay (shown during downloads)
@@ -1195,6 +1182,9 @@ class AlbumCard(QFrame):
         layout.addWidget(album_label)
         layout.addWidget(year_label)
         layout.addStretch()
+        
+        # Initialize overlay text based on current ownership status
+        self._refresh_overlay_text()
     
     def load_album_image(self):
         """Load album image in background"""
@@ -1216,13 +1206,97 @@ class AlbumCard(QFrame):
     
     def enterEvent(self, event):
         """Show overlay on hover"""
-        self.overlay.show()
+        try:
+            if hasattr(self, 'overlay') and self.overlay:
+                self.overlay.show()
+                self.overlay.raise_()  # Bring to front
+        except (RuntimeError, AttributeError):
+            # Object has been deleted or is invalid, skip
+            pass
         super().enterEvent(event)
     
     def leaveEvent(self, event):
         """Hide overlay when not hovering"""
-        self.overlay.hide()
+        try:
+            if hasattr(self, 'overlay') and self.overlay:
+                self.overlay.hide()
+        except (RuntimeError, AttributeError):
+            # Object has been deleted or is invalid, skip
+            pass
         super().leaveEvent(event)
+    
+    def _refresh_overlay_text(self):
+        """Refresh overlay text based on current ownership status"""
+        if self.is_owned:
+            if self.ownership_status and self.ownership_status.is_complete:
+                # Complete album (90%+) - green checkmark overlay
+                self.overlay.setStyleSheet("""
+                    QLabel {
+                        background: rgba(29, 185, 84, 0.8);
+                        border-radius: 6px;
+                        color: white;
+                        font-size: 16px;
+                        font-weight: bold;
+                    }
+                """)
+                self.overlay.setText("✓ Complete\nVerify tracks")
+                self.overlay.setCursor(Qt.CursorShape.PointingHandCursor)
+            elif self.ownership_status and self.ownership_status.is_nearly_complete:
+                # Nearly complete album (80-89%) - blue overlay
+                self.overlay.setStyleSheet("""
+                    QLabel {
+                        background: rgba(13, 110, 253, 0.8);
+                        border-radius: 6px;
+                        color: white;
+                        font-size: 14px;
+                        font-weight: bold;
+                    }
+                """)
+                percentage = int(self.ownership_status.completion_ratio * 100)
+                missing_tracks = self.ownership_status.expected_tracks - self.ownership_status.owned_tracks
+                self.overlay.setText(f"◐ Nearly Complete\n({percentage}%)\nGet {missing_tracks} missing")
+                self.overlay.setCursor(Qt.CursorShape.PointingHandCursor)
+            elif self.ownership_status:
+                # Partial album (<80%) - yellow warning overlay
+                self.overlay.setStyleSheet("""
+                    QLabel {
+                        background: rgba(255, 193, 7, 0.8);
+                        border-radius: 6px;
+                        color: #212529;
+                        font-size: 14px;
+                        font-weight: bold;
+                    }
+                """)
+                percentage = int(self.ownership_status.completion_ratio * 100)
+                missing_tracks = self.ownership_status.expected_tracks - self.ownership_status.owned_tracks
+                self.overlay.setText(f"⚠ Partial\n({percentage}%)\nGet {missing_tracks} missing")
+                self.overlay.setCursor(Qt.CursorShape.PointingHandCursor)
+            else:
+                # Legacy complete album - green checkmark overlay
+                self.overlay.setStyleSheet("""
+                    QLabel {
+                        background: rgba(29, 185, 84, 0.8);
+                        border-radius: 6px;
+                        color: white;
+                        font-size: 16px;
+                        font-weight: bold;
+                    }
+                """)
+                self.overlay.setText("✓ Complete\nVerify tracks")
+                self.overlay.setCursor(Qt.CursorShape.PointingHandCursor)
+        else:
+            # Missing album - download overlay
+            self.overlay.setStyleSheet("""
+                QLabel {
+                    background: rgba(0, 0, 0, 0.7);
+                    border-radius: 6px;
+                    color: white;
+                    font-size: 16px;
+                    font-weight: bold;
+                }
+            """)
+            self.overlay.setText("📥 Missing\n(0%)\nDownload")
+            self.overlay.setCursor(Qt.CursorShape.PointingHandCursor)
     
     def update_status_indicator(self):
         """Update the permanent status indicator"""
@@ -1319,83 +1393,25 @@ class AlbumCard(QFrame):
         self.update_status_indicator()
         
         # Update the hover overlay
-        if self.is_owned:
-            if self.ownership_status and self.ownership_status.is_complete:
-                # Complete album (90%+) - green checkmark overlay
-                self.overlay.setStyleSheet("""
-                    QLabel {
-                        background: rgba(29, 185, 84, 0.8);
-                        border-radius: 6px;
-                        color: white;
-                        font-size: 16px;
-                        font-weight: bold;
-                    }
-                """)
-                self.overlay.setText("✓ Complete\nVerify tracks")
-                self.overlay.setCursor(Qt.CursorShape.PointingHandCursor)
-            elif self.ownership_status and self.ownership_status.is_nearly_complete:
-                # Nearly complete album (80-89%) - blue overlay
-                self.overlay.setStyleSheet("""
-                    QLabel {
-                        background: rgba(13, 110, 253, 0.8);
-                        border-radius: 6px;
-                        color: white;
-                        font-size: 14px;
-                        font-weight: bold;
-                    }
-                """)
-                percentage = int(self.ownership_status.completion_ratio * 100)
-                missing_tracks = self.ownership_status.expected_tracks - self.ownership_status.owned_tracks
-                self.overlay.setText(f"◐ {percentage}%\nGet {missing_tracks} missing")
-                self.overlay.setCursor(Qt.CursorShape.PointingHandCursor)
-            elif self.ownership_status:
-                # Partial album (<80%) - yellow warning overlay
-                self.overlay.setStyleSheet("""
-                    QLabel {
-                        background: rgba(255, 193, 7, 0.8);
-                        border-radius: 6px;
-                        color: #212529;
-                        font-size: 14px;
-                        font-weight: bold;
-                    }
-                """)
-                percentage = int(self.ownership_status.completion_ratio * 100)
-                missing_tracks = self.ownership_status.expected_tracks - self.ownership_status.owned_tracks
-                self.overlay.setText(f"⚠ {percentage}%\nGet {missing_tracks} missing")
-                self.overlay.setCursor(Qt.CursorShape.PointingHandCursor)
-            else:
-                # Legacy complete album - green checkmark overlay
-                self.overlay.setStyleSheet("""
-                    QLabel {
-                        background: rgba(29, 185, 84, 0.8);
-                        border-radius: 6px;
-                        color: white;
-                        font-size: 16px;
-                        font-weight: bold;
-                    }
-                """)
-                self.overlay.setText("✓ Complete\nVerify tracks")
-                self.overlay.setCursor(Qt.CursorShape.PointingHandCursor)
-        else:
-            # Missing album - download overlay
-            self.overlay.setStyleSheet("""
-                QLabel {
-                    background: rgba(0, 0, 0, 0.7);
-                    border-radius: 6px;
-                    color: white;
-                    font-size: 16px;
-                    font-weight: bold;
-                }
-            """)
-            self.overlay.setText("📥\nDownload")
-            self.overlay.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._refresh_overlay_text()
     
     def set_download_in_progress(self):
         """Set album card to download in progress state"""
         # Hide hover overlay and show progress overlay
-        self.overlay.hide()
-        self.progress_overlay.setText("⏳\nPreparing...")
-        self.progress_overlay.show()
+        try:
+            if hasattr(self, 'overlay') and self.overlay:
+                self.overlay.hide()
+        except (RuntimeError, AttributeError):
+            # Object has been deleted or is invalid, skip
+            pass
+        
+        try:
+            if hasattr(self, 'progress_overlay') and self.progress_overlay and not self.progress_overlay.isNull():
+                self.progress_overlay.setText("⏳\nPreparing...")
+                self.progress_overlay.show()
+        except (RuntimeError, AttributeError):
+            # Object has been deleted or is invalid, skip
+            pass
         
         # Update status indicator
         self.status_indicator.setStyleSheet("""
