@@ -175,18 +175,12 @@ class AlbumFetchWorker(QThread):
     
     def run(self):
         try:
-            print(f"🎵 Fetching albums for artist: {self.artist.name} (ID: {self.artist.id})")
+            print(f"🎵 Fetching all releases (albums & singles) for artist: {self.artist.name} (ID: {self.artist.id})")
             
-            # Use the proper Spotify API method to get albums by artist
-            albums = self.spotify_client.get_artist_albums(self.artist.id, album_type='album', limit=50)
+            # Always fetch both albums and singles from the Spotify API
+            albums = self.spotify_client.get_artist_albums(self.artist.id, album_type='album,single', limit=50)
             
-            print(f"📀 Found {len(albums)} albums for {self.artist.name}")
-            
-            if not albums:
-                print("⚠️ No albums found, trying with singles included...")
-                # If no albums found, try including singles
-                albums = self.spotify_client.get_artist_albums(self.artist.id, album_type='album,single', limit=50)
-                print(f"📀 Found {len(albums)} items including singles")
+            print(f"📀 Found {len(albums)} total releases for {self.artist.name}")
             
             # Remove duplicates based on name (case insensitive)
             seen_names = set()
@@ -200,7 +194,7 @@ class AlbumFetchWorker(QThread):
             # Sort by release date (newest first)
             unique_albums.sort(key=lambda x: x.release_date if x.release_date else '', reverse=True)
             
-            print(f"✅ Returning {len(unique_albums)} unique albums")
+            print(f"✅ Returning {len(unique_albums)} unique releases")
             self.albums_found.emit(unique_albums, self.artist)
             
         except Exception as e:
@@ -3099,7 +3093,8 @@ class ArtistsPage(QWidget):
             return
         
         self.current_albums = albums
-        self.albums_status.setText(f"Found {len(albums)} albums • Checking Plex library...")
+        self.albums_status.setText(f"Found {len(albums)} releases • Checking Plex library...")
+
         
         # Initialize match counter for real-time updates
         self.matched_count = 0
@@ -3196,7 +3191,8 @@ class ArtistsPage(QWidget):
         if missing_count > 0:
             status_parts.append(f"{missing_count} missing")
         
-        self.albums_status.setText(f"Found {total_count} albums • " + " • ".join(status_parts))
+        self.albums_status.setText(f"Found {total_count} releases • " + " • ".join(status_parts))
+
         
         # Show toast with library check results
         if hasattr(self, 'toast_manager') and self.toast_manager:
@@ -3232,7 +3228,8 @@ class ArtistsPage(QWidget):
         if self.current_albums:
             total_count = len(self.current_albums)
             remaining_count = total_count - self.matched_count
-            self.albums_status.setText(f"Found {total_count} albums • {self.matched_count} owned • {remaining_count} checking...")
+            self.albums_status.setText(f"Found {total_count} releases • {self.matched_count} owned • {remaining_count} checking...")
+
         
         # Find and update the specific album card
         for i in range(self.albums_grid_layout.count()):
