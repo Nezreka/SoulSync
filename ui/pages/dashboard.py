@@ -20,6 +20,8 @@ import requests
 from PIL import Image
 import io
 from core.matching_engine import MusicMatchingEngine
+from ui.components.database_updater_widget import DatabaseUpdaterWidget
+from core.database_update_worker import DatabaseUpdateWorker, DatabaseStatsWorker
 
 class MetadataUpdateWorker(QThread):
     """Worker thread for updating Plex artist metadata using Spotify data"""
@@ -1205,6 +1207,12 @@ class DashboardPage(QWidget):
         self.stats_cards = {}
         
         self.setup_ui()
+        
+        # Initialize list to track active stats workers
+        self._active_stats_workers = []
+        
+        # Load initial database statistics (with delay to avoid startup issues)
+        QTimer.singleShot(1000, self.refresh_database_statistics)
     
     def set_service_clients(self, spotify_client, plex_client, soulseek_client):
         """Called from main window to provide service client references"""
@@ -1383,11 +1391,16 @@ class DashboardPage(QWidget):
         header_label.setFont(QFont("Arial", 16, QFont.Weight.Bold))
         header_label.setStyleSheet("color: #ffffff;")
         
-        # Metadata updater widget
+        # Database updater widget (FIRST)
+        self.database_widget = DatabaseUpdaterWidget()
+        self.database_widget.start_button.clicked.connect(self.toggle_database_update)
+        
+        # Metadata updater widget (SECOND)
         self.metadata_widget = MetadataUpdaterWidget()
         self.metadata_widget.start_button.clicked.connect(self.toggle_metadata_update)
         
         layout.addWidget(header_label)
+        layout.addWidget(self.database_widget)
         layout.addWidget(self.metadata_widget)
         
         return section
@@ -1450,6 +1463,154 @@ class DashboardPage(QWidget):
             
             # Start test
             self.data_provider.test_service_connection(service)
+    
+    def toggle_database_update(self):
+        """Toggle database update process"""
+        current_text = self.database_widget.start_button.text()
+        if "Update Database" in current_text:
+            # Start database update
+            self.start_database_update()
+        else:
+            # Stop database update
+            self.stop_database_update()
+    
+    def start_database_update(self):
+        """Start the SoulSync database update process"""
+        if not hasattr(self, 'data_provider') or not self.data_provider.service_clients.get('plex'):
+            self.add_activity_item("❌", "Database Update", "Plex client not available", "Now")
+            return
+        
+        try:
+            # Get update type from dropdown
+            full_refresh = self.database_widget.is_full_refresh()
+            
+            # Start the database update worker
+            self.database_worker = DatabaseUpdateWorker(
+                self.data_provider.service_clients['plex'],
+                "database/music_library.db",
+                full_refresh
+            )
+            
+            # Connect signals
+            self.database_worker.progress_updated.connect(self.on_database_progress)
+            self.database_worker.artist_processed.connect(self.on_database_artist_processed)
+            self.database_worker.finished.connect(self.on_database_finished)
+            self.database_worker.error.connect(self.on_database_error)
+            self.database_worker.phase_changed.connect(self.on_database_phase_changed)
+            
+            # Update UI and start
+            self.database_widget.update_progress(True, "Initializing...", 0, 0, 0.0)
+            update_type = "Full refresh" if full_refresh else "Incremental update"
+            self.add_activity_item("🗄️", "Database Update", f"Starting {update_type.lower()}...", "Now")
+            
+            self.database_worker.start()
+            
+            # Start a timer to refresh database statistics during update
+            self.start_database_stats_refresh()
+            
+        except Exception as e:
+            self.add_activity_item("❌", "Database Update", f"Failed to start: {str(e)}", "Now")
+    
+    def stop_database_update(self):
+        """Stop the database update process"""
+        if hasattr(self, 'database_worker') and self.database_worker.isRunning():
+            self.database_worker.stop()
+            self.database_worker.wait(3000)  # Wait up to 3 seconds
+            if self.database_worker.isRunning():
+                self.database_worker.terminate()
+        
+        self.database_widget.update_progress(False, "", 0, 0, 0.0)
+        self.add_activity_item("⏹️", "Database Update", "Stopped database update process", "Now")
+        
+        # Stop statistics refresh timer
+        self.stop_database_stats_refresh()
+    
+    def on_database_progress(self, current_item: str, processed: int, total: int, percentage: float):
+        """Handle database update progress"""
+        self.database_widget.update_progress(True, current_item, processed, total, percentage)
+    
+    def on_database_artist_processed(self, artist_name: str, success: bool, details: str, album_count: int, track_count: int):
+        """Handle individual artist processing completion"""
+        if success:
+            self.add_activity_item("✅", "Artist Processed", f"'{artist_name}' - {details}", "Now")
+        else:
+            self.add_activity_item("❌", "Artist Failed", f"'{artist_name}' - {details}", "Now")
+    
+    def on_database_finished(self, total_artists: int, total_albums: int, total_tracks: int, successful: int, failed: int):
+        """Handle database update completion"""
+        self.database_widget.update_progress(False, "", 0, 0, 0.0)
+        summary = f"Processed {total_artists} artists, {total_albums} albums, {total_tracks} tracks"
+        self.add_activity_item("🗄️", "Database Complete", summary, "Now")
+        
+        # Stop statistics refresh timer and do final update
+        self.stop_database_stats_refresh()
+        self.refresh_database_statistics()
+    
+    def on_database_error(self, error_message: str):
+        """Handle database update error"""
+        self.database_widget.update_progress(False, "", 0, 0, 0.0)
+        self.add_activity_item("❌", "Database Error", error_message, "Now")
+        
+        # Stop statistics refresh timer
+        self.stop_database_stats_refresh()
+    
+    def on_database_phase_changed(self, phase: str):
+        """Handle database update phase changes"""
+        self.database_widget.update_phase(phase)
+    
+    def start_database_stats_refresh(self):
+        """Start periodic database statistics refresh during update"""
+        # Create timer to refresh stats every 5 seconds during update
+        if not hasattr(self, 'database_stats_timer'):
+            self.database_stats_timer = QTimer()
+            self.database_stats_timer.timeout.connect(self.refresh_database_statistics)
+        
+        self.database_stats_timer.start(5000)  # Every 5 seconds
+    
+    def stop_database_stats_refresh(self):
+        """Stop periodic database statistics refresh"""
+        if hasattr(self, 'database_stats_timer'):
+            self.database_stats_timer.stop()
+    
+    def refresh_database_statistics(self):
+        """Refresh database statistics display"""
+        try:
+            # Check if database widget exists first
+            if not hasattr(self, 'database_widget') or self.database_widget is None:
+                return
+            
+            # Get statistics in background thread to avoid blocking UI
+            stats_worker = DatabaseStatsWorker("database/music_library.db")
+            
+            # Track the worker for cleanup
+            if not hasattr(self, '_active_stats_workers'):
+                self._active_stats_workers = []
+            self._active_stats_workers.append(stats_worker)
+            
+            # Connect signals
+            stats_worker.stats_updated.connect(self.database_widget.update_statistics)
+            stats_worker.finished.connect(lambda: self._cleanup_stats_worker(stats_worker))
+            
+            stats_worker.start()
+        except Exception as e:
+            logger.error(f"Error refreshing database statistics: {e}")
+            # Fallback to default stats to prevent crashes
+            if hasattr(self, 'database_widget') and self.database_widget:
+                self.database_widget.update_statistics({
+                    'artists': 0,
+                    'albums': 0,
+                    'tracks': 0,
+                    'database_size_mb': 0.0
+                })
+    
+    def _cleanup_stats_worker(self, worker):
+        """Clean up a finished stats worker"""
+        try:
+            if hasattr(self, '_active_stats_workers') and worker in self._active_stats_workers:
+                self._active_stats_workers.remove(worker)
+            worker.deleteLater()
+        except Exception as e:
+            logger.error(f"Error cleaning up stats worker: {e}")
     
     def toggle_metadata_update(self):
         """Toggle metadata update process"""
@@ -1720,3 +1881,27 @@ class DashboardPage(QWidget):
             self.data_provider.download_stats_timer.stop()
         if hasattr(self.data_provider, 'system_stats_timer'):
             self.data_provider.system_stats_timer.stop()
+        
+        # Clean up database-related threads and timers
+        if hasattr(self, 'database_worker') and self.database_worker.isRunning():
+            self.database_worker.stop()
+            self.database_worker.wait(1000)
+            self.database_worker.deleteLater()
+        
+        if hasattr(self, 'database_stats_timer'):
+            self.database_stats_timer.stop()
+        
+        # Clean up any running stats workers (keep track of them)
+        if hasattr(self, '_active_stats_workers'):
+            for worker in self._active_stats_workers:
+                if worker.isRunning():
+                    worker.stop()
+                    worker.wait(1000)
+                    worker.deleteLater()
+            self._active_stats_workers.clear()
+        
+        # Clean up metadata worker as well
+        if hasattr(self, 'metadata_worker') and self.metadata_worker.isRunning():
+            self.metadata_worker.stop()
+            self.metadata_worker.wait(1000)
+            self.metadata_worker.deleteLater()
