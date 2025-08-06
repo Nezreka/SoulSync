@@ -9,6 +9,7 @@ import time
 
 from database import get_database, MusicDatabase
 from utils.logging_config import get_logger
+from config.settings import config_manager
 
 logger = get_logger("database_update_worker")
 
@@ -36,8 +37,10 @@ class DatabaseUpdateWorker(QThread):
         self.successful_operations = 0
         self.failed_operations = 0
         
-        # Threading control
-        self.max_workers = 3  # Conservative to avoid overwhelming Plex API
+        # Threading control - get from config or default to 5
+        database_config = config_manager.get('database', {})
+        self.max_workers = database_config.get('max_workers', 5)
+        logger.info(f"Using {self.max_workers} worker threads for database update")
         self.thread_lock = threading.Lock()
         
         # Database instance

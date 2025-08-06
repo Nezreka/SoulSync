@@ -54,19 +54,19 @@ class MusicDatabase:
     def __init__(self, database_path: str = "database/music_library.db"):
         self.database_path = Path(database_path)
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
-        self._connection: Optional[sqlite3.Connection] = None
         
         # Initialize database
         self._initialize_database()
     
     def _get_connection(self) -> sqlite3.Connection:
-        """Get database connection with row factory"""
-        if self._connection is None:
-            self._connection = sqlite3.connect(str(self.database_path))
-            self._connection.row_factory = sqlite3.Row
-            # Enable foreign key constraints
-            self._connection.execute("PRAGMA foreign_keys = ON")
-        return self._connection
+        """Get a NEW database connection for each operation (thread-safe)"""
+        connection = sqlite3.connect(str(self.database_path), timeout=30.0)
+        connection.row_factory = sqlite3.Row
+        # Enable foreign key constraints and WAL mode for better concurrency
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute("PRAGMA journal_mode = WAL")
+        connection.execute("PRAGMA busy_timeout = 30000")  # 30 second timeout
+        return connection
     
     def _initialize_database(self):
         """Create database tables if they don't exist"""
@@ -138,31 +138,30 @@ class MusicDatabase:
             raise
     
     def close(self):
-        """Close database connection"""
-        if self._connection:
-            self._connection.close()
-            self._connection = None
+        """Close database connection (no-op since we create connections per operation)"""
+        # Each operation creates and closes its own connection, so nothing to do here
+        pass
     
     def get_statistics(self) -> Dict[str, int]:
         """Get database statistics"""
         try:
-            conn = self._get_connection()
-            cursor = conn.cursor()
-            
-            cursor.execute("SELECT COUNT(*) FROM artists")
-            artist_count = cursor.fetchone()[0]
-            
-            cursor.execute("SELECT COUNT(*) FROM albums")
-            album_count = cursor.fetchone()[0]
-            
-            cursor.execute("SELECT COUNT(*) FROM tracks")
-            track_count = cursor.fetchone()[0]
-            
-            return {
-                'artists': artist_count,
-                'albums': album_count,
-                'tracks': track_count
-            }
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute("SELECT COUNT(*) FROM artists")
+                artist_count = cursor.fetchone()[0]
+                
+                cursor.execute("SELECT COUNT(*) FROM albums")
+                album_count = cursor.fetchone()[0]
+                
+                cursor.execute("SELECT COUNT(*) FROM tracks")
+                track_count = cursor.fetchone()[0]
+                
+                return {
+                    'artists': artist_count,
+                    'albums': album_count,
+                    'tracks': track_count
+                }
         except Exception as e:
             logger.error(f"Error getting database statistics: {e}")
             return {'artists': 0, 'albums': 0, 'tracks': 0}
@@ -170,16 +169,21 @@ class MusicDatabase:
     def clear_all_data(self):
         """Clear all data from database (for full refresh)"""
         try:
-            conn = self._get_connection()
-            cursor = conn.cursor()
-            
-            cursor.execute("DELETE FROM tracks")
-            cursor.execute("DELETE FROM albums")
-            cursor.execute("DELETE FROM artists")
-            
-            conn.commit()
-            logger.info("All database data cleared")
-            
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute("DELETE FROM tracks")
+                cursor.execute("DELETE FROM albums")
+                cursor.execute("DELETE FROM artists")
+                
+                conn.commit()
+                
+                # VACUUM to actually shrink the database file and reclaim disk space
+                logger.info("Vacuuming database to reclaim disk space...")
+                cursor.execute("VACUUM")
+                
+                logger.info("All database data cleared and file compacted")
+                
         except Exception as e:
             logger.error(f"Error clearing database: {e}")
             raise
@@ -188,43 +192,43 @@ class MusicDatabase:
     def insert_or_update_artist(self, plex_artist) -> bool:
         """Insert or update artist from Plex artist object"""
         try:
-            conn = self._get_connection()
-            cursor = conn.cursor()
-            
-            artist_id = int(plex_artist.ratingKey)
-            name = plex_artist.title
-            thumb_url = getattr(plex_artist, 'thumb', None)
-            summary = getattr(plex_artist, 'summary', None)
-            
-            # Get genres
-            genres = []
-            if hasattr(plex_artist, 'genres') and plex_artist.genres:
-                genres = [genre.tag if hasattr(genre, 'tag') else str(genre) 
-                         for genre in plex_artist.genres]
-            
-            genres_json = json.dumps(genres) if genres else None
-            
-            # Check if artist exists
-            cursor.execute("SELECT id FROM artists WHERE id = ?", (artist_id,))
-            exists = cursor.fetchone()
-            
-            if exists:
-                # Update existing artist
-                cursor.execute("""
-                    UPDATE artists 
-                    SET name = ?, thumb_url = ?, genres = ?, summary = ?, updated_at = CURRENT_TIMESTAMP
-                    WHERE id = ?
-                """, (name, thumb_url, genres_json, summary, artist_id))
-            else:
-                # Insert new artist
-                cursor.execute("""
-                    INSERT INTO artists (id, name, thumb_url, genres, summary)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (artist_id, name, thumb_url, genres_json, summary))
-            
-            conn.commit()
-            return True
-            
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                
+                artist_id = int(plex_artist.ratingKey)
+                name = plex_artist.title
+                thumb_url = getattr(plex_artist, 'thumb', None)
+                summary = getattr(plex_artist, 'summary', None)
+                
+                # Get genres
+                genres = []
+                if hasattr(plex_artist, 'genres') and plex_artist.genres:
+                    genres = [genre.tag if hasattr(genre, 'tag') else str(genre) 
+                             for genre in plex_artist.genres]
+                
+                genres_json = json.dumps(genres) if genres else None
+                
+                # Check if artist exists
+                cursor.execute("SELECT id FROM artists WHERE id = ?", (artist_id,))
+                exists = cursor.fetchone()
+                
+                if exists:
+                    # Update existing artist
+                    cursor.execute("""
+                        UPDATE artists 
+                        SET name = ?, thumb_url = ?, genres = ?, summary = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                    """, (name, thumb_url, genres_json, summary, artist_id))
+                else:
+                    # Insert new artist
+                    cursor.execute("""
+                        INSERT INTO artists (id, name, thumb_url, genres, summary)
+                        VALUES (?, ?, ?, ?, ?)
+                    """, (artist_id, name, thumb_url, genres_json, summary))
+                
+                conn.commit()
+                return True
+                
         except Exception as e:
             logger.error(f"Error inserting/updating artist {getattr(plex_artist, 'title', 'Unknown')}: {e}")
             return False
@@ -232,25 +236,25 @@ class MusicDatabase:
     def get_artist(self, artist_id: int) -> Optional[DatabaseArtist]:
         """Get artist by ID"""
         try:
-            conn = self._get_connection()
-            cursor = conn.cursor()
-            
-            cursor.execute("SELECT * FROM artists WHERE id = ?", (artist_id,))
-            row = cursor.fetchone()
-            
-            if row:
-                genres = json.loads(row['genres']) if row['genres'] else None
-                return DatabaseArtist(
-                    id=row['id'],
-                    name=row['name'],
-                    thumb_url=row['thumb_url'],
-                    genres=genres,
-                    summary=row['summary'],
-                    created_at=datetime.fromisoformat(row['created_at']) if row['created_at'] else None,
-                    updated_at=datetime.fromisoformat(row['updated_at']) if row['updated_at'] else None
-                )
-            return None
-            
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute("SELECT * FROM artists WHERE id = ?", (artist_id,))
+                row = cursor.fetchone()
+                
+                if row:
+                    genres = json.loads(row['genres']) if row['genres'] else None
+                    return DatabaseArtist(
+                        id=row['id'],
+                        name=row['name'],
+                        thumb_url=row['thumb_url'],
+                        genres=genres,
+                        summary=row['summary'],
+                        created_at=datetime.fromisoformat(row['created_at']) if row['created_at'] else None,
+                        updated_at=datetime.fromisoformat(row['updated_at']) if row['updated_at'] else None
+                    )
+                return None
+                
         except Exception as e:
             logger.error(f"Error getting artist {artist_id}: {e}")
             return None
