@@ -693,6 +693,115 @@ class MusicDatabase:
         
         return max(0.0, similarity)
     
+    def check_album_completeness(self, album_id: int, expected_track_count: Optional[int] = None) -> Tuple[int, int, bool]:
+        """
+        Check if we have all tracks for an album.
+        Returns (owned_tracks, expected_tracks, is_complete)
+        """
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            # Get actual track count in our database
+            cursor.execute("SELECT COUNT(*) FROM tracks WHERE album_id = ?", (album_id,))
+            owned_tracks = cursor.fetchone()[0]
+            
+            # Get expected track count from album table
+            cursor.execute("SELECT track_count FROM albums WHERE id = ?", (album_id,))
+            result = cursor.fetchone()
+            
+            if not result:
+                return 0, 0, False
+            
+            stored_track_count = result[0]
+            
+            # Use provided expected count if available, otherwise use stored count
+            expected_tracks = expected_track_count if expected_track_count is not None else stored_track_count
+            
+            # Determine completeness with refined thresholds
+            if expected_tracks and expected_tracks > 0:
+                completion_ratio = owned_tracks / expected_tracks
+                # Complete: 90%+, Nearly Complete: 80-89%, Partial: <80%
+                is_complete = completion_ratio >= 0.9 and owned_tracks > 0
+            else:
+                # Fallback: if we have any tracks, consider it owned
+                is_complete = owned_tracks > 0
+            
+            return owned_tracks, expected_tracks or 0, is_complete
+            
+        except Exception as e:
+            logger.error(f"Error checking album completeness for album_id {album_id}: {e}")
+            return 0, 0, False
+    
+    def check_album_exists_with_completeness(self, title: str, artist: str, expected_track_count: Optional[int] = None, confidence_threshold: float = 0.8) -> Tuple[Optional[DatabaseAlbum], float, int, int, bool]:
+        """
+        Check if an album exists in the database with completeness information.
+        Returns (album, confidence, owned_tracks, expected_tracks, is_complete)
+        """
+        try:
+            # First find the album match
+            album, confidence = self.check_album_exists(title, artist, confidence_threshold)
+            
+            if not album:
+                return None, 0.0, 0, 0, False
+            
+            # Now check completeness
+            owned_tracks, expected_tracks, is_complete = self.check_album_completeness(album.id, expected_track_count)
+            
+            return album, confidence, owned_tracks, expected_tracks, is_complete
+            
+        except Exception as e:
+            logger.error(f"Error checking album existence with completeness for '{title}' by '{artist}': {e}")
+            return None, 0.0, 0, 0, False
+    
+    def get_album_completion_stats(self, artist_name: str) -> Dict[str, int]:
+        """
+        Get completion statistics for all albums by an artist.
+        Returns dict with counts of complete, partial, and missing albums.
+        """
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            # Get all albums by this artist with track counts
+            cursor.execute("""
+                SELECT albums.id, albums.track_count, COUNT(tracks.id) as actual_tracks
+                FROM albums
+                JOIN artists ON albums.artist_id = artists.id
+                LEFT JOIN tracks ON albums.id = tracks.album_id
+                WHERE artists.name LIKE ?
+                GROUP BY albums.id, albums.track_count
+            """, (f"%{artist_name}%",))
+            
+            results = cursor.fetchall()
+            stats = {
+                'complete': 0,          # >=90% of tracks
+                'nearly_complete': 0,   # 80-89% of tracks
+                'partial': 0,           # 1-79% of tracks  
+                'missing': 0,           # 0% of tracks
+                'total': len(results)
+            }
+            
+            for row in results:
+                expected_tracks = row['track_count'] or 1  # Avoid division by zero
+                actual_tracks = row['actual_tracks']
+                completion_ratio = actual_tracks / expected_tracks
+                
+                if actual_tracks == 0:
+                    stats['missing'] += 1
+                elif completion_ratio >= 0.9:
+                    stats['complete'] += 1
+                elif completion_ratio >= 0.8:
+                    stats['nearly_complete'] += 1
+                else:
+                    stats['partial'] += 1
+            
+            return stats
+            
+        except Exception as e:
+            logger.error(f"Error getting album completion stats for artist '{artist_name}': {e}")
+            return {'complete': 0, 'nearly_complete': 0, 'partial': 0, 'missing': 0, 'total': 0}
+    
     def get_database_info(self) -> Dict[str, Any]:
         """Get comprehensive database information"""
         try:
