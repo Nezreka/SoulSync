@@ -29,6 +29,29 @@ class ArtistMatch:
     confidence: float
     match_reason: str = ""
 
+@dataclass  
+class AlbumOwnershipStatus:
+    """Represents album ownership status with completeness info"""
+    album_name: str
+    is_owned: bool
+    is_complete: bool
+    is_nearly_complete: bool
+    owned_tracks: int
+    expected_tracks: int
+    completion_ratio: float
+    
+    @property
+    def completion_level(self) -> str:
+        """Get completion level as string"""
+        if not self.is_owned:
+            return "missing"
+        elif self.completion_ratio >= 0.9:
+            return "complete"
+        elif self.completion_ratio >= 0.8:
+            return "nearly_complete"  
+        else:
+            return "partial"
+
 class DownloadCompletionWorkerSignals(QObject):
     """Signals for the download completion worker"""
     completed = pyqtSignal(object, str)  # download_item, organized_path
@@ -423,9 +446,9 @@ class AlbumStatusProcessingWorker(QRunnable):
 
 
 class DatabaseLibraryWorker(QThread):
-    """Background worker for checking database library (replaces PlexLibraryWorker)"""
-    library_checked = pyqtSignal(set)  # Set of owned album names (final result)
-    album_matched = pyqtSignal(str)    # Individual album match (album name)
+    """Background worker for checking database library with completeness info (replaces PlexLibraryWorker)"""
+    library_checked = pyqtSignal(dict)  # Dict of album_name -> AlbumOwnershipStatus
+    album_matched = pyqtSignal(str, object)    # album_name, AlbumOwnershipStatus  
     check_failed = pyqtSignal(str)
     
     def __init__(self, albums, matching_engine):
@@ -440,8 +463,8 @@ class DatabaseLibraryWorker(QThread):
     
     def run(self):
         try:
-            print("🔍 Starting robust database album matching...")
-            owned_albums = set()
+            print("🔍 Starting robust database album matching with completeness checking...")
+            album_statuses = {}  # album_name -> AlbumOwnershipStatus
             
             # Get database instance
             db = get_database()
@@ -472,8 +495,14 @@ class DatabaseLibraryWorker(QThread):
                 # Try different artist combinations
                 artists_to_try = spotify_album.artists[:2] if spotify_album.artists else [""]
                 
-                best_match = None
+                best_album = None
                 best_confidence = 0.0
+                best_owned_tracks = 0
+                best_expected_tracks = 0
+                best_is_complete = False
+                
+                # Get expected track count from Spotify
+                expected_track_count = getattr(spotify_album, 'total_tracks', None)
                 
                 # Search with different combinations
                 for artist in artists_to_try:
@@ -486,61 +515,112 @@ class DatabaseLibraryWorker(QThread):
                         if self._stop_requested:
                             return
                         
-                        # Search database for this combination (cleaned artist)
+                        # Search database for this combination with completeness info
                         print(f"   🔍 Searching database: album='{album_name}', artist='{artist_clean}'")
-                        db_album, confidence = db.check_album_exists(album_name, artist_clean, confidence_threshold=0.7)
+                        db_album, confidence, owned_tracks, expected_tracks, is_complete = db.check_album_exists_with_completeness(
+                            album_name, artist_clean, expected_track_count, confidence_threshold=0.7
+                        )
                         
                         if db_album and confidence > best_confidence:
-                            best_match = db_album
+                            best_album = db_album
                             best_confidence = confidence
-                            print(f"   📀 Found database match with confidence {confidence:.2f}")
+                            best_owned_tracks = owned_tracks
+                            best_expected_tracks = expected_tracks
+                            best_is_complete = is_complete
+                            print(f"   📀 Found database match with confidence {confidence:.2f} ({owned_tracks}/{expected_tracks} tracks)")
                             
                             # If we have a very confident match, we can stop searching for this album
                             if confidence >= 0.95:
                                 break
                         
-                        # Backup search with original uncleaned artist name (for cases like "Tyler, The Creator")
+                        # Backup search with original uncleaned artist name
                         if not db_album and artist and artist != artist_clean:
                             print(f"   🔄 Backup search with original artist: album='{album_name}', artist='{artist}'")
-                            db_album_backup, confidence_backup = db.check_album_exists(album_name, artist, confidence_threshold=0.7)
+                            db_album_backup, confidence_backup, owned_backup, expected_backup, complete_backup = db.check_album_exists_with_completeness(
+                                album_name, artist, expected_track_count, confidence_threshold=0.7
+                            )
                             
                             if db_album_backup and confidence_backup > best_confidence:
-                                best_match = db_album_backup
+                                best_album = db_album_backup
                                 best_confidence = confidence_backup
-                                print(f"   📀 Found backup match with confidence {confidence_backup:.2f}")
+                                best_owned_tracks = owned_backup
+                                best_expected_tracks = expected_backup
+                                best_is_complete = complete_backup
+                                print(f"   📀 Found backup match with confidence {confidence_backup:.2f} ({owned_backup}/{expected_backup} tracks)")
                             
-                            # Additional fallback: remove commas (Tyler, The Creator -> Tyler The Creator)
+                            # Additional fallback: remove commas
                             if not db_album_backup and ',' in artist:
                                 artist_no_comma = artist.replace(',', '').strip()
-                                # Clean up multiple spaces that might result from comma removal
                                 artist_no_comma = ' '.join(artist_no_comma.split())
                                 print(f"   🔄 Comma-removal fallback: album='{album_name}', artist='{artist_no_comma}'")
-                                db_album_comma, confidence_comma = db.check_album_exists(album_name, artist_no_comma, confidence_threshold=0.7)
+                                db_album_comma, confidence_comma, owned_comma, expected_comma, complete_comma = db.check_album_exists_with_completeness(
+                                    album_name, artist_no_comma, expected_track_count, confidence_threshold=0.7
+                                )
                                 
                                 if db_album_comma and confidence_comma > best_confidence:
-                                    best_match = db_album_comma
+                                    best_album = db_album_comma
                                     best_confidence = confidence_comma
-                                    print(f"   📀 Found comma-removal match with confidence {confidence_comma:.2f}")
+                                    best_owned_tracks = owned_comma
+                                    best_expected_tracks = expected_comma
+                                    best_is_complete = complete_comma
+                                    print(f"   📀 Found comma-removal match with confidence {confidence_comma:.2f} ({owned_comma}/{expected_comma} tracks)")
                     
                     # If we found a very confident match, stop searching other artists
                     if best_confidence >= 0.95:
                         break
                 
-                # Check final result
-                if best_match and best_confidence >= 0.8:
-                    owned_albums.add(spotify_album.name)
-                    print(f"✅ Database match found: '{spotify_album.name}' -> '{best_match.title}' (confidence: {best_confidence:.2f})")
+                # Create ownership status
+                if best_album and best_confidence >= 0.8:
+                    completion_ratio = best_owned_tracks / max(best_expected_tracks, 1)
+                    is_nearly_complete = completion_ratio >= 0.8 and completion_ratio < 0.9
+                    status = AlbumOwnershipStatus(
+                        album_name=spotify_album.name,
+                        is_owned=True,
+                        is_complete=best_is_complete,
+                        is_nearly_complete=is_nearly_complete,
+                        owned_tracks=best_owned_tracks,
+                        expected_tracks=best_expected_tracks,
+                        completion_ratio=completion_ratio
+                    )
+                    album_statuses[spotify_album.name] = status
+                    
+                    # Log detailed result
+                    if best_is_complete:
+                        print(f"✅ Complete album: '{spotify_album.name}' -> '{best_album.title}' ({best_owned_tracks}/{best_expected_tracks} tracks)")
+                    elif is_nearly_complete:
+                        print(f"🔵 Nearly complete album: '{spotify_album.name}' -> '{best_album.title}' ({best_owned_tracks}/{best_expected_tracks} tracks)")
+                    else:
+                        print(f"⚠️ Partial album: '{spotify_album.name}' -> '{best_album.title}' ({best_owned_tracks}/{best_expected_tracks} tracks)")
+                    
                     # Emit individual match for real-time UI update
-                    self.album_matched.emit(spotify_album.name)
+                    self.album_matched.emit(spotify_album.name, status)
                 else:
-                    if best_match:
+                    # Create status for missing album
+                    status = AlbumOwnershipStatus(
+                        album_name=spotify_album.name,
+                        is_owned=False,
+                        is_complete=False,
+                        is_nearly_complete=False,
+                        owned_tracks=0,
+                        expected_tracks=expected_track_count or 0,
+                        completion_ratio=0.0
+                    )
+                    album_statuses[spotify_album.name] = status
+                    
+                    if best_album:
                         print(f"❌ No confident match for '{spotify_album.name}' (best: {best_confidence:.2f})")
                     else:
                         print(f"❌ No database candidates found for '{spotify_album.name}'")
             
-            print(f"🎯 Final result: {len(owned_albums)} owned albums out of {len(self.albums)}")
-            print(f"🚀 Emitting signal with owned_albums: {list(owned_albums)}")
-            self.library_checked.emit(owned_albums)
+            # Count results for summary
+            complete_count = sum(1 for status in album_statuses.values() if status.is_complete)
+            nearly_complete_count = sum(1 for status in album_statuses.values() if status.is_nearly_complete)
+            partial_count = sum(1 for status in album_statuses.values() if status.is_owned and not status.is_complete and not status.is_nearly_complete)
+            missing_count = sum(1 for status in album_statuses.values() if not status.is_owned)
+            
+            print(f"🎯 Final result: {complete_count} complete, {nearly_complete_count} nearly complete, {partial_count} partial, {missing_count} missing out of {len(self.albums)} albums")
+            print(f"🚀 Emitting detailed album statuses")
+            self.library_checked.emit(album_statuses)
             
         except Exception as e:
             if not self._stop_requested:
@@ -985,6 +1065,7 @@ class AlbumCard(QFrame):
         super().__init__(parent)
         self.album = album
         self.is_owned = is_owned
+        self.ownership_status = None  # Will store AlbumOwnershipStatus
         self.setup_ui()
         self.load_album_image()
     
@@ -1146,18 +1227,63 @@ class AlbumCard(QFrame):
     def update_status_indicator(self):
         """Update the permanent status indicator"""
         if self.is_owned:
-            self.status_indicator.setStyleSheet("""
-                QLabel {
-                    background: rgba(29, 185, 84, 0.9);
-                    border-radius: 12px;
-                    color: white;
-                    font-size: 14px;
-                    font-weight: bold;
-                }
-            """)
-            self.status_indicator.setText("✓")
-            self.status_indicator.setToolTip("Album owned in Plex")
+            if self.ownership_status and self.ownership_status.is_complete:
+                # Complete album (90%+) - green checkmark
+                self.status_indicator.setStyleSheet("""
+                    QLabel {
+                        background: rgba(29, 185, 84, 0.9);
+                        border-radius: 12px;
+                        color: white;
+                        font-size: 14px;
+                        font-weight: bold;
+                    }
+                """)
+                self.status_indicator.setText("✓")
+                self.status_indicator.setToolTip(f"Complete album - {self.ownership_status.owned_tracks}/{self.ownership_status.expected_tracks} tracks ({int(self.ownership_status.completion_ratio * 100)}%)")
+            elif self.ownership_status and self.ownership_status.is_nearly_complete:
+                # Nearly complete album (80-89%) - blue half-circle
+                self.status_indicator.setStyleSheet("""
+                    QLabel {
+                        background: rgba(13, 110, 253, 0.9);
+                        border-radius: 12px;
+                        color: white;
+                        font-size: 14px;
+                        font-weight: bold;
+                    }
+                """)
+                self.status_indicator.setText("◐")
+                percentage = int(self.ownership_status.completion_ratio * 100)
+                missing_tracks = self.ownership_status.expected_tracks - self.ownership_status.owned_tracks
+                self.status_indicator.setToolTip(f"Nearly complete - {self.ownership_status.owned_tracks}/{self.ownership_status.expected_tracks} tracks ({percentage}%) • {missing_tracks} missing")
+            elif self.ownership_status and not self.ownership_status.is_complete and not self.ownership_status.is_nearly_complete:
+                # Partial album (<80%) - yellow warning
+                self.status_indicator.setStyleSheet("""
+                    QLabel {
+                        background: rgba(255, 193, 7, 0.9);
+                        border-radius: 12px;
+                        color: #212529;
+                        font-size: 14px;
+                        font-weight: bold;
+                    }
+                """)
+                self.status_indicator.setText("⚠")
+                percentage = int(self.ownership_status.completion_ratio * 100)
+                self.status_indicator.setToolTip(f"Partial album - {self.ownership_status.owned_tracks}/{self.ownership_status.expected_tracks} tracks ({percentage}%)")
+            else:
+                # Fallback for legacy owned albums without detailed status
+                self.status_indicator.setStyleSheet("""
+                    QLabel {
+                        background: rgba(29, 185, 84, 0.9);
+                        border-radius: 12px;
+                        color: white;
+                        font-size: 14px;
+                        font-weight: bold;
+                    }
+                """)
+                self.status_indicator.setText("✓")
+                self.status_indicator.setToolTip("Album owned in library")
         else:
+            # Missing album - red download icon
             self.status_indicator.setStyleSheet("""
                 QLabel {
                     background: rgba(220, 53, 69, 0.8);
@@ -1170,10 +1296,22 @@ class AlbumCard(QFrame):
             self.status_indicator.setText("📥")
             self.status_indicator.setToolTip("Album available for download")
     
-    def update_ownership(self, is_owned: bool):
-        """Update ownership status and refresh UI"""
+    def update_ownership(self, ownership_info):
+        """Update ownership status and refresh UI - supports bool or AlbumOwnershipStatus"""
+        if isinstance(ownership_info, bool):
+            # Legacy support for simple boolean
+            is_owned = ownership_info
+            self.ownership_status = None
+        else:
+            # New detailed ownership status
+            is_owned = ownership_info.is_owned
+            self.ownership_status = ownership_info
+        
         if self.is_owned != is_owned:  # Only log if status actually changed
-            print(f"🔄 '{self.album.name}' ownership: {self.is_owned} -> {is_owned}")
+            if self.ownership_status:
+                print(f"🔄 '{self.album.name}' ownership: {self.is_owned} -> {is_owned} (complete: {self.ownership_status.is_complete})")
+            else:
+                print(f"🔄 '{self.album.name}' ownership: {self.is_owned} -> {is_owned}")
         
         self.is_owned = is_owned
         
@@ -1182,18 +1320,64 @@ class AlbumCard(QFrame):
         
         # Update the hover overlay
         if self.is_owned:
-            self.overlay.setStyleSheet("""
-                QLabel {
-                    background: rgba(29, 185, 84, 0.8);
-                    border-radius: 6px;
-                    color: white;
-                    font-size: 24px;
-                    font-weight: bold;
-                }
-            """)
-            self.overlay.setText("✓")
-            self.overlay.setCursor(Qt.CursorShape.ArrowCursor)
+            if self.ownership_status and self.ownership_status.is_complete:
+                # Complete album (90%+) - green checkmark overlay
+                self.overlay.setStyleSheet("""
+                    QLabel {
+                        background: rgba(29, 185, 84, 0.8);
+                        border-radius: 6px;
+                        color: white;
+                        font-size: 16px;
+                        font-weight: bold;
+                    }
+                """)
+                self.overlay.setText("✓ Complete\nVerify tracks")
+                self.overlay.setCursor(Qt.CursorShape.PointingHandCursor)
+            elif self.ownership_status and self.ownership_status.is_nearly_complete:
+                # Nearly complete album (80-89%) - blue overlay
+                self.overlay.setStyleSheet("""
+                    QLabel {
+                        background: rgba(13, 110, 253, 0.8);
+                        border-radius: 6px;
+                        color: white;
+                        font-size: 14px;
+                        font-weight: bold;
+                    }
+                """)
+                percentage = int(self.ownership_status.completion_ratio * 100)
+                missing_tracks = self.ownership_status.expected_tracks - self.ownership_status.owned_tracks
+                self.overlay.setText(f"◐ {percentage}%\nGet {missing_tracks} missing")
+                self.overlay.setCursor(Qt.CursorShape.PointingHandCursor)
+            elif self.ownership_status:
+                # Partial album (<80%) - yellow warning overlay
+                self.overlay.setStyleSheet("""
+                    QLabel {
+                        background: rgba(255, 193, 7, 0.8);
+                        border-radius: 6px;
+                        color: #212529;
+                        font-size: 14px;
+                        font-weight: bold;
+                    }
+                """)
+                percentage = int(self.ownership_status.completion_ratio * 100)
+                missing_tracks = self.ownership_status.expected_tracks - self.ownership_status.owned_tracks
+                self.overlay.setText(f"⚠ {percentage}%\nGet {missing_tracks} missing")
+                self.overlay.setCursor(Qt.CursorShape.PointingHandCursor)
+            else:
+                # Legacy complete album - green checkmark overlay
+                self.overlay.setStyleSheet("""
+                    QLabel {
+                        background: rgba(29, 185, 84, 0.8);
+                        border-radius: 6px;
+                        color: white;
+                        font-size: 16px;
+                        font-weight: bold;
+                    }
+                """)
+                self.overlay.setText("✓ Complete\nVerify tracks")
+                self.overlay.setCursor(Qt.CursorShape.PointingHandCursor)
         else:
+            # Missing album - download overlay
             self.overlay.setStyleSheet("""
                 QLabel {
                     background: rgba(0, 0, 0, 0.7);
@@ -1294,6 +1478,7 @@ class AlbumCard(QFrame):
         # Don't allow downloads if already downloading
         if (event.button() == Qt.MouseButton.LeftButton and 
             not self.progress_overlay.isVisible()):
+            print(f"🖱️ Album card clicked: {self.album.name} (owned: {self.is_owned})")
             self.download_requested.emit(self.album)
         super().mousePressEvent(event)
 
@@ -2909,9 +3094,14 @@ class ArtistsPage(QWidget):
         # Start Plex library check in background - will update UI when complete
         self.start_plex_library_check(albums)
     
-    def display_albums(self, albums, owned_albums):
-        """Display albums in the grid"""
-        print(f"🎨 Displaying {len(albums)} albums, {len(owned_albums)} owned")
+    def display_albums(self, albums, ownership_info):
+        """Display albums in the grid - supports legacy set or new dict of AlbumOwnershipStatus"""
+        
+        # Handle both old format (set of owned album names) and new format (dict of statuses)
+        if isinstance(ownership_info, dict):
+            print(f"🎨 Displaying {len(albums)} albums with detailed ownership info")
+        else:
+            print(f"🎨 Displaying {len(albums)} albums, {len(ownership_info)} owned")
         
         # Clear existing albums
         self.clear_albums()
@@ -2920,11 +3110,23 @@ class ArtistsPage(QWidget):
         max_cols = 5
         
         for album in albums:
-            is_owned = album.name in owned_albums
+            if isinstance(ownership_info, dict):
+                # New format - use detailed ownership status
+                status = ownership_info.get(album.name)
+                if status:
+                    card = AlbumCard(album, status.is_owned)
+                    card.update_ownership(status)
+                else:
+                    # Album not found in statuses - assume not owned
+                    card = AlbumCard(album, False)
+            else:
+                # Legacy format - simple set of owned album names
+                is_owned = album.name in ownership_info
+                card = AlbumCard(album, is_owned)
             
-            card = AlbumCard(album, is_owned)
-            if not is_owned:
-                card.download_requested.connect(self.on_album_download_requested)
+            # Connect download signal for all albums - we can download missing tracks for partial albums
+            # and missing albums, but complete albums will show a different modal
+            card.download_requested.connect(self.on_album_download_requested)
             
             self.albums_grid_layout.addWidget(card, row, col)
             
@@ -2952,33 +3154,60 @@ class ArtistsPage(QWidget):
         self.plex_library_worker.check_failed.connect(self.on_plex_library_check_failed)
         self.plex_library_worker.start()
     
-    def on_plex_library_checked(self, owned_albums):
-        """Handle final Plex library check completion"""
-        print(f"📨 Plex check completed: {len(owned_albums)} total matches")
+    def on_plex_library_checked(self, album_statuses):
+        """Handle final database library check completion with detailed status info"""
+        print(f"📨 Database check completed: {len(album_statuses)} album statuses")
         
         if not self.current_albums:
             print("📨 No current albums, skipping final update")
             return
         
-        # Update final status message
-        owned_count = len(owned_albums)
+        # Count different types of ownership
+        complete_count = sum(1 for status in album_statuses.values() if status.is_complete)
+        nearly_complete_count = sum(1 for status in album_statuses.values() if status.is_nearly_complete)
+        partial_count = sum(1 for status in album_statuses.values() if status.is_owned and not status.is_complete and not status.is_nearly_complete)
+        missing_count = sum(1 for status in album_statuses.values() if not status.is_owned)
         total_count = len(self.current_albums)
-        missing_count = total_count - owned_count
         
-        self.albums_status.setText(f"Found {total_count} albums • {owned_count} owned • {missing_count} available for download")
+        # Update final status message with all categories
+        status_parts = []
+        if complete_count > 0:
+            status_parts.append(f"{complete_count} complete")
+        if nearly_complete_count > 0:
+            status_parts.append(f"{nearly_complete_count} nearly complete")
+        if partial_count > 0:
+            status_parts.append(f"{partial_count} partial")
+        if missing_count > 0:
+            status_parts.append(f"{missing_count} missing")
         
-        # Show toast with Plex check results
+        self.albums_status.setText(f"Found {total_count} albums • " + " • ".join(status_parts))
+        
+        # Show toast with library check results
         if hasattr(self, 'toast_manager') and self.toast_manager:
+            owned_count = complete_count + nearly_complete_count + partial_count
             if owned_count == 0:
-                self.toast_manager.info(f"No albums found in your Plex library ({total_count} available for download)")
+                self.toast_manager.info(f"No albums found in your library ({total_count} available for download)")
+            elif nearly_complete_count > 0 or partial_count > 0:
+                if nearly_complete_count > 0:
+                    self.toast_manager.success(f"Found {complete_count} complete, {nearly_complete_count} nearly complete, {partial_count} partial albums out of {total_count}")
+                else:
+                    self.toast_manager.success(f"Found {complete_count} complete, {partial_count} partial albums out of {total_count}")
             else:
-                self.toast_manager.success(f"Found {owned_count} of {total_count} albums in your Plex library")
+                self.toast_manager.success(f"Found {complete_count} complete albums out of {total_count}")
         
-        print(f"✅ Plex check complete: {owned_count}/{total_count} albums owned")
+        print(f"✅ Database check complete: {complete_count} complete, {nearly_complete_count} nearly complete, {partial_count} partial, {missing_count} missing out of {total_count} albums")
+        
+        # Update the album display with the final ownership statuses
+        self.display_albums(self.current_albums, album_statuses)
     
-    def on_album_matched(self, album_name):
-        """Handle individual album match for real-time UI update"""
-        print(f"🎯 Real-time match: '{album_name}'")
+    def on_album_matched(self, album_name, ownership_status):
+        """Handle individual album match for real-time UI update with detailed status"""
+        if ownership_status.is_complete:
+            print(f"🎯 Real-time match: '{album_name}' (complete)")
+        elif ownership_status.is_nearly_complete:
+            print(f"🎯 Real-time match: '{album_name}' (nearly complete {int(ownership_status.completion_ratio * 100)}%)")
+        else:
+            print(f"🎯 Real-time match: '{album_name}' (partial {int(ownership_status.completion_ratio * 100)}%)")
         
         # Update match counter
         self.matched_count += 1
@@ -2995,8 +3224,14 @@ class ArtistsPage(QWidget):
             if item and item.widget():
                 album_card = item.widget()
                 if hasattr(album_card, 'album') and album_card.album.name == album_name:
-                    print(f"🔄 Real-time update: '{album_name}' -> owned")
-                    album_card.update_ownership(True)
+                    if ownership_status.is_complete:
+                        status_text = "complete"
+                    elif ownership_status.is_nearly_complete:
+                        status_text = f"nearly complete ({int(ownership_status.completion_ratio * 100)}%)"
+                    else:
+                        status_text = f"partial ({int(ownership_status.completion_ratio * 100)}%)"
+                    print(f"🔄 Real-time update: '{album_name}' -> {status_text}")
+                    album_card.update_ownership(ownership_status)
                     break
     
     def on_plex_library_check_failed(self, error):
