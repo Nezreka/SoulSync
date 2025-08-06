@@ -453,6 +453,246 @@ class MusicDatabase:
             logger.error(f"Error searching artists with query '{query}': {e}")
             return []
     
+    def search_tracks(self, title: str = "", artist: str = "", limit: int = 50) -> List[DatabaseTrack]:
+        """Search tracks by title and/or artist name with fuzzy matching"""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            # Build dynamic query based on provided parameters
+            where_conditions = []
+            params = []
+            
+            if title:
+                where_conditions.append("tracks.title LIKE ?")
+                params.append(f"%{title}%")
+            
+            if artist:
+                where_conditions.append("artists.name LIKE ?")
+                params.append(f"%{artist}%")
+            
+            if not where_conditions:
+                # If no search criteria, return empty list
+                return []
+            
+            where_clause = " AND ".join(where_conditions)
+            params.append(limit)
+            
+            cursor.execute(f"""
+                SELECT tracks.*, artists.name as artist_name, albums.title as album_title
+                FROM tracks
+                JOIN artists ON tracks.artist_id = artists.id
+                JOIN albums ON tracks.album_id = albums.id
+                WHERE {where_clause}
+                ORDER BY tracks.title, artists.name
+                LIMIT ?
+            """, params)
+            
+            rows = cursor.fetchall()
+            
+            tracks = []
+            for row in rows:
+                track = DatabaseTrack(
+                    id=row['id'],
+                    album_id=row['album_id'],
+                    artist_id=row['artist_id'],
+                    title=row['title'],
+                    track_number=row['track_number'],
+                    duration=row['duration'],
+                    file_path=row['file_path'],
+                    bitrate=row['bitrate'],
+                    created_at=datetime.fromisoformat(row['created_at']) if row['created_at'] else None,
+                    updated_at=datetime.fromisoformat(row['updated_at']) if row['updated_at'] else None
+                )
+                # Add artist and album info for compatibility with Plex responses
+                track.artist_name = row['artist_name']
+                track.album_title = row['album_title']
+                tracks.append(track)
+            
+            return tracks
+            
+        except Exception as e:
+            logger.error(f"Error searching tracks with title='{title}', artist='{artist}': {e}")
+            return []
+    
+    def search_albums(self, title: str = "", artist: str = "", limit: int = 50) -> List[DatabaseAlbum]:
+        """Search albums by title and/or artist name with fuzzy matching"""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            # Build dynamic query based on provided parameters  
+            where_conditions = []
+            params = []
+            
+            if title:
+                where_conditions.append("albums.title LIKE ?")
+                params.append(f"%{title}%")
+            
+            if artist:
+                where_conditions.append("artists.name LIKE ?")
+                params.append(f"%{artist}%")
+            
+            if not where_conditions:
+                # If no search criteria, return empty list
+                return []
+            
+            where_clause = " AND ".join(where_conditions)
+            params.append(limit)
+            
+            cursor.execute(f"""
+                SELECT albums.*, artists.name as artist_name
+                FROM albums
+                JOIN artists ON albums.artist_id = artists.id
+                WHERE {where_clause}
+                ORDER BY albums.title, artists.name
+                LIMIT ?
+            """, params)
+            
+            rows = cursor.fetchall()
+            
+            albums = []
+            for row in rows:
+                genres = json.loads(row['genres']) if row['genres'] else None
+                album = DatabaseAlbum(
+                    id=row['id'],
+                    artist_id=row['artist_id'],
+                    title=row['title'],
+                    year=row['year'],
+                    thumb_url=row['thumb_url'],
+                    genres=genres,
+                    track_count=row['track_count'],
+                    duration=row['duration'],
+                    created_at=datetime.fromisoformat(row['created_at']) if row['created_at'] else None,
+                    updated_at=datetime.fromisoformat(row['updated_at']) if row['updated_at'] else None
+                )
+                # Add artist info for compatibility with Plex responses
+                album.artist_name = row['artist_name']
+                albums.append(album)
+            
+            return albums
+            
+        except Exception as e:
+            logger.error(f"Error searching albums with title='{title}', artist='{artist}': {e}")
+            return []
+    
+    def check_track_exists(self, title: str, artist: str, confidence_threshold: float = 0.8) -> Tuple[Optional[DatabaseTrack], float]:
+        """
+        Check if a track exists in the database with fuzzy matching and confidence scoring.
+        Returns (track, confidence) tuple where confidence is 0.0-1.0
+        """
+        try:
+            # Search for potential matches
+            potential_matches = self.search_tracks(title=title, artist=artist, limit=20)
+            
+            if not potential_matches:
+                return None, 0.0
+            
+            # Simple confidence scoring based on string similarity
+            def calculate_confidence(db_track: DatabaseTrack) -> float:
+                title_similarity = self._string_similarity(title.lower().strip(), db_track.title.lower().strip())
+                artist_similarity = self._string_similarity(artist.lower().strip(), db_track.artist_name.lower().strip())
+                
+                # Weight title slightly more than artist
+                return (title_similarity * 0.6) + (artist_similarity * 0.4)
+            
+            # Find best match
+            best_match = None
+            best_confidence = 0.0
+            
+            for track in potential_matches:
+                confidence = calculate_confidence(track)
+                if confidence > best_confidence:
+                    best_confidence = confidence
+                    best_match = track
+            
+            # Return match only if it meets threshold
+            if best_confidence >= confidence_threshold:
+                return best_match, best_confidence
+            else:
+                return None, best_confidence
+            
+        except Exception as e:
+            logger.error(f"Error checking track existence for '{title}' by '{artist}': {e}")
+            return None, 0.0
+    
+    def check_album_exists(self, title: str, artist: str, confidence_threshold: float = 0.8) -> Tuple[Optional[DatabaseAlbum], float]:
+        """
+        Check if an album exists in the database with fuzzy matching and confidence scoring.
+        Returns (album, confidence) tuple where confidence is 0.0-1.0
+        """
+        try:
+            # Search for potential matches
+            potential_matches = self.search_albums(title=title, artist=artist, limit=20)
+            
+            if not potential_matches:
+                return None, 0.0
+            
+            # Simple confidence scoring based on string similarity
+            def calculate_confidence(db_album: DatabaseAlbum) -> float:
+                title_similarity = self._string_similarity(title.lower().strip(), db_album.title.lower().strip())
+                artist_similarity = self._string_similarity(artist.lower().strip(), db_album.artist_name.lower().strip())
+                
+                # Weight title and artist equally for albums
+                return (title_similarity * 0.5) + (artist_similarity * 0.5)
+            
+            # Find best match
+            best_match = None
+            best_confidence = 0.0
+            
+            for album in potential_matches:
+                confidence = calculate_confidence(album)
+                if confidence > best_confidence:
+                    best_confidence = confidence
+                    best_match = album
+            
+            # Return match only if it meets threshold
+            if best_confidence >= confidence_threshold:
+                return best_match, best_confidence
+            else:
+                return None, best_confidence
+            
+        except Exception as e:
+            logger.error(f"Error checking album existence for '{title}' by '{artist}': {e}")
+            return None, 0.0
+    
+    def _string_similarity(self, s1: str, s2: str) -> float:
+        """
+        Calculate simple string similarity using Levenshtein distance.
+        Returns value between 0.0 (no similarity) and 1.0 (identical)
+        """
+        if s1 == s2:
+            return 1.0
+        
+        if not s1 or not s2:
+            return 0.0
+        
+        # Simple Levenshtein distance implementation
+        len1, len2 = len(s1), len(s2)
+        if len1 < len2:
+            s1, s2 = s2, s1
+            len1, len2 = len2, len1
+        
+        if len2 == 0:
+            return 0.0
+        
+        # Create matrix
+        previous_row = list(range(len2 + 1))
+        for i, c1 in enumerate(s1):
+            current_row = [i + 1]
+            for j, c2 in enumerate(s2):
+                insertions = previous_row[j + 1] + 1
+                deletions = current_row[j] + 1
+                substitutions = previous_row[j] + (c1 != c2)
+                current_row.append(min(insertions, deletions, substitutions))
+            previous_row = current_row
+        
+        max_len = max(len1, len2)
+        distance = previous_row[-1]
+        similarity = (max_len - distance) / max_len
+        
+        return max(0.0, similarity)
+    
     def get_database_info(self) -> Dict[str, Any]:
         """Get comprehensive database information"""
         try:

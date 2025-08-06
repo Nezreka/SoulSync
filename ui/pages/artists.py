@@ -18,6 +18,7 @@ from core.spotify_client import SpotifyClient, Artist, Album
 from core.plex_client import PlexClient
 from core.soulseek_client import SoulseekClient, AlbumResult
 from core.matching_engine import MusicMatchingEngine
+from database.music_database import get_database
 import asyncio
 
 
@@ -421,16 +422,15 @@ class AlbumStatusProcessingWorker(QRunnable):
 
 
 
-class PlexLibraryWorker(QThread):
-    """Background worker for checking Plex library"""
+class DatabaseLibraryWorker(QThread):
+    """Background worker for checking database library (replaces PlexLibraryWorker)"""
     library_checked = pyqtSignal(set)  # Set of owned album names (final result)
     album_matched = pyqtSignal(str)    # Individual album match (album name)
     check_failed = pyqtSignal(str)
     
-    def __init__(self, albums, plex_client, matching_engine):
+    def __init__(self, albums, matching_engine):
         super().__init__()
         self.albums = albums
-        self.plex_client = plex_client
         self.matching_engine = matching_engine
         self._stop_requested = False
     
@@ -440,18 +440,16 @@ class PlexLibraryWorker(QThread):
     
     def run(self):
         try:
-            print("🔍 Starting robust Plex album matching...")
+            print("🔍 Starting robust database album matching...")
             owned_albums = set()
             
-            if not self.plex_client or not self.plex_client.ensure_connection():
-                print("⚠️ Plex client not available or not connected")
-                self.library_checked.emit(owned_albums)
-                return
+            # Get database instance
+            db = get_database()
             
             if self._stop_requested:
                 return
             
-            print(f"📚 Checking {len(self.albums)} Spotify albums against Plex library...")
+            print(f"📚 Checking {len(self.albums)} Spotify albums against local database...")
             
             # Use robust matching for each album
             for i, spotify_album in enumerate(self.albums):
@@ -474,7 +472,8 @@ class PlexLibraryWorker(QThread):
                 # Try different artist combinations
                 artists_to_try = spotify_album.artists[:2] if spotify_album.artists else [""]
                 
-                all_plex_matches = []
+                best_match = None
+                best_confidence = 0.0
                 
                 # Search with different combinations
                 for artist in artists_to_try:
@@ -487,58 +486,57 @@ class PlexLibraryWorker(QThread):
                         if self._stop_requested:
                             return
                         
-                        # Search Plex for this combination (cleaned artist)
-                        print(f"   🔍 Searching Plex: album='{album_name}', artist='{artist_clean}'")
-                        plex_albums = self.plex_client.search_albums(album_name, artist_clean, limit=5)
-                        print(f"   📀 Found {len(plex_albums)} Plex albums")
-                        all_plex_matches.extend(plex_albums)
+                        # Search database for this combination (cleaned artist)
+                        print(f"   🔍 Searching database: album='{album_name}', artist='{artist_clean}'")
+                        db_album, confidence = db.check_album_exists(album_name, artist_clean, confidence_threshold=0.7)
+                        
+                        if db_album and confidence > best_confidence:
+                            best_match = db_album
+                            best_confidence = confidence
+                            print(f"   📀 Found database match with confidence {confidence:.2f}")
+                            
+                            # If we have a very confident match, we can stop searching for this album
+                            if confidence >= 0.95:
+                                break
                         
                         # Backup search with original uncleaned artist name (for cases like "Tyler, The Creator")
-                        if not plex_albums and artist and artist != artist_clean:
+                        if not db_album and artist and artist != artist_clean:
                             print(f"   🔄 Backup search with original artist: album='{album_name}', artist='{artist}'")
-                            original_artist_results = self.plex_client.search_albums(album_name, artist, limit=5)
-                            print(f"   📀 Found {len(original_artist_results)} albums (original artist)")
-                            all_plex_matches.extend(original_artist_results)
+                            db_album_backup, confidence_backup = db.check_album_exists(album_name, artist, confidence_threshold=0.7)
+                            
+                            if db_album_backup and confidence_backup > best_confidence:
+                                best_match = db_album_backup
+                                best_confidence = confidence_backup
+                                print(f"   📀 Found backup match with confidence {confidence_backup:.2f}")
                             
                             # Additional fallback: remove commas (Tyler, The Creator -> Tyler The Creator)
-                            if not original_artist_results and ',' in artist:
+                            if not db_album_backup and ',' in artist:
                                 artist_no_comma = artist.replace(',', '').strip()
                                 # Clean up multiple spaces that might result from comma removal
                                 artist_no_comma = ' '.join(artist_no_comma.split())
                                 print(f"   🔄 Comma-removal fallback: album='{album_name}', artist='{artist_no_comma}'")
-                                no_comma_results = self.plex_client.search_albums(album_name, artist_no_comma, limit=5)
-                                print(f"   📀 Found {len(no_comma_results)} albums (no comma)")
-                                all_plex_matches.extend(no_comma_results)
-                        
-                        # Also try album-only search if no results from artist searches
-                        if not all_plex_matches:  # Only if we haven't found anything yet for this album
-                            print(f"   🔍 Trying album-only search: album='{album_name}'")
-                            album_only_results = self.plex_client.search_albums(album_name, "", limit=5)
-                            print(f"   📀 Found {len(album_only_results)} albums (album-only)")
-                            all_plex_matches.extend(album_only_results)
-                
-                # Remove duplicates based on album ID
-                unique_matches = {}
-                for match in all_plex_matches:
-                    unique_matches[match['id']] = match
-                
-                unique_plex_albums = list(unique_matches.values())
-                
-                if unique_plex_albums:
-                    # Use robust matching to find best match
-                    best_match, confidence = self.matching_engine.find_best_album_match(
-                        spotify_album, unique_plex_albums
-                    )
+                                db_album_comma, confidence_comma = db.check_album_exists(album_name, artist_no_comma, confidence_threshold=0.7)
+                                
+                                if db_album_comma and confidence_comma > best_confidence:
+                                    best_match = db_album_comma
+                                    best_confidence = confidence_comma
+                                    print(f"   📀 Found comma-removal match with confidence {confidence_comma:.2f}")
                     
-                    if best_match and confidence >= 0.8:
-                        owned_albums.add(spotify_album.name)
-                        print(f"✅ Match found: '{spotify_album.name}' -> '{best_match['title']}' (confidence: {confidence:.2f})")
-                        # Emit individual match for real-time UI update
-                        self.album_matched.emit(spotify_album.name)
-                    else:
-                        print(f"❌ No confident match for '{spotify_album.name}' (best: {confidence:.2f})")
+                    # If we found a very confident match, stop searching other artists
+                    if best_confidence >= 0.95:
+                        break
+                
+                # Check final result
+                if best_match and best_confidence >= 0.8:
+                    owned_albums.add(spotify_album.name)
+                    print(f"✅ Database match found: '{spotify_album.name}' -> '{best_match.title}' (confidence: {best_confidence:.2f})")
+                    # Emit individual match for real-time UI update
+                    self.album_matched.emit(spotify_album.name)
                 else:
-                    print(f"❌ No Plex candidates found for '{spotify_album.name}'")
+                    if best_match:
+                        print(f"❌ No confident match for '{spotify_album.name}' (best: {best_confidence:.2f})")
+                    else:
+                        print(f"❌ No database candidates found for '{spotify_album.name}'")
             
             print(f"🎯 Final result: {len(owned_albums)} owned albums out of {len(self.albums)}")
             print(f"🚀 Emitting signal with owned_albums: {list(owned_albums)}")
@@ -546,9 +544,13 @@ class PlexLibraryWorker(QThread):
             
         except Exception as e:
             if not self._stop_requested:
-                error_msg = f"Error checking Plex library: {e}"
+                error_msg = f"Error checking database library: {e}"
                 print(f"❌ {error_msg}")
                 self.check_failed.emit(error_msg)
+
+
+# Keep the old class name as an alias for backward compatibility
+PlexLibraryWorker = DatabaseLibraryWorker
 
 class AlbumSearchDialog(QDialog):
     """Dialog for displaying album search results and allowing selection"""
@@ -1744,7 +1746,7 @@ class DownloadMissingAlbumTracksModal(QDialog):
         self.start_plex_analysis()
 
     def start_plex_analysis(self):
-        """Start Plex analysis for album tracks"""
+        """Start database analysis for album tracks (previously Plex analysis)"""
         from ui.pages.sync import PlaylistTrackAnalysisWorker
         worker = PlaylistTrackAnalysisWorker(self.album.tracks, self.plex_client)
         worker.signals.analysis_started.connect(self.on_analysis_started)
@@ -2944,7 +2946,7 @@ class ArtistsPage(QWidget):
             self.plex_library_worker.wait()
         
         # Start new Plex worker
-        self.plex_library_worker = PlexLibraryWorker(albums, self.plex_client, self.matching_engine)
+        self.plex_library_worker = PlexLibraryWorker(albums, self.matching_engine)
         self.plex_library_worker.library_checked.connect(self.on_plex_library_checked)
         self.plex_library_worker.album_matched.connect(self.on_album_matched)
         self.plex_library_worker.check_failed.connect(self.on_plex_library_check_failed)
@@ -3038,7 +3040,7 @@ class ArtistsPage(QWidget):
             return
             
         if not self.plex_client:
-            QMessageBox.critical(self, "Error", "Plex client is not available. Cannot verify existing tracks.")
+            QMessageBox.critical(self, "Error", "Music database is not available. Cannot verify existing tracks.")
             return
         
         # Check if there's already an active session for this album
