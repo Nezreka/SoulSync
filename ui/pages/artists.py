@@ -1782,15 +1782,28 @@ class DownloadMissingAlbumTracksModal(QDialog):
         print("✅ Album modal initialization complete")
 
     def generate_smart_search_queries(self, artist_name, track_name):
-        """Generate multiple search query variations for better matching"""
-        queries = []
-
-        # Step 1: Use the original, full track name
+        """Generate smart search query variations with album-in-title detection"""
+        # Create a mock spotify track object for the matching engine
+        class MockSpotifyTrack:
+            def __init__(self, name, artists, album=None):
+                self.name = name
+                self.artists = artists if isinstance(artists, list) else [artists] if artists else []
+                self.album = album
+        
+        # Pass album information if we're in the context of an album
+        album_name = getattr(self, 'album', None)
+        album_title = album_name.name if hasattr(album_name, 'name') else str(album_name) if album_name else None
+        
+        mock_track = MockSpotifyTrack(track_name, [artist_name] if artist_name else [], album_title)
+        
+        # Use the enhanced matching engine to generate queries
+        queries = self.matching_engine.generate_download_queries(mock_track)
+        
+        # Add some legacy fallback queries for compatibility
+        legacy_queries = []
+        
+        # Add first word of artist approach (legacy compatibility)
         if artist_name:
-            # Attempt 1: Full Artist + Full Track Name
-            queries.append(f"{artist_name} {track_name}".strip())
-
-            # Attempt 2: Full Track Name + First Word of Artist
             artist_words = artist_name.split()
             if artist_words:
                 first_word = artist_words[0]
@@ -1798,26 +1811,26 @@ class DownloadMissingAlbumTracksModal(QDialog):
                     first_word = artist_words[1]
                 
                 if len(first_word) > 1:
-                    queries.append(f"{track_name} {first_word}".strip())
-
-        # Attempt 3: Full Track Name only
-        queries.append(track_name.strip())
-
-        # Step 2: Clean the track name for the final fallback
-        cleaned_name = re.sub(r'\s*\([^)]*\)', '', track_name).strip()
-        cleaned_name = re.sub(r'\s*\[[^\]]*\]', '', cleaned_name).strip()
-
-        # Attempt 4: Cleaned Track Name only (if different from original)
-        if cleaned_name and cleaned_name.lower() != track_name.lower():
-            queries.append(cleaned_name.strip())
-
+                    legacy_queries.append(f"{track_name} {first_word}".strip())
+        
+        # Add track-only query
+        legacy_queries.append(track_name.strip())
+        
+        # Combine enhanced queries with legacy fallbacks
+        all_queries = queries + legacy_queries
+        
         # Remove duplicates while preserving order
         unique_queries = []
-        for query in queries:
-            if query and query not in unique_queries:
+        seen = set()
+        for query in all_queries:
+            if query and query.lower() not in seen:
                 unique_queries.append(query)
+                seen.add(query.lower())
         
-        print(f"🧠 Generated {len(unique_queries)} smart queries for '{track_name}'. Sequence: {unique_queries}")
+        print(f"🧠 Generated {len(unique_queries)} smart queries for '{track_name}' (enhanced with album detection)")
+        for i, query in enumerate(unique_queries):
+            print(f"   {i+1}. '{query}'")
+        
         return unique_queries
 
     def setup_ui(self):
@@ -2663,8 +2676,8 @@ class DownloadMissingAlbumTracksModal(QDialog):
         if not results:
             return []
 
-        # Get initial confident matches based on title, bitrate, etc.
-        initial_candidates = self.matching_engine.find_best_slskd_matches(spotify_track, results)
+        # Get initial confident matches with version-aware scoring
+        initial_candidates = self.matching_engine.find_best_slskd_matches_enhanced(spotify_track, results)
 
         if not initial_candidates:
             print(f"⚠️ No initial candidates found for '{spotify_track.name}' from query '{query}'.")
@@ -2695,7 +2708,17 @@ class DownloadMissingAlbumTracksModal(QDialog):
 
         if verified_candidates:
             best_confidence = verified_candidates[0].confidence
-            print(f"✅ Found {len(verified_candidates)} VERIFIED matches for '{spotify_track.name}'. Best score: {best_confidence:.2f}")
+            best_version = getattr(verified_candidates[0], 'version_type', 'unknown')
+            print(f"✅ Found {len(verified_candidates)} VERIFIED matches for '{spotify_track.name}'. Best: {best_confidence:.2f} ({best_version})")
+            
+            # Log version breakdown for debugging
+            version_counts = {}
+            for candidate in verified_candidates[:5]:  # Show top 5
+                version = getattr(candidate, 'version_type', 'unknown')
+                version_counts[version] = version_counts.get(version, 0) + 1
+                penalty = getattr(candidate, 'version_penalty', 0.0)
+                print(f"   🎵 {candidate.confidence:.2f} - {version} (penalty: {penalty:.2f}) - {candidate.filename[:100]}...")
+                
         else:
             print(f"⚠️ No verified matches found for '{spotify_track.name}' after checking file paths.")
 
