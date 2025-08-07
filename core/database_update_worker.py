@@ -127,10 +127,54 @@ class DatabaseUpdateWorker(QThread):
             
             logger.info("Getting recently added albums to find new artists...")
             
-            # Get recently added albums (up to 500 to cast a wide net)
+            # Get recently added albums (up to 500 to cast a wide net)  
             try:
-                recent_albums = self.plex_client.music_library.recentlyAdded(maxresults=500)
-                logger.info(f"Found {len(recent_albums)} recently added albums")
+                # Try to get specifically albums first
+                try:
+                    recent_content = self.plex_client.music_library.recentlyAdded(libtype='album', maxresults=500)
+                    logger.info(f"Found {len(recent_content)} recently added albums (album-specific)")
+                except:
+                    # Fallback to general recently added
+                    recent_content = self.plex_client.music_library.recentlyAdded(maxresults=500)
+                    logger.info(f"Found {len(recent_content)} recently added items (mixed types)")
+                
+                # Filter to only get Album objects and convert Artist objects to their albums
+                recent_albums = []
+                artist_count = 0
+                album_count = 0
+                
+                for item in recent_content:
+                    try:
+                        item_type = type(item).__name__
+                        logger.info(f"Processing recently added item: {item_type} - '{getattr(item, 'title', 'Unknown')}'")
+                        
+                        if hasattr(item, 'tracks') and hasattr(item, 'artist'):
+                            # This is an Album - add directly
+                            recent_albums.append(item)
+                            album_count += 1
+                            logger.info(f"✅ Added album directly: '{item.title}'")
+                        elif hasattr(item, 'albums'):
+                            # This is an Artist - get their albums
+                            try:
+                                artist_albums = list(item.albums())
+                                if artist_albums:
+                                    recent_albums.extend(artist_albums)
+                                    artist_count += 1
+                                    logger.info(f"✅ Added {len(artist_albums)} albums from artist '{item.title}'")
+                                else:
+                                    logger.info(f"⚠️ Artist '{item.title}' has no albums")
+                            except Exception as albums_error:
+                                logger.warning(f"Error getting albums from artist '{getattr(item, 'title', 'Unknown')}': {albums_error}")
+                        else:
+                            # Unknown type - skip
+                            logger.info(f"❌ Skipping unsupported type: {item_type} (has tracks: {hasattr(item, 'tracks')}, has albums: {hasattr(item, 'albums')}, has artist: {hasattr(item, 'artist')})")
+                    except Exception as e:
+                        logger.warning(f"Error processing recently added item: {e}")
+                        continue
+                
+                logger.info(f"Processed recently added content: {artist_count} artists → albums, {album_count} direct albums")
+                
+                logger.info(f"Extracted {len(recent_albums)} albums from recently added content")
             except Exception as e:
                 logger.warning(f"Could not get recently added albums: {e}")
                 # Fallback: get recently added tracks instead
@@ -171,43 +215,106 @@ class DatabaseUpdateWorker(QThread):
             
             logger.info("Checking artists from recent albums (with early stopping)...")
             
+            # Debug: log the types of objects we're processing
+            object_types = {}
+            for item in recent_albums[:10]:  # Check first 10 items
+                item_type = type(item).__name__
+                object_types[item_type] = object_types.get(item_type, 0) + 1
+            logger.info(f"Recent albums object types (first 10): {object_types}")
+            
+            if not recent_albums:
+                logger.warning("No albums found to process - incremental update cannot proceed")
+                return []
+            
+            # New approach: Track-level incremental update with 3-consecutive-tracks stopping
+            consecutive_existing_tracks = 0
+            processed_artist_ids = set()
+            total_tracks_checked = 0
+            
             for i, album in enumerate(recent_albums):
                 if self.should_stop:
                     break
                 
                 try:
-                    # Get the artist for this album
-                    album_artist = album.artist()
-                    if not album_artist:
+                    # Defensive check: ensure this is actually an album object
+                    if not hasattr(album, 'tracks') or not hasattr(album, 'artist'):
+                        logger.warning(f"Skipping invalid album object at index {i}: {type(album).__name__}")
                         continue
                     
-                    artist_id = int(album_artist.ratingKey)
+                    album_title = getattr(album, 'title', f'Album_{i}')
+                    album_has_new_tracks = False
                     
-                    # Skip if we've already checked this artist
-                    if artist_id in processed_artist_ids:
-                        continue
+                    # Check each individual track in this album
+                    try:
+                        tracks = list(album.tracks())
+                        logger.debug(f"Checking {len(tracks)} tracks in album '{album_title}'")
+                        
+                        for track in tracks:
+                            total_tracks_checked += 1
+                            try:
+                                track_id = int(track.ratingKey)
+                                track_title = getattr(track, 'title', 'Unknown Track')
+                                
+                                if self.database.track_exists(track_id):
+                                    consecutive_existing_tracks += 1
+                                    logger.debug(f"Track '{track_title}' already exists (consecutive: {consecutive_existing_tracks})")
+                                    
+                                    # Stop after 3 consecutive existing tracks
+                                    if consecutive_existing_tracks >= 3:
+                                        logger.info(f"🛑 Found 3 consecutive existing tracks - stopping incremental scan after checking {total_tracks_checked} tracks")
+                                        stopped_early = True
+                                        break
+                                else:
+                                    # Found missing track - reset counter
+                                    if consecutive_existing_tracks > 0:
+                                        logger.debug(f"Track '{track_title}' missing - resetting consecutive count (was {consecutive_existing_tracks})")
+                                    consecutive_existing_tracks = 0
+                                    album_has_new_tracks = True
+                                    logger.debug(f"📀 Track '{track_title}' is new - will process album's artist")
+                                    
+                            except Exception as track_error:
+                                logger.debug(f"Error checking individual track: {track_error}")
+                                # Reset counter on error to be safe
+                                consecutive_existing_tracks = 0
+                                album_has_new_tracks = True  # Assume needs processing if can't check
+                                continue
+                                
+                        # If we hit the stop condition, break out of album loop too
+                        if stopped_early:
+                            break
+                            
+                    except Exception as tracks_error:
+                        logger.warning(f"Error getting tracks for album '{album_title}': {tracks_error}")
+                        # Assume album needs processing if we can't check tracks
+                        album_has_new_tracks = True
+                        consecutive_existing_tracks = 0
                     
-                    processed_artist_ids.add(artist_id)
-                    
-                    # Check if this artist is already current in our database
-                    if self._artist_is_already_current(album_artist):
-                        logger.info(f"Hit already-current artist '{album_artist.title}' at position {i+1} - stopping early!")
-                        stopped_early = True
-                        break
-                    
-                    # Artist needs processing
-                    artists_to_process.append(album_artist)
-                    logger.debug(f"Added artist '{album_artist.title}' for processing")
+                    # If album has new tracks, queue its artist for processing
+                    if album_has_new_tracks:
+                        try:
+                            album_artist = album.artist()
+                            if album_artist:
+                                artist_id = int(album_artist.ratingKey)
+                                
+                                # Skip if we've already queued this artist
+                                if artist_id not in processed_artist_ids:
+                                    processed_artist_ids.add(artist_id)
+                                    artists_to_process.append(album_artist)
+                                    logger.info(f"✅ Added artist '{album_artist.title}' for processing (from album '{album_title}' with new tracks)")
+                        except Exception as artist_error:
+                            logger.warning(f"Error getting artist for album '{album_title}': {artist_error}")
                 
                 except Exception as e:
-                    logger.warning(f"Error checking album artist: {e}")
+                    logger.warning(f"Error processing album at index {i} (type: {type(album).__name__}): {e}")
+                    # Reset consecutive count on error to be safe
+                    consecutive_existing_tracks = 0
                     continue
             
             result_msg = f"Smart incremental scan result: {len(artists_to_process)} artists to process"
             if stopped_early:
-                result_msg += f" (stopped early after checking {len(processed_artist_ids)} artists)"
+                result_msg += f" (stopped early after finding 3 consecutive existing tracks)"
             else:
-                result_msg += f" (checked all {len(processed_artist_ids)} artists from recent albums)"
+                result_msg += f" (checked {total_tracks_checked} tracks from {len(recent_albums)} albums)"
             
             logger.info(result_msg)
             return artists_to_process
@@ -216,37 +323,6 @@ class DatabaseUpdateWorker(QThread):
             logger.error(f"Error in smart incremental update: {e}")
             # Fallback to empty list - user can try full refresh
             return []
-    
-    def _artist_is_already_current(self, plex_artist) -> bool:
-        """Check if an artist is already current in our database"""
-        try:
-            artist_id = int(plex_artist.ratingKey)
-            
-            # Get artist from database
-            db_artist = self.database.get_artist(artist_id)
-            
-            if not db_artist:
-                # Not in database at all
-                return False
-            
-            # Check if artist was updated recently (within last 24 hours)
-            if db_artist.updated_at:
-                from datetime import datetime, timedelta
-                hours_since_update = (datetime.now() - db_artist.updated_at).total_seconds() / 3600
-                
-                # Consider "current" if updated within last 24 hours
-                if hours_since_update < 24:
-                    logger.debug(f"Artist '{plex_artist.title}' is current (updated {hours_since_update:.1f} hours ago)")
-                    return True
-            
-            # Artist exists but hasn't been updated recently
-            logger.debug(f"Artist '{plex_artist.title}' exists but needs refresh")
-            return False
-            
-        except Exception as e:
-            logger.warning(f"Error checking if artist is current: {e}")
-            # When in doubt, process the artist
-            return False
     
     def _process_all_artists(self, artists: List):
         """Process all artists and their albums/tracks using thread pool"""
