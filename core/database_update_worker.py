@@ -122,6 +122,25 @@ class DatabaseUpdateWorker(QThread):
                 logger.error("No music library found in Plex")
                 return []
             
+            # Check if database has enough content for incremental updates
+            try:
+                stats = self.database.get_database_info()
+                track_count = stats.get('tracks', 0)
+                
+                if track_count < 100:  # Minimum threshold for meaningful incremental updates
+                    logger.warning(f"Database has only {track_count} tracks - insufficient for incremental updates")
+                    logger.info("Switching to full refresh mode (incremental updates require established database)")
+                    # Switch to full refresh automatically
+                    self.full_refresh = True
+                    return self._get_all_artists()
+                    
+                logger.info(f"Database has {track_count} tracks - proceeding with incremental update")
+                
+            except Exception as e:
+                logger.warning(f"Could not check database state: {e} - defaulting to full refresh")
+                self.full_refresh = True
+                return self._get_all_artists()
+            
             # Strategy: Get recently added albums and extract artists from them
             # Process artists in reverse chronological order until we hit one that's already current
             
