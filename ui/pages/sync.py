@@ -3580,45 +3580,66 @@ class DownloadMissingTracksModal(QDialog):
 
     def generate_smart_search_queries(self, artist_name, track_name):
         """
-        Generate multiple search query variations in the specific fallback order
-        requested by the user.
+        Generate smart search query variations with album-in-title detection.
+        Enhanced version with fallback strategies.
         """
-        import re
-        queries = []
-
-        # --- Step 1: Use the original, full track name ---
+        # Create a mock spotify track object for the matching engine
+        class MockSpotifyTrack:
+            def __init__(self, name, artists, album=None):
+                self.name = name
+                self.artists = artists if isinstance(artists, list) else [artists] if artists else []
+                self.album = album
+        
+        # Try to get album information from the track context if available
+        # In sync context, we might not always have album info, but try to extract it
+        album_title = None
+        # If track_name contains potential album info, we'll let the detection handle it
+        
+        mock_track = MockSpotifyTrack(track_name, [artist_name] if artist_name else [], album_title)
+        
+        # Use the enhanced matching engine to generate queries
+        queries = self.matching_engine.generate_download_queries(mock_track)
+        
+        # Add some legacy fallback queries for compatibility
+        legacy_queries = []
+        
+        # Add first word of artist approach (legacy compatibility)
         if artist_name:
-            # Attempt 1: Full Artist + Full Track Name
-            queries.append(f"{artist_name} {track_name}".strip())
-
-            # Attempt 2: Full Track Name + First Word of Artist
             artist_words = artist_name.split()
             if artist_words:
                 first_word = artist_words[0]
                 if first_word.lower() == 'the' and len(artist_words) > 1:
-                    first_word = artist_words[1] # Use second word if first is "the"
+                    first_word = artist_words[1]
                 
-                if len(first_word) > 1: # Avoid single-letter words
-                    queries.append(f"{track_name} {first_word}".strip())
-
-        # Attempt 3: Full Track Name only
-        queries.append(track_name.strip())
-
-        # --- Step 2: Clean the track name for the final fallback ---
+                if len(first_word) > 1:
+                    legacy_queries.append(f"{track_name} {first_word}".strip())
+        
+        # Add track-only query
+        legacy_queries.append(track_name.strip())
+        
+        # Add traditional cleaned queries
+        import re
         cleaned_name = re.sub(r'\s*\([^)]*\)', '', track_name).strip()
         cleaned_name = re.sub(r'\s*\[[^\]]*\]', '', cleaned_name).strip()
-
-        # Attempt 4: Cleaned Track Name only (if it's different from the original)
-        if cleaned_name and cleaned_name.lower() != track_name.lower():
-            queries.append(cleaned_name.strip())
-
-        # --- Finalize: Remove duplicates while preserving the fallback order ---
-        unique_queries = []
-        for query in queries:
-            if query and query not in unique_queries:
-                unique_queries.append(query)
         
-        print(f"🧠 Generated {len(unique_queries)} smart queries for '{track_name}'. Sequence: {unique_queries}")
+        if cleaned_name and cleaned_name.lower() != track_name.lower():
+            legacy_queries.append(cleaned_name.strip())
+        
+        # Combine enhanced queries with legacy fallbacks
+        all_queries = queries + legacy_queries
+        
+        # Remove duplicates while preserving order
+        unique_queries = []
+        seen = set()
+        for query in all_queries:
+            if query and query.lower() not in seen:
+                unique_queries.append(query)
+                seen.add(query.lower())
+        
+        print(f"🧠 Generated {len(unique_queries)} smart queries for '{track_name}' (enhanced with album detection)")
+        for i, query in enumerate(unique_queries):
+            print(f"   {i+1}. '{query}'")
+        
         return unique_queries
 
     def setup_ui(self):
@@ -4527,9 +4548,9 @@ class DownloadMissingTracksModal(QDialog):
         if not results:
             return []
 
-        # Step 1: Get initial confident matches based on title, bitrate, etc.
-        # This gives us a sorted list of potential candidates.
-        initial_candidates = self.matching_engine.find_best_slskd_matches(spotify_track, results)
+        # Step 1: Get initial confident matches with version-aware scoring
+        # This gives us a sorted list of potential candidates, preferring originals.
+        initial_candidates = self.matching_engine.find_best_slskd_matches_enhanced(spotify_track, results)
 
         if not initial_candidates:
             print(f"⚠️ No initial candidates found for '{spotify_track.name}' from query '{query}'.")
@@ -4564,7 +4585,15 @@ class DownloadMissingTracksModal(QDialog):
 
         if verified_candidates:
             best_confidence = verified_candidates[0].confidence
-            print(f"✅ Found {len(verified_candidates)} VERIFIED matches for '{spotify_track.name}'. Best score: {best_confidence:.2f}")
+            best_version = getattr(verified_candidates[0], 'version_type', 'unknown')
+            print(f"✅ Found {len(verified_candidates)} VERIFIED matches for '{spotify_track.name}'. Best: {best_confidence:.2f} ({best_version})")
+            
+            # Log version breakdown for debugging
+            for candidate in verified_candidates[:3]:  # Show top 3
+                version = getattr(candidate, 'version_type', 'unknown')
+                penalty = getattr(candidate, 'version_penalty', 0.0)
+                print(f"   🎵 {candidate.confidence:.2f} - {version} (penalty: {penalty:.2f}) - {candidate.filename[:80]}...")
+                
         else:
             print(f"⚠️ No verified matches found for '{spotify_track.name}' after checking file paths.")
 

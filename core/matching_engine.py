@@ -217,17 +217,165 @@ class MusicMatchingEngine:
             match_type=best_match_type
         )
     
+    def detect_album_in_title(self, track_title: str, album_name: str = None) -> Tuple[str, bool]:
+        """
+        Detect if album name appears in track title and return cleaned version.
+        Returns (cleaned_title, album_detected) tuple.
+        """
+        if not track_title:
+            return "", False
+            
+        original_title = track_title
+        title_lower = track_title.lower()
+        
+        # Common patterns where album name appears in track titles
+        album_patterns = [
+            r'\s*-\s*(.+)$',      # "Track - Album" (most common)
+            r'\s*\|\s*(.+)$',     # "Track | Album" 
+            r'\s*\(\s*(.+)\s*\)$' # "Track (Album)" 
+        ]
+        
+        # If we have album name, check if it appears in the title
+        if album_name:
+            album_clean = album_name.lower().strip()
+            
+            for pattern in album_patterns:
+                match = re.search(pattern, track_title)
+                if match:
+                    potential_album = match.group(1).lower().strip()
+                    
+                    # Check if the extracted part matches the album name with better fuzzy matching
+                    similarity_threshold = 0.8
+                    
+                    # Calculate similarity between potential album and actual album
+                    if potential_album == album_clean:
+                        similarity = 1.0  # Exact match
+                    elif potential_album in album_clean or album_clean in potential_album:
+                        # Substring match - calculate how much overlap
+                        shorter = min(len(potential_album), len(album_clean))
+                        longer = max(len(potential_album), len(album_clean))
+                        similarity = shorter / longer if longer > 0 else 0.0
+                    else:
+                        # Use string similarity for fuzzy matching
+                        similarity = self.similarity_score(potential_album, album_clean)
+                    
+                    if similarity >= similarity_threshold:
+                        # Remove the album part from the title
+                        cleaned_title = re.sub(pattern, '', track_title).strip()
+                        
+                        # SAFETY CHECK: Don't return empty or too-short titles
+                        if not cleaned_title or len(cleaned_title.strip()) < 2:
+                            print(f"⚠️ Album removal would create empty title: '{original_title}' → '{cleaned_title}' - keeping original")
+                            return track_title, False
+                        
+                        # SAFETY CHECK: Don't remove if it would leave only articles or very short words
+                        words = cleaned_title.split()
+                        meaningful_words = [w for w in words if len(w) > 2 and w.lower() not in ['the', 'and', 'or', 'of', 'a', 'an']]
+                        if not meaningful_words:
+                            print(f"⚠️ Album removal would leave only short words: '{original_title}' → '{cleaned_title}' - keeping original")
+                            return track_title, False
+                        
+                        print(f"🎵 Detected album in title: '{original_title}' → '{cleaned_title}' (removed: '{match.group(1)}', similarity: {similarity:.2f})")
+                        return cleaned_title, True
+        
+        # Fallback: detect common album-like suffixes even without album context
+        # Look for patterns that might be album names (usually after dash)
+        dash_pattern = r'\s*-\s*([A-Za-z][A-Za-z0-9\s&\-\']{3,30})$'
+        match = re.search(dash_pattern, track_title)
+        if match:
+            potential_album_part = match.group(1).strip()
+            
+            # Heuristics: likely an album name if it:
+            # - Doesn't contain common track descriptors
+            # - Is reasonable length (4-30 chars)
+            # - Doesn't look like a feature/remix indicator
+            exclude_patterns = [
+                r'\b(remix|mix|edit|version|live|acoustic|instrumental|demo|feat|ft|featuring)\b'
+            ]
+            
+            is_likely_album = True
+            for exclude_pattern in exclude_patterns:
+                if re.search(exclude_pattern, potential_album_part.lower()):
+                    is_likely_album = False
+                    break
+            
+            if is_likely_album and 4 <= len(potential_album_part) <= 30:
+                cleaned_title = re.sub(dash_pattern, '', track_title).strip()
+                print(f"🎵 Heuristic album detection: '{original_title}' → '{cleaned_title}' (removed: '{potential_album_part}')")
+                return cleaned_title, True
+        
+        return track_title, False
+
+    def generate_download_queries(self, spotify_track: SpotifyTrack) -> List[str]:
+        """
+        Generate multiple search query variations for better matching.
+        Returns queries in order of preference (cleaned titles first, then original).
+        """
+        queries = []
+        
+        if not spotify_track.artists:
+            # No artist info - just use track name variations
+            queries.append(self.clean_title(spotify_track.name))
+            return queries
+            
+        artist = self.clean_artist(spotify_track.artists[0])
+        original_title = spotify_track.name
+        
+        # Get album name if available - try multiple attribute names
+        album_name = None
+        for attr in ['album', 'album_name', 'album_title']:
+            album_name = getattr(spotify_track, attr, None)
+            if album_name:
+                break
+        
+        # PRIORITY 1: Try removing potential album from title FIRST
+        cleaned_title, album_detected = self.detect_album_in_title(original_title, album_name)
+        if album_detected and cleaned_title != original_title:
+            cleaned_track = self.clean_title(cleaned_title)
+            if cleaned_track:
+                queries.append(f"{artist} {cleaned_track}".strip())
+                print(f"🎯 PRIORITY 1: Album-cleaned query: '{artist} {cleaned_track}'")
+        
+        # PRIORITY 2: Try with just the first part before any dash/parentheses
+        simple_patterns = [
+            r'^([^-\(]+)',  # Everything before first dash or parenthesis
+            r'^([^-]+)',    # Everything before first dash only
+        ]
+        
+        for pattern in simple_patterns:
+            match = re.search(pattern, original_title.strip())
+            if match:
+                simple_title = match.group(1).strip()
+                if simple_title and len(simple_title) >= 3:  # Avoid too-short titles
+                    simple_clean = self.clean_title(simple_title)
+                    if simple_clean and simple_clean not in [self.clean_title(q.split(' ', 1)[1]) for q in queries if ' ' in q]:
+                        queries.append(f"{artist} {simple_clean}".strip())
+                        print(f"🎯 PRIORITY 2: Simple-cleaned query: '{artist} {simple_clean}'")
+        
+        # PRIORITY 3: Original query (ONLY if no album was detected or if it's different)
+        original_track_clean = self.clean_title(original_title)
+        if not album_detected or not queries:  # Only add original if no album detected or no other queries
+            if original_track_clean not in [q.split(' ', 1)[1] for q in queries if ' ' in q]:
+                queries.append(f"{artist} {original_track_clean}".strip())
+                print(f"🎯 PRIORITY 3: Original query: '{artist} {original_track_clean}'")
+        
+        # Remove duplicates while preserving order
+        unique_queries = []
+        seen = set()
+        for query in queries:
+            if query.lower() not in seen:
+                unique_queries.append(query)
+                seen.add(query.lower())
+        
+        return unique_queries
+
     def generate_download_query(self, spotify_track: SpotifyTrack) -> str:
-        """Generate optimized search query for downloading tracks"""
-        # Use artist + track name for more precise matching
-        if spotify_track.artists:
-            # Use first artist and clean track name
-            artist = self.clean_artist(spotify_track.artists[0])
-            track = self.clean_title(spotify_track.name)
-            return f"{artist} {track}".strip()
-        else:
-            # Fallback to just track name if no artist
-            return self.clean_title(spotify_track.name)
+        """
+        Generate optimized search query for downloading tracks.
+        Returns the most specific query (backward compatibility).
+        """
+        queries = self.generate_download_queries(spotify_track)
+        return queries[0] if queries else ""
         
     
     def calculate_slskd_match_confidence(self, spotify_track: SpotifyTrack, slskd_track: TrackResult) -> float:
@@ -303,6 +451,129 @@ class MusicMatchingEngine:
         # Filter out very low-confidence results to avoid bad matches.
         # A threshold of 0.6 means the title and artist had to have some reasonable similarity.
         confident_results = [r for r in sorted_results if r.confidence > 0.6]
+
+        return confident_results
+    
+    def detect_version_type(self, filename: str) -> Tuple[str, float]:
+        """
+        Detect version type from filename and return (version_type, penalty).
+        Penalties are applied to prefer original versions over variants.
+        """
+        if not filename:
+            return 'original', 0.0
+            
+        filename_lower = filename.lower()
+        
+        # Define version patterns and their penalties (higher penalty = lower priority)
+        version_patterns = {
+            'remix': {
+                'patterns': [r'\bremix\b', r'\brmx\b', r'\brework\b', r'\bedit\b(?!ion)'],
+                'penalty': 0.15  # -15% penalty for remixes
+            },
+            'live': {
+                'patterns': [r'\blive\b', r'\bconcert\b', r'\btour\b', r'\bperformance\b'],
+                'penalty': 0.20  # -20% penalty for live versions
+            },
+            'acoustic': {
+                'patterns': [r'\bacoustic\b', r'\bunplugged\b', r'\bstripped\b'],
+                'penalty': 0.12  # -12% penalty for acoustic
+            },
+            'instrumental': {
+                'patterns': [r'\binstrumental\b', r'\bkaraoke\b', r'\bminus one\b'],
+                'penalty': 0.25  # -25% penalty for instrumentals (most different from original)
+            },
+            'radio': {
+                'patterns': [r'\bradio\s*edit\b', r'\bradio\s*version\b', r'\bclean\s*edit\b'],
+                'penalty': 0.08  # -8% penalty for radio edits (minor difference)
+            },
+            'extended': {
+                'patterns': [r'\bextended\b', r'\bfull\s*version\b', r'\blong\s*version\b'],
+                'penalty': 0.05  # -5% penalty for extended (close to original)
+            },
+            'demo': {
+                'patterns': [r'\bdemo\b', r'\broughcut\b', r'\bunreleased\b'],
+                'penalty': 0.18  # -18% penalty for demos
+            },
+            'explicit': {
+                'patterns': [r'\bexplicit\b', r'\buncensored\b'],
+                'penalty': 0.02  # -2% minor penalty (might be preferred by some)
+            }
+        }
+        
+        # Check each version type
+        for version_type, config in version_patterns.items():
+            for pattern in config['patterns']:
+                if re.search(pattern, filename_lower):
+                    return version_type, config['penalty']
+        
+        # No version indicators found - assume original
+        return 'original', 0.0
+    
+    def calculate_slskd_match_confidence_enhanced(self, spotify_track: SpotifyTrack, slskd_track: TrackResult) -> Tuple[float, str]:
+        """
+        Enhanced version of calculate_slskd_match_confidence with version-aware scoring.
+        Returns (confidence, version_type) tuple.
+        """
+        # Get base confidence using existing logic
+        base_confidence = self.calculate_slskd_match_confidence(spotify_track, slskd_track)
+        
+        # Detect version type and get penalty
+        version_type, penalty = self.detect_version_type(slskd_track.filename)
+        
+        # Apply version penalty
+        if version_type != 'original':
+            adjusted_confidence = max(0.0, base_confidence - penalty)
+            # Store version info on the track object for UI display
+            slskd_track.version_type = version_type
+            slskd_track.version_penalty = penalty
+        else:
+            adjusted_confidence = base_confidence
+            slskd_track.version_type = 'original'
+            slskd_track.version_penalty = 0.0
+        
+        return adjusted_confidence, version_type
+    
+    def find_best_slskd_matches_enhanced(self, spotify_track: SpotifyTrack, slskd_results: List[TrackResult]) -> List[TrackResult]:
+        """
+        Enhanced version of find_best_slskd_matches with version-aware scoring.
+        Returns candidates sorted by adjusted confidence (preferring originals).
+        """
+        if not slskd_results:
+            return []
+
+        scored_results = []
+        for slskd_track in slskd_results:
+            # Use enhanced confidence calculation
+            confidence, version_type = self.calculate_slskd_match_confidence_enhanced(spotify_track, slskd_track)
+            
+            # Store the adjusted confidence and version info
+            slskd_track.confidence = confidence
+            slskd_track.version_type = getattr(slskd_track, 'version_type', 'original')
+            scored_results.append(slskd_track)
+
+        # Sort by confidence score (descending), then by version preference, then by size
+        def sort_key(r):
+            # Primary: confidence score
+            # Secondary: prefer originals (original=0, others=penalty value for tie-breaking)
+            version_priority = 0.0 if r.version_type == 'original' else getattr(r, 'version_penalty', 0.1)
+            # Tertiary: file size
+            return (r.confidence, -version_priority, r.size)
+        
+        sorted_results = sorted(scored_results, key=sort_key, reverse=True)
+        
+        # Filter out very low-confidence results
+        # Lower the threshold to 0.45 to account for version penalties and album-in-title scenarios
+        confident_results = [r for r in sorted_results if r.confidence > 0.45]
+        
+        # Debug logging for troubleshooting
+        if scored_results and not confident_results:
+            print(f"⚠️ DEBUG: Found {len(scored_results)} scored results but none met confidence threshold 0.45")
+            for i, result in enumerate(sorted_results[:3]):  # Show top 3
+                print(f"   {i+1}. {result.confidence:.3f} - {getattr(result, 'version_type', 'unknown')} - {result.filename[:60]}...")
+        elif confident_results:
+            print(f"✅ DEBUG: {len(confident_results)} results passed confidence threshold 0.45")
+            for i, result in enumerate(confident_results[:3]):  # Show top 3
+                print(f"   {i+1}. {result.confidence:.3f} - {getattr(result, 'version_type', 'unknown')} - {result.filename[:60]}...")
 
         return confident_results
     
