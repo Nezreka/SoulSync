@@ -18,6 +18,7 @@ from core.spotify_client import SpotifyClient, Artist, Album
 from core.plex_client import PlexClient
 from core.soulseek_client import SoulseekClient, AlbumResult
 from core.matching_engine import MusicMatchingEngine
+from core.plex_scan_manager import PlexScanManager
 from database.music_database import get_database
 import asyncio
 
@@ -1740,6 +1741,7 @@ class DownloadMissingAlbumTracksModal(QDialog):
         self.album = album
         self.album_card = album_card
         self.parent_page = parent_page
+        self.parent_artists_page = parent_page  # Reference to artists page for scan manager
         self.downloads_page = downloads_page
         self.plex_client = plex_client
         self.matching_engine = MusicMatchingEngine()
@@ -2648,6 +2650,11 @@ class DownloadMissingAlbumTracksModal(QDialog):
             self.process_finished.emit()
         except RuntimeError as e:
             print(f"⚠️ Modal object deleted during downloads complete signal: {e}")
+        
+        # Request Plex library scan if we have successful downloads
+        if self.successful_downloads > 0 and hasattr(self, 'parent_artists_page') and self.parent_artists_page.scan_manager:
+            album_name = getattr(self.album, 'name', 'Unknown Album')
+            self.parent_artists_page.scan_manager.request_scan(f"Album download completed: {album_name} ({self.successful_downloads} tracks)")
 
         # Determine the final message based on success or failure
         if self.permanently_failed_tracks:
@@ -2815,9 +2822,13 @@ class DownloadMissingAlbumTracksModal(QDialog):
 
     def on_manual_match_resolved(self, resolved_track_info):
         """Handle a track being successfully resolved by the ManualMatchModal"""
+        print(f"🔧 Manual match resolved (Artists) - download_index: {resolved_track_info.get('download_index')}, table_index: {resolved_track_info.get('table_index')}")
         original_failed_track = next((t for t in self.permanently_failed_tracks if t['download_index'] == resolved_track_info['download_index']), None)
         if original_failed_track:
             self.permanently_failed_tracks.remove(original_failed_track)
+            print(f"✅ Removed track from permanently_failed_tracks (Artists) - remaining: {len(self.permanently_failed_tracks)}")
+        else:
+            print("⚠️ Could not find original failed track to remove (Artists)")
         self.update_failed_matches_button()
 
 class ArtistsPage(QWidget):
@@ -2850,6 +2861,9 @@ class ArtistsPage(QWidget):
         self.download_status_timer.timeout.connect(self.poll_album_download_statuses)
         self.download_status_timer.start(2000)  # Poll every 2 seconds (consistent with sync.py)
         self.download_status_pool = QThreadPool()
+        
+        # Initialize Plex scan manager (will be set when clients are connected)
+        self.scan_manager = None
         self.download_status_pool.setMaxThreadCount(1)  # One worker at a time to avoid conflicts
         self._is_status_update_running = False
         
@@ -2878,6 +2892,11 @@ class ArtistsPage(QWidget):
                 self.soulseek_client.download_path = download_path
                 print(f"✅ Set soulseek_client download path for ArtistsPage to: {download_path}")
             # --- END FIX ---
+            
+            # Initialize Plex scan manager now that clients are available
+            if self.plex_client:
+                self.scan_manager = PlexScanManager(self.plex_client, delay_seconds=60)
+                print("✅ PlexScanManager initialized for ArtistsPage")
 
         except Exception as e:
             print(f"Failed to initialize clients: {e}")
