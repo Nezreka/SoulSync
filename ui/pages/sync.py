@@ -83,25 +83,51 @@ def save_sync_status(data):
 
 def clean_track_name_for_search(track_name):
     """
-    Cleans a track name for searching by removing text in parentheses and brackets.
-    If cleaning the name results in an empty string, the original name is returned.
+    Intelligently cleans a track name for searching by removing noise while preserving important version information.
+    Removes: (feat. Artist), (Explicit), (Clean), etc.
+    Keeps: (Extended Version), (Live), (Acoustic), (Remix), etc.
     """
     if not track_name or not isinstance(track_name, str):
         return track_name
 
-    # Remove content in parentheses, e.g., (feat. Artist), (Remix)
-    cleaned_name = re.sub(r'\s*\([^)]*\)', '', track_name).strip()
-    # Remove content in square brackets, e.g., [Live], [Explicit]
-    cleaned_name = re.sub(r'\s*\[[^\]]*\]', '', cleaned_name).strip()
+    cleaned_name = track_name
     
-    # If cleaning results in an empty string (e.g., track name was only "(Intro)"),
-    # return the original track name to avoid an empty search.
-    if not cleaned_name:
+    # Define patterns to REMOVE (noise that doesn't affect track identity)
+    remove_patterns = [
+        r'\s*\(explicit\)',           # (Explicit)
+        r'\s*\(clean\)',              # (Clean) 
+        r'\s*\(radio\s*edit\)',       # (Radio Edit)
+        r'\s*\(radio\s*version\)',    # (Radio Version)
+        r'\s*\(feat\.?\s*[^)]+\)',    # (feat. Artist) or (ft. Artist)
+        r'\s*\(ft\.?\s*[^)]+\)',      # (ft Artist)
+        r'\s*\(featuring\s*[^)]+\)',  # (featuring Artist)
+        r'\s*\(with\s*[^)]+\)',       # (with Artist)
+        r'\s*\[[^\]]*explicit[^\]]*\]', # [Explicit] in brackets
+        r'\s*\[[^\]]*clean[^\]]*\]',    # [Clean] in brackets
+    ]
+    
+    # Apply removal patterns
+    for pattern in remove_patterns:
+        cleaned_name = re.sub(pattern, '', cleaned_name, flags=re.IGNORECASE).strip()
+    
+    # PRESERVE important version information (do NOT remove these)
+    # These patterns are intentionally NOT in the remove list:
+    # - (Extended Version), (Extended), (Long Version)
+    # - (Live), (Live Version), (Concert)
+    # - (Acoustic), (Acoustic Version)  
+    # - (Remix), (Club Mix), (Dance Mix)
+    # - (Remastered), (Remaster)
+    # - (Demo), (Studio Version)
+    # - (Instrumental)
+    # - Album/year info like (2023), (Deluxe Edition)
+    
+    # If cleaning results in an empty string, return the original track name
+    if not cleaned_name.strip():
         return track_name
         
     # Log cleaning if significant changes were made
     if cleaned_name != track_name:
-        print(f"🧹 Cleaned track name for search: '{track_name}' -> '{cleaned_name}'")
+        print(f"🧹 Intelligent track cleaning: '{track_name}' -> '{cleaned_name}'")
     
     return cleaned_name
 

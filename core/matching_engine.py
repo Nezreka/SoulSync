@@ -336,21 +336,44 @@ class MusicMatchingEngine:
                 queries.append(f"{artist} {cleaned_track}".strip())
                 print(f"🎯 PRIORITY 1: Album-cleaned query: '{artist} {cleaned_track}'")
         
-        # PRIORITY 2: Try with just the first part before any dash/parentheses
-        simple_patterns = [
-            r'^([^-\(]+)',  # Everything before first dash or parenthesis
-            r'^([^-]+)',    # Everything before first dash only
-        ]
+        # PRIORITY 2: Try simplified versions, but preserve important version info
+        # Only remove content that's likely to be album names or noise, not version info
         
-        for pattern in simple_patterns:
-            match = re.search(pattern, original_title.strip())
-            if match:
-                simple_title = match.group(1).strip()
-                if simple_title and len(simple_title) >= 3:  # Avoid too-short titles
+        # Pattern 1: Remove content after " - " (likely album names)
+        dash_pattern = r'^([^-]+?)(?:\s*-\s*.+)?$'
+        match = re.search(dash_pattern, original_title.strip())
+        if match:
+            dash_title = match.group(1).strip()
+            if dash_title and len(dash_title) >= 3 and dash_title != original_title:
+                dash_clean = self.clean_title(dash_title) 
+                if dash_clean and dash_clean not in [self.clean_title(q.split(' ', 1)[1]) for q in queries if ' ' in q]:
+                    queries.append(f"{artist} {dash_clean}".strip())
+                    print(f"🎯 PRIORITY 2: Dash-cleaned query: '{artist} {dash_clean}'")
+        
+        # Pattern 2: Only remove parentheses that contain noise (feat, explicit, etc), not version info
+        # Check if parentheses contain version-related keywords before removing
+        paren_pattern = r'^(.+?)\s*\(([^)]+)\)(.*)$'
+        paren_match = re.search(paren_pattern, original_title)
+        if paren_match:
+            before_paren = paren_match.group(1).strip()
+            paren_content = paren_match.group(2).strip().lower()
+            after_paren = paren_match.group(3).strip()
+            
+            # Define what we consider "noise" vs "important version info"
+            noise_keywords = ['feat', 'ft', 'featuring', 'explicit', 'clean', 'radio edit', 'radio version']
+            version_keywords = ['extended', 'live', 'acoustic', 'remix', 'remaster', 'demo', 'instrumental', 'version', 'edit', 'mix']
+            
+            # Only remove parentheses if they contain noise, not version info
+            is_noise = any(keyword in paren_content for keyword in noise_keywords)
+            is_version = any(keyword in paren_content for keyword in version_keywords)
+            
+            if is_noise and not is_version and before_paren:
+                simple_title = (before_paren + ' ' + after_paren).strip()
+                if simple_title and len(simple_title) >= 3:
                     simple_clean = self.clean_title(simple_title)
                     if simple_clean and simple_clean not in [self.clean_title(q.split(' ', 1)[1]) for q in queries if ' ' in q]:
                         queries.append(f"{artist} {simple_clean}".strip())
-                        print(f"🎯 PRIORITY 2: Simple-cleaned query: '{artist} {simple_clean}'")
+                        print(f"🎯 PRIORITY 2: Noise-removed query: '{artist} {simple_clean}'")
         
         # PRIORITY 3: Original query (ONLY if no album was detected or if it's different)
         original_track_clean = self.clean_title(original_title)
