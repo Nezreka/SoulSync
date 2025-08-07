@@ -206,99 +206,49 @@ class PlaylistSyncService:
             self._cancelled = False
     
     async def _find_track_in_plex(self, spotify_track: SpotifyTrack) -> Tuple[Optional[PlexTrackInfo], float]:
-        """Find a track in Plex using the same robust search approach as Download Missing Tracks"""
+        """Find a track using the same improved database matching as Download Missing Tracks modal"""
         try:
             if not self.plex_client or not self.plex_client.is_connected():
                 logger.warning("Plex client not connected")
                 return None, 0.0
             
-            # Use same robust search logic as PlaylistTrackAnalysisWorker
+            # Use the SAME improved database matching as PlaylistTrackAnalysisWorker
+            from database.music_database import MusicDatabase
+            
             original_title = spotify_track.name
             
-            # Create title variations
-            unique_title_variations = []
-            original_clean = self.matching_engine.get_core_string(original_title)
-            unique_title_variations.append(original_clean)
-            
-            # Add cleaned version
-            cleaned_version = self.matching_engine.clean_title(original_title)
-            if cleaned_version != original_clean:
-                unique_title_variations.append(cleaned_version)
-            
-            all_potential_matches = []
-            found_match_ids = set()
-            
-            # Search by artist + title combinations
-            for artist in spotify_track.artists[:2]:  # Limit to first 2 artists
+            # Try each artist (same as modal logic)
+            for artist in spotify_track.artists:
                 if self._cancelled:
                     return None, 0.0
                 
-                artist_name = self.matching_engine.clean_artist(artist)
+                artist_name = artist if isinstance(artist, str) else artist
                 
-                for query_title in unique_title_variations:
-                    if self._cancelled:
-                        logger.debug(f"Sync cancelled during track search for '{original_title}'")
-                        return None, 0.0
+                # Use the improved database check_track_exists method
+                try:
+                    db = MusicDatabase()
+                    db_track, confidence = db.check_track_exists(original_title, artist_name, confidence_threshold=0.7)
                     
-                    potential_plex_matches = self.plex_client.search_tracks(
-                        title=query_title,
-                        artist=artist_name,
-                        limit=15
-                    )
-                    
-                    # Check cancellation after each search operation
-                    if self._cancelled:
-                        logger.debug(f"Sync cancelled after search for '{original_title}'")
-                        return None, 0.0
-                    
-                    for track in potential_plex_matches:
-                        if track.id not in found_match_ids:
-                            all_potential_matches.append(track)
-                            found_match_ids.add(track.id)
-                
-                # Early exit check for confident match
-                if all_potential_matches:
-                    match_result = self.matching_engine.find_best_match(spotify_track, all_potential_matches)
-                    if match_result.is_match:
-                        logger.debug(f"Early confident match found for '{original_title}'")
-                        return match_result.plex_track, match_result.confidence
-            
-            # Fallback: Title-only search
-            if not all_potential_matches:
-                if self._cancelled:
-                    logger.debug(f"Sync cancelled before title-only search for '{original_title}'")
-                    return None, 0.0
-                    
-                logger.debug(f"No artist-based matches found. Using title-only fallback for '{original_title}'")
-                for query_title in unique_title_variations:
-                    if self._cancelled:
-                        logger.debug(f"Sync cancelled during title-only search for '{original_title}'")
-                        return None, 0.0
+                    if db_track and confidence >= 0.7:
+                        logger.debug(f"✔️ Database match found for '{original_title}' by '{artist_name}': '{db_track.title}' with confidence {confidence:.2f}")
                         
-                    title_only_matches = self.plex_client.search_tracks(title=query_title, artist="", limit=10)
-                    
-                    if self._cancelled:
-                        logger.debug(f"Sync cancelled after title-only search for '{original_title}'")
-                        return None, 0.0
+                        # Convert database track to format compatible with existing code
+                        class MockPlexTrack:
+                            def __init__(self, db_track):
+                                self.id = str(db_track.id)
+                                self.title = db_track.title
+                                self.artist = db_track.artist_name
+                                self.album = db_track.album_title
+                                self.duration = db_track.duration
+                                
+                        return MockPlexTrack(db_track), confidence
                         
-                    for track in title_only_matches:
-                        if track.id not in found_match_ids:
-                            all_potential_matches.append(track)
-                            found_match_ids.add(track.id)
+                except Exception as db_error:
+                    logger.error(f"Error checking track existence for '{original_title}' by '{artist_name}': {db_error}")
+                    continue
             
-            if not all_potential_matches:
-                logger.debug(f"No Plex candidates found for '{original_title}'")
-                return None, 0.0
-            
-            # Final scoring
-            final_match_result = self.matching_engine.find_best_match(spotify_track, all_potential_matches)
-            
-            if final_match_result.is_match:
-                logger.debug(f"Match found for '{original_title}': '{final_match_result.plex_track.title}' (confidence: {final_match_result.confidence:.2f})")
-            else:
-                logger.debug(f"No confident match for '{original_title}' (best score: {final_match_result.confidence:.2f})")
-            
-            return final_match_result.plex_track, final_match_result.confidence
+            logger.debug(f"❌ No database match found for '{original_title}' by any of the artists {spotify_track.artists}")
+            return None, 0.0
             
         except Exception as e:
             logger.error(f"Error searching for track '{spotify_track.name}': {e}")
