@@ -24,14 +24,12 @@ class MatchResult:
 
 class MusicMatchingEngine:
     def __init__(self):
-        # The order of these patterns is important. More general patterns go first.
+        # Conservative title patterns - only remove clear noise, preserve meaningful differences like remixes
         self.title_patterns = [
-            # General patterns to remove all content in brackets/parentheses
-            r'\(.*\)',
-            r'\[.*\]',
-            # General pattern to remove everything after a hyphen, which is common for version info
-            r'\s-\s.*',
-            # Patterns to remove featuring artists from the title itself
+            # Only remove explicit/clean markers - preserve remixes, versions, and content after hyphens
+            r'\s*\(explicit\)',
+            r'\s*\(clean\)',
+            # Remove featuring artists from the title itself
             r'\sfeat\.?.*',
             r'\sft\.?.*',
             r'\sfeaturing.*'

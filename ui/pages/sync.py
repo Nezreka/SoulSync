@@ -200,18 +200,20 @@ class PlaylistTrackAnalysisWorker(QRunnable):
             # Get database instance
             db = get_database()
             
-            # --- Generate a list of title variations ---
+            # --- Generate conservative title variations (preserve meaningful differences) ---
             title_variations = [original_title]
-            if " - " in original_title:
-                title_variations.append(original_title.split(' - ')[0].strip())
             
+            # Only add cleaned version if it removes clear noise (not meaningful content like remixes)
             cleaned_for_search = clean_track_name_for_search(original_title)
             if cleaned_for_search.lower() != original_title.lower():
                 title_variations.append(cleaned_for_search)
 
+            # Use matching engine's conservative clean_title (no longer strips remixes/versions)
             base_title = self.matching_engine.clean_title(original_title)
             if base_title.lower() not in [t.lower() for t in title_variations]:
                 title_variations.append(base_title)
+            
+            # DO NOT strip content after dashes - this removes important remix/version info
 
             unique_title_variations = list(dict.fromkeys(title_variations))
             

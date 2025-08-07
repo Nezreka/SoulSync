@@ -7542,10 +7542,12 @@ class DownloadsPage(QWidget):
                 print(f"    Album name from album_info: '{album_info['album_name']}'")
                 print(f"    Original download item title: '{download_item.title}'")
                 
-                # Use clean track name from album_info if available
-                clean_track_name = album_info.get('clean_track_name', download_item.title)
-                if hasattr(download_item, '_spotify_clean_title'):
+                # Use the Spotify title information if available (most accurate for matched tracks)
+                clean_track_name = download_item.title
+                if hasattr(download_item, '_spotify_clean_title') and download_item._spotify_clean_title:
                     clean_track_name = download_item._spotify_clean_title
+                elif album_info.get('clean_track_name'):
+                    clean_track_name = album_info['clean_track_name']
                     
                 print(f"    Clean track name to use: '{clean_track_name}'")
                 
@@ -7564,10 +7566,12 @@ class DownloadsPage(QWidget):
                 
             else:
                 # Single track structure: Transfer/ARTIST/ARTIST - SINGLE/SINGLE.ext
-                # Use clean track name for single folder and filename
-                clean_track_name = album_info.get('clean_track_name', download_item.title) if album_info else download_item.title
-                if hasattr(download_item, '_spotify_clean_title'):
+                # Use the Spotify title information if available (most accurate for matched tracks)
+                clean_track_name = download_item.title
+                if hasattr(download_item, '_spotify_clean_title') and download_item._spotify_clean_title:
                     clean_track_name = download_item._spotify_clean_title
+                elif album_info and album_info.get('clean_track_name'):
+                    clean_track_name = album_info['clean_track_name']
                     
                 print(f"    Original download item title: '{download_item.title}'")
                 print(f"    Clean track name to use: '{clean_track_name}'")
@@ -8098,8 +8102,9 @@ class DownloadsPage(QWidget):
                     track_num = spotify_track_number
                     print(f"🎯 Using Spotify track number: {track_num}")
                     
-                    # Store the clean Spotify track name for use in file organization
-                    download_item._spotify_clean_title = clean_track_name
+                    # Store the clean Spotify track name for use in file organization (only if not already set)
+                    if not hasattr(download_item, '_spotify_clean_title') or not download_item._spotify_clean_title:
+                        download_item._spotify_clean_title = clean_track_name
                     download_item._spotify_clean_album = album_name
                     
                     # Extract album image URL from detailed track data
@@ -8147,7 +8152,9 @@ class DownloadsPage(QWidget):
                     # Get track number from metadata or filename as fallback
                     track_num = self._extract_track_number(download_item)
                     
-                    download_item._spotify_clean_title = clean_track_name
+                    # Only set if not already set (preserve original Spotify title from modal)
+                    if not hasattr(download_item, '_spotify_clean_title') or not download_item._spotify_clean_title:
+                        download_item._spotify_clean_title = clean_track_name
                     download_item._spotify_clean_album = album_name
                     
                     # Try to get album image URL from matched_album if available
@@ -8175,7 +8182,9 @@ class DownloadsPage(QWidget):
                 print(f"✅ Using cleaned Soulseek album context: '{clean_album}' (cleaned from '{download_item.album}')")
                 print(f"🧹 Cleaned track title: '{clean_title}' (cleaned from '{download_item.title}')")
                 
-                download_item._spotify_clean_title = clean_title
+                # Only set if not already set (preserve original Spotify title from modal)
+                if not hasattr(download_item, '_spotify_clean_title') or not download_item._spotify_clean_title:
+                    download_item._spotify_clean_title = clean_title
                 download_item._spotify_clean_album = clean_album
                 
                 # Try to get album image URL from matched_album if available
@@ -8196,7 +8205,9 @@ class DownloadsPage(QWidget):
             print(f"🎯 No album context found, defaulting to single track structure with cleaned title")
             clean_title = self._clean_track_title(download_item.title, artist.name)
             
-            download_item._spotify_clean_title = clean_title
+            # Only set if not already set (preserve original Spotify title from modal)
+            if not hasattr(download_item, '_spotify_clean_title') or not download_item._spotify_clean_title:
+                download_item._spotify_clean_title = clean_title
             
             # Try to get album image URL from matched_album if available
             album_image_url = None
@@ -8273,7 +8284,11 @@ class DownloadsPage(QWidget):
                         self.matching_engine.normalize_string(track_name)
                     )
                     
-                    if similarity > 0.7:  # Good match threshold
+                    # Use higher threshold for remix matching to ensure precision
+                    is_remix = any(word in clean_track.lower() for word in ['remix', 'mix', 'edit', 'version'])
+                    threshold = 0.9 if is_remix else 0.7  # Much stricter for remixes
+                    
+                    if similarity > threshold:
                         print(f"✅ FOUND: '{track_name}' (track #{track_number}) matches '{clean_track}' (similarity: {similarity:.2f})")
                         print(f"🎯 Forcing album classification for track in '{album.name}'")
                         
@@ -8282,7 +8297,7 @@ class DownloadsPage(QWidget):
                             'is_album': True,  # Always true - we found it in an album!
                             'album_name': album.name,
                             'track_number': track_number,
-                            'clean_track_name': track_name,  # Use Spotify's clean name
+                            'clean_track_name': clean_track,  # Use the ORIGINAL download title, not the database match
                             'album_image_url': album.image_url,
                             'confidence': similarity,
                             'source': 'album_context_search'

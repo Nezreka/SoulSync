@@ -1047,9 +1047,14 @@ class ArtistResultCard(QFrame):
     
     def mousePressEvent(self, event):
         """Handle click to select artist"""
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.artist_selected.emit(self.artist)
-        super().mousePressEvent(event)
+        try:
+            if event.button() == Qt.MouseButton.LeftButton:
+                self.artist_selected.emit(self.artist)
+            super().mousePressEvent(event)
+        except RuntimeError as e:
+            # Qt object has been deleted, ignore the event silently
+            print(f"⚠️ ArtistCard object deleted during mouse event: {e}")
+            pass
 
 class AlbumCard(QFrame):
     """Card widget for displaying album information"""
@@ -1485,12 +1490,17 @@ class AlbumCard(QFrame):
     
     def mousePressEvent(self, event):
         """Handle click for download"""
-        # Don't allow downloads if already downloading
-        if (event.button() == Qt.MouseButton.LeftButton and 
-            not self.progress_overlay.isVisible()):
-            print(f"🖱️ Album card clicked: {self.album.name} (owned: {self.is_owned})")
-            self.download_requested.emit(self.album)
-        super().mousePressEvent(event)
+        try:
+            # Don't allow downloads if already downloading
+            if (event.button() == Qt.MouseButton.LeftButton and 
+                not self.progress_overlay.isVisible()):
+                print(f"🖱️ Album card clicked: {self.album.name} (owned: {self.is_owned})")
+                self.download_requested.emit(self.album)
+            super().mousePressEvent(event)
+        except RuntimeError as e:
+            # Qt object has been deleted, ignore the event silently
+            print(f"⚠️ AlbumCard object deleted during mouse event: {e}")
+            pass
 
 class DownloadMissingAlbumTracksModal(QDialog):
     """Enhanced modal for downloading missing album tracks with live progress tracking"""
@@ -1978,7 +1988,10 @@ class DownloadMissingAlbumTracksModal(QDialog):
         else:
             self.download_in_progress = False
             self.cancel_btn.hide()
-            self.process_finished.emit() 
+            try:
+                self.process_finished.emit()
+            except RuntimeError as e:
+                print(f"⚠️ Modal object deleted during analysis complete signal: {e}")
             QMessageBox.information(self, "Analysis Complete", "All album tracks already exist in Plex! No downloads needed.")
             # Close with accept since all tracks are already available (success case)
             self.accept()
@@ -2384,7 +2397,10 @@ class DownloadMissingAlbumTracksModal(QDialog):
         self.cancel_btn.hide()
         
         # Emit process_finished signal to unlock UI
-        self.process_finished.emit()
+        try:
+            self.process_finished.emit()
+        except RuntimeError as e:
+            print(f"⚠️ Modal object deleted during downloads complete signal: {e}")
 
         # Determine the final message based on success or failure
         if self.permanently_failed_tracks:
@@ -2494,16 +2510,24 @@ class DownloadMissingAlbumTracksModal(QDialog):
         
     def on_cancel_clicked(self):
         """Handle Cancel button"""
-        self.cancel_operations()
-        self.process_finished.emit()
-        self.reject()
+        try:
+            self.cancel_operations()
+            self.process_finished.emit()
+            self.reject()
+        except RuntimeError as e:
+            print(f"⚠️ Modal object deleted during cancel: {e}")
+            pass
         
     def on_close_clicked(self):
         """Handle Close button"""
-        if self.cancel_requested or not self.download_in_progress:
-            self.cancel_operations()
-            self.process_finished.emit()
-        self.reject()
+        try:
+            if self.cancel_requested or not self.download_in_progress:
+                self.cancel_operations()
+                self.process_finished.emit()
+            self.reject()
+        except RuntimeError as e:
+            print(f"⚠️ Modal object deleted during close: {e}")
+            pass
         
     def cancel_operations(self):
         """Cancel any ongoing operations"""

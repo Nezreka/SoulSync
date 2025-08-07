@@ -943,27 +943,44 @@ class MusicDatabase:
         """Generate variations of track title for better matching"""
         variations = [title]  # Always include original
         
+        # IMPORTANT: Generate bracket/dash style variations for better matching
+        # Convert "Track - Instrumental" to "Track (Instrumental)" and vice versa
+        if ' - ' in title:
+            # Convert dash style to parentheses style
+            dash_parts = title.split(' - ', 1)
+            if len(dash_parts) == 2:
+                paren_version = f"{dash_parts[0]} ({dash_parts[1]})"
+                variations.append(paren_version)
+        
+        if '(' in title and ')' in title:
+            # Convert parentheses style to dash style
+            dash_version = re.sub(r'\s*\(([^)]+)\)\s*', r' - \1', title)
+            if dash_version != title:
+                variations.append(dash_version)
+        
         # Clean up the title
         title_lower = title.lower().strip()
         
-        # Common track title variations
+        # Conservative track title variations - only remove clear noise, preserve meaningful differences
         track_patterns = [
-            # Remove version/remix info
-            r'\s*\(.*version\)',
-            r'\s*\(.*remix\)',
-            r'\s*\(.*mix\)',
-            r'\s*\(.*edit\)',
-            r'\s*\(.*radio\)',
-            # Remove featuring artists
+            # Remove explicit/clean markers only
+            r'\s*\(explicit\)',
+            r'\s*\(clean\)',
+            r'\s*\[explicit\]',
+            r'\s*\[clean\]',
+            # Remove featuring artists in parentheses
             r'\s*\(.*feat\..*\)',
             r'\s*\(.*featuring.*\)',
             r'\s*\(.*ft\..*\)',
-            # Remove brackets/parentheses content
-            r'\s*\[.*\]',
-            r'\s*\(.*\)',
-            # Remove everything after dash
-            r'\s*-\s*.*'
+            # Remove radio/TV edit markers
+            r'\s*\(radio\s*edit\)',
+            r'\s*\(tv\s*edit\)',
+            r'\s*\[radio\s*edit\]',
+            r'\s*\[tv\s*edit\]',
         ]
+        
+        # DO NOT remove remixes, versions, or content after dashes
+        # These are meaningful distinctions that should not be collapsed
         
         for pattern in track_patterns:
             # Apply pattern to original title
@@ -1020,21 +1037,29 @@ class MusicDatabase:
             return 0.0
     
     def _clean_track_title_for_comparison(self, title: str) -> str:
-        """Clean track title for comparison by removing common noise"""
+        """Clean track title for comparison by normalizing brackets/dashes and removing noise"""
         cleaned = title.lower().strip()
         
-        # Remove common patterns that cause mismatches
+        # STEP 1: Normalize bracket/dash styles for consistent matching
+        # Convert all bracket styles to spaces for better matching
+        cleaned = re.sub(r'\s*[\[\(]\s*', ' ', cleaned)  # Convert opening brackets/parens to space
+        cleaned = re.sub(r'\s*[\]\)]\s*', ' ', cleaned)  # Convert closing brackets/parens to space
+        cleaned = re.sub(r'\s*-\s*', ' ', cleaned)       # Convert dashes to spaces too
+        
+        # STEP 2: Remove clear noise patterns
         patterns_to_remove = [
-            r'\s*\(.*\)',      # Remove anything in parentheses
-            r'\s*\[.*\]',      # Remove anything in brackets  
-            r'\s*-\s*.*',      # Remove everything after dash
-            r'\s*feat\..*',    # Remove featuring artists
-            r'\s*ft\..*',      # Remove ft. artists
-            r'\s*featuring.*', # Remove featuring
+            r'\s*explicit\s*',      # Remove explicit markers (now without brackets)
+            r'\s*clean\s*',         # Remove clean markers (now without brackets)  
+            r'\s*feat\..*',         # Remove featuring (now without brackets)
+            r'\s*featuring.*',      # Remove featuring (now without brackets)
+            r'\s*ft\..*',           # Remove ft. (now without brackets)
         ]
         
         for pattern in patterns_to_remove:
             cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE).strip()
+        
+        # STEP 3: Clean up extra spaces
+        cleaned = re.sub(r'\s+', ' ', cleaned).strip()
         
         return cleaned
     
