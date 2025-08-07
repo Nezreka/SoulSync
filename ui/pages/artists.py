@@ -439,6 +439,220 @@ class AlbumStatusProcessingWorker(QRunnable):
 
 
 
+class SinglesEPsLibraryWorker(QThread):
+    """Background worker for checking singles and EPs using track-level matching"""
+    check_completed = pyqtSignal(dict)  # Dict of release_name -> AlbumOwnershipStatus
+    release_matched = pyqtSignal(str, object)  # release_name, AlbumOwnershipStatus
+    check_failed = pyqtSignal(str)
+    
+    def __init__(self, releases, matching_engine):
+        super().__init__()
+        self.releases = releases
+        self.matching_engine = matching_engine
+        self._stop_requested = False
+    
+    def stop(self):
+        """Request to stop the check"""
+        self._stop_requested = True
+    
+    def run(self):
+        try:
+            print("🔍 Starting track-level matching for singles and EPs...")
+            release_statuses = {}  # release_name -> AlbumOwnershipStatus
+            
+            # Get database instance
+            db = get_database()
+            
+            if self._stop_requested:
+                return
+            
+            print(f"🎵 Checking {len(self.releases)} singles/EPs against database...")
+            
+            for i, release in enumerate(self.releases):
+                if self._stop_requested:
+                    return
+                
+                print(f"🎵 Checking release {i+1}/{len(self.releases)}: {release.name} ({release.total_tracks} tracks)")
+                
+                if release.total_tracks == 1:
+                    # SINGLE: Use track-level matching
+                    status = self._check_single_ownership(release, db)
+                else:
+                    # EP: Use track-by-track matching for completion percentage
+                    status = self._check_ep_ownership(release, db)
+                
+                release_statuses[release.name] = status
+                
+                # Emit individual match for real-time UI update
+                self.release_matched.emit(release.name, status)
+            
+            print(f"🎯 Singles/EPs check complete: {len(release_statuses)} releases processed")
+            self.check_completed.emit(release_statuses)
+            
+        except Exception as e:
+            error_msg = f"Error checking singles/EPs library: {e}"
+            print(f"❌ {error_msg}")
+            import traceback
+            traceback.print_exc()
+            self.check_failed.emit(error_msg)
+    
+    def _check_single_ownership(self, single_release, db):
+        """Check if a single track exists anywhere in the library"""
+        try:
+            # For singles, we need to get the track info from Spotify first
+            # Since the release object might not have track details
+            from core.spotify_client import SpotifyClient
+            spotify_client = SpotifyClient()
+            
+            if not spotify_client.is_authenticated():
+                # Fallback: use release name as track name
+                track_name = single_release.name
+                artist_name = single_release.artists[0] if single_release.artists else ""
+            else:
+                try:
+                    # Get full album data to get track info
+                    album_data = spotify_client.get_album(single_release.id)
+                    if album_data and album_data.get('tracks') and album_data['tracks']:
+                        track_name = album_data['tracks'][0]['name']
+                        artist_name = album_data['tracks'][0]['artists'][0]['name'] if album_data['tracks'][0]['artists'] else single_release.artists[0]
+                    else:
+                        # Fallback
+                        track_name = single_release.name
+                        artist_name = single_release.artists[0] if single_release.artists else ""
+                except:
+                    # Fallback if Spotify call fails
+                    track_name = single_release.name
+                    artist_name = single_release.artists[0] if single_release.artists else ""
+            
+            print(f"   🔍 Searching for single track: '{track_name}' by '{artist_name}'")
+            
+            # Search for the track anywhere in the library
+            db_track, confidence = db.check_track_exists(track_name, artist_name, confidence_threshold=0.7)
+            
+            if db_track and confidence >= 0.7:
+                print(f"   ✅ Single found: '{track_name}' in album '{db_track.album_title}' (confidence: {confidence:.2f})")
+                
+                # For singles, if we find the track, it's "complete"
+                return AlbumOwnershipStatus(
+                    album_name=single_release.name,
+                    is_owned=True,
+                    is_complete=True,
+                    is_nearly_complete=False,
+                    owned_tracks=1,
+                    expected_tracks=1,
+                    completion_ratio=1.0
+                )
+            else:
+                print(f"   ❌ Single not found: '{track_name}'")
+                return AlbumOwnershipStatus(
+                    album_name=single_release.name,
+                    is_owned=False,
+                    is_complete=False,
+                    is_nearly_complete=False,
+                    owned_tracks=0,
+                    expected_tracks=1,
+                    completion_ratio=0.0
+                )
+                
+        except Exception as e:
+            print(f"   ❌ Error checking single '{single_release.name}': {e}")
+            return AlbumOwnershipStatus(
+                album_name=single_release.name,
+                is_owned=False,
+                is_complete=False,
+                is_nearly_complete=False,
+                owned_tracks=0,
+                expected_tracks=1,
+                completion_ratio=0.0
+            )
+    
+    def _check_ep_ownership(self, ep_release, db):
+        """Check EP ownership by checking individual tracks"""
+        try:
+            # Get EP tracks from Spotify
+            from core.spotify_client import SpotifyClient
+            spotify_client = SpotifyClient()
+            
+            if not spotify_client.is_authenticated():
+                print(f"   ⚠️ Spotify not available, cannot check EP tracks for '{ep_release.name}'")
+                return AlbumOwnershipStatus(
+                    album_name=ep_release.name,
+                    is_owned=False,
+                    is_complete=False,
+                    is_nearly_complete=False,
+                    owned_tracks=0,
+                    expected_tracks=ep_release.total_tracks,
+                    completion_ratio=0.0
+                )
+            
+            try:
+                album_data = spotify_client.get_album(ep_release.id)
+                if not album_data or not album_data.get('tracks'):
+                    raise Exception("No track data available")
+                    
+                tracks = album_data['tracks']
+            except:
+                print(f"   ⚠️ Could not fetch EP tracks for '{ep_release.name}'")
+                return AlbumOwnershipStatus(
+                    album_name=ep_release.name,
+                    is_owned=False,
+                    is_complete=False,
+                    is_nearly_complete=False,
+                    owned_tracks=0,
+                    expected_tracks=ep_release.total_tracks,
+                    completion_ratio=0.0
+                )
+            
+            print(f"   🔍 Checking {len(tracks)} tracks in EP '{ep_release.name}'")
+            
+            owned_tracks = 0
+            expected_tracks = len(tracks)
+            
+            for track in tracks:
+                if self._stop_requested:
+                    break
+                    
+                track_name = track['name']
+                artist_name = track['artists'][0]['name'] if track['artists'] else (ep_release.artists[0] if ep_release.artists else "")
+                
+                # Search for this track
+                db_track, confidence = db.check_track_exists(track_name, artist_name, confidence_threshold=0.7)
+                
+                if db_track and confidence >= 0.7:
+                    owned_tracks += 1
+                    print(f"     ✅ Track found: '{track_name}'")
+                else:
+                    print(f"     ❌ Track missing: '{track_name}'")
+            
+            completion_ratio = owned_tracks / max(expected_tracks, 1)
+            is_complete = completion_ratio >= 0.9
+            is_nearly_complete = completion_ratio >= 0.8 and completion_ratio < 0.9
+            is_owned = owned_tracks > 0
+            
+            print(f"   📊 EP '{ep_release.name}': {owned_tracks}/{expected_tracks} tracks ({int(completion_ratio * 100)}%)")
+            
+            return AlbumOwnershipStatus(
+                album_name=ep_release.name,
+                is_owned=is_owned,
+                is_complete=is_complete,
+                is_nearly_complete=is_nearly_complete,
+                owned_tracks=owned_tracks,
+                expected_tracks=expected_tracks,
+                completion_ratio=completion_ratio
+            )
+            
+        except Exception as e:
+            print(f"   ❌ Error checking EP '{ep_release.name}': {e}")
+            return AlbumOwnershipStatus(
+                album_name=ep_release.name,
+                is_owned=False,
+                is_complete=False,
+                is_nearly_complete=False,
+                owned_tracks=0,
+                expected_tracks=ep_release.total_tracks,
+                completion_ratio=0.0
+            )
+
 class DatabaseLibraryWorker(QThread):
     """Background worker for checking database library with completeness info (replaces PlexLibraryWorker)"""
     library_checked = pyqtSignal(dict)  # Dict of album_name -> AlbumOwnershipStatus
@@ -1413,27 +1627,42 @@ class AlbumCard(QFrame):
             pass
         
         # Update status indicator
-        self.status_indicator.setStyleSheet("""
-            QLabel {
-                background: rgba(255, 193, 7, 0.9);
-                border-radius: 12px;
-                color: white;
-                font-size: 12px;
-                font-weight: bold;
-            }
-        """)
-        self.status_indicator.setText("⏳")
-        self.status_indicator.setToolTip("Album downloading...")
+        try:
+            if hasattr(self, 'status_indicator') and self.status_indicator:
+                self.status_indicator.setStyleSheet("""
+                    QLabel {
+                        background: rgba(255, 193, 7, 0.9);
+                        border-radius: 12px;
+                        color: white;
+                        font-size: 12px;
+                        font-weight: bold;
+                    }
+                """)
+                self.status_indicator.setText("⏳")
+                self.status_indicator.setToolTip("Album downloading...")
+        except (RuntimeError, AttributeError):
+            # Object has been deleted or is invalid, skip
+            pass
     
     def update_download_progress(self, completed_tracks: int, total_tracks: int, percentage: int):
         """Update download progress display"""
-        progress_text = f"📥 Downloading\n{completed_tracks}/{total_tracks} tracks\n{percentage}%"
-        self.progress_overlay.setText(progress_text)
-        self.progress_overlay.show()
+        try:
+            progress_text = f"📥 Downloading\n{completed_tracks}/{total_tracks} tracks\n{percentage}%"
+            if hasattr(self, 'progress_overlay') and self.progress_overlay:
+                self.progress_overlay.setText(progress_text)
+                self.progress_overlay.show()
+        except (RuntimeError, AttributeError):
+            # Progress overlay has been deleted, skip
+            pass
         
         # Update status indicator with progress
-        self.status_indicator.setText(f"{percentage}%")
-        self.status_indicator.setToolTip(f"Downloading: {completed_tracks}/{total_tracks} tracks ({percentage}%)")
+        try:
+            if hasattr(self, 'status_indicator') and self.status_indicator:
+                self.status_indicator.setText(f"{percentage}%")
+                self.status_indicator.setToolTip(f"Downloading: {completed_tracks}/{total_tracks} tracks ({percentage}%)")
+        except (RuntimeError, AttributeError):
+            # Status indicator has been deleted, skip
+            pass
     
     def set_download_completed(self):
         """Set album card to download completed state"""
@@ -1939,8 +2168,13 @@ class DownloadMissingAlbumTracksModal(QDialog):
     def on_begin_search_clicked(self):
         """Handle Begin Search button click - starts Plex analysis"""
         # Trigger UI updates on album card
-        if self.album_card:
-            self.album_card.set_download_in_progress()
+        try:
+            if self.album_card and hasattr(self.album_card, 'set_download_in_progress'):
+                self.album_card.set_download_in_progress()
+        except (RuntimeError, AttributeError):
+            # Album card object has been deleted, skip UI update
+            print("⚠️ Album card object deleted, skipping progress update")
+            pass
 
         self.begin_search_btn.hide()
         self.cancel_btn.show()
@@ -2577,10 +2811,14 @@ class ArtistsPage(QWidget):
         # State management
         self.selected_artist = None
         self.current_albums = []
+        self.all_releases = []  # Store all releases (albums + singles + eps)
+        self.albums_only = []   # Store only studio albums
+        self.singles_and_eps = []  # Store singles and EPs
         self.matched_count = 0
         self.artist_search_worker = None
         self.album_fetch_worker = None
         self.plex_library_worker = None
+        self.singles_eps_worker = None
         
         # Album download tracking
         self.album_downloads = {}  # {album_id: {total_tracks: X, completed_tracks: Y, active_downloads: [download_ids], album_card: card_ref}}
@@ -2942,18 +3180,63 @@ class ArtistsPage(QWidget):
         albums_layout.setContentsMargins(20, 16, 20, 20)
         albums_layout.setSpacing(16)
         
-        # Albums header
+        # Albums header with filter toggle buttons
         albums_header_layout = QHBoxLayout()
         
-        albums_title = QLabel("Albums")
+        # Left side: Title and filter buttons
+        title_and_filters_layout = QHBoxLayout()
+        title_and_filters_layout.setSpacing(15)
+        
+        albums_title = QLabel("Releases")
         albums_title.setFont(QFont("Arial", 16, QFont.Weight.Bold))
         albums_title.setStyleSheet("color: #ffffff;")
         
-        self.albums_status = QLabel("Loading albums...")
+        # Toggle buttons for filtering
+        self.current_filter = "albums"  # Default filter
+        
+        self.albums_button = QPushButton("Albums")
+        self.albums_button.setCheckable(True)
+        self.albums_button.setChecked(True)
+        self.albums_button.clicked.connect(lambda: self.set_filter("albums"))
+        
+        self.singles_eps_button = QPushButton("Singles & EPs")
+        self.singles_eps_button.setCheckable(True)
+        self.singles_eps_button.clicked.connect(lambda: self.set_filter("singles_eps"))
+        
+        # Style the toggle buttons
+        toggle_button_style = """
+            QPushButton {
+                background-color: rgba(255, 255, 255, 0.1);
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                border-radius: 12px;
+                padding: 6px 12px;
+                color: #b3b3b3;
+                font-size: 11px;
+                font-weight: 500;
+            }
+            QPushButton:checked {
+                background-color: rgba(29, 185, 84, 0.8);
+                border-color: rgba(29, 185, 84, 1.0);
+                color: #ffffff;
+            }
+            QPushButton:hover:!checked {
+                background-color: rgba(255, 255, 255, 0.15);
+                color: #ffffff;
+            }
+        """
+        
+        self.albums_button.setStyleSheet(toggle_button_style)
+        self.singles_eps_button.setStyleSheet(toggle_button_style)
+        
+        title_and_filters_layout.addWidget(albums_title)
+        title_and_filters_layout.addWidget(self.albums_button)
+        title_and_filters_layout.addWidget(self.singles_eps_button)
+        
+        self.albums_status = QLabel("Loading releases...")
         self.albums_status.setFont(QFont("Arial", 11))
         self.albums_status.setStyleSheet("color: #b3b3b3;")
         
-        albums_header_layout.addWidget(albums_title)
+        albums_header_layout.addLayout(title_and_filters_layout)
         albums_header_layout.addStretch()
         albums_header_layout.addWidget(self.albums_status)
         
@@ -2993,6 +3276,61 @@ class ArtistsPage(QWidget):
         layout.addWidget(albums_container, 1)
         
         return widget
+    
+    def set_filter(self, filter_type):
+        """Handle filter toggle button clicks"""
+        self.current_filter = filter_type
+        
+        # Update button states
+        self.albums_button.setChecked(filter_type == "albums")
+        self.singles_eps_button.setChecked(filter_type == "singles_eps")
+        
+        # Filter and display appropriate releases
+        if self.all_releases:  # Only filter if we have data
+            self.filter_and_display_releases()
+    
+    def classify_releases(self, releases):
+        """Classify releases into albums, singles, and EPs"""
+        albums = []
+        singles = []
+        eps = []
+        
+        for release in releases:
+            if release.album_type == 'album':
+                albums.append(release)
+            elif release.album_type == 'single':
+                if release.total_tracks == 1:
+                    singles.append(release)
+                else:  # 2+ tracks = EP
+                    eps.append(release)
+        
+        return albums, singles, eps
+    
+    def filter_and_display_releases(self):
+        """Filter releases based on current filter and display them"""
+        if self.current_filter == "albums":
+            releases_to_show = self.albums_only
+            status_text = f"Found {len(releases_to_show)} albums"
+        else:  # singles_eps
+            releases_to_show = self.singles_and_eps
+            singles_count = len([r for r in releases_to_show if r.total_tracks == 1])
+            eps_count = len([r for r in releases_to_show if r.total_tracks > 1])
+            status_text = f"Found {singles_count} singles, {eps_count} EPs"
+        
+        # Update status
+        self.albums_status.setText(status_text)
+        
+        # Store current releases for ownership checking
+        self.current_albums = releases_to_show
+        
+        # Display releases immediately (without ownership info)
+        self.display_albums(releases_to_show, set())
+        
+        # Start appropriate ownership check in background
+        if self.current_filter == "albums":
+            self.start_plex_library_check(releases_to_show)  # Use existing album-level matching
+        else:
+            self.start_singles_eps_library_check(releases_to_show)  # New track-level matching
     
     def perform_artist_search(self):
         """Perform artist search"""
@@ -3111,23 +3449,32 @@ class ArtistsPage(QWidget):
         self.album_fetch_worker.start()
     
     def on_albums_found(self, albums, artist):
-        """Handle album fetch results"""
+        """Handle album fetch results - now handles all release types"""
         if not albums:
-            self.albums_status.setText("No albums found")
+            self.albums_status.setText("No releases found")
             return
         
-        self.current_albums = albums
-        self.albums_status.setText(f"Found {len(albums)} releases • Checking Plex library...")
-
+        print(f"📀 Processing {len(albums)} releases for {artist.name}")
+        
+        # Store all releases and classify them
+        self.all_releases = albums
+        self.albums_only, singles, eps = self.classify_releases(albums)
+        self.singles_and_eps = singles + eps
+        
+        print(f"📊 Classification: {len(self.albums_only)} albums, {len(singles)} singles, {len(eps)} EPs")
         
         # Initialize match counter for real-time updates
         self.matched_count = 0
         
-        # Display albums immediately (without ownership info)
-        self.display_albums(albums, set())
+        # Auto-switch to Singles & EPs if no albums available
+        if len(self.albums_only) == 0 and len(self.singles_and_eps) > 0:
+            print("📀 No albums found, automatically switching to Singles & EPs view")
+            self.current_filter = "singles_eps"
+            self.albums_button.setChecked(False)
+            self.singles_eps_button.setChecked(True)
         
-        # Start Plex library check in background - will update UI when complete
-        self.start_plex_library_check(albums)
+        # Display based on current filter
+        self.filter_and_display_releases()
     
     def display_albums(self, albums, ownership_info):
         """Display albums in the grid - supports legacy set or new dict of AlbumOwnershipStatus"""
@@ -3170,6 +3517,32 @@ class ArtistsPage(QWidget):
                 col = 0
                 row += 1
     
+    def start_singles_eps_library_check(self, releases):
+        """Start track-level library check for singles and EPs"""
+        if not releases:
+            return
+        
+        # Update status to show we're checking
+        singles_count = len([r for r in releases if r.total_tracks == 1])
+        eps_count = len([r for r in releases if r.total_tracks > 1])
+        self.albums_status.setText(f"Found {singles_count} singles, {eps_count} EPs • Checking library...")
+        
+        # Show toast for library check start
+        if hasattr(self, 'toast_manager') and self.toast_manager:
+            self.toast_manager.info("Checking your library for owned singles and EPs...")
+        
+        # Stop any existing worker
+        if hasattr(self, 'singles_eps_worker') and self.singles_eps_worker:
+            self.singles_eps_worker.stop()
+            self.singles_eps_worker.wait()
+        
+        # Start new worker for track-level matching
+        self.singles_eps_worker = SinglesEPsLibraryWorker(releases, MusicMatchingEngine())
+        self.singles_eps_worker.release_matched.connect(self.on_single_ep_matched)
+        self.singles_eps_worker.check_completed.connect(self.on_singles_eps_library_checked)
+        self.singles_eps_worker.check_failed.connect(self.on_singles_eps_check_failed)
+        self.singles_eps_worker.start()
+
     def start_plex_library_check(self, albums):
         """Start Plex library check in background"""
         # Show toast for Plex check start
@@ -3284,9 +3657,77 @@ class ArtistsPage(QWidget):
             # Display albums without ownership info
             self.display_albums(self.current_albums, set())
     
+    def on_single_ep_matched(self, release_name, ownership_status):
+        """Handle real-time single/EP match results"""
+        if ownership_status.is_owned:
+            if ownership_status.is_complete:
+                print(f"🎯 Single/EP match: '{release_name}' (complete)")
+            else:
+                print(f"🎯 Single/EP match: '{release_name}' (partial {int(ownership_status.completion_ratio * 100)}%)")
+        
+        # Find the corresponding card and update it
+        for i in range(self.albums_grid_layout.count()):
+            item = self.albums_grid_layout.itemAt(i)
+            if item:
+                card = item.widget()
+                if isinstance(card, AlbumCard) and card.album.name == release_name:
+                    card.update_ownership(ownership_status)
+                    break
+
+    def on_singles_eps_library_checked(self, release_statuses):
+        """Handle singles/EPs library check completion"""
+        print(f"📨 Singles/EPs check completed: {len(release_statuses)} statuses")
+        
+        # Count results for summary
+        complete_count = sum(1 for status in release_statuses.values() if status.is_complete)
+        nearly_complete_count = sum(1 for status in release_statuses.values() if status.is_nearly_complete)
+        partial_count = sum(1 for status in release_statuses.values() if status.is_owned and not status.is_complete and not status.is_nearly_complete)
+        missing_count = sum(1 for status in release_statuses.values() if not status.is_owned)
+        total_count = len(release_statuses)
+        
+        # Update status text with results
+        singles_count = len([r for r in self.singles_and_eps if r.total_tracks == 1])
+        eps_count = len([r for r in self.singles_and_eps if r.total_tracks > 1])
+        owned_count = complete_count + nearly_complete_count + partial_count
+        self.albums_status.setText(f"Found {singles_count} singles, {eps_count} EPs • {owned_count} owned")
+        
+        # Show toast notifications
+        if hasattr(self, 'toast_manager') and self.toast_manager:
+            if owned_count == 0:
+                self.toast_manager.info(f"No releases found in your library ({total_count} available for download)")
+            else:
+                if complete_count > 0 and (nearly_complete_count > 0 or partial_count > 0):
+                    self.toast_manager.success(f"Found {complete_count} complete, {nearly_complete_count + partial_count} partial releases")
+                elif complete_count > 0:
+                    self.toast_manager.success(f"Found {complete_count} complete releases")
+                else:
+                    self.toast_manager.success(f"Found {owned_count} partial releases")
+        
+        print(f"✅ Singles/EPs check complete: {complete_count} complete, {nearly_complete_count} nearly complete, {partial_count} partial, {missing_count} missing out of {total_count} releases")
+        
+        # Update the display with the final ownership statuses
+        self.display_albums(self.current_albums, release_statuses)
+
+    def on_singles_eps_check_failed(self, error):
+        """Handle singles/EPs check failure"""
+        print(f"❌ Singles/EPs library check failed: {error}")
+        
+        # Update status
+        singles_count = len([r for r in self.singles_and_eps if r.total_tracks == 1])
+        eps_count = len([r for r in self.singles_and_eps if r.total_tracks > 1])
+        self.albums_status.setText(f"Found {singles_count} singles, {eps_count} EPs • Check failed")
+        
+        # Show error toast
+        if hasattr(self, 'toast_manager') and self.toast_manager:
+            self.toast_manager.error("Library connection failed - cannot check owned releases")
+        
+        if self.current_albums:
+            # Display releases without ownership info
+            self.display_albums(self.current_albums, set())
+
     def on_album_fetch_failed(self, error):
         """Handle album fetch failure"""
-        self.albums_status.setText(f"Failed to load albums: {error}")
+        self.albums_status.setText(f"Failed to load releases: {error}")
     
     def on_album_download_requested(self, album: Album):
         """Handle album download request from an AlbumCard using new modal system."""
@@ -3317,31 +3758,33 @@ class ArtistsPage(QWidget):
         
         # Check if there's already an active session for this album
         if album.id in self.active_album_sessions:
-            print(f"🔄 Resuming existing download session for album: {album.name}")
             existing_session = self.active_album_sessions[album.id]
             existing_modal = existing_session.get('modal')
             
-            # Show toast notification for already active session
-            if hasattr(self, 'toast_manager') and self.toast_manager:
-                self.toast_manager.info(f"Downloads already in progress for '{album.name}'")
-            
             # Check if the modal still exists and is valid
-            if existing_modal and not existing_modal.isVisible():
-                try:
-                    # Show the existing modal
-                    existing_modal.show()
+            try:
+                if existing_modal and existing_modal.isVisible():
+                    print(f"🔄 Resuming existing active modal for album: {album.name}")
+                    # Modal is already visible and active, just bring it to front
                     existing_modal.activateWindow()
                     existing_modal.raise_()
+                    
+                    # Show toast notification
+                    if hasattr(self, 'toast_manager') and self.toast_manager:
+                        self.toast_manager.info(f"Downloads already in progress for '{album.name}'")
                     return
-                except RuntimeError:
-                    # Modal was deleted, remove from sessions
-                    print("⚠️ Existing modal was deleted, creating new session")
+                elif existing_modal:
+                    # Modal exists but is not visible - might be finished/cancelled
+                    print("⚠️ Found hidden modal - likely finished or cancelled, creating fresh modal")
                     del self.active_album_sessions[album.id]
-            elif existing_modal and existing_modal.isVisible():
-                # Modal is already visible, just bring it to front
-                existing_modal.activateWindow()
-                existing_modal.raise_()
-                return
+                else:
+                    # No modal reference, clean up stale session
+                    print("⚠️ Stale session found, cleaning up")
+                    del self.active_album_sessions[album.id]
+            except RuntimeError:
+                # Modal was deleted, remove from sessions
+                print("⚠️ Existing modal was deleted, creating fresh session")
+                del self.active_album_sessions[album.id]
         
         print("🚀 Fetching album tracks and creating DownloadMissingAlbumTracksModal...")
         
@@ -3422,13 +3865,13 @@ class ArtistsPage(QWidget):
         
         # Clean up the session when modal is definitely closing
         if album_id in self.active_album_sessions:
+            # Always remove session when modal closes (whether accepted or cancelled)
+            # This ensures a fresh modal is created when user clicks the album again
+            del self.active_album_sessions[album_id]
             if result == 1:  # QDialog.Accepted = 1 (downloads completed or all tracks exist)
-                # Remove session since downloads are complete
-                del self.active_album_sessions[album_id]
                 print(f"🗑️ Removed completed session for album {album_id}")
             else:
-                # Keep session for resumption, but hide the modal for now
-                print(f"💾 Keeping session for album {album_id} for potential resumption")
+                print(f"🗑️ Removed cancelled session for album {album_id} - fresh modal will be created on next click")
         
         if album_card:
             try:
@@ -4263,6 +4706,11 @@ class ArtistsPage(QWidget):
             else:
                 print("   ⚠️ Plex library worker did not stop within timeout")
             self.plex_library_worker = None
+            
+        if hasattr(self, 'singles_eps_worker') and self.singles_eps_worker:
+            self.singles_eps_worker.stop()
+            self.singles_eps_worker.wait()
+            self.singles_eps_worker = None
             workers_stopped += 1
         
         if workers_stopped > 0:
