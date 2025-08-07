@@ -393,6 +393,21 @@ class MusicDatabase:
             logger.error(f"Error inserting/updating track {getattr(plex_track, 'title', 'Unknown')}: {e}")
             return False
     
+    def track_exists(self, track_id: int) -> bool:
+        """Check if a track exists in the database by Plex ID"""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            cursor.execute("SELECT 1 FROM tracks WHERE id = ? LIMIT 1", (track_id,))
+            result = cursor.fetchone()
+            
+            return result is not None
+            
+        except Exception as e:
+            logger.error(f"Error checking if track {track_id} exists: {e}")
+            return False
+    
     def get_tracks_by_album(self, album_id: int) -> List[DatabaseTrack]:
         """Get all tracks by album ID"""
         try:
