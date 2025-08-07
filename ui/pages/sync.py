@@ -16,6 +16,7 @@ import asyncio
 from core.matching_engine import MusicMatchingEngine
 from ui.components.toast_manager import ToastType
 from database.music_database import get_database
+from core.plex_scan_manager import PlexScanManager
 
 # Define constants for storage
 STORAGE_DIR = "storage"
@@ -1984,6 +1985,11 @@ class SyncPage(QWidget):
         self.thread_pool = QThreadPool()
         self.thread_pool.setMaxThreadCount(3)  # Limit concurrent Spotify API calls
         
+        # Initialize Plex scan manager
+        self.scan_manager = None
+        if self.plex_client:
+            self.scan_manager = PlexScanManager(self.plex_client, delay_seconds=60)
+        
         self.setup_ui()
         
         # Don't auto-load on startup, but do auto-load when page becomes visible
@@ -3564,6 +3570,7 @@ class DownloadMissingTracksModal(QDialog):
         self.playlist = playlist
         self.playlist_item = playlist_item
         self.parent_page = parent_page
+        self.parent_sync_page = parent_page  # Reference to sync page for scan manager
         self.downloads_page = downloads_page
         self.matching_engine = MusicMatchingEngine()
         # State tracking
@@ -4163,6 +4170,7 @@ class DownloadMissingTracksModal(QDialog):
         
         # Update UI to show the new download has been queued
         spotify_based_result = self.create_spotify_based_search_result_from_validation(slskd_result, spotify_metadata)
+        print(f"🔧 Updating table at index {table_index} to '... Queued' for manual retry")
         self.track_table.setItem(table_index, 4, QTableWidgetItem("... Queued"))
         
         # Start the actual download process
@@ -4380,6 +4388,7 @@ class DownloadMissingTracksModal(QDialog):
         
         track_info['completed'] = True
         if success:
+            print(f"🔧 Track {download_index} completed successfully - updating table index {track_info['table_index']} to '✅ Downloaded'")
             self.track_table.setItem(track_info['table_index'], 4, QTableWidgetItem("✅ Downloaded"))
             self.downloaded_tracks_count += 1
             # --- FIX ---
@@ -4387,6 +4396,7 @@ class DownloadMissingTracksModal(QDialog):
             self.downloaded_count_label.setText(str(self.downloaded_tracks_count))
             self.successful_downloads += 1
         else:
+            print(f"🔧 Track {download_index} failed - updating table index {track_info['table_index']} to '❌ Failed'")
             self.track_table.setItem(track_info['table_index'], 4, QTableWidgetItem("❌ Failed"))
             self.failed_downloads += 1
             if track_info not in self.permanently_failed_tracks:
@@ -4421,9 +4431,13 @@ class DownloadMissingTracksModal(QDialog):
 
     def on_manual_match_resolved(self, resolved_track_info):
         """Handles a track being successfully resolved by the ManualMatchModal."""
+        print(f"🔧 Manual match resolved - download_index: {resolved_track_info.get('download_index')}, table_index: {resolved_track_info.get('table_index')}")
         original_failed_track = next((t for t in self.permanently_failed_tracks if t['download_index'] == resolved_track_info['download_index']), None)
         if original_failed_track:
             self.permanently_failed_tracks.remove(original_failed_track)
+            print(f"✅ Removed track from permanently_failed_tracks - remaining: {len(self.permanently_failed_tracks)}")
+        else:
+            print("⚠️ Could not find original failed track to remove")
         self.update_failed_matches_button()
             
     def find_track_index_in_playlist(self, spotify_track):
@@ -4441,6 +4455,10 @@ class DownloadMissingTracksModal(QDialog):
             
             # The process_finished signal is still emitted to unlock the main UI.
             self.process_finished.emit()
+            
+            # Request Plex library scan if we have successful downloads
+            if self.successful_downloads > 0 and hasattr(self, 'parent_sync_page') and self.parent_sync_page.scan_manager:
+                self.parent_sync_page.scan_manager.request_scan(f"Playlist download completed ({self.successful_downloads} tracks)")
 
             # Determine the final message based on success or failure.
             if self.permanently_failed_tracks:
