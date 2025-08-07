@@ -458,66 +458,215 @@ class MusicDatabase:
             return []
     
     def search_tracks(self, title: str = "", artist: str = "", limit: int = 50) -> List[DatabaseTrack]:
-        """Search tracks by title and/or artist name with fuzzy matching"""
+        """Search tracks by title and/or artist name with Unicode-aware fuzzy matching"""
         try:
+            if not title and not artist:
+                return []
+            
             conn = self._get_connection()
             cursor = conn.cursor()
             
-            # Build dynamic query based on provided parameters
-            where_conditions = []
-            params = []
+            # STRATEGY 1: Try basic SQL LIKE search first (fastest)
+            basic_results = self._search_tracks_basic(cursor, title, artist, limit)
             
-            if title:
-                where_conditions.append("tracks.title LIKE ?")
-                params.append(f"%{title}%")
+            if basic_results:
+                logger.debug(f"🔍 Basic search found {len(basic_results)} results")
+                return basic_results
             
-            if artist:
-                where_conditions.append("artists.name LIKE ?")
-                params.append(f"%{artist}%")
+            # STRATEGY 2: If basic search fails and we have Unicode support, try normalized search
+            try:
+                from unidecode import unidecode
+                unicode_support = True
+            except ImportError:
+                unicode_support = False
             
-            if not where_conditions:
-                # If no search criteria, return empty list
-                return []
+            if unicode_support:
+                normalized_results = self._search_tracks_unicode_fallback(cursor, title, artist, limit)
+                if normalized_results:
+                    logger.debug(f"🔍 Unicode fallback search found {len(normalized_results)} results")
+                    return normalized_results
             
-            where_clause = " AND ".join(where_conditions)
-            params.append(limit)
+            # STRATEGY 3: Last resort - broader fuzzy search with Python filtering
+            fuzzy_results = self._search_tracks_fuzzy_fallback(cursor, title, artist, limit)
+            if fuzzy_results:
+                logger.debug(f"🔍 Fuzzy fallback search found {len(fuzzy_results)} results")
             
-            cursor.execute(f"""
-                SELECT tracks.*, artists.name as artist_name, albums.title as album_title
-                FROM tracks
-                JOIN artists ON tracks.artist_id = artists.id
-                JOIN albums ON tracks.album_id = albums.id
-                WHERE {where_clause}
-                ORDER BY tracks.title, artists.name
-                LIMIT ?
-            """, params)
-            
-            rows = cursor.fetchall()
-            
-            tracks = []
-            for row in rows:
-                track = DatabaseTrack(
-                    id=row['id'],
-                    album_id=row['album_id'],
-                    artist_id=row['artist_id'],
-                    title=row['title'],
-                    track_number=row['track_number'],
-                    duration=row['duration'],
-                    file_path=row['file_path'],
-                    bitrate=row['bitrate'],
-                    created_at=datetime.fromisoformat(row['created_at']) if row['created_at'] else None,
-                    updated_at=datetime.fromisoformat(row['updated_at']) if row['updated_at'] else None
-                )
-                # Add artist and album info for compatibility with Plex responses
-                track.artist_name = row['artist_name']
-                track.album_title = row['album_title']
-                tracks.append(track)
-            
-            return tracks
+            return fuzzy_results
             
         except Exception as e:
             logger.error(f"Error searching tracks with title='{title}', artist='{artist}': {e}")
             return []
+    
+    def _search_tracks_basic(self, cursor, title: str, artist: str, limit: int) -> List[DatabaseTrack]:
+        """Basic SQL LIKE search - fastest method"""
+        where_conditions = []
+        params = []
+        
+        if title:
+            where_conditions.append("tracks.title LIKE ?")
+            params.append(f"%{title}%")
+        
+        if artist:
+            where_conditions.append("artists.name LIKE ?")
+            params.append(f"%{artist}%")
+        
+        if not where_conditions:
+            return []
+        
+        where_clause = " AND ".join(where_conditions)
+        params.append(limit)
+        
+        cursor.execute(f"""
+            SELECT tracks.*, artists.name as artist_name, albums.title as album_title
+            FROM tracks
+            JOIN artists ON tracks.artist_id = artists.id
+            JOIN albums ON tracks.album_id = albums.id
+            WHERE {where_clause}
+            ORDER BY tracks.title, artists.name
+            LIMIT ?
+        """, params)
+        
+        return self._rows_to_tracks(cursor.fetchall())
+    
+    def _search_tracks_unicode_fallback(self, cursor, title: str, artist: str, limit: int) -> List[DatabaseTrack]:
+        """Unicode-aware fallback search - tries normalized versions"""
+        from unidecode import unidecode
+        
+        # Normalize search terms
+        title_norm = unidecode(title).lower() if title else ""
+        artist_norm = unidecode(artist).lower() if artist else ""
+        
+        # Try searching with normalized versions
+        where_conditions = []
+        params = []
+        
+        if title:
+            where_conditions.append("LOWER(tracks.title) LIKE ?")
+            params.append(f"%{title_norm}%")
+        
+        if artist:
+            where_conditions.append("LOWER(artists.name) LIKE ?")
+            params.append(f"%{artist_norm}%")
+        
+        if not where_conditions:
+            return []
+        
+        where_clause = " AND ".join(where_conditions)
+        params.append(limit * 2)  # Get more results for filtering
+        
+        cursor.execute(f"""
+            SELECT tracks.*, artists.name as artist_name, albums.title as album_title
+            FROM tracks
+            JOIN artists ON tracks.artist_id = artists.id
+            JOIN albums ON tracks.album_id = albums.id
+            WHERE {where_clause}
+            ORDER BY tracks.title, artists.name
+            LIMIT ?
+        """, params)
+        
+        rows = cursor.fetchall()
+        
+        # Filter results with proper Unicode normalization
+        filtered_tracks = []
+        for row in rows:
+            db_title_norm = unidecode(row['title'].lower()) if row['title'] else ""
+            db_artist_norm = unidecode(row['artist_name'].lower()) if row['artist_name'] else ""
+            
+            title_matches = not title or title_norm in db_title_norm
+            artist_matches = not artist or artist_norm in db_artist_norm
+            
+            if title_matches and artist_matches:
+                filtered_tracks.append(row)
+                if len(filtered_tracks) >= limit:
+                    break
+        
+        return self._rows_to_tracks(filtered_tracks)
+    
+    def _search_tracks_fuzzy_fallback(self, cursor, title: str, artist: str, limit: int) -> List[DatabaseTrack]:
+        """Broadest fuzzy search - partial word matching"""
+        # Get broader results by searching for individual words
+        search_terms = []
+        if title:
+            # Split title into words and search for each
+            title_words = [w.strip() for w in title.lower().split() if len(w.strip()) >= 3]
+            search_terms.extend(title_words)
+        
+        if artist:
+            # Split artist into words and search for each
+            artist_words = [w.strip() for w in artist.lower().split() if len(w.strip()) >= 3]
+            search_terms.extend(artist_words)
+        
+        if not search_terms:
+            return []
+        
+        # Build a query that searches for any of the words
+        like_conditions = []
+        params = []
+        
+        for term in search_terms[:5]:  # Limit to 5 terms to avoid too broad search
+            like_conditions.append("(LOWER(tracks.title) LIKE ? OR LOWER(artists.name) LIKE ?)")
+            params.extend([f"%{term}%", f"%{term}%"])
+        
+        if not like_conditions:
+            return []
+        
+        where_clause = " OR ".join(like_conditions)
+        params.append(limit * 3)  # Get more results for scoring
+        
+        cursor.execute(f"""
+            SELECT tracks.*, artists.name as artist_name, albums.title as album_title
+            FROM tracks
+            JOIN artists ON tracks.artist_id = artists.id
+            JOIN albums ON tracks.album_id = albums.id
+            WHERE {where_clause}
+            ORDER BY tracks.title, artists.name
+            LIMIT ?
+        """, params)
+        
+        rows = cursor.fetchall()
+        
+        # Score and filter results
+        scored_results = []
+        for row in rows:
+            # Simple scoring based on how many search terms match
+            score = 0
+            db_title_lower = row['title'].lower()
+            db_artist_lower = row['artist_name'].lower()
+            
+            for term in search_terms:
+                if term in db_title_lower or term in db_artist_lower:
+                    score += 1
+            
+            if score > 0:
+                scored_results.append((score, row))
+        
+        # Sort by score and take top results
+        scored_results.sort(key=lambda x: x[0], reverse=True)
+        top_rows = [row for score, row in scored_results[:limit]]
+        
+        return self._rows_to_tracks(top_rows)
+    
+    def _rows_to_tracks(self, rows) -> List[DatabaseTrack]:
+        """Convert database rows to DatabaseTrack objects"""
+        tracks = []
+        for row in rows:
+            track = DatabaseTrack(
+                id=row['id'],
+                album_id=row['album_id'],
+                artist_id=row['artist_id'],
+                title=row['title'],
+                track_number=row['track_number'],
+                duration=row['duration'],
+                file_path=row['file_path'],
+                bitrate=row['bitrate'],
+                created_at=datetime.fromisoformat(row['created_at']) if row['created_at'] else None,
+                updated_at=datetime.fromisoformat(row['updated_at']) if row['updated_at'] else None
+            )
+            # Add artist and album info for compatibility with Plex responses
+            track.artist_name = row['artist_name']
+            track.album_title = row['album_title']
+            tracks.append(track)
+        return tracks
     
     def search_albums(self, title: str = "", artist: str = "", limit: int = 50) -> List[DatabaseAlbum]:
         """Search albums by title and/or artist name with fuzzy matching"""
@@ -1007,12 +1156,43 @@ class MusicDatabase:
         
         return unique_variations
     
-    def _calculate_track_confidence(self, search_title: str, search_artist: str, db_track: DatabaseTrack) -> float:
-        """Calculate confidence score for track match with enhanced cleaning"""
+    def _normalize_for_comparison(self, text: str) -> str:
+        """Normalize text for comparison with Unicode accent handling"""
+        if not text:
+            return ""
+        
+        # Try to use unidecode for accent normalization, fallback to basic if not available
         try:
-            # Direct similarity
-            title_similarity = self._string_similarity(search_title.lower(), db_track.title.lower())
-            artist_similarity = self._string_similarity(search_artist.lower(), db_track.artist_name.lower())
+            from unidecode import unidecode
+            # Convert accents: é→e, ñ→n, ü→u, etc.
+            normalized = unidecode(text)
+        except ImportError:
+            # Fallback: basic normalization without accent handling
+            normalized = text
+            logger.warning("unidecode not available, accent matching may be limited")
+        
+        # Convert to lowercase and strip
+        return normalized.lower().strip()
+    
+    def _calculate_track_confidence(self, search_title: str, search_artist: str, db_track: DatabaseTrack) -> float:
+        """Calculate confidence score for track match with enhanced cleaning and Unicode normalization"""
+        try:
+            # Unicode-aware normalization for accent matching (é→e, ñ→n, etc.)
+            search_title_norm = self._normalize_for_comparison(search_title)
+            search_artist_norm = self._normalize_for_comparison(search_artist)
+            db_title_norm = self._normalize_for_comparison(db_track.title)
+            db_artist_norm = self._normalize_for_comparison(db_track.artist_name)
+            
+            # Debug logging for Unicode normalization
+            if search_title != search_title_norm or search_artist != search_artist_norm or \
+               db_track.title != db_title_norm or db_track.artist_name != db_artist_norm:
+                logger.debug(f"🔤 Unicode normalization:")
+                logger.debug(f"   Search: '{search_title}' → '{search_title_norm}' | '{search_artist}' → '{search_artist_norm}'")
+                logger.debug(f"   Database: '{db_track.title}' → '{db_title_norm}' | '{db_track.artist_name}' → '{db_artist_norm}'")
+            
+            # Direct similarity with Unicode normalization
+            title_similarity = self._string_similarity(search_title_norm, db_title_norm)
+            artist_similarity = self._string_similarity(search_artist_norm, db_artist_norm)
             
             # Also try with cleaned versions (removing parentheses, brackets, etc.)
             clean_search_title = self._clean_track_title_for_comparison(search_title)
