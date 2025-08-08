@@ -134,11 +134,40 @@ class MusicMatchingEngine:
         return self.normalize_string(cleaned)
     
     def similarity_score(self, str1: str, str2: str) -> float:
-        """Calculates similarity score between two strings."""
+        """Calculates similarity score between two strings with enhanced version handling."""
         if not str1 or not str2:
             return 0.0
         
-        return SequenceMatcher(None, str1, str2).ratio()
+        # Standard similarity
+        standard_ratio = SequenceMatcher(None, str1, str2).ratio()
+        
+        # Enhanced logic: Check if one string is a version of the other
+        # This handles cases like "Back & forth" vs "Back & forth original mix"
+        shorter, longer = (str1, str2) if len(str1) <= len(str2) else (str2, str1)
+        
+        # If the shorter string is at the start of the longer string
+        if longer.startswith(shorter):
+            # Extract the extra content
+            extra_content = longer[len(shorter):].strip()
+            
+            # Check if the extra content looks like version info
+            version_keywords = [
+                'original mix', 'radio mix', 'club mix', 'extended mix',
+                'slowed', 'reverb', 'sped up', 'acoustic', 'remix', 'remaster',
+                'live', 'demo', 'instrumental', 'clean', 'explicit', 
+                'radio edit', 'extended', 'version'
+            ]
+            
+            # Normalize extra content for comparison
+            extra_normalized = extra_content.lower().strip(' -()[]')
+            
+            # If the extra content matches version keywords, boost the similarity
+            for keyword in version_keywords:
+                if keyword in extra_normalized:
+                    # High similarity but not perfect (to distinguish from exact matches)
+                    return max(standard_ratio, 0.85)
+        
+        return standard_ratio
     
     def duration_similarity(self, duration1: int, duration2: int) -> float:
         """Calculates similarity score based on track duration (in ms)."""
@@ -339,16 +368,33 @@ class MusicMatchingEngine:
         # PRIORITY 2: Try simplified versions, but preserve important version info
         # Only remove content that's likely to be album names or noise, not version info
         
-        # Pattern 1: Remove content after " - " (likely album names)
-        dash_pattern = r'^([^-]+?)(?:\s*-\s*.+)?$'
+        # Pattern 1: Intelligently handle content after " - "
+        # Only remove if it looks like album names, preserve version info like "slowed", "remix", etc.
+        dash_pattern = r'^([^-]+?)\s*-\s*(.+)$'
         match = re.search(dash_pattern, original_title.strip())
         if match:
-            dash_title = match.group(1).strip()
-            if dash_title and len(dash_title) >= 3 and dash_title != original_title:
-                dash_clean = self.clean_title(dash_title) 
+            title_part = match.group(1).strip()
+            dash_content = match.group(2).strip().lower()
+            
+            # Define version keywords that should be preserved
+            preserve_keywords = [
+                'slowed', 'reverb', 'sped up', 'speed up', 'spedup', 'slowdown',
+                'remix', 'mix', 'edit', 'version', 'remaster', 'acoustic', 
+                'live', 'demo', 'instrumental', 'radio', 'extended', 'club',
+                'original', 'clean', 'explicit', 'mashup', 'bootleg'
+            ]
+            
+            # Check if the dash content contains version keywords
+            should_preserve = any(keyword in dash_content for keyword in preserve_keywords)
+            
+            if not should_preserve and title_part and len(title_part) >= 3:
+                # This looks like album content, safe to remove
+                dash_clean = self.clean_title(title_part)
                 if dash_clean and dash_clean not in [self.clean_title(q.split(' ', 1)[1]) for q in queries if ' ' in q]:
                     queries.append(f"{artist} {dash_clean}".strip())
-                    print(f"🎯 PRIORITY 2: Dash-cleaned query: '{artist} {dash_clean}'")
+                    print(f"🎯 PRIORITY 2: Dash-cleaned query (removed album): '{artist} {dash_clean}'")
+            elif should_preserve:
+                print(f"🎯 PRESERVED: Keeping dash content '{dash_content}' as it appears to be version info")
         
         # Pattern 2: Only remove parentheses that contain noise (feat, explicit, etc), not version info
         # Check if parentheses contain version-related keywords before removing
@@ -360,8 +406,14 @@ class MusicMatchingEngine:
             after_paren = paren_match.group(3).strip()
             
             # Define what we consider "noise" vs "important version info"
-            noise_keywords = ['feat', 'ft', 'featuring', 'explicit', 'clean', 'radio edit', 'radio version']
-            version_keywords = ['extended', 'live', 'acoustic', 'remix', 'remaster', 'demo', 'instrumental', 'version', 'edit', 'mix']
+            noise_keywords = ['feat', 'ft', 'featuring', 'explicit', 'clean']
+            # Expanded version keywords to match the dash preserve keywords
+            version_keywords = [
+                'slowed', 'reverb', 'sped up', 'speed up', 'spedup', 'slowdown',
+                'remix', 'mix', 'edit', 'version', 'remaster', 'acoustic', 
+                'live', 'demo', 'instrumental', 'radio', 'extended', 'club',
+                'original', 'mashup', 'bootleg'
+            ]
             
             # Only remove parentheses if they contain noise, not version info
             is_noise = any(keyword in paren_content for keyword in noise_keywords)
@@ -374,6 +426,8 @@ class MusicMatchingEngine:
                     if simple_clean and simple_clean not in [self.clean_title(q.split(' ', 1)[1]) for q in queries if ' ' in q]:
                         queries.append(f"{artist} {simple_clean}".strip())
                         print(f"🎯 PRIORITY 2: Noise-removed query: '{artist} {simple_clean}'")
+            elif is_version:
+                print(f"🎯 PRESERVED: Keeping parentheses content '({paren_content})' as it appears to be version info")
         
         # PRIORITY 3: Original query (ONLY if no album was detected or if it's different)
         original_track_clean = self.clean_title(original_title)
