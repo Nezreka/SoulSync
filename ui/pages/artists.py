@@ -18,9 +18,14 @@ from core.spotify_client import SpotifyClient, Artist, Album
 from core.plex_client import PlexClient
 from core.soulseek_client import SoulseekClient, AlbumResult
 from core.matching_engine import MusicMatchingEngine
+from core.wishlist_service import get_wishlist_service
 from core.plex_scan_manager import PlexScanManager
 from database.music_database import get_database
+from utils.logging_config import get_logger
 import asyncio
+from datetime import datetime
+
+logger = get_logger("artists")
 
 
 @dataclass
@@ -1745,6 +1750,7 @@ class DownloadMissingAlbumTracksModal(QDialog):
         self.downloads_page = downloads_page
         self.plex_client = plex_client
         self.matching_engine = MusicMatchingEngine()
+        self.wishlist_service = get_wishlist_service()
         
         # State tracking
         self.total_tracks = len(album.tracks)
@@ -2656,9 +2662,47 @@ class DownloadMissingAlbumTracksModal(QDialog):
             album_name = getattr(self.album, 'name', 'Unknown Album')
             self.parent_artists_page.scan_manager.request_scan(f"Album download completed: {album_name} ({self.successful_downloads} tracks)")
 
+        # Add permanently failed tracks to wishlist before showing completion message
+        failed_count = len(self.permanently_failed_tracks)
+        wishlist_added_count = 0
+        
+        if self.permanently_failed_tracks:
+            try:
+                # Add failed tracks to wishlist
+                source_context = {
+                    'album_name': getattr(self.album, 'name', 'Unknown Album'),
+                    'album_id': getattr(self.album, 'id', None),
+                    'artist_name': getattr(self.album, 'artists', [{}])[0].get('name', 'Unknown Artist') if hasattr(self.album, 'artists') else 'Unknown Artist',
+                    'added_from': 'artists_page_modal',
+                    'timestamp': datetime.now().isoformat()
+                }
+                
+                for failed_track_info in self.permanently_failed_tracks:
+                    try:
+                        success = self.wishlist_service.add_failed_track_from_modal(
+                            track_info=failed_track_info,
+                            source_type='album',
+                            source_context=source_context
+                        )
+                        if success:
+                            wishlist_added_count += 1
+                    except Exception as e:
+                        logger.error(f"Failed to add album track to wishlist: {e}")
+                        
+                if wishlist_added_count > 0:
+                    logger.info(f"Added {wishlist_added_count} failed tracks to wishlist from album '{self.album.name}'")
+                    
+            except Exception as e:
+                logger.error(f"Error adding failed album tracks to wishlist: {e}")
+
         # Determine the final message based on success or failure
         if self.permanently_failed_tracks:
-            final_message = f"Completed downloading {self.successful_downloads}/{len(self.missing_tracks)} missing album tracks!\n\nYou can now manually correct any failed downloads or close this window."
+            final_message = f"Completed downloading {self.successful_downloads}/{len(self.missing_tracks)} missing album tracks!\n\n"
+            
+            if wishlist_added_count > 0:
+                final_message += f"✨ Added {wishlist_added_count} failed track{'s' if wishlist_added_count != 1 else ''} to wishlist for automatic retry.\n\n"
+            
+            final_message += "You can also manually correct failed downloads or check the wishlist on the dashboard."
             
             # If there are failures, ensure the modal is visible and bring it to the front
             if self.isHidden():

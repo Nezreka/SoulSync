@@ -1,7 +1,8 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                            QFrame, QGridLayout, QScrollArea, QSizePolicy, QPushButton,
-                           QProgressBar, QTextEdit, QSpacerItem, QGroupBox, QFormLayout, QComboBox)
-from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, QObject
+                           QProgressBar, QTextEdit, QSpacerItem, QGroupBox, QFormLayout, QComboBox,
+                           QDialog, QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox)
+from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, QObject, QRunnable, QThreadPool
 from PyQt6.QtGui import QFont, QPalette, QColor
 import time
 import asyncio
@@ -22,9 +23,446 @@ import io
 from core.matching_engine import MusicMatchingEngine
 from ui.components.database_updater_widget import DatabaseUpdaterWidget
 from core.database_update_worker import DatabaseUpdateWorker, DatabaseStatsWorker
+from core.wishlist_service import get_wishlist_service
 from utils.logging_config import get_logger
 
 logger = get_logger("dashboard")
+
+class DownloadMissingWishlistTracksModal(QDialog):
+    """Modal for downloading tracks from the wishlist with live progress tracking"""
+    process_finished = pyqtSignal()
+    
+    def __init__(self, wishlist_service, parent_dashboard, downloads_page, spotify_client, plex_client, soulseek_client):
+        super().__init__(parent_dashboard)
+        self.wishlist_service = wishlist_service
+        self.parent_dashboard = parent_dashboard
+        self.downloads_page = downloads_page
+        self.spotify_client = spotify_client
+        self.plex_client = plex_client
+        self.soulseek_client = soulseek_client
+        
+        # Import matching engine
+        self.matching_engine = MusicMatchingEngine()
+        
+        # State tracking
+        self.wishlist_tracks = []
+        self.total_tracks = 0
+        self.download_in_progress = False
+        self.cancel_requested = False
+        self.active_parallel_downloads = 0
+        self.download_queue_index = 0
+        self.completed_downloads = 0
+        self.successful_downloads = 0
+        self.failed_downloads = 0
+        
+        # Track active downloads and failed tracks
+        self.active_downloads = []
+        self.permanently_failed_tracks = []
+        
+        # Parallel search tracking (adapted from sync.py)
+        self.parallel_search_tracking = {}
+        
+        self.setup_ui()
+        self.load_wishlist_tracks()
+    
+    def setup_ui(self):
+        """Setup the modal UI (simplified version based on sync.py modal)"""
+        self.setWindowTitle("Download Wishlist Tracks")
+        self.setMinimumSize(800, 600)
+        self.setStyleSheet("""
+            DownloadMissingWishlistTracksModal {
+                background: #191414;
+            }
+        """)
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+        
+        # Header
+        header_label = QLabel("Download Missing Wishlist Tracks")
+        header_label.setFont(QFont("Arial", 16, QFont.Weight.Bold))
+        header_label.setStyleSheet("color: #ffffff;")
+        
+        # Info label
+        self.info_label = QLabel("Loading wishlist tracks...")
+        self.info_label.setFont(QFont("Arial", 11))
+        self.info_label.setStyleSheet("color: #b3b3b3;")
+        
+        # Track table (simplified)
+        self.track_table = QTableWidget()
+        self.track_table.setColumnCount(4)
+        self.track_table.setHorizontalHeaderLabels(["Track", "Artist", "Retry Count", "Status"])
+        self.track_table.horizontalHeader().setStretchLastSection(True)
+        self.track_table.setStyleSheet("""
+            QTableWidget {
+                background: #282828;
+                border: 1px solid #404040;
+                border-radius: 8px;
+                gridline-color: #404040;
+            }
+            QTableWidget::item {
+                padding: 8px;
+                border-bottom: 1px solid #404040;
+            }
+            QHeaderView::section {
+                background: #404040;
+                color: #ffffff;
+                padding: 8px;
+                border: none;
+                font-weight: bold;
+            }
+        """)
+        
+        # Progress bar
+        self.download_progress = QProgressBar()
+        self.download_progress.setVisible(False)
+        self.download_progress.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid #404040;
+                border-radius: 8px;
+                text-align: center;
+                background: #282828;
+            }
+            QProgressBar::chunk {
+                background: #1db954;
+                border-radius: 7px;
+            }
+        """)
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        
+        self.begin_download_btn = QPushButton("🚀 Begin Downloads")
+        self.begin_download_btn.setFixedHeight(40)
+        self.begin_download_btn.clicked.connect(self.start_downloads)
+        self.begin_download_btn.setStyleSheet("""
+            QPushButton {
+                background: #1db954;
+                border: none;
+                border-radius: 20px;
+                color: #000000;
+                font-size: 12px;
+                font-weight: bold;
+                padding: 8px 20px;
+            }
+            QPushButton:hover {
+                background: #1ed760;
+            }
+            QPushButton:disabled {
+                background: #404040;
+                color: #888888;
+            }
+        """)
+        
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setFixedHeight(40)
+        self.cancel_btn.clicked.connect(self.on_cancel_clicked)
+        self.cancel_btn.setStyleSheet("""
+            QPushButton {
+                background: #404040;
+                border: none;
+                border-radius: 20px;
+                color: #ffffff;
+                font-size: 12px;
+                padding: 8px 20px;
+            }
+            QPushButton:hover {
+                background: #505050;
+            }
+        """)
+        
+        self.clear_wishlist_btn = QPushButton("🗑️ Clear Wishlist")
+        self.clear_wishlist_btn.setFixedHeight(40)
+        self.clear_wishlist_btn.clicked.connect(self.clear_wishlist)
+        self.clear_wishlist_btn.setStyleSheet("""
+            QPushButton {
+                background: #e22134;
+                border: none;
+                border-radius: 20px;
+                color: #ffffff;
+                font-size: 12px;
+                padding: 8px 20px;
+            }
+            QPushButton:hover {
+                background: #ff4757;
+            }
+        """)
+        
+        button_layout.addStretch()
+        button_layout.addWidget(self.clear_wishlist_btn)
+        button_layout.addWidget(self.cancel_btn)
+        button_layout.addWidget(self.begin_download_btn)
+        
+        # Add to layout
+        layout.addWidget(header_label)
+        layout.addWidget(self.info_label)
+        layout.addWidget(self.track_table)
+        layout.addWidget(self.download_progress)
+        layout.addLayout(button_layout)
+    
+    def load_wishlist_tracks(self):
+        """Load tracks from wishlist"""
+        try:
+            self.wishlist_tracks = self.wishlist_service.get_wishlist_tracks_for_download()
+            self.total_tracks = len(self.wishlist_tracks)
+            
+            if self.total_tracks == 0:
+                self.info_label.setText("No tracks in wishlist")
+                self.begin_download_btn.setEnabled(False)
+                return
+                
+            self.info_label.setText(f"Found {self.total_tracks} tracks in wishlist ready for retry")
+            
+            # Populate table
+            self.track_table.setRowCount(self.total_tracks)
+            
+            for i, track_data in enumerate(self.wishlist_tracks):
+                # Track name
+                self.track_table.setItem(i, 0, QTableWidgetItem(track_data.get('name', 'Unknown Track')))
+                
+                # Artist
+                artists = track_data.get('artists', [])
+                artist_name = artists[0].get('name', 'Unknown Artist') if artists else 'Unknown Artist'
+                self.track_table.setItem(i, 1, QTableWidgetItem(artist_name))
+                
+                # Retry count
+                retry_count = track_data.get('retry_count', 0)
+                self.track_table.setItem(i, 2, QTableWidgetItem(str(retry_count)))
+                
+                # Status
+                self.track_table.setItem(i, 3, QTableWidgetItem("Pending"))
+                
+        except Exception as e:
+            logger.error(f"Error loading wishlist tracks: {e}")
+            self.info_label.setText(f"Error loading tracks: {str(e)}")
+    
+    def start_downloads(self):
+        """Start downloading all wishlist tracks"""
+        try:
+            if self.total_tracks == 0:
+                return
+                
+            self.download_in_progress = True
+            self.cancel_requested = False
+            self.begin_download_btn.setEnabled(False)
+            self.download_progress.setVisible(True)
+            self.download_progress.setMaximum(self.total_tracks)
+            self.download_progress.setValue(0)
+            
+            # Start parallel downloads (simplified approach)
+            self.active_parallel_downloads = 0
+            self.download_queue_index = 0
+            self.completed_downloads = 0
+            self.successful_downloads = 0
+            self.failed_downloads = 0
+            
+            # Initialize tracking
+            self.active_downloads = []
+            self.permanently_failed_tracks = []
+            self.parallel_search_tracking = {}
+            
+            self.start_next_batch_of_downloads()
+            
+        except Exception as e:
+            logger.error(f"Error starting downloads: {e}")
+            QMessageBox.critical(self, "Error", f"Failed to start downloads: {str(e)}")
+    
+    def start_next_batch_of_downloads(self, max_concurrent=3):
+        """Start the next batch of downloads up to the concurrent limit"""
+        while (self.active_parallel_downloads < max_concurrent and 
+               self.download_queue_index < len(self.wishlist_tracks)):
+            track_data = self.wishlist_tracks[self.download_queue_index]
+            track_index = self.download_queue_index
+            
+            # Update UI
+            self.track_table.setItem(track_index, 3, QTableWidgetItem("🔍 Searching..."))
+            
+            # Start search and download for this track (simplified)
+            self.search_and_download_track_simple(track_data, self.download_queue_index)
+            
+            self.active_parallel_downloads += 1
+            self.download_queue_index += 1
+        
+        if (self.download_queue_index >= len(self.wishlist_tracks) and self.active_parallel_downloads == 0):
+            self.on_all_downloads_complete()
+    
+    def search_and_download_track_simple(self, track_data, download_index):
+        """Simplified search and download for wishlist tracks"""
+        try:
+            # Create a simple search worker
+            artist_name = track_data.get('artists', [{}])[0].get('name', '') if track_data.get('artists') else ''
+            track_name = track_data.get('name', '')
+            
+            if not track_name:
+                self.on_track_download_failed(download_index, "Missing track name")
+                return
+            
+            # Create search query
+            query = f"{artist_name} {track_name}".strip()
+            if not query:
+                self.on_track_download_failed(download_index, "Cannot create search query")
+                return
+            
+            # Use a simple approach - directly call soulseek search
+            worker = SimpleWishlistDownloadWorker(self.soulseek_client, query, track_data, download_index)
+            worker.signals.download_completed.connect(self.on_track_download_completed)
+            worker.signals.download_failed.connect(self.on_track_download_failed)
+            
+            QThreadPool.globalInstance().start(worker)
+            
+        except Exception as e:
+            logger.error(f"Error starting track download: {e}")
+            self.on_track_download_failed(download_index, str(e))
+    
+    def on_track_download_completed(self, download_index, download_id):
+        """Handle successful track download"""
+        try:
+            track_data = self.wishlist_tracks[download_index]
+            track_id = track_data.get('spotify_track_id')
+            
+            # Update UI
+            self.track_table.setItem(download_index, 3, QTableWidgetItem("✅ Downloaded"))
+            
+            # Mark as successful in wishlist service
+            if track_id:
+                self.wishlist_service.mark_track_download_result(track_id, success=True)
+            
+            self.successful_downloads += 1
+            self.completed_downloads += 1
+            self.active_parallel_downloads -= 1
+            
+            # Update progress
+            self.download_progress.setValue(self.completed_downloads)
+            
+            # Continue with next downloads
+            self.start_next_batch_of_downloads()
+            
+        except Exception as e:
+            logger.error(f"Error handling download completion: {e}")
+    
+    def on_track_download_failed(self, download_index, error_message):
+        """Handle failed track download"""
+        try:
+            track_data = self.wishlist_tracks[download_index]
+            track_id = track_data.get('spotify_track_id')
+            
+            # Update UI
+            self.track_table.setItem(download_index, 3, QTableWidgetItem("❌ Failed"))
+            
+            # Mark as failed in wishlist service (increment retry count)
+            if track_id:
+                self.wishlist_service.mark_track_download_result(track_id, success=False, error_message=error_message)
+            
+            self.failed_downloads += 1
+            self.completed_downloads += 1
+            self.active_parallel_downloads -= 1
+            
+            # Update progress
+            self.download_progress.setValue(self.completed_downloads)
+            
+            # Continue with next downloads
+            self.start_next_batch_of_downloads()
+            
+        except Exception as e:
+            logger.error(f"Error handling download failure: {e}")
+    
+    def on_all_downloads_complete(self):
+        """Handle completion of all downloads"""
+        try:
+            self.download_in_progress = False
+            
+            # Show completion message
+            message = f"Wishlist processing complete!\n\n"
+            message += f"Successfully downloaded: {self.successful_downloads}\n"
+            message += f"Failed: {self.failed_downloads}\n"
+            message += f"Total processed: {self.completed_downloads}\n\n"
+            
+            if self.failed_downloads > 0:
+                message += "Failed tracks remain in wishlist for future retry."
+            else:
+                message += "All tracks downloaded successfully!"
+            
+            QMessageBox.information(self, "Downloads Complete", message)
+            
+            # Emit signal to update parent
+            self.process_finished.emit()
+            
+            # Close modal
+            self.accept()
+            
+        except Exception as e:
+            logger.error(f"Error handling downloads completion: {e}")
+    
+    def clear_wishlist(self):
+        """Clear all tracks from wishlist"""
+        try:
+            reply = QMessageBox.question(
+                self, "Clear Wishlist", 
+                "Are you sure you want to clear all tracks from the wishlist?\n\nThis action cannot be undone.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                if self.wishlist_service.clear_wishlist():
+                    QMessageBox.information(self, "Wishlist Cleared", "All tracks have been removed from the wishlist.")
+                    self.process_finished.emit()  # Update parent count
+                    self.accept()  # Close modal
+                else:
+                    QMessageBox.warning(self, "Error", "Failed to clear wishlist.")
+        except Exception as e:
+            logger.error(f"Error clearing wishlist: {e}")
+            QMessageBox.critical(self, "Error", f"Failed to clear wishlist: {str(e)}")
+    
+    def on_cancel_clicked(self):
+        """Handle cancel button"""
+        self.cancel_requested = True
+        self.process_finished.emit()
+        self.reject()
+
+
+class SimpleWishlistDownloadWorker(QRunnable):
+    """Simple worker to download a single wishlist track"""
+    
+    class Signals(QObject):
+        download_completed = pyqtSignal(int, str)  # download_index, download_id
+        download_failed = pyqtSignal(int, str)  # download_index, error_message
+    
+    def __init__(self, soulseek_client, query, track_data, download_index):
+        super().__init__()
+        self.soulseek_client = soulseek_client
+        self.query = query
+        self.track_data = track_data
+        self.download_index = download_index
+        self.signals = self.Signals()
+    
+    def run(self):
+        """Run the download"""
+        try:
+            # Get quality preference
+            from config.settings import config_manager
+            quality_preference = config_manager.get_quality_preference()
+            
+            # Use async method in sync context
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            try:
+                download_id = loop.run_until_complete(
+                    self.soulseek_client.search_and_download_best(self.query, quality_preference)
+                )
+                
+                if download_id:
+                    self.signals.download_completed.emit(self.download_index, download_id)
+                else:
+                    self.signals.download_failed.emit(self.download_index, "No search results found")
+                    
+            finally:
+                loop.close()
+                
+        except Exception as e:
+            self.signals.download_failed.emit(self.download_index, str(e))
+
 
 class MetadataUpdateWorker(QThread):
     """Worker thread for updating Plex artist metadata using Spotify data"""
@@ -562,9 +1000,9 @@ class DashboardDataProvider(QObject):
     
     def set_service_clients(self, spotify_client, plex_client, soulseek_client):
         self.service_clients = {
-            'spotify': spotify_client,
-            'plex': plex_client, 
-            'soulseek': soulseek_client
+            'spotify_client': spotify_client,
+            'plex_client': plex_client, 
+            'soulseek_client': soulseek_client
         }
     
     def set_page_references(self, downloads_page, sync_page):
@@ -1214,15 +1652,43 @@ class DashboardPage(QWidget):
         # Initialize list to track active stats workers
         self._active_stats_workers = []
         
+        # Initialize wishlist service and timers
+        self.wishlist_service = get_wishlist_service()
+        
+        # Timer for updating wishlist button count
+        self.wishlist_update_timer = QTimer()
+        self.wishlist_update_timer.timeout.connect(self.update_wishlist_button_count)
+        self.wishlist_update_timer.start(30000)  # Update every 30 seconds
+        
+        # Timer for automatic wishlist retry processing
+        self.wishlist_retry_timer = QTimer()
+        self.wishlist_retry_timer.timeout.connect(self.process_wishlist_automatically)
+        self.wishlist_retry_timer.start(3600000)  # Process every hour (3600000 ms)
+        
+        # Track if automatic processing is currently running
+        self.auto_processing_wishlist = False
+        
         # Load initial database statistics (with delay to avoid startup issues)
         QTimer.singleShot(1000, self.refresh_database_statistics)
+        # Load initial wishlist count (with slight delay)
+        QTimer.singleShot(1500, self.update_wishlist_button_count)
     
-    def set_service_clients(self, spotify_client, plex_client, soulseek_client):
+    def set_service_clients(self, spotify_client, plex_client, soulseek_client, downloads_page=None):
         """Called from main window to provide service client references"""
         self.data_provider.set_service_clients(spotify_client, plex_client, soulseek_client)
+        
+        # Store service clients for wishlist modal
+        self.service_clients = {
+            'spotify_client': spotify_client,
+            'plex_client': plex_client,
+            'soulseek_client': soulseek_client,
+            'downloads_page': downloads_page
+        }
     
     def set_page_references(self, downloads_page, sync_page):
         """Called from main window to provide page references for live data"""
+        self.downloads_page = downloads_page
+        self.sync_page = sync_page
         self.data_provider.set_page_references(downloads_page, sync_page)
     
     def set_app_start_time(self, start_time):
@@ -1302,9 +1768,15 @@ class DashboardPage(QWidget):
     
     def create_header(self):
         header = QWidget()
-        layout = QVBoxLayout(header)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(5)
+        main_layout = QHBoxLayout(header)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(20)
+        
+        # Left side - Title and subtitle
+        left_widget = QWidget()
+        left_layout = QVBoxLayout(left_widget)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(5)
         
         # Welcome message
         welcome_label = QLabel("System Dashboard")
@@ -1316,8 +1788,52 @@ class DashboardPage(QWidget):
         subtitle_label.setFont(QFont("Arial", 14))
         subtitle_label.setStyleSheet("color: #b3b3b3;")
         
-        layout.addWidget(welcome_label)
-        layout.addWidget(subtitle_label)
+        left_layout.addWidget(welcome_label)
+        left_layout.addWidget(subtitle_label)
+        
+        # Right side - Wishlist button
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(0)
+        
+        # Spacer to align button with title
+        right_layout.addStretch()
+        
+        # Wishlist button
+        self.wishlist_button = QPushButton("🎵 Wishlist (0)")
+        self.wishlist_button.setFixedHeight(45)
+        self.wishlist_button.setFixedWidth(150)
+        self.wishlist_button.clicked.connect(self.on_wishlist_button_clicked)
+        self.wishlist_button.setStyleSheet("""
+            QPushButton {
+                background: #1db954;
+                border: none;
+                border-radius: 22px;
+                color: #000000;
+                font-size: 12px;
+                font-weight: bold;
+                padding: 8px 16px;
+            }
+            QPushButton:hover {
+                background: #1ed760;
+            }
+            QPushButton:pressed {
+                background: #169c46;
+            }
+            QPushButton:disabled {
+                background: #404040;
+                color: #666666;
+            }
+        """)
+        
+        right_layout.addWidget(self.wishlist_button)
+        right_layout.addStretch()
+        
+        # Add to main layout
+        main_layout.addWidget(left_widget)
+        main_layout.addStretch()  # Push button to the right
+        main_layout.addWidget(right_widget)
         
         return header
     
@@ -1881,6 +2397,13 @@ class DashboardPage(QWidget):
     def closeEvent(self, event):
         """Clean up threads when dashboard is closed"""
         self.cleanup_threads()
+        
+        # Stop wishlist timers
+        if hasattr(self, 'wishlist_update_timer'):
+            self.wishlist_update_timer.stop()
+        if hasattr(self, 'wishlist_retry_timer'):
+            self.wishlist_retry_timer.stop()
+        
         super().closeEvent(event)
     
     def cleanup_threads(self):
@@ -1892,6 +2415,261 @@ class DashboardPage(QWidget):
                     thread.wait(1000)  # Wait up to 1 second
                 thread.deleteLater()
             self.data_provider._test_threads.clear()
+    
+    def on_wishlist_button_clicked(self):
+        """Handle wishlist button click - open wishlist modal"""
+        try:
+            summary = self.wishlist_service.get_wishlist_summary()
+            total_tracks = summary['total_tracks']
+            
+            if total_tracks == 0:
+                QMessageBox.information(self, "Wishlist", "Your wishlist is empty!\n\nFailed download tracks will be automatically added here for retry.")
+                return
+            
+            # Need to get service clients to pass to modal
+            if not hasattr(self, 'service_clients'):
+                QMessageBox.warning(self, "Wishlist", "Service clients not initialized. Please restart the application.")
+                return
+            
+            spotify_client = self.service_clients.get('spotify_client')
+            plex_client = self.service_clients.get('plex_client') 
+            soulseek_client = self.service_clients.get('soulseek_client')
+            downloads_page = self.downloads_page
+            
+            if not all([spotify_client, plex_client, soulseek_client, downloads_page]):
+                QMessageBox.warning(self, "Wishlist", "Required services not available. Please check your service connections.")
+                return
+            
+            # Create and show the wishlist download modal
+            modal = DownloadMissingWishlistTracksModal(
+                self.wishlist_service,
+                self, 
+                downloads_page,
+                spotify_client,
+                plex_client,
+                soulseek_client
+            )
+            modal.process_finished.connect(self.update_wishlist_button_count)  # Update count when done
+            modal.exec()
+            
+        except Exception as e:
+            logger.error(f"Error opening wishlist: {e}")
+            QMessageBox.critical(self, "Error", f"Failed to open wishlist: {str(e)}")
+    
+    def update_wishlist_button_count(self):
+        """Update the wishlist button with current count"""
+        try:
+            count = self.wishlist_service.get_wishlist_count()
+            
+            if hasattr(self, 'wishlist_button'):
+                self.wishlist_button.setText(f"🎵 Wishlist ({count})")
+                
+                # Enable/disable button based on count
+                if count == 0:
+                    self.wishlist_button.setStyleSheet("""
+                        QPushButton {
+                            background: #404040;
+                            border: none;
+                            border-radius: 22px;
+                            color: #888888;
+                            font-size: 12px;
+                            font-weight: bold;
+                            padding: 8px 16px;
+                        }
+                        QPushButton:hover {
+                            background: #505050;
+                            color: #999999;
+                        }
+                    """)
+                else:
+                    self.wishlist_button.setStyleSheet("""
+                        QPushButton {
+                            background: #1db954;
+                            border: none;
+                            border-radius: 22px;
+                            color: #000000;
+                            font-size: 12px;
+                            font-weight: bold;
+                            padding: 8px 16px;
+                        }
+                        QPushButton:hover {
+                            background: #1ed760;
+                        }
+                        QPushButton:pressed {
+                            background: #169c46;
+                        }
+                    """)
+        except Exception as e:
+            logger.error(f"Error updating wishlist button count: {e}")
+    
+    def process_wishlist_automatically(self):
+        """Automatically process wishlist tracks in the background"""
+        try:
+            # Skip if already processing or no service clients available
+            if self.auto_processing_wishlist:
+                logger.debug("Wishlist auto-processing already running, skipping")
+                return
+            
+            if not hasattr(self, 'service_clients') or not self.service_clients:
+                logger.debug("Service clients not available for wishlist auto-processing")
+                return
+            
+            # Check if we have tracks to process
+            wishlist_count = self.wishlist_service.get_wishlist_count()
+            if wishlist_count == 0:
+                logger.debug("No tracks in wishlist for auto-processing")
+                return
+            
+            # Get service clients
+            spotify_client = self.service_clients.get('spotify_client')
+            plex_client = self.service_clients.get('plex_client') 
+            soulseek_client = self.service_clients.get('soulseek_client')
+            downloads_page = self.downloads_page
+            
+            if not all([spotify_client, plex_client, soulseek_client, downloads_page]):
+                logger.warning("Required services not available for wishlist auto-processing")
+                return
+            
+            logger.info(f"Starting automatic wishlist processing for {wishlist_count} tracks")
+            self.auto_processing_wishlist = True
+            
+            # Create and run the background processing worker
+            worker = AutoWishlistProcessorWorker(
+                self.wishlist_service,
+                spotify_client,
+                plex_client,
+                soulseek_client,
+                downloads_page
+            )
+            worker.signals.processing_complete.connect(self.on_auto_wishlist_processing_complete)
+            worker.signals.processing_error.connect(self.on_auto_wishlist_processing_error)
+            
+            # Run in thread pool
+            QThreadPool.globalInstance().start(worker)
+            
+        except Exception as e:
+            logger.error(f"Error starting automatic wishlist processing: {e}")
+            self.auto_processing_wishlist = False
+    
+    def on_auto_wishlist_processing_complete(self, successful, failed, total):
+        """Handle completion of automatic wishlist processing"""
+        try:
+            self.auto_processing_wishlist = False
+            
+            logger.info(f"Automatic wishlist processing complete: {successful} successful, {failed} failed, {total} total")
+            
+            # Update button count since tracks may have been removed
+            self.update_wishlist_button_count()
+            
+            # Show toast notification if there were successful downloads
+            if successful > 0 and hasattr(self, 'toast_manager') and self.toast_manager:
+                message = f"Found {successful} wishlist track{'s' if successful != 1 else ''} automatically!"
+                self.toast_manager.success(message)
+            
+        except Exception as e:
+            logger.error(f"Error handling automatic wishlist processing completion: {e}")
+    
+    def on_auto_wishlist_processing_error(self, error_message):
+        """Handle error in automatic wishlist processing"""
+        try:
+            self.auto_processing_wishlist = False
+            logger.error(f"Automatic wishlist processing failed: {error_message}")
+        except Exception as e:
+            logger.error(f"Error handling automatic wishlist processing error: {e}")
+
+
+class AutoWishlistProcessorWorker(QRunnable):
+    """Background worker for automatic wishlist processing"""
+    
+    class Signals(QObject):
+        processing_complete = pyqtSignal(int, int, int)  # successful, failed, total
+        processing_error = pyqtSignal(str)  # error_message
+    
+    def __init__(self, wishlist_service, spotify_client, plex_client, soulseek_client, downloads_page):
+        super().__init__()
+        self.wishlist_service = wishlist_service
+        self.spotify_client = spotify_client
+        self.plex_client = plex_client
+        self.soulseek_client = soulseek_client
+        self.downloads_page = downloads_page
+        self.signals = self.Signals()
+    
+    def run(self):
+        """Run automatic wishlist processing"""
+        try:
+            # Get quality preference
+            from config.settings import config_manager
+            quality_preference = config_manager.get_quality_preference()
+            
+            # Get wishlist tracks (limit to prevent overwhelming the system)
+            wishlist_tracks = self.wishlist_service.get_wishlist_tracks_for_download(limit=10)
+            
+            if not wishlist_tracks:
+                self.signals.processing_complete.emit(0, 0, 0)
+                return
+            
+            total_tracks = len(wishlist_tracks)
+            successful_downloads = 0
+            failed_downloads = 0
+            
+            logger.info(f"Processing {total_tracks} wishlist tracks automatically")
+            
+            # Process each track
+            for track_data in wishlist_tracks:
+                try:
+                    # Create search query
+                    artist_name = track_data.get('artists', [{}])[0].get('name', '') if track_data.get('artists') else ''
+                    track_name = track_data.get('name', '')
+                    
+                    if not track_name:
+                        failed_downloads += 1
+                        continue
+                    
+                    query = f"{artist_name} {track_name}".strip()
+                    if not query:
+                        failed_downloads += 1
+                        continue
+                    
+                    # Attempt download
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    
+                    try:
+                        download_id = loop.run_until_complete(
+                            self.soulseek_client.search_and_download_best(query, quality_preference)
+                        )
+                        
+                        track_id = track_data.get('spotify_track_id')
+                        
+                        if download_id and track_id:
+                            # Mark as successful (removes from wishlist)
+                            self.wishlist_service.mark_track_download_result(track_id, success=True)
+                            successful_downloads += 1
+                            logger.info(f"Auto-downloaded wishlist track: '{track_name}' by {artist_name}")
+                        else:
+                            # Mark as failed (increment retry count)
+                            if track_id:
+                                self.wishlist_service.mark_track_download_result(track_id, success=False, error_message="No search results found")
+                            failed_downloads += 1
+                            
+                    finally:
+                        loop.close()
+                        
+                except Exception as e:
+                    logger.error(f"Error processing wishlist track '{track_name}': {e}")
+                    
+                    # Mark as failed
+                    track_id = track_data.get('spotify_track_id')
+                    if track_id:
+                        self.wishlist_service.mark_track_download_result(track_id, success=False, error_message=str(e))
+                    failed_downloads += 1
+            
+            # Emit completion
+            self.signals.processing_complete.emit(successful_downloads, failed_downloads, total_tracks)
+            
+        except Exception as e:
+            logger.error(f"Critical error in automatic wishlist processing: {e}")
+            self.signals.processing_error.emit(str(e))
         
         # Stop the data provider timers
         if hasattr(self.data_provider, 'download_stats_timer'):
