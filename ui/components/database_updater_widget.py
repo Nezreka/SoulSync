@@ -4,6 +4,9 @@ from PyQt6.QtWidgets import (QFrame, QVBoxLayout, QHBoxLayout, QLabel,
                            QPushButton, QProgressBar, QComboBox, QGroupBox)
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
+from utils.logging_config import get_logger
+
+logger = get_logger("database_updater_widget")
 
 class DatabaseUpdaterWidget(QFrame):
     """UI widget for updating SoulSync database with Plex library data"""
@@ -35,6 +38,18 @@ class DatabaseUpdaterWidget(QFrame):
         info_label.setFont(QFont("Arial", 9))
         info_label.setStyleSheet("color: #b3b3b3; margin-bottom: 5px;")
         info_label.setWordWrap(True)
+        
+        # Recommendation label
+        self.recommendation_label = QLabel("💡 Tip: Run a Full Refresh every 1-2 weeks to ensure database accuracy")
+        self.recommendation_label.setFont(QFont("Arial", 9))
+        self.recommendation_label.setStyleSheet("color: #ffaa00; margin-bottom: 8px; padding: 6px 8px; background: #332200; border-radius: 4px;")
+        self.recommendation_label.setWordWrap(True)
+        
+        # Last full refresh label
+        self.last_refresh_label = QLabel("")
+        self.last_refresh_label.setFont(QFont("Arial", 8))
+        self.last_refresh_label.setStyleSheet("color: #888888; margin-bottom: 5px;")
+        self.last_refresh_label.setWordWrap(True)
         
         # Control section
         control_layout = QVBoxLayout()
@@ -270,6 +285,8 @@ class DatabaseUpdaterWidget(QFrame):
         # Add all sections to main layout
         layout.addWidget(header_label)
         layout.addWidget(info_label)
+        layout.addWidget(self.recommendation_label)
+        layout.addWidget(self.last_refresh_label)
         layout.addLayout(control_layout)
         layout.addLayout(progress_layout)
         layout.addWidget(stats_group)
@@ -313,3 +330,55 @@ class DatabaseUpdaterWidget(QFrame):
     def set_button_enabled(self, enabled: bool):
         """Enable/disable the start button"""
         self.start_button.setEnabled(enabled)
+    
+    def update_last_refresh_info(self, last_refresh_date: str = None):
+        """Update the last refresh information with color-coded warnings"""
+        if not last_refresh_date:
+            self.last_refresh_label.setText("No full refresh recorded")
+            self.last_refresh_label.setStyleSheet("color: #ff6666; margin-bottom: 5px; font-style: italic;")
+            self._update_recommendation_urgency(urgent=True)
+            return
+        
+        try:
+            from datetime import datetime
+            last_date = datetime.fromisoformat(last_refresh_date.replace('Z', '+00:00'))
+            days_ago = (datetime.now() - last_date.replace(tzinfo=None)).days
+            
+            if days_ago == 0:
+                time_text = "today"
+                color = "#1db954"  # Green
+                urgent = False
+            elif days_ago == 1:
+                time_text = "yesterday"
+                color = "#1db954"  # Green
+                urgent = False
+            elif days_ago < 7:
+                time_text = f"{days_ago} days ago"
+                color = "#1db954"  # Green
+                urgent = False
+            elif days_ago < 14:
+                time_text = f"{days_ago} days ago"
+                color = "#ffaa00"  # Orange warning
+                urgent = False
+            else:
+                time_text = f"{days_ago} days ago"
+                color = "#ff6666"  # Red warning
+                urgent = True
+            
+            self.last_refresh_label.setText(f"Last full refresh: {time_text}")
+            self.last_refresh_label.setStyleSheet(f"color: {color}; margin-bottom: 5px;")
+            self._update_recommendation_urgency(urgent=urgent)
+            
+        except Exception:
+            self.last_refresh_label.setText("Last full refresh: unknown")
+            self.last_refresh_label.setStyleSheet("color: #888888; margin-bottom: 5px;")
+            self._update_recommendation_urgency(urgent=False)
+    
+    def _update_recommendation_urgency(self, urgent: bool = False):
+        """Update the recommendation label styling based on urgency"""
+        if urgent:
+            self.recommendation_label.setText("⚠️  Recommended: Run a Full Refresh - it's been over 2 weeks!")
+            self.recommendation_label.setStyleSheet("color: #ffffff; margin-bottom: 8px; padding: 6px 8px; background: #cc3300; border-radius: 4px;")
+        else:
+            self.recommendation_label.setText("💡 Tip: Run a Full Refresh every 1-2 weeks to ensure database accuracy")
+            self.recommendation_label.setStyleSheet("color: #ffaa00; margin-bottom: 8px; padding: 6px 8px; background: #332200; border-radius: 4px;")
