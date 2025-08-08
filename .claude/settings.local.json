@@ -5,7 +5,9 @@
       "Bash(rm:*)",
       "Bash(rg:*)",
       "Bash(grep:*)",
-      "WebFetch(domain:python-plexapi.readthedocs.io)"
+      "WebFetch(domain:python-plexapi.readthedocs.io)",
+      "Bash(git restore:*)",
+      "Bash(python3:*)"
     ],
     "deny": []
   }
