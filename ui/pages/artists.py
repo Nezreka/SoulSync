@@ -519,13 +519,25 @@ class SinglesEPsLibraryWorker(QThread):
                     # Get full album data to get track info
                     album_data = spotify_client.get_album(single_release.id)
                     if album_data and album_data.get('tracks') and album_data['tracks']:
-                        track_name = album_data['tracks'][0]['name']
-                        artist_name = album_data['tracks'][0]['artists'][0]['name'] if album_data['tracks'][0]['artists'] else single_release.artists[0]
+                        # Handle different track data formats from Spotify API
+                        tracks_data = album_data['tracks']
+                        if isinstance(tracks_data, dict) and 'items' in tracks_data and tracks_data['items']:
+                            first_track = tracks_data['items'][0]  # Paginated response
+                        elif isinstance(tracks_data, list) and tracks_data:
+                            first_track = tracks_data[0]  # Direct list
+                        else:
+                            raise Exception("No track data in expected format")
+                            
+                        track_name = first_track['name']
+                        artist_name = first_track['artists'][0]['name'] if first_track['artists'] else single_release.artists[0]
                     else:
                         # Fallback
                         track_name = single_release.name
                         artist_name = single_release.artists[0] if single_release.artists else ""
-                except:
+                except Exception as e:
+                    print(f"   🔍 Debug single track fetch error: {e}")
+                    if album_data and 'tracks' in album_data:
+                        print(f"   🔍 Debug: tracks data type = {type(album_data['tracks'])}")
                     # Fallback if Spotify call fails
                     track_name = single_release.name
                     artist_name = single_release.artists[0] if single_release.artists else ""
@@ -596,9 +608,21 @@ class SinglesEPsLibraryWorker(QThread):
                 if not album_data or not album_data.get('tracks'):
                     raise Exception("No track data available")
                     
-                tracks = album_data['tracks']
-            except:
-                print(f"   ⚠️ Could not fetch EP tracks for '{ep_release.name}'")
+                # Handle different track data formats from Spotify API
+                tracks_data = album_data['tracks']
+                if isinstance(tracks_data, dict) and 'items' in tracks_data:
+                    tracks = tracks_data['items']  # Paginated response
+                elif isinstance(tracks_data, list):
+                    tracks = tracks_data  # Direct list
+                else:
+                    raise Exception(f"Unexpected tracks data format: {type(tracks_data)}")
+                    
+            except Exception as e:
+                print(f"   ⚠️ Could not fetch EP tracks for '{ep_release.name}': {e}")
+                if album_data and 'tracks' in album_data:
+                    print(f"   🔍 Debug: tracks data type = {type(album_data['tracks'])}")
+                    if hasattr(album_data['tracks'], '__len__') and len(album_data['tracks']) > 0:
+                        print(f"   🔍 Debug: first item type = {type(album_data['tracks'][0])}")
                 return AlbumOwnershipStatus(
                     album_name=ep_release.name,
                     is_owned=False,
