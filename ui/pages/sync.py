@@ -14,7 +14,13 @@ from core.soulseek_client import TrackResult
 import re
 import asyncio
 from core.matching_engine import MusicMatchingEngine
+from core.wishlist_service import get_wishlist_service
 from ui.components.toast_manager import ToastType
+from database.music_database import get_database
+from core.plex_scan_manager import PlexScanManager
+from utils.logging_config import get_logger
+
+logger = get_logger("sync")
 
 # Define constants for storage
 STORAGE_DIR = "storage"
@@ -82,25 +88,51 @@ def save_sync_status(data):
 
 def clean_track_name_for_search(track_name):
     """
-    Cleans a track name for searching by removing text in parentheses and brackets.
-    If cleaning the name results in an empty string, the original name is returned.
+    Intelligently cleans a track name for searching by removing noise while preserving important version information.
+    Removes: (feat. Artist), (Explicit), (Clean), etc.
+    Keeps: (Extended Version), (Live), (Acoustic), (Remix), etc.
     """
     if not track_name or not isinstance(track_name, str):
         return track_name
 
-    # Remove content in parentheses, e.g., (feat. Artist), (Remix)
-    cleaned_name = re.sub(r'\s*\([^)]*\)', '', track_name).strip()
-    # Remove content in square brackets, e.g., [Live], [Explicit]
-    cleaned_name = re.sub(r'\s*\[[^\]]*\]', '', cleaned_name).strip()
+    cleaned_name = track_name
     
-    # If cleaning results in an empty string (e.g., track name was only "(Intro)"),
-    # return the original track name to avoid an empty search.
-    if not cleaned_name:
+    # Define patterns to REMOVE (noise that doesn't affect track identity)
+    remove_patterns = [
+        r'\s*\(explicit\)',           # (Explicit)
+        r'\s*\(clean\)',              # (Clean) 
+        r'\s*\(radio\s*edit\)',       # (Radio Edit)
+        r'\s*\(radio\s*version\)',    # (Radio Version)
+        r'\s*\(feat\.?\s*[^)]+\)',    # (feat. Artist) or (ft. Artist)
+        r'\s*\(ft\.?\s*[^)]+\)',      # (ft Artist)
+        r'\s*\(featuring\s*[^)]+\)',  # (featuring Artist)
+        r'\s*\(with\s*[^)]+\)',       # (with Artist)
+        r'\s*\[[^\]]*explicit[^\]]*\]', # [Explicit] in brackets
+        r'\s*\[[^\]]*clean[^\]]*\]',    # [Clean] in brackets
+    ]
+    
+    # Apply removal patterns
+    for pattern in remove_patterns:
+        cleaned_name = re.sub(pattern, '', cleaned_name, flags=re.IGNORECASE).strip()
+    
+    # PRESERVE important version information (do NOT remove these)
+    # These patterns are intentionally NOT in the remove list:
+    # - (Extended Version), (Extended), (Long Version)
+    # - (Live), (Live Version), (Concert)
+    # - (Acoustic), (Acoustic Version)  
+    # - (Remix), (Club Mix), (Dance Mix)
+    # - (Remastered), (Remaster)
+    # - (Demo), (Studio Version)
+    # - (Instrumental)
+    # - Album/year info like (2023), (Deluxe Edition)
+    
+    # If cleaning results in an empty string, return the original track name
+    if not cleaned_name.strip():
         return track_name
         
     # Log cleaning if significant changes were made
     if cleaned_name != track_name:
-        print(f"🧹 Cleaned track name for search: '{track_name}' -> '{cleaned_name}'")
+        print(f"🧹 Intelligent track cleaning: '{track_name}' -> '{cleaned_name}'")
     
     return cleaned_name
 
@@ -189,31 +221,34 @@ class PlaylistTrackAnalysisWorker(QRunnable):
     
     def _check_track_in_plex(self, spotify_track):
         """
-        Check if a Spotify track exists in Plex by searching for each artist and
+        Check if a Spotify track exists in the database by searching for each artist and
         stopping as soon as a confident match is found.
+        Now uses local database instead of Plex API for much faster performance.
         """
         try:
             original_title = spotify_track.name
             
-            # --- Generate a list of title variations ---
-            title_variations = [original_title]
-            if " - " in original_title:
-                title_variations.append(original_title.split(' - ')[0].strip())
+            # Get database instance
+            db = get_database()
             
+            # --- Generate conservative title variations (preserve meaningful differences) ---
+            title_variations = [original_title]
+            
+            # Only add cleaned version if it removes clear noise (not meaningful content like remixes)
             cleaned_for_search = clean_track_name_for_search(original_title)
             if cleaned_for_search.lower() != original_title.lower():
                 title_variations.append(cleaned_for_search)
 
+            # Use matching engine's conservative clean_title (no longer strips remixes/versions)
             base_title = self.matching_engine.clean_title(original_title)
             if base_title.lower() not in [t.lower() for t in title_variations]:
                 title_variations.append(base_title)
+            
+            # DO NOT strip content after dashes - this removes important remix/version info
 
             unique_title_variations = list(dict.fromkeys(title_variations))
             
-            all_potential_matches = []
-            found_match_ids = set()
-
-            # --- Search for each artist, but exit early if a good match is found ---
+            # --- Search for each artist with each title variation ---
             artists_to_search = spotify_track.artists if spotify_track.artists else [""]
             for artist_name in artists_to_search:
                 if self._cancelled: return None, 0.0
@@ -221,47 +256,33 @@ class PlaylistTrackAnalysisWorker(QRunnable):
                 for query_title in unique_title_variations:
                     if self._cancelled: return None, 0.0
 
-                    potential_plex_matches = self.plex_client.search_tracks(
-                        title=query_title, 
-                        artist=artist_name, 
-                        limit=15
-                    )
+                    # Use database check_track_exists method with consistent thresholds
+                    db_track, confidence = db.check_track_exists(query_title, artist_name, confidence_threshold=0.7)
                     
-                    for track in potential_plex_matches:
-                        if track.id not in found_match_ids:
-                            all_potential_matches.append(track)
-                            found_match_ids.add(track.id)
-                
-                # --- Early Exit Check ---
-                # After searching for an artist, check if we have a confident match.
-                if all_potential_matches:
-                    match_result = self.matching_engine.find_best_match(spotify_track, all_potential_matches)
-                    if match_result.is_match:
-                        print(f"✔️ Confident match found early for '{original_title}'. Stopping search.")
-                        return match_result.plex_track, match_result.confidence
-
-            # --- Final Fallback: Title-only search if no artist-based match was found ---
-            # Removed title-only fallback to prevent false positives
-            # A track by a different artist is NOT the same track
+                    if db_track and confidence >= 0.7:
+                        print(f"✔️ Database match found for '{original_title}' by '{artist_name}': '{db_track.title}' with confidence {confidence:.2f}")
+                        
+                        # Convert database track to format compatible with existing code
+                        # Create a mock Plex track object for compatibility
+                        class MockPlexTrack:
+                            def __init__(self, db_track):
+                                self.id = str(db_track.id)
+                                self.title = db_track.title
+                                self.artist_name = db_track.artist_name
+                                self.album_title = db_track.album_title
+                                self.track_number = db_track.track_number
+                                self.duration = db_track.duration
+                                self.file_path = db_track.file_path
+                        
+                        mock_track = MockPlexTrack(db_track)
+                        return mock_track, confidence
             
-            if not all_potential_matches:
-                print(f"❌ No Plex candidates found for '{original_title}' after all strategies.")
-                return None, 0.0
-            
-            # --- Final Scoring ---
-            print(f"✅ Found {len(all_potential_matches)} total potential Plex matches for '{original_title}'. Scoring now...")
-            final_match_result = self.matching_engine.find_best_match(spotify_track, all_potential_matches)
-            
-            if final_match_result.is_match:
-                print(f"✔️ Best match for '{original_title}': '{final_match_result.plex_track.title}' with confidence {final_match_result.confidence:.2f}")
-            else:
-                print(f"⚠️ No confident match found for '{original_title}'. Best attempt scored {final_match_result.confidence:.2f}.")
-
-            return final_match_result.plex_track, final_match_result.confidence
+            print(f"❌ No database match found for '{original_title}' by any of the artists {artists_to_search}")
+            return None, 0.0
             
         except Exception as e:
             import traceback
-            print(f"Error checking track in Plex: {e}")
+            print(f"Error checking track in database: {e}")
             traceback.print_exc()
             return None, 0.0
 
@@ -274,12 +295,13 @@ class TrackDownloadWorkerSignals(QObject):
 class TrackDownloadWorker(QRunnable):
     """Background worker to download individual tracks via Soulseek"""
     
-    def __init__(self, spotify_track, soulseek_client, download_index, track_index):
+    def __init__(self, spotify_track, soulseek_client, download_index, track_index, quality_preference=None):
         super().__init__()
         self.spotify_track = spotify_track
         self.soulseek_client = soulseek_client
         self.download_index = download_index
         self.track_index = track_index
+        self.quality_preference = quality_preference or 'flac'
         self.signals = TrackDownloadWorkerSignals()
         self._cancelled = False
     
@@ -320,7 +342,7 @@ class TrackDownloadWorker(QRunnable):
                 
                 try:
                     download_id = loop.run_until_complete(
-                        self.soulseek_client.search_and_download_best(query)
+                        self.soulseek_client.search_and_download_best(query, self.quality_preference)
                     )
                     if download_id:
                         break  # Success - stop trying other queries
@@ -1968,6 +1990,11 @@ class SyncPage(QWidget):
         self.thread_pool = QThreadPool()
         self.thread_pool.setMaxThreadCount(3)  # Limit concurrent Spotify API calls
         
+        # Initialize Plex scan manager
+        self.scan_manager = None
+        if self.plex_client:
+            self.scan_manager = PlexScanManager(self.plex_client, delay_seconds=60)
+        
         self.setup_ui()
         
         # Don't auto-load on startup, but do auto-load when page becomes visible
@@ -3548,8 +3575,11 @@ class DownloadMissingTracksModal(QDialog):
         self.playlist = playlist
         self.playlist_item = playlist_item
         self.parent_page = parent_page
+        self.parent_sync_page = parent_page  # Reference to sync page for scan manager
         self.downloads_page = downloads_page
         self.matching_engine = MusicMatchingEngine()
+        self.wishlist_service = get_wishlist_service()
+        
         # State tracking
         self.total_tracks = len(playlist.tracks)
         self.matched_tracks_count = 0
@@ -3590,45 +3620,66 @@ class DownloadMissingTracksModal(QDialog):
 
     def generate_smart_search_queries(self, artist_name, track_name):
         """
-        Generate multiple search query variations in the specific fallback order
-        requested by the user.
+        Generate smart search query variations with album-in-title detection.
+        Enhanced version with fallback strategies.
         """
-        import re
-        queries = []
-
-        # --- Step 1: Use the original, full track name ---
+        # Create a mock spotify track object for the matching engine
+        class MockSpotifyTrack:
+            def __init__(self, name, artists, album=None):
+                self.name = name
+                self.artists = artists if isinstance(artists, list) else [artists] if artists else []
+                self.album = album
+        
+        # Try to get album information from the track context if available
+        # In sync context, we might not always have album info, but try to extract it
+        album_title = None
+        # If track_name contains potential album info, we'll let the detection handle it
+        
+        mock_track = MockSpotifyTrack(track_name, [artist_name] if artist_name else [], album_title)
+        
+        # Use the enhanced matching engine to generate queries
+        queries = self.matching_engine.generate_download_queries(mock_track)
+        
+        # Add some legacy fallback queries for compatibility
+        legacy_queries = []
+        
+        # Add first word of artist approach (legacy compatibility)
         if artist_name:
-            # Attempt 1: Full Artist + Full Track Name
-            queries.append(f"{artist_name} {track_name}".strip())
-
-            # Attempt 2: Full Track Name + First Word of Artist
             artist_words = artist_name.split()
             if artist_words:
                 first_word = artist_words[0]
                 if first_word.lower() == 'the' and len(artist_words) > 1:
-                    first_word = artist_words[1] # Use second word if first is "the"
+                    first_word = artist_words[1]
                 
-                if len(first_word) > 1: # Avoid single-letter words
-                    queries.append(f"{track_name} {first_word}".strip())
-
-        # Attempt 3: Full Track Name only
-        queries.append(track_name.strip())
-
-        # --- Step 2: Clean the track name for the final fallback ---
+                if len(first_word) > 1:
+                    legacy_queries.append(f"{track_name} {first_word}".strip())
+        
+        # Add track-only query
+        legacy_queries.append(track_name.strip())
+        
+        # Add traditional cleaned queries
+        import re
         cleaned_name = re.sub(r'\s*\([^)]*\)', '', track_name).strip()
         cleaned_name = re.sub(r'\s*\[[^\]]*\]', '', cleaned_name).strip()
-
-        # Attempt 4: Cleaned Track Name only (if it's different from the original)
-        if cleaned_name and cleaned_name.lower() != track_name.lower():
-            queries.append(cleaned_name.strip())
-
-        # --- Finalize: Remove duplicates while preserving the fallback order ---
-        unique_queries = []
-        for query in queries:
-            if query and query not in unique_queries:
-                unique_queries.append(query)
         
-        print(f"🧠 Generated {len(unique_queries)} smart queries for '{track_name}'. Sequence: {unique_queries}")
+        if cleaned_name and cleaned_name.lower() != track_name.lower():
+            legacy_queries.append(cleaned_name.strip())
+        
+        # Combine enhanced queries with legacy fallbacks
+        all_queries = queries + legacy_queries
+        
+        # Remove duplicates while preserving order
+        unique_queries = []
+        seen = set()
+        for query in all_queries:
+            if query and query.lower() not in seen:
+                unique_queries.append(query)
+                seen.add(query.lower())
+        
+        print(f"🧠 Generated {len(unique_queries)} smart queries for '{track_name}' (enhanced with album detection)")
+        for i, query in enumerate(unique_queries):
+            print(f"   {i+1}. '{query}'")
+        
         return unique_queries
 
     def setup_ui(self):
@@ -4126,6 +4177,7 @@ class DownloadMissingTracksModal(QDialog):
         
         # Update UI to show the new download has been queued
         spotify_based_result = self.create_spotify_based_search_result_from_validation(slskd_result, spotify_metadata)
+        print(f"🔧 Updating table at index {table_index} to '... Queued' for manual retry")
         self.track_table.setItem(table_index, 4, QTableWidgetItem("... Queued"))
         
         # Start the actual download process
@@ -4343,6 +4395,7 @@ class DownloadMissingTracksModal(QDialog):
         
         track_info['completed'] = True
         if success:
+            print(f"🔧 Track {download_index} completed successfully - updating table index {track_info['table_index']} to '✅ Downloaded'")
             self.track_table.setItem(track_info['table_index'], 4, QTableWidgetItem("✅ Downloaded"))
             self.downloaded_tracks_count += 1
             # --- FIX ---
@@ -4350,6 +4403,7 @@ class DownloadMissingTracksModal(QDialog):
             self.downloaded_count_label.setText(str(self.downloaded_tracks_count))
             self.successful_downloads += 1
         else:
+            print(f"🔧 Track {download_index} failed - updating table index {track_info['table_index']} to '❌ Failed'")
             self.track_table.setItem(track_info['table_index'], 4, QTableWidgetItem("❌ Failed"))
             self.failed_downloads += 1
             if track_info not in self.permanently_failed_tracks:
@@ -4384,9 +4438,13 @@ class DownloadMissingTracksModal(QDialog):
 
     def on_manual_match_resolved(self, resolved_track_info):
         """Handles a track being successfully resolved by the ManualMatchModal."""
+        print(f"🔧 Manual match resolved - download_index: {resolved_track_info.get('download_index')}, table_index: {resolved_track_info.get('table_index')}")
         original_failed_track = next((t for t in self.permanently_failed_tracks if t['download_index'] == resolved_track_info['download_index']), None)
         if original_failed_track:
             self.permanently_failed_tracks.remove(original_failed_track)
+            print(f"✅ Removed track from permanently_failed_tracks - remaining: {len(self.permanently_failed_tracks)}")
+        else:
+            print("⚠️ Could not find original failed track to remove")
         self.update_failed_matches_button()
             
     def find_track_index_in_playlist(self, spotify_track):
@@ -4404,10 +4462,51 @@ class DownloadMissingTracksModal(QDialog):
             
             # The process_finished signal is still emitted to unlock the main UI.
             self.process_finished.emit()
+            
+            # Request Plex library scan if we have successful downloads
+            if self.successful_downloads > 0 and hasattr(self, 'parent_sync_page') and self.parent_sync_page.scan_manager:
+                self.parent_sync_page.scan_manager.request_scan(f"Playlist download completed ({self.successful_downloads} tracks)")
+
+            # Add permanently failed tracks to wishlist before showing completion message
+            failed_count = len(self.permanently_failed_tracks)
+            wishlist_added_count = 0
+            
+            if self.permanently_failed_tracks:
+                try:
+                    # Add failed tracks to wishlist
+                    source_context = {
+                        'playlist_name': getattr(self.playlist, 'name', 'Unknown Playlist'),
+                        'playlist_id': getattr(self.playlist, 'id', None),
+                        'added_from': 'sync_page_modal',
+                        'timestamp': datetime.now().isoformat()
+                    }
+                    
+                    for failed_track_info in self.permanently_failed_tracks:
+                        try:
+                            success = self.wishlist_service.add_failed_track_from_modal(
+                                track_info=failed_track_info,
+                                source_type='playlist',
+                                source_context=source_context
+                            )
+                            if success:
+                                wishlist_added_count += 1
+                        except Exception as e:
+                            logger.error(f"Failed to add track to wishlist: {e}")
+                            
+                    if wishlist_added_count > 0:
+                        logger.info(f"Added {wishlist_added_count} failed tracks to wishlist from playlist '{self.playlist.name}'")
+                        
+                except Exception as e:
+                    logger.error(f"Error adding failed tracks to wishlist: {e}")
 
             # Determine the final message based on success or failure.
             if self.permanently_failed_tracks:
-                final_message = f"Completed downloading {self.successful_downloads}/{len(self.missing_tracks)} missing tracks!\n\nYou can now manually correct any failed downloads or close this window."
+                final_message = f"Completed downloading {self.successful_downloads}/{len(self.missing_tracks)} missing tracks!\n\n"
+                
+                if wishlist_added_count > 0:
+                    final_message += f"✨ Added {wishlist_added_count} failed track{'s' if wishlist_added_count != 1 else ''} to wishlist for automatic retry.\n\n"
+                
+                final_message += "You can also manually correct failed downloads or check the wishlist on the dashboard."
                 
                 # If there are failures, ensure the modal is visible and bring it to the front.
                 if self.isHidden():
@@ -4537,9 +4636,9 @@ class DownloadMissingTracksModal(QDialog):
         if not results:
             return []
 
-        # Step 1: Get initial confident matches based on title, bitrate, etc.
-        # This gives us a sorted list of potential candidates.
-        initial_candidates = self.matching_engine.find_best_slskd_matches(spotify_track, results)
+        # Step 1: Get initial confident matches with version-aware scoring
+        # This gives us a sorted list of potential candidates, preferring originals.
+        initial_candidates = self.matching_engine.find_best_slskd_matches_enhanced(spotify_track, results)
 
         if not initial_candidates:
             print(f"⚠️ No initial candidates found for '{spotify_track.name}' from query '{query}'.")
@@ -4573,8 +4672,35 @@ class DownloadMissingTracksModal(QDialog):
                 print(f"❌ Artist '{spotify_artist_name}' NOT found in path: '{slskd_full_path}'. Discarding candidate.")
 
         if verified_candidates:
+            # Apply quality preference filtering before returning
+            from config.settings import config_manager
+            quality_preference = config_manager.get_quality_preference()
+            
+            # Filter candidates by quality preference with smart fallback
+            if hasattr(self.parent_page, 'soulseek_client'):
+                quality_filtered = self.parent_page.soulseek_client.filter_results_by_quality_preference(
+                    verified_candidates, quality_preference
+                )
+                
+                if quality_filtered:
+                    verified_candidates = quality_filtered
+                    print(f"🎯 Applied quality filtering ({quality_preference}): {len(verified_candidates)} candidates remain")
+                else:
+                    print(f"⚠️ Quality filtering ({quality_preference}) removed all candidates, keeping originals")
+            
             best_confidence = verified_candidates[0].confidence
-            print(f"✅ Found {len(verified_candidates)} VERIFIED matches for '{spotify_track.name}'. Best score: {best_confidence:.2f}")
+            best_version = getattr(verified_candidates[0], 'version_type', 'unknown')
+            best_quality = getattr(verified_candidates[0], 'quality', 'unknown')
+            print(f"✅ Found {len(verified_candidates)} VERIFIED matches for '{spotify_track.name}'. Best: {best_confidence:.2f} ({best_version}, {best_quality.upper()})")
+            
+            # Log version breakdown for debugging
+            for candidate in verified_candidates[:3]:  # Show top 3
+                version = getattr(candidate, 'version_type', 'unknown')
+                penalty = getattr(candidate, 'version_penalty', 0.0)
+                quality = getattr(candidate, 'quality', 'unknown')
+                bitrate_info = f" {candidate.bitrate}kbps" if hasattr(candidate, 'bitrate') and candidate.bitrate else ""
+                print(f"   🎵 {candidate.confidence:.2f} - {version} ({quality.upper()}{bitrate_info}) (penalty: {penalty:.2f}) - {candidate.filename[:80]}...")
+                
         else:
             print(f"⚠️ No verified matches found for '{spotify_track.name}' after checking file paths.")
 

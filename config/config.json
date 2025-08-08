@@ -1,23 +1,30 @@
 {
   "spotify": {
-    "client_id": "YOUR CLIENT ID",
-    "client_secret": "YOUR CLIENT SECRET"
+    "client_id": "YOUR_SPOTIFY_CLIENT_ID",
+    "client_secret": "YOUR_SPOTIFY_CLIENT_SECRET"
   },
   "plex": {
-    "base_url": "http://192.168.86.36:32400",
-    "token": "YOUR PLEX TOKEN"
+    "base_url": "http://YOUR_PLEX_IP_ADDRESS:32400",
+    "token": "YOUR_PLEX_TOKEN"
   },
   "soulseek": {
     "slskd_url": "http://localhost:5030",
-    "api_key": "YOUR SLSKD API KEY",
-    "download_path": "./downloads",
-    "transfer_path": "./Transfer"
+    "api_key": "YOUR_SLSKD_API_KEY",
+    "download_path": "/path/to/your/slskd/downloads",
+    "transfer_path": "/path/to/your/music/library"
   },
   "logging": {
     "path": "logs/app.log",
-    "level": "DEBUG"
+    "level": "INFO"
   },
   "settings": {
     "audio_quality": "flac"
+  },
+  "database": {
+    "path": "database/music_library.db",
+    "batch_size": 50,
+    "auto_refresh": true,
+    "refresh_interval_hours": 24,
+    "max_workers": 5
   }
 }

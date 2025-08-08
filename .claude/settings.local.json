@@ -4,7 +4,10 @@
       "Bash(mkdir:*)",
       "Bash(rm:*)",
       "Bash(rg:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "WebFetch(domain:python-plexapi.readthedocs.io)",
+      "Bash(git restore:*)",
+      "Bash(python3:*)"
     ],
     "deny": []
   }
