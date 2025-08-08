@@ -126,6 +126,15 @@ class MusicDatabase:
                 )
             """)
             
+            # Metadata table for storing system information like last refresh dates
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS metadata (
+                    key TEXT PRIMARY KEY,
+                    value TEXT,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
             # Create indexes for performance
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_artist_id ON albums (artist_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_album_id ON tracks (album_id)")
@@ -1330,6 +1339,40 @@ class MusicDatabase:
             logger.error(f"Error getting album completion stats for artist '{artist_name}': {e}")
             return {'complete': 0, 'nearly_complete': 0, 'partial': 0, 'missing': 0, 'total': 0}
     
+    def set_metadata(self, key: str, value: str):
+        """Set a metadata value"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT OR REPLACE INTO metadata (key, value, updated_at) 
+                    VALUES (?, ?, CURRENT_TIMESTAMP)
+                """, (key, value))
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Error setting metadata {key}: {e}")
+    
+    def get_metadata(self, key: str) -> Optional[str]:
+        """Get a metadata value"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT value FROM metadata WHERE key = ?", (key,))
+                result = cursor.fetchone()
+                return result['value'] if result else None
+        except Exception as e:
+            logger.error(f"Error getting metadata {key}: {e}")
+            return None
+    
+    def record_full_refresh_completion(self):
+        """Record when a full refresh was completed"""
+        from datetime import datetime
+        self.set_metadata('last_full_refresh', datetime.now().isoformat())
+    
+    def get_last_full_refresh(self) -> Optional[str]:
+        """Get the date of the last full refresh"""
+        return self.get_metadata('last_full_refresh')
+
     def get_database_info(self) -> Dict[str, Any]:
         """Get comprehensive database information"""
         try:
@@ -1357,11 +1400,15 @@ class MusicDatabase:
             result = cursor.fetchone()
             last_update = result['last_update'] if result and result['last_update'] else None
             
+            # Get last full refresh
+            last_full_refresh = self.get_last_full_refresh()
+            
             return {
                 **stats,
                 'database_size_mb': round(db_size_mb, 2),
                 'database_path': str(self.database_path),
-                'last_update': last_update
+                'last_update': last_update,
+                'last_full_refresh': last_full_refresh
             }
             
         except Exception as e:
@@ -1372,7 +1419,8 @@ class MusicDatabase:
                 'tracks': 0,
                 'database_size_mb': 0.0,
                 'database_path': str(self.database_path),
-                'last_update': None
+                'last_update': None,
+                'last_full_refresh': None
             }
 
 # Thread-safe singleton pattern for database access

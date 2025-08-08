@@ -22,6 +22,9 @@ import io
 from core.matching_engine import MusicMatchingEngine
 from ui.components.database_updater_widget import DatabaseUpdaterWidget
 from core.database_update_worker import DatabaseUpdateWorker, DatabaseStatsWorker
+from utils.logging_config import get_logger
+
+logger = get_logger("dashboard")
 
 class MetadataUpdateWorker(QThread):
     """Worker thread for updating Plex artist metadata using Spotify data"""
@@ -1588,7 +1591,7 @@ class DashboardPage(QWidget):
             self._active_stats_workers.append(stats_worker)
             
             # Connect signals
-            stats_worker.stats_updated.connect(self.database_widget.update_statistics)
+            stats_worker.stats_updated.connect(self.update_database_info)
             stats_worker.finished.connect(lambda: self._cleanup_stats_worker(stats_worker))
             
             stats_worker.start()
@@ -1596,12 +1599,26 @@ class DashboardPage(QWidget):
             logger.error(f"Error refreshing database statistics: {e}")
             # Fallback to default stats to prevent crashes
             if hasattr(self, 'database_widget') and self.database_widget:
-                self.database_widget.update_statistics({
+                fallback_info = {
                     'artists': 0,
                     'albums': 0,
                     'tracks': 0,
-                    'database_size_mb': 0.0
-                })
+                    'database_size_mb': 0.0,
+                    'last_full_refresh': None
+                }
+                self.update_database_info(fallback_info)
+    
+    def update_database_info(self, info: dict):
+        """Update database statistics and last refresh info"""
+        try:
+            # Update basic statistics
+            self.database_widget.update_statistics(info)
+            
+            # Update last refresh information
+            last_refresh_date = info.get('last_full_refresh')
+            self.database_widget.update_last_refresh_info(last_refresh_date)
+        except Exception as e:
+            logger.error(f"Error updating database info: {e}")
     
     def _cleanup_stats_worker(self, worker):
         """Clean up a finished stats worker"""

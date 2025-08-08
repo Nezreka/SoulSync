@@ -80,6 +80,14 @@ class DatabaseUpdateWorker(QThread):
             self.phase_changed.emit("Processing artists, albums, and tracks...")
             self._process_all_artists(artists_to_process)
             
+            # Record full refresh completion for tracking purposes
+            if self.full_refresh and self.database:
+                try:
+                    self.database.record_full_refresh_completion()
+                    logger.info("Full refresh completion recorded in database")
+                except Exception as e:
+                    logger.warning(f"Could not record full refresh completion: {e}")
+            
             # Emit final results
             self.finished.emit(
                 self.processed_artists,
@@ -483,7 +491,7 @@ class DatabaseStatsWorker(QThread):
         self.should_stop = True
     
     def run(self):
-        """Get database statistics"""
+        """Get database statistics and full info including last refresh"""
         try:
             if self.should_stop:
                 return
@@ -492,9 +500,10 @@ class DatabaseStatsWorker(QThread):
             if self.should_stop:
                 return
                 
-            stats = database.get_database_info()
+            # Get full database info (includes last_full_refresh)
+            info = database.get_database_info()
             if not self.should_stop:
-                self.stats_updated.emit(stats)
+                self.stats_updated.emit(info)
         except Exception as e:
             logger.error(f"Error getting database stats: {e}")
             if not self.should_stop:
@@ -503,5 +512,6 @@ class DatabaseStatsWorker(QThread):
                     'albums': 0, 
                     'tracks': 0,
                     'database_size_mb': 0.0,
-                    'last_update': None
+                    'last_update': None,
+                    'last_full_refresh': None
                 })
