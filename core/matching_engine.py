@@ -36,12 +36,13 @@ class MusicMatchingEngine:
         ]
         
         self.artist_patterns = [
+            # Only remove featured artists, not parts of main artist names
             r'\s*feat\..*',
             r'\s*ft\..*',
             r'\s*featuring.*',
-            r'\s*&.*',
-            r'\s*and.*',
-            r',.*'
+            # REMOVED: r'\s*&.*' - This breaks "Daryl Hall & John Oates", "Blood & Water"
+            # REMOVED: r'\s*and.*' - This breaks artist names with "and"  
+            # REMOVED: r',.*' - This can break legitimate artist names with commas
         ]
     
     def normalize_string(self, text: str) -> str:
@@ -204,10 +205,13 @@ class MusicMatchingEngine:
         plex_core_title = self.get_core_string(plex_track.title)
 
         if spotify_core_title and spotify_core_title == plex_core_title:
-            # If the core titles are identical, we are highly confident.
-            # The final score is a high base (0.9) plus a bonus for artist similarity.
-            confidence = 0.90 + (artist_score * 0.09) # Max score of 0.99
-            return confidence, "core_title_match"
+            # SAFETY CHECK: Only give high confidence if artist also matches reasonably well
+            # This prevents "Artist A - Girls" from matching "Artist Z - Girls" with high confidence
+            if artist_score >= 0.75:  # Require decent artist match
+                # If the core titles are identical and artists match, we are highly confident
+                confidence = 0.90 + (artist_score * 0.09) # Max score of 0.99
+                return confidence, "core_title_match"
+            # If artist score is too low, fall through to standard weighted calculation
 
         # --- Priority 2: Fuzzy Title Match (for variations, typos, etc.) ---
         spotify_title_cleaned = self.clean_title(spotify_track.name)
@@ -294,17 +298,17 @@ class MusicMatchingEngine:
                         
                         # SAFETY CHECK: Don't return empty or too-short titles
                         if not cleaned_title or len(cleaned_title.strip()) < 2:
-                            print(f"⚠️ Album removal would create empty title: '{original_title}' → '{cleaned_title}' - keeping original")
+                            logger.warning(f"Album removal would create empty title: '{original_title}' → '{cleaned_title}' - keeping original")
                             return track_title, False
                         
                         # SAFETY CHECK: Don't remove if it would leave only articles or very short words
                         words = cleaned_title.split()
                         meaningful_words = [w for w in words if len(w) > 2 and w.lower() not in ['the', 'and', 'or', 'of', 'a', 'an']]
                         if not meaningful_words:
-                            print(f"⚠️ Album removal would leave only short words: '{original_title}' → '{cleaned_title}' - keeping original")
+                            logger.warning(f"Album removal would leave only short words: '{original_title}' → '{cleaned_title}' - keeping original")
                             return track_title, False
                         
-                        print(f"🎵 Detected album in title: '{original_title}' → '{cleaned_title}' (removed: '{match.group(1)}', similarity: {similarity:.2f})")
+                        logger.debug(f"Detected album in title: '{original_title}' → '{cleaned_title}' (removed: '{match.group(1)}', similarity: {similarity:.2f})")
                         return cleaned_title, True
         
         # Fallback: detect common album-like suffixes even without album context
@@ -363,7 +367,7 @@ class MusicMatchingEngine:
             cleaned_track = self.clean_title(cleaned_title)
             if cleaned_track:
                 queries.append(f"{artist} {cleaned_track}".strip())
-                print(f"🎯 PRIORITY 1: Album-cleaned query: '{artist} {cleaned_track}'")
+                logger.debug(f"PRIORITY 1: Album-cleaned query: '{artist} {cleaned_track}'")
         
         # PRIORITY 2: Try simplified versions, but preserve important version info
         # Only remove content that's likely to be album names or noise, not version info
@@ -392,9 +396,9 @@ class MusicMatchingEngine:
                 dash_clean = self.clean_title(title_part)
                 if dash_clean and dash_clean not in [self.clean_title(q.split(' ', 1)[1]) for q in queries if ' ' in q]:
                     queries.append(f"{artist} {dash_clean}".strip())
-                    print(f"🎯 PRIORITY 2: Dash-cleaned query (removed album): '{artist} {dash_clean}'")
+                    logger.debug(f"PRIORITY 2: Dash-cleaned query (removed album): '{artist} {dash_clean}'")
             elif should_preserve:
-                print(f"🎯 PRESERVED: Keeping dash content '{dash_content}' as it appears to be version info")
+                logger.debug(f"PRESERVED: Keeping dash content '{dash_content}' as it appears to be version info")
         
         # Pattern 2: Only remove parentheses that contain noise (feat, explicit, etc), not version info
         # Check if parentheses contain version-related keywords before removing
@@ -425,16 +429,16 @@ class MusicMatchingEngine:
                     simple_clean = self.clean_title(simple_title)
                     if simple_clean and simple_clean not in [self.clean_title(q.split(' ', 1)[1]) for q in queries if ' ' in q]:
                         queries.append(f"{artist} {simple_clean}".strip())
-                        print(f"🎯 PRIORITY 2: Noise-removed query: '{artist} {simple_clean}'")
+                        logger.debug(f"PRIORITY 2: Noise-removed query: '{artist} {simple_clean}'")
             elif is_version:
-                print(f"🎯 PRESERVED: Keeping parentheses content '({paren_content})' as it appears to be version info")
+                logger.debug(f"PRESERVED: Keeping parentheses content '({paren_content})' as it appears to be version info")
         
         # PRIORITY 3: Original query (ONLY if no album was detected or if it's different)
         original_track_clean = self.clean_title(original_title)
         if not album_detected or not queries:  # Only add original if no album detected or no other queries
             if original_track_clean not in [q.split(' ', 1)[1] for q in queries if ' ' in q]:
                 queries.append(f"{artist} {original_track_clean}".strip())
-                print(f"🎯 PRIORITY 3: Original query: '{artist} {original_track_clean}'")
+                logger.debug(f"PRIORITY 3: Original query: '{artist} {original_track_clean}'")
         
         # Remove duplicates while preserving order
         unique_queries = []
@@ -492,7 +496,7 @@ class MusicMatchingEngine:
         quality_bonus = 0.0
         if slskd_track.quality:
             if slskd_track.quality.lower() == 'flac':
-                quality_bonus = 0.1
+                quality_bonus = 0.07  # Reduced from 0.1 to prevent low-confidence FLAC beating high-confidence MP3
             elif slskd_track.quality.lower() == 'mp3' and (slskd_track.bitrate or 0) >= 320:
                 quality_bonus = 0.05
 
