@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                            QFrame, QGridLayout, QScrollArea, QSizePolicy, QPushButton,
                            QProgressBar, QTextEdit, QSpacerItem, QGroupBox, QFormLayout, QComboBox,
-                           QDialog, QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox)
+                           QDialog, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QMessageBox, QApplication)
 from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, QObject, QRunnable, QThreadPool
 from PyQt6.QtGui import QFont, QPalette, QColor
 import time
@@ -64,138 +64,270 @@ class DownloadMissingWishlistTracksModal(QDialog):
         
         self.setup_ui()
         self.load_wishlist_tracks()
+        
+        # Timer to periodically check for automatic processing status changes
+        self.status_check_timer = QTimer()
+        self.status_check_timer.timeout.connect(self.check_auto_processing_status)
+        self.status_check_timer.start(2000)  # Check every 2 seconds
     
     def setup_ui(self):
-        """Setup the modal UI (simplified version based on sync.py modal)"""
-        self.setWindowTitle("Download Wishlist Tracks")
-        self.setMinimumSize(800, 600)
+        """Setup the modal UI with enhanced styling"""
+        self.setWindowTitle("Wishlist Downloads")
+        self.setMinimumSize(900, 650)
         self.setStyleSheet("""
             DownloadMissingWishlistTracksModal {
-                background: #191414;
+                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                                          stop: 0 #1a1a1a,
+                                          stop: 1 #0f0f0f);
+                border-radius: 12px;
             }
         """)
         
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(15)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(20)
         
-        # Header
-        header_label = QLabel("Download Missing Wishlist Tracks")
-        header_label.setFont(QFont("Arial", 16, QFont.Weight.Bold))
-        header_label.setStyleSheet("color: #ffffff;")
+        # Header section with icon
+        header_layout = QHBoxLayout()
+        header_layout.setSpacing(12)
         
-        # Info label
+        # Wishlist icon
+        icon_label = QLabel("🎵")
+        icon_label.setFont(QFont("Arial", 20))
+        icon_label.setFixedSize(32, 32)
+        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_label.setStyleSheet("""
+            QLabel {
+                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 1,
+                                          stop: 0 rgba(29, 185, 84, 0.15),
+                                          stop: 1 rgba(30, 215, 96, 0.1));
+                border: 1px solid rgba(29, 185, 84, 0.3);
+                border-radius: 16px;
+            }
+        """)
+        
+        # Header text
+        header_label = QLabel("Wishlist Downloads")
+        header_label.setFont(QFont("SF Pro Display", 18, QFont.Weight.Bold))
+        header_label.setStyleSheet("""
+            color: #ffffff;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+        """)
+        
+        header_layout.addWidget(icon_label)
+        header_layout.addWidget(header_label)
+        header_layout.addStretch()
+        
+        # Info label with better styling
         self.info_label = QLabel("Loading wishlist tracks...")
-        self.info_label.setFont(QFont("Arial", 11))
-        self.info_label.setStyleSheet("color: #b3b3b3;")
+        self.info_label.setFont(QFont("SF Pro Text", 12))
+        self.info_label.setStyleSheet("""
+            color: rgba(255, 255, 255, 0.7);
+            padding: 8px 0px;
+            font-weight: 400;
+        """)
         
-        # Track table (simplified)
+        # Enhanced track table
         self.track_table = QTableWidget()
         self.track_table.setColumnCount(4)
         self.track_table.setHorizontalHeaderLabels(["Track", "Artist", "Retry Count", "Status"])
-        self.track_table.horizontalHeader().setStretchLastSection(True)
+        
+        # Set more balanced column distribution
+        header = self.track_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)  # Track - flexible
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # Artist - flexible  
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)  # Retry Count - flexible
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)  # Status - flexible
+        
+        # Set minimum widths to ensure readability
+        self.track_table.setMinimumSize(800, 400)
+        header.setMinimumSectionSize(80)   # Minimum width for any column
+        header.setDefaultSectionSize(150)  # Default width for columns
+        
+        # Enhanced table styling
+        self.track_table.setAlternatingRowColors(True)
+        self.track_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.track_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.track_table.verticalHeader().setVisible(False)
+        self.track_table.setShowGrid(False)
+        
         self.track_table.setStyleSheet("""
             QTableWidget {
-                background: #282828;
-                border: 1px solid #404040;
-                border-radius: 8px;
-                gridline-color: #404040;
+                background: transparent;
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 12px;
+                gridline-color: transparent;
+                outline: none;
+                font-family: "SF Pro Text";
+                font-size: 11px;
             }
             QTableWidget::item {
-                padding: 8px;
-                border-bottom: 1px solid #404040;
+                padding: 12px 8px;
+                border: none;
+                color: rgba(255, 255, 255, 0.9);
+                background: transparent;
+            }
+            QTableWidget::item:alternate {
+                background: rgba(255, 255, 255, 0.02);
+            }
+            QTableWidget::item:hover {
+                background: rgba(255, 255, 255, 0.05);
+            }
+            QTableWidget::item:selected {
+                background: rgba(29, 185, 84, 0.1);
+                border-left: 2px solid #1db954;
             }
             QHeaderView::section {
-                background: #404040;
-                color: #ffffff;
-                padding: 8px;
+                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                                          stop: 0 rgba(255, 255, 255, 0.08),
+                                          stop: 1 rgba(255, 255, 255, 0.04));
+                color: rgba(255, 255, 255, 0.9);
+                padding: 12px 8px;
                 border: none;
-                font-weight: bold;
+                font-weight: 600;
+                font-size: 10px;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+            }
+            QHeaderView::section:first {
+                border-top-left-radius: 12px;
+            }
+            QHeaderView::section:last {
+                border-top-right-radius: 12px;
+            }
+            QScrollBar:vertical {
+                background: rgba(255, 255, 255, 0.05);
+                width: 8px;
+                border-radius: 4px;
+                margin: 0;
+            }
+            QScrollBar::handle:vertical {
+                background: rgba(255, 255, 255, 0.2);
+                border-radius: 4px;
+                min-height: 20px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: rgba(255, 255, 255, 0.3);
             }
         """)
         
-        # Progress bar
+        # Enhanced progress bar
         self.download_progress = QProgressBar()
+        self.download_progress.setFixedHeight(8)
         self.download_progress.setVisible(False)
+        self.download_progress.setTextVisible(False)
         self.download_progress.setStyleSheet("""
             QProgressBar {
-                border: 1px solid #404040;
-                border-radius: 8px;
-                text-align: center;
-                background: #282828;
+                background: rgba(255, 255, 255, 0.1);
+                border: none;
+                border-radius: 4px;
             }
             QProgressBar::chunk {
-                background: #1db954;
-                border-radius: 7px;
+                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0,
+                                          stop: 0 #1db954,
+                                          stop: 1 #1ed760);
+                border-radius: 4px;
             }
         """)
         
-        # Buttons
+        # Enhanced buttons
         button_layout = QHBoxLayout()
+        button_layout.setSpacing(12)
         
         self.begin_download_btn = QPushButton("🚀 Begin Downloads")
-        self.begin_download_btn.setFixedHeight(40)
+        self.begin_download_btn.setFixedHeight(44)
+        self.begin_download_btn.setMinimumWidth(160)
         self.begin_download_btn.clicked.connect(self.start_downloads)
         self.begin_download_btn.setStyleSheet("""
             QPushButton {
-                background: #1db954;
-                border: none;
-                border-radius: 20px;
+                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 1,
+                                          stop: 0 #1db954,
+                                          stop: 1 #1ed760);
+                border: 1px solid rgba(29, 185, 84, 0.3);
+                border-radius: 22px;
                 color: #000000;
-                font-size: 12px;
-                font-weight: bold;
-                padding: 8px 20px;
+                font-family: "SF Pro Text";
+                font-size: 13px;
+                font-weight: 600;
+                padding: 0px 24px;
+                letter-spacing: 0.2px;
             }
             QPushButton:hover {
-                background: #1ed760;
+                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 1,
+                                          stop: 0 #1ed760,
+                                          stop: 1 #22e968);
+                border: 1px solid rgba(30, 215, 96, 0.4);
+                transform: translateY(-1px);
+            }
+            QPushButton:pressed {
+                background: #1db954;
+                transform: translateY(0px);
             }
             QPushButton:disabled {
-                background: #404040;
-                color: #888888;
+                background: rgba(255, 255, 255, 0.05);
+                color: rgba(255, 255, 255, 0.3);
+                border: 1px solid rgba(255, 255, 255, 0.1);
             }
         """)
         
-        self.cancel_btn = QPushButton("Cancel")
-        self.cancel_btn.setFixedHeight(40)
-        self.cancel_btn.clicked.connect(self.on_cancel_clicked)
-        self.cancel_btn.setStyleSheet("""
-            QPushButton {
-                background: #404040;
-                border: none;
-                border-radius: 20px;
-                color: #ffffff;
-                font-size: 12px;
-                padding: 8px 20px;
-            }
-            QPushButton:hover {
-                background: #505050;
-            }
-        """)
-        
-        self.clear_wishlist_btn = QPushButton("🗑️ Clear Wishlist")
-        self.clear_wishlist_btn.setFixedHeight(40)
+        # Clear wishlist button
+        self.clear_wishlist_btn = QPushButton("🗑️ Clear All")
+        self.clear_wishlist_btn.setFixedHeight(44)
+        self.clear_wishlist_btn.setMinimumWidth(120)
         self.clear_wishlist_btn.clicked.connect(self.clear_wishlist)
         self.clear_wishlist_btn.setStyleSheet("""
             QPushButton {
-                background: #e22134;
-                border: none;
-                border-radius: 20px;
-                color: #ffffff;
+                background: rgba(255, 107, 107, 0.1);
+                border: 1px solid rgba(255, 107, 107, 0.2);
+                border-radius: 22px;
+                color: #ff6b6b;
+                font-family: "SF Pro Text";
                 font-size: 12px;
-                padding: 8px 20px;
+                font-weight: 500;
+                padding: 0px 20px;
             }
             QPushButton:hover {
-                background: #ff4757;
+                background: rgba(255, 107, 107, 0.15);
+                border: 1px solid rgba(255, 107, 107, 0.3);
+            }
+            QPushButton:pressed {
+                background: rgba(255, 107, 107, 0.05);
             }
         """)
         
-        button_layout.addStretch()
+        self.cancel_btn = QPushButton("Close")
+        self.cancel_btn.setFixedHeight(44)
+        self.cancel_btn.setMinimumWidth(100)
+        self.cancel_btn.clicked.connect(self.on_cancel_clicked)
+        self.cancel_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(255, 255, 255, 0.05);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 22px;
+                color: rgba(255, 255, 255, 0.8);
+                font-family: "SF Pro Text";
+                font-size: 12px;
+                font-weight: 500;
+                padding: 0px 20px;
+            }
+            QPushButton:hover {
+                background: rgba(255, 255, 255, 0.08);
+                border: 1px solid rgba(255, 255, 255, 0.15);
+            }
+            QPushButton:pressed {
+                background: rgba(255, 255, 255, 0.02);
+            }
+        """)
+        
+        # Add buttons to layout
         button_layout.addWidget(self.clear_wishlist_btn)
+        button_layout.addStretch()
         button_layout.addWidget(self.cancel_btn)
         button_layout.addWidget(self.begin_download_btn)
         
-        # Add to layout
-        layout.addWidget(header_label)
+        # Add all components to main layout
+        layout.addLayout(header_layout)
         layout.addWidget(self.info_label)
         layout.addWidget(self.track_table)
         layout.addWidget(self.download_progress)
@@ -211,8 +343,14 @@ class DownloadMissingWishlistTracksModal(QDialog):
                 self.info_label.setText("No tracks in wishlist")
                 self.begin_download_btn.setEnabled(False)
                 return
-                
-            self.info_label.setText(f"Found {self.total_tracks} tracks in wishlist ready for retry")
+            
+            # Check if automatic processing is running and update UI accordingly
+            if hasattr(self.parent_dashboard, 'auto_processing_wishlist') and self.parent_dashboard.auto_processing_wishlist:
+                self.info_label.setText(f"Found {self.total_tracks} tracks in wishlist (⚡ Automatic processing in progress...)")
+                self.begin_download_btn.setText("⏳ Auto Processing...")
+                self.begin_download_btn.setEnabled(False)
+            else:
+                self.info_label.setText(f"Found {self.total_tracks} tracks in wishlist ready for retry")
             
             # Populate table
             self.track_table.setRowCount(self.total_tracks)
@@ -237,10 +375,51 @@ class DownloadMissingWishlistTracksModal(QDialog):
             logger.error(f"Error loading wishlist tracks: {e}")
             self.info_label.setText(f"Error loading tracks: {str(e)}")
     
+    def check_auto_processing_status(self):
+        """Periodically check if automatic processing status has changed"""
+        try:
+            is_auto_processing = hasattr(self.parent_dashboard, 'auto_processing_wishlist') and self.parent_dashboard.auto_processing_wishlist
+            current_button_text = self.begin_download_btn.text()
+            
+            if is_auto_processing and "Auto Processing" not in current_button_text:
+                # Auto processing started, update UI
+                self.info_label.setText(f"Found {self.total_tracks} tracks in wishlist (⚡ Automatic processing in progress...)")
+                self.begin_download_btn.setText("⏳ Auto Processing...")
+                self.begin_download_btn.setEnabled(False)
+                logger.debug("Modal UI updated: Automatic processing started")
+                
+            elif not is_auto_processing and "Auto Processing" in current_button_text:
+                # Auto processing finished, refresh the modal
+                self.load_wishlist_tracks()
+                self.begin_download_btn.setText("🚀 Begin Downloads")
+                self.begin_download_btn.setEnabled(self.total_tracks > 0)
+                logger.debug("Modal UI updated: Automatic processing completed")
+                
+        except Exception as e:
+            logger.error(f"Error checking auto processing status: {e}")
+    
+    def refresh_if_auto_processing_complete(self):
+        """Check if automatic processing completed and refresh the modal"""
+        try:
+            if not hasattr(self.parent_dashboard, 'auto_processing_wishlist') or not self.parent_dashboard.auto_processing_wishlist:
+                # Auto processing is not running, refresh the modal
+                self.load_wishlist_tracks()
+                self.begin_download_btn.setText("🚀 Begin Downloads")
+                self.begin_download_btn.setEnabled(self.total_tracks > 0)
+        except Exception as e:
+            logger.error(f"Error refreshing modal after auto processing: {e}")
+    
     def start_downloads(self):
         """Start downloading all wishlist tracks"""
         try:
             if self.total_tracks == 0:
+                return
+                
+            # Check if automatic processing is already running
+            if hasattr(self.parent_dashboard, 'auto_processing_wishlist') and self.parent_dashboard.auto_processing_wishlist:
+                QMessageBox.information(self, "Wishlist Processing", 
+                                      "Automatic wishlist processing is currently running in the background. "
+                                      "Please wait for it to complete before starting manual processing.")
                 return
                 
             self.download_in_progress = True
@@ -275,10 +454,7 @@ class DownloadMissingWishlistTracksModal(QDialog):
             track_data = self.wishlist_tracks[self.download_queue_index]
             track_index = self.download_queue_index
             
-            # Update UI
-            self.track_table.setItem(track_index, 3, QTableWidgetItem("🔍 Searching..."))
-            
-            # Start search and download for this track (simplified)
+            # Start search and download for this track (status updates handled by worker)
             self.search_and_download_track_simple(track_data, self.download_queue_index)
             
             self.active_parallel_downloads += 1
@@ -304,8 +480,9 @@ class DownloadMissingWishlistTracksModal(QDialog):
                 self.on_track_download_failed(download_index, "Cannot create search query")
                 return
             
-            # Use a simple approach - directly call soulseek search
+            # Use enhanced worker with status updates
             worker = SimpleWishlistDownloadWorker(self.soulseek_client, query, track_data, download_index)
+            worker.signals.status_updated.connect(self.on_track_status_updated)
             worker.signals.download_completed.connect(self.on_track_download_completed)
             worker.signals.download_failed.connect(self.on_track_download_failed)
             
@@ -314,6 +491,15 @@ class DownloadMissingWishlistTracksModal(QDialog):
         except Exception as e:
             logger.error(f"Error starting track download: {e}")
             self.on_track_download_failed(download_index, str(e))
+    
+    def on_track_status_updated(self, download_index, status_text):
+        """Handle live status updates for individual tracks"""
+        try:
+            if 0 <= download_index < self.track_table.rowCount():
+                self.track_table.setItem(download_index, 3, QTableWidgetItem(status_text))
+                logger.debug(f"Updated track {download_index} status to: {status_text}")
+        except Exception as e:
+            logger.error(f"Error updating track status: {e}")
     
     def on_track_download_completed(self, download_index, download_id):
         """Handle successful track download"""
@@ -419,12 +605,29 @@ class DownloadMissingWishlistTracksModal(QDialog):
         self.cancel_requested = True
         self.process_finished.emit()
         self.reject()
+    
+    def closeEvent(self, event):
+        """Clean up when modal is closed"""
+        try:
+            # Stop the status check timer
+            if hasattr(self, 'status_check_timer') and self.status_check_timer:
+                self.status_check_timer.stop()
+                
+            # Cancel any ongoing downloads
+            if self.download_in_progress:
+                self.cancel_requested = True
+                
+        except Exception as e:
+            logger.error(f"Error during modal close: {e}")
+        
+        super().closeEvent(event)
 
 
 class SimpleWishlistDownloadWorker(QRunnable):
-    """Simple worker to download a single wishlist track"""
+    """Enhanced worker to download a single wishlist track with detailed status updates"""
     
     class Signals(QObject):
+        status_updated = pyqtSignal(int, str)  # download_index, status_text
         download_completed = pyqtSignal(int, str)  # download_index, download_id
         download_failed = pyqtSignal(int, str)  # download_index, error_message
     
@@ -437,8 +640,11 @@ class SimpleWishlistDownloadWorker(QRunnable):
         self.signals = self.Signals()
     
     def run(self):
-        """Run the download"""
+        """Run the download with detailed status updates"""
         try:
+            # Update status: Starting search
+            self.signals.status_updated.emit(self.download_index, "🔍 Searching...")
+            
             # Get quality preference
             from config.settings import config_manager
             quality_preference = config_manager.get_quality_preference()
@@ -448,12 +654,33 @@ class SimpleWishlistDownloadWorker(QRunnable):
             asyncio.set_event_loop(loop)
             
             try:
-                download_id = loop.run_until_complete(
-                    self.soulseek_client.search_and_download_best(self.query, quality_preference)
+                # Update status: Found candidates, analyzing
+                self.signals.status_updated.emit(self.download_index, "🔎 Analyzing results...")
+                
+                # Use the enhanced search method that provides more feedback
+                results = loop.run_until_complete(
+                    self._search_with_progress(self.query, quality_preference)
                 )
                 
-                if download_id:
-                    self.signals.download_completed.emit(self.download_index, download_id)
+                if results and len(results) > 0:
+                    # Update status: Found candidates, starting download
+                    self.signals.status_updated.emit(self.download_index, f"📋 Found {len(results)} candidates")
+                    time.sleep(0.5)  # Brief pause so user can see the status
+                    
+                    # Get the best result and start download
+                    best_result = results[0]  # Assuming results are sorted by quality
+                    
+                    self.signals.status_updated.emit(self.download_index, "⏬ Starting download...")
+                    
+                    # Start the actual download
+                    download_id = loop.run_until_complete(
+                        self.soulseek_client.download_track(best_result)
+                    )
+                    
+                    if download_id:
+                        self.signals.download_completed.emit(self.download_index, download_id)
+                    else:
+                        self.signals.download_failed.emit(self.download_index, "Download failed to start")
                 else:
                     self.signals.download_failed.emit(self.download_index, "No search results found")
                     
@@ -462,6 +689,39 @@ class SimpleWishlistDownloadWorker(QRunnable):
                 
         except Exception as e:
             self.signals.download_failed.emit(self.download_index, str(e))
+    
+    async def _search_with_progress(self, query, quality_preference):
+        """Search for tracks with progress updates"""
+        try:
+            # Emit search progress
+            self.signals.status_updated.emit(self.download_index, "🌐 Searching network...")
+            
+            # Perform the search (this would ideally use the soulseek client's search methods)
+            # For now, we'll use the existing search_and_download_best method
+            # but in a real implementation, you'd want to separate search from download
+            
+            # This is a simplified version - in practice you'd want to:
+            # 1. Search for candidates
+            # 2. Filter by quality
+            # 3. Return the results for manual download
+            
+            # For now, let's use a direct approach
+            from core.soulseek_client import SoulseekClient
+            if hasattr(self.soulseek_client, 'search_tracks'):
+                results = await self.soulseek_client.search_tracks(query)
+                
+                if results:
+                    # Filter by quality preference if needed
+                    filtered_results = self.soulseek_client.filter_results_by_quality_preference(
+                        results, quality_preference
+                    )
+                    return filtered_results
+            
+            return []
+            
+        except Exception as e:
+            logger.error(f"Error in search with progress: {e}")
+            return []
 
 
 class MetadataUpdateWorker(QThread):
@@ -1133,11 +1393,19 @@ class DashboardDataProvider(QObject):
         print(f"DEBUG: Testing {service} connection")
         print(f"DEBUG: Available service clients: {list(self.service_clients.keys())}")
         
-        if service not in self.service_clients:
-            print(f"DEBUG: Service {service} not found in service_clients")
+        # Map service names to client keys
+        service_key_map = {
+            'spotify': 'spotify_client',
+            'plex': 'plex_client', 
+            'soulseek': 'soulseek_client'
+        }
+        
+        client_key = service_key_map.get(service, service)
+        if client_key not in self.service_clients:
+            print(f"DEBUG: Service {service} (key: {client_key}) not found in service_clients")
             return
         
-        print(f"DEBUG: Service client for {service}: {self.service_clients[service]}")
+        print(f"DEBUG: Service client for {service}: {self.service_clients[client_key]}")
         
         # Clean up any existing test thread for this service
         if hasattr(self, '_test_threads') and service in self._test_threads:
@@ -1152,7 +1420,7 @@ class DashboardDataProvider(QObject):
             self._test_threads = {}
         
         # Run connection test in background thread
-        test_thread = ServiceTestThread(service, self.service_clients[service])
+        test_thread = ServiceTestThread(service, self.service_clients[client_key])
         test_thread.test_completed.connect(self.on_service_test_completed)
         test_thread.finished.connect(lambda: self._cleanup_test_thread(service))
         self._test_threads[service] = test_thread
@@ -1662,8 +1930,9 @@ class DashboardPage(QWidget):
         
         # Timer for automatic wishlist retry processing
         self.wishlist_retry_timer = QTimer()
+        self.wishlist_retry_timer.setSingleShot(True)  # Single shot timer, we'll restart it after each completion
         self.wishlist_retry_timer.timeout.connect(self.process_wishlist_automatically)
-        self.wishlist_retry_timer.start(3600000)  # Process every hour (3600000 ms)
+        self.wishlist_retry_timer.start(60000)  # Start first processing 1 minute after app launch (60000 ms)
         
         # Track if automatic processing is currently running
         self.auto_processing_wishlist = False
@@ -1995,7 +2264,12 @@ class DashboardPage(QWidget):
     
     def start_database_update(self):
         """Start the SoulSync database update process"""
-        if not hasattr(self, 'data_provider') or not self.data_provider.service_clients.get('plex'):
+        logger.debug(f"Starting database update - data_provider exists: {hasattr(self, 'data_provider')}")
+        if hasattr(self, 'data_provider') and hasattr(self.data_provider, 'service_clients'):
+            logger.debug(f"Service clients available: {list(self.data_provider.service_clients.keys())}")
+            logger.debug(f"Plex client: {self.data_provider.service_clients.get('plex')}")
+        
+        if not hasattr(self, 'data_provider') or not self.data_provider.service_clients.get('plex_client'):
             self.add_activity_item("❌", "Database Update", "Plex client not available", "Now")
             return
         
@@ -2005,7 +2279,7 @@ class DashboardPage(QWidget):
             
             # Start the database update worker
             self.database_worker = DatabaseUpdateWorker(
-                self.data_provider.service_clients['plex'],
+                self.data_provider.service_clients['plex_client'],
                 "database/music_library.db",
                 full_refresh
             )
@@ -2157,11 +2431,15 @@ class DashboardPage(QWidget):
     
     def start_metadata_update(self):
         """Start the Plex metadata update process"""
-        if not hasattr(self, 'data_provider') or not self.data_provider.service_clients.get('plex'):
+        logger.debug(f"Starting metadata update - data_provider exists: {hasattr(self, 'data_provider')}")
+        if hasattr(self, 'data_provider') and hasattr(self.data_provider, 'service_clients'):
+            logger.debug(f"Service clients available: {list(self.data_provider.service_clients.keys())}")
+        
+        if not hasattr(self, 'data_provider') or not self.data_provider.service_clients.get('plex_client'):
             self.add_activity_item("❌", "Metadata Update", "Plex client not available", "Now")
             return
             
-        if not self.data_provider.service_clients.get('spotify'):
+        if not self.data_provider.service_clients.get('spotify_client'):
             self.add_activity_item("❌", "Metadata Update", "Spotify client not available", "Now")
             return
         
@@ -2172,8 +2450,8 @@ class DashboardPage(QWidget):
             # Start the metadata update worker (it will handle artist retrieval in background)
             self.metadata_worker = MetadataUpdateWorker(
                 None,  # Artists will be loaded in the worker thread
-                self.data_provider.service_clients['plex'],
-                self.data_provider.service_clients['spotify'],
+                self.data_provider.service_clients['plex_client'],
+                self.data_provider.service_clients['spotify_client'],
                 refresh_interval_days
             )
             
@@ -2404,6 +2682,53 @@ class DashboardPage(QWidget):
         if hasattr(self, 'wishlist_retry_timer'):
             self.wishlist_retry_timer.stop()
         
+        # Stop the data provider timers
+        if hasattr(self.data_provider, 'download_stats_timer'):
+            self.data_provider.download_stats_timer.stop()
+        if hasattr(self.data_provider, 'system_stats_timer'):
+            self.data_provider.system_stats_timer.stop()
+        
+        # Clean up database-related threads and timers (only on actual shutdown)
+        if hasattr(self, 'database_worker') and self.database_worker and self.database_worker.isRunning():
+            try:
+                self.database_worker.stop()
+                self.database_worker.wait(2000)  # Give it more time
+                if self.database_worker.isRunning():
+                    self.database_worker.terminate()
+                self.database_worker.deleteLater()
+            except Exception as e:
+                logger.debug(f"Error cleaning up database worker: {e}")
+        
+        if hasattr(self, 'database_stats_timer') and self.database_stats_timer:
+            try:
+                self.database_stats_timer.stop()
+            except Exception as e:
+                logger.debug(f"Error stopping database stats timer: {e}")
+        
+        # Clean up any running stats workers
+        if hasattr(self, '_active_stats_workers') and self._active_stats_workers:
+            try:
+                for worker in self._active_stats_workers[:]:  # Copy list to avoid modification issues
+                    if worker and worker.isRunning():
+                        worker.stop()
+                        worker.wait(1000)
+                    if worker:
+                        worker.deleteLater()
+                self._active_stats_workers.clear()
+            except Exception as e:
+                logger.debug(f"Error cleaning up stats workers: {e}")
+        
+        # Clean up metadata worker as well (only on shutdown)
+        if hasattr(self, 'metadata_worker') and self.metadata_worker and self.metadata_worker.isRunning():
+            try:
+                self.metadata_worker.stop()
+                self.metadata_worker.wait(2000)  # Give it more time
+                if self.metadata_worker.isRunning():
+                    self.metadata_worker.terminate()
+                self.metadata_worker.deleteLater()
+            except Exception as e:
+                logger.debug(f"Error cleaning up metadata worker: {e}")
+        
         super().closeEvent(event)
     
     def cleanup_threads(self):
@@ -2561,10 +2886,20 @@ class DashboardPage(QWidget):
             # Update button count since tracks may have been removed
             self.update_wishlist_button_count()
             
+            # Refresh any open wishlist modals
+            for widget in QApplication.instance().allWidgets():
+                if isinstance(widget, DownloadMissingWishlistTracksModal) and widget.isVisible():
+                    widget.refresh_if_auto_processing_complete()
+            
             # Show toast notification if there were successful downloads
             if successful > 0 and hasattr(self, 'toast_manager') and self.toast_manager:
                 message = f"Found {successful} wishlist track{'s' if successful != 1 else ''} automatically!"
                 self.toast_manager.success(message)
+            
+            # Schedule next wishlist processing in 60 minutes
+            if hasattr(self, 'wishlist_retry_timer') and self.wishlist_retry_timer:
+                logger.info("Scheduling next automatic wishlist processing in 60 minutes")
+                self.wishlist_retry_timer.start(3600000)  # 60 minutes (3600000 ms)
             
         except Exception as e:
             logger.error(f"Error handling automatic wishlist processing completion: {e}")
@@ -2574,6 +2909,12 @@ class DashboardPage(QWidget):
         try:
             self.auto_processing_wishlist = False
             logger.error(f"Automatic wishlist processing failed: {error_message}")
+            
+            # Schedule next wishlist processing in 60 minutes even after error
+            if hasattr(self, 'wishlist_retry_timer') and self.wishlist_retry_timer:
+                logger.info("Scheduling next automatic wishlist processing in 60 minutes (after error)")
+                self.wishlist_retry_timer.start(3600000)  # 60 minutes (3600000 ms)
+                
         except Exception as e:
             logger.error(f"Error handling automatic wishlist processing error: {e}")
 
@@ -2671,32 +3012,4 @@ class AutoWishlistProcessorWorker(QRunnable):
             logger.error(f"Critical error in automatic wishlist processing: {e}")
             self.signals.processing_error.emit(str(e))
         
-        # Stop the data provider timers
-        if hasattr(self.data_provider, 'download_stats_timer'):
-            self.data_provider.download_stats_timer.stop()
-        if hasattr(self.data_provider, 'system_stats_timer'):
-            self.data_provider.system_stats_timer.stop()
-        
-        # Clean up database-related threads and timers
-        if hasattr(self, 'database_worker') and self.database_worker.isRunning():
-            self.database_worker.stop()
-            self.database_worker.wait(1000)
-            self.database_worker.deleteLater()
-        
-        if hasattr(self, 'database_stats_timer'):
-            self.database_stats_timer.stop()
-        
-        # Clean up any running stats workers (keep track of them)
-        if hasattr(self, '_active_stats_workers'):
-            for worker in self._active_stats_workers:
-                if worker.isRunning():
-                    worker.stop()
-                    worker.wait(1000)
-                    worker.deleteLater()
-            self._active_stats_workers.clear()
-        
-        # Clean up metadata worker as well
-        if hasattr(self, 'metadata_worker') and self.metadata_worker.isRunning():
-            self.metadata_worker.stop()
-            self.metadata_worker.wait(1000)
-            self.metadata_worker.deleteLater()
+        # Worker is complete - no cleanup needed for this simple background task
