@@ -14,9 +14,13 @@ from core.soulseek_client import TrackResult
 import re
 import asyncio
 from core.matching_engine import MusicMatchingEngine
+from core.wishlist_service import get_wishlist_service
 from ui.components.toast_manager import ToastType
 from database.music_database import get_database
 from core.plex_scan_manager import PlexScanManager
+from utils.logging_config import get_logger
+
+logger = get_logger("sync")
 
 # Define constants for storage
 STORAGE_DIR = "storage"
@@ -3574,6 +3578,8 @@ class DownloadMissingTracksModal(QDialog):
         self.parent_sync_page = parent_page  # Reference to sync page for scan manager
         self.downloads_page = downloads_page
         self.matching_engine = MusicMatchingEngine()
+        self.wishlist_service = get_wishlist_service()
+        
         # State tracking
         self.total_tracks = len(playlist.tracks)
         self.matched_tracks_count = 0
@@ -4461,9 +4467,46 @@ class DownloadMissingTracksModal(QDialog):
             if self.successful_downloads > 0 and hasattr(self, 'parent_sync_page') and self.parent_sync_page.scan_manager:
                 self.parent_sync_page.scan_manager.request_scan(f"Playlist download completed ({self.successful_downloads} tracks)")
 
+            # Add permanently failed tracks to wishlist before showing completion message
+            failed_count = len(self.permanently_failed_tracks)
+            wishlist_added_count = 0
+            
+            if self.permanently_failed_tracks:
+                try:
+                    # Add failed tracks to wishlist
+                    source_context = {
+                        'playlist_name': getattr(self.playlist, 'name', 'Unknown Playlist'),
+                        'playlist_id': getattr(self.playlist, 'id', None),
+                        'added_from': 'sync_page_modal',
+                        'timestamp': datetime.now().isoformat()
+                    }
+                    
+                    for failed_track_info in self.permanently_failed_tracks:
+                        try:
+                            success = self.wishlist_service.add_failed_track_from_modal(
+                                track_info=failed_track_info,
+                                source_type='playlist',
+                                source_context=source_context
+                            )
+                            if success:
+                                wishlist_added_count += 1
+                        except Exception as e:
+                            logger.error(f"Failed to add track to wishlist: {e}")
+                            
+                    if wishlist_added_count > 0:
+                        logger.info(f"Added {wishlist_added_count} failed tracks to wishlist from playlist '{self.playlist.name}'")
+                        
+                except Exception as e:
+                    logger.error(f"Error adding failed tracks to wishlist: {e}")
+
             # Determine the final message based on success or failure.
             if self.permanently_failed_tracks:
-                final_message = f"Completed downloading {self.successful_downloads}/{len(self.missing_tracks)} missing tracks!\n\nYou can now manually correct any failed downloads or close this window."
+                final_message = f"Completed downloading {self.successful_downloads}/{len(self.missing_tracks)} missing tracks!\n\n"
+                
+                if wishlist_added_count > 0:
+                    final_message += f"✨ Added {wishlist_added_count} failed track{'s' if wishlist_added_count != 1 else ''} to wishlist for automatic retry.\n\n"
+                
+                final_message += "You can also manually correct failed downloads or check the wishlist on the dashboard."
                 
                 # If there are failures, ensure the modal is visible and bring it to the front.
                 if self.isHidden():

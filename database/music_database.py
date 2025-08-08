@@ -135,10 +135,27 @@ class MusicDatabase:
                 )
             """)
             
+            # Wishlist table for storing failed download tracks for retry
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS wishlist_tracks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    spotify_track_id TEXT UNIQUE NOT NULL,
+                    spotify_data TEXT NOT NULL,  -- JSON of full Spotify track data
+                    failure_reason TEXT,
+                    retry_count INTEGER DEFAULT 0,
+                    last_attempted TIMESTAMP,
+                    date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    source_type TEXT DEFAULT 'unknown',  -- 'playlist', 'album', 'manual'
+                    source_info TEXT  -- JSON of source context (playlist name, album info, etc.)
+                )
+            """)
+            
             # Create indexes for performance
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_artist_id ON albums (artist_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_album_id ON tracks (album_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_artist_id ON tracks (artist_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_wishlist_spotify_id ON wishlist_tracks (spotify_track_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_wishlist_date_added ON wishlist_tracks (date_added)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_name ON artists (name)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_title ON albums (title)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_title ON tracks (title)")
@@ -1372,6 +1389,158 @@ class MusicDatabase:
     def get_last_full_refresh(self) -> Optional[str]:
         """Get the date of the last full refresh"""
         return self.get_metadata('last_full_refresh')
+    
+    # Wishlist management methods
+    
+    def add_to_wishlist(self, spotify_track_data: Dict[str, Any], failure_reason: str = "Download failed", 
+                       source_type: str = "unknown", source_info: Dict[str, Any] = None) -> bool:
+        """Add a failed track to the wishlist for retry"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Use Spotify track ID as unique identifier
+                track_id = spotify_track_data.get('id')
+                if not track_id:
+                    logger.error("Cannot add track to wishlist: missing Spotify track ID")
+                    return False
+                
+                # Convert data to JSON strings
+                spotify_json = json.dumps(spotify_track_data)
+                source_json = json.dumps(source_info or {})
+                
+                cursor.execute("""
+                    INSERT OR REPLACE INTO wishlist_tracks 
+                    (spotify_track_id, spotify_data, failure_reason, source_type, source_info, date_added)
+                    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """, (track_id, spotify_json, failure_reason, source_type, source_json))
+                
+                conn.commit()
+                
+                track_name = spotify_track_data.get('name', 'Unknown Track')
+                artist_name = spotify_track_data.get('artists', [{}])[0].get('name', 'Unknown Artist')
+                logger.info(f"Added track to wishlist: '{track_name}' by {artist_name}")
+                return True
+                
+        except Exception as e:
+            logger.error(f"Error adding track to wishlist: {e}")
+            return False
+    
+    def remove_from_wishlist(self, spotify_track_id: str) -> bool:
+        """Remove a track from the wishlist (typically after successful download)"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM wishlist_tracks WHERE spotify_track_id = ?", (spotify_track_id,))
+                conn.commit()
+                
+                if cursor.rowcount > 0:
+                    logger.info(f"Removed track from wishlist: {spotify_track_id}")
+                    return True
+                else:
+                    logger.debug(f"Track not found in wishlist: {spotify_track_id}")
+                    return False
+                    
+        except Exception as e:
+            logger.error(f"Error removing track from wishlist: {e}")
+            return False
+    
+    def get_wishlist_tracks(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Get all tracks in the wishlist, ordered by date added (oldest first for retry priority)"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                
+                query = """
+                    SELECT id, spotify_track_id, spotify_data, failure_reason, retry_count, 
+                           last_attempted, date_added, source_type, source_info
+                    FROM wishlist_tracks 
+                    ORDER BY date_added ASC
+                """
+                
+                if limit:
+                    query += f" LIMIT {limit}"
+                
+                cursor.execute(query)
+                rows = cursor.fetchall()
+                
+                wishlist_tracks = []
+                for row in rows:
+                    try:
+                        spotify_data = json.loads(row['spotify_data'])
+                        source_info = json.loads(row['source_info']) if row['source_info'] else {}
+                        
+                        wishlist_tracks.append({
+                            'id': row['id'],
+                            'spotify_track_id': row['spotify_track_id'],
+                            'spotify_data': spotify_data,
+                            'failure_reason': row['failure_reason'],
+                            'retry_count': row['retry_count'],
+                            'last_attempted': row['last_attempted'],
+                            'date_added': row['date_added'],
+                            'source_type': row['source_type'],
+                            'source_info': source_info
+                        })
+                    except json.JSONDecodeError as e:
+                        logger.error(f"Error parsing wishlist track data: {e}")
+                        continue
+                
+                return wishlist_tracks
+                
+        except Exception as e:
+            logger.error(f"Error getting wishlist tracks: {e}")
+            return []
+    
+    def update_wishlist_retry(self, spotify_track_id: str, success: bool, error_message: str = None) -> bool:
+        """Update retry count and status for a wishlist track"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                
+                if success:
+                    # Remove from wishlist on success
+                    cursor.execute("DELETE FROM wishlist_tracks WHERE spotify_track_id = ?", (spotify_track_id,))
+                else:
+                    # Increment retry count and update failure reason
+                    cursor.execute("""
+                        UPDATE wishlist_tracks 
+                        SET retry_count = retry_count + 1, 
+                            last_attempted = CURRENT_TIMESTAMP,
+                            failure_reason = COALESCE(?, failure_reason)
+                        WHERE spotify_track_id = ?
+                    """, (error_message, spotify_track_id))
+                
+                conn.commit()
+                return cursor.rowcount > 0
+                
+        except Exception as e:
+            logger.error(f"Error updating wishlist retry status: {e}")
+            return False
+    
+    def get_wishlist_count(self) -> int:
+        """Get the total number of tracks in the wishlist"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM wishlist_tracks")
+                result = cursor.fetchone()
+                return result[0] if result else 0
+        except Exception as e:
+            logger.error(f"Error getting wishlist count: {e}")
+            return 0
+    
+    def clear_wishlist(self) -> bool:
+        """Clear all tracks from the wishlist"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM wishlist_tracks")
+                conn.commit()
+                logger.info(f"Cleared {cursor.rowcount} tracks from wishlist")
+                return True
+        except Exception as e:
+            logger.error(f"Error clearing wishlist: {e}")
+            return False
 
     def get_database_info(self) -> Dict[str, Any]:
         """Get comprehensive database information"""
