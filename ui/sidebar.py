@@ -253,10 +253,11 @@ class SidebarButton(QPushButton):
             """)
 
 class CryptoDonationWidget(QWidget):
-    """Widget for displaying crypto donation addresses"""
+    """Widget for displaying crypto donation addresses with collapsible section"""
     
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.addresses_visible = False
         self.setup_ui()
     
     def setup_ui(self):
@@ -275,18 +276,54 @@ class CryptoDonationWidget(QWidget):
         layout.setContentsMargins(0, 15, 0, 15)
         layout.setSpacing(8)
         
+        # Header with title and toggle button
+        header_layout = QHBoxLayout()
+        header_layout.setContentsMargins(20, 0, 20, 0)
+        header_layout.setSpacing(8)
+        
         # Donation title
         donation_title = QLabel("Support Development")
         donation_title.setFont(QFont("SF Pro Text", 10, QFont.Weight.Bold))
         donation_title.setMinimumHeight(16)
         donation_title.setStyleSheet("""
             color: rgba(255, 255, 255, 0.9); 
-            padding: 0 20px; 
             margin-bottom: 5px;
             letter-spacing: 0.2px;
             font-weight: 600;
         """)
-        layout.addWidget(donation_title)
+        
+        # Toggle button
+        self.toggle_btn = QPushButton("Show")
+        self.toggle_btn.setFixedSize(40, 20)
+        self.toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.toggle_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(255, 255, 255, 0.1);
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                border-radius: 10px;
+                color: rgba(255, 255, 255, 0.7);
+                font-size: 8px;
+                font-weight: 500;
+            }
+            QPushButton:hover {
+                background: rgba(255, 255, 255, 0.15);
+                border: 1px solid rgba(255, 255, 255, 0.3);
+                color: rgba(255, 255, 255, 0.9);
+            }
+        """)
+        self.toggle_btn.clicked.connect(self.toggle_addresses)
+        
+        header_layout.addWidget(donation_title)
+        header_layout.addStretch()
+        header_layout.addWidget(self.toggle_btn)
+        
+        layout.addLayout(header_layout)
+        
+        # Container for crypto addresses (initially hidden)
+        self.addresses_container = QWidget()
+        self.addresses_layout = QVBoxLayout(self.addresses_container)
+        self.addresses_layout.setContentsMargins(0, 0, 0, 0)
+        self.addresses_layout.setSpacing(8)
         
         # Crypto addresses
         crypto_addresses = [
@@ -296,7 +333,22 @@ class CryptoDonationWidget(QWidget):
         
         for symbol, name, address in crypto_addresses:
             crypto_item = self.create_crypto_item(symbol, name, address)
-            layout.addWidget(crypto_item)
+            self.addresses_layout.addWidget(crypto_item)
+        
+        # Initially hide the addresses
+        self.addresses_container.hide()
+        layout.addWidget(self.addresses_container)
+    
+    def toggle_addresses(self):
+        """Toggle the visibility of crypto addresses"""
+        self.addresses_visible = not self.addresses_visible
+        
+        if self.addresses_visible:
+            self.addresses_container.show()
+            self.toggle_btn.setText("Hide")
+        else:
+            self.addresses_container.hide()
+            self.toggle_btn.setText("Show")
     
     def create_crypto_item(self, symbol: str, name: str, address: str):
         """Create a clickable crypto donation item"""

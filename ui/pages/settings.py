@@ -562,6 +562,15 @@ class SettingsPage(QWidget):
             self.download_path_input.setText(soulseek_config.get('download_path', './downloads'))
             self.transfer_path_input.setText(soulseek_config.get('transfer_path', './Transfer'))
             
+            # Load database config
+            database_config = config_manager.get('database', {})
+            if hasattr(self, 'max_workers_combo'):
+                max_workers = database_config.get('max_workers', 5)
+                # Find the index of the current value in the combo box
+                index = self.max_workers_combo.findText(str(max_workers))
+                if index >= 0:
+                    self.max_workers_combo.setCurrentIndex(index)
+            
             # Load logging config (read-only display)
             logging_config = config_manager.get_logging_config()
             if hasattr(self, 'log_level_display'):
@@ -569,6 +578,22 @@ class SettingsPage(QWidget):
             
             if hasattr(self, 'log_path_display'):
                 self.log_path_display.setText(logging_config.get('path', 'logs/app.log'))
+            
+            # Load quality preference
+            if hasattr(self, 'quality_combo'):
+                audio_quality = config_manager.get('settings.audio_quality', 'FLAC')
+                # Map config values to combo box text
+                quality_mapping = {
+                    'flac': 'FLAC',
+                    'mp3_320': '320 kbps MP3',
+                    'mp3_256': '256 kbps MP3', 
+                    'mp3_192': '192 kbps MP3',
+                    'any': 'Any'
+                }
+                display_quality = quality_mapping.get(audio_quality.lower(), audio_quality)
+                index = self.quality_combo.findText(display_quality)
+                if index >= 0:
+                    self.quality_combo.setCurrentIndex(index)
             
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to load configuration: {e}")
@@ -589,6 +614,25 @@ class SettingsPage(QWidget):
             config_manager.set('soulseek.api_key', self.api_key_input.text())
             config_manager.set('soulseek.download_path', self.download_path_input.text())
             config_manager.set('soulseek.transfer_path', self.transfer_path_input.text())
+            
+            # Save Database settings
+            if hasattr(self, 'max_workers_combo'):
+                max_workers = int(self.max_workers_combo.currentText())
+                config_manager.set('database.max_workers', max_workers)
+            
+            # Save Quality preference
+            if hasattr(self, 'quality_combo'):
+                quality_text = self.quality_combo.currentText()
+                # Map combo box text to config values
+                config_mapping = {
+                    'FLAC': 'flac',
+                    '320 kbps MP3': 'mp3_320',
+                    '256 kbps MP3': 'mp3_256',
+                    '192 kbps MP3': 'mp3_192',
+                    'Any': 'any'
+                }
+                config_value = config_mapping.get(quality_text, 'flac')
+                config_manager.set('settings.audio_quality', config_value)
             
             # Emit signals for path changes to update other pages immediately
             self.settings_changed.emit('soulseek.download_path', self.download_path_input.text())
@@ -1204,14 +1248,15 @@ class SettingsPage(QWidget):
         quality_label = QLabel("Preferred Quality:")
         quality_label.setStyleSheet("color: #ffffff; font-size: 12px;")
         
-        quality_combo = QComboBox()
-        quality_combo.addItems(["FLAC", "320 kbps MP3", "256 kbps MP3", "192 kbps MP3", "Any"])
-        quality_combo.setCurrentText("FLAC")
-        quality_combo.setStyleSheet(self.get_combo_style())
-        quality_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.quality_combo = QComboBox()
+        self.quality_combo.addItems(["FLAC", "320 kbps MP3", "256 kbps MP3", "192 kbps MP3", "Any"])
+        self.quality_combo.setCurrentText("FLAC")
+        self.quality_combo.setStyleSheet(self.get_combo_style())
+        self.quality_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.form_inputs['settings.audio_quality'] = self.quality_combo
         
         quality_layout.addWidget(quality_label)
-        quality_layout.addWidget(quality_combo)
+        quality_layout.addWidget(self.quality_combo)
         
         # Download path
         path_container = QVBoxLayout()
@@ -1256,6 +1301,34 @@ class SettingsPage(QWidget):
         download_layout.addLayout(quality_layout)
         download_layout.addLayout(path_container)
         download_layout.addLayout(transfer_path_container)
+        
+        # Database Settings
+        database_group = SettingsGroup("Database Settings")
+        database_layout = QVBoxLayout(database_group)
+        database_layout.setContentsMargins(16, 20, 16, 16)
+        database_layout.setSpacing(12)
+        
+        # Max Workers
+        workers_layout = QHBoxLayout()
+        workers_label = QLabel("Concurrent Workers:")
+        workers_label.setStyleSheet("color: #ffffff; font-size: 12px;")
+        
+        self.max_workers_combo = QComboBox()
+        self.max_workers_combo.addItems(["3", "4", "5", "6", "7", "8", "9", "10"])
+        self.max_workers_combo.setCurrentText("5")  # Default value
+        self.max_workers_combo.setStyleSheet(self.get_combo_style())
+        self.max_workers_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        
+        workers_layout.addWidget(workers_label)
+        workers_layout.addWidget(self.max_workers_combo)
+        
+        # Help text for workers
+        workers_help = QLabel("Number of parallel threads for database updates. Higher values = faster updates but more server load.")
+        workers_help.setStyleSheet("color: #888888; font-size: 10px; font-style: italic;")
+        workers_help.setWordWrap(True)
+        
+        database_layout.addLayout(workers_layout)
+        database_layout.addWidget(workers_help)
         
         # Logging Settings
         logging_group = SettingsGroup("Logging Settings")
@@ -1305,6 +1378,7 @@ class SettingsPage(QWidget):
         logging_layout.addLayout(log_path_container)
         
         layout.addWidget(download_group)
+        layout.addWidget(database_group)
         layout.addWidget(logging_group)
         layout.addStretch()  # Push content to top, prevent stretching
         

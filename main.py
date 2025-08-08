@@ -311,6 +311,11 @@ class MainWindow(QMainWindow):
                 logger.info("Cleaning up Downloads page threads...")
                 self.downloads_page.cleanup_all_threads()
             
+            # Stop dashboard threads
+            if hasattr(self, 'dashboard_page') and self.dashboard_page:
+                logger.info("Cleaning up Dashboard page threads...")
+                self.dashboard_page.cleanup_threads()
+            
             # Stop status monitoring thread
             if self.status_thread:
                 logger.info("Stopping status monitoring thread...")
@@ -328,6 +333,14 @@ class MainWindow(QMainWindow):
                 loop.run_until_complete(self.soulseek_client.close())
             except Exception as e:
                 logger.error(f"Error closing Soulseek client: {e}")
+            
+            # Close database connection
+            try:
+                logger.info("Closing database connection...")
+                from database import close_database
+                close_database()
+            except Exception as e:
+                logger.error(f"Error closing database: {e}")
             
             logger.info("Application closed successfully")
             event.accept()

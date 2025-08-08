@@ -1137,15 +1137,19 @@ class SoulseekClient:
             logger.warning(f"No results found for: {query}")
             return None
         
-        preferred_results = [r for r in results if r.quality.lower() == preferred_quality.lower()]
+        # Use the new quality filtering
+        filtered_results = self.filter_results_by_quality_preference(results, preferred_quality)
         
-        if preferred_results:
-            best_result = preferred_results[0]
-        else:
-            best_result = results[0]
-            logger.info(f"Preferred quality {preferred_quality} not found, using {best_result.quality}")
-        
-        logger.info(f"Downloading: {best_result.filename} ({best_result.quality}) from {best_result.username}")
+        if not filtered_results:
+            logger.warning(f"No suitable quality results found for: {query}")
+            return None
+            
+        best_result = filtered_results[0]
+        quality_info = f"{best_result.quality.upper()}"
+        if best_result.bitrate:
+            quality_info += f" {best_result.bitrate}kbps"
+            
+        logger.info(f"Downloading: {best_result.filename} ({quality_info}) from {best_result.username}")
         return await self.download(best_result.username, best_result.filename, best_result.size)
     
     async def check_connection(self) -> bool:
@@ -1159,6 +1163,74 @@ class SoulseekClient:
         except Exception as e:
             logger.debug(f"Connection check failed: {e}")
             return False
+    
+    def filter_results_by_quality_preference(self, results: List[TrackResult], preferred_quality: str) -> List[TrackResult]:
+        """
+        Filter and sort results by quality preference with smart fallback.
+        Prefers exact match, then higher quality, then lower quality.
+        """
+        if not results:
+            return []
+        
+        # Normalize preference to match our quality strings
+        quality_map = {
+            'flac': 'flac',
+            'mp3_320': ('mp3', 320),
+            'mp3_256': ('mp3', 256), 
+            'mp3_192': ('mp3', 192),
+            'any': 'any'
+        }
+        
+        if preferred_quality not in quality_map:
+            return results  # Return all if unknown preference
+            
+        if preferred_quality == 'any':
+            # Sort by quality score for "any" preference
+            return sorted(results, key=lambda x: x.quality_score, reverse=True)
+        
+        # Separate results by quality categories
+        exact_matches = []
+        higher_quality = []
+        lower_quality = []
+        
+        if preferred_quality == 'flac':
+            for result in results:
+                if result.quality.lower() == 'flac':
+                    exact_matches.append(result)
+                elif result.quality.lower() == 'mp3' and result.bitrate and result.bitrate >= 320:
+                    higher_quality.append(result)  # High-quality MP3 as fallback
+                else:
+                    lower_quality.append(result)
+        else:
+            # MP3 preference with specific bitrate
+            pref_format, pref_bitrate = quality_map[preferred_quality]
+            
+            for result in results:
+                if result.quality.lower() == 'flac':
+                    higher_quality.append(result)  # FLAC is always higher quality
+                elif result.quality.lower() == pref_format:
+                    if result.bitrate:
+                        if result.bitrate == pref_bitrate:
+                            exact_matches.append(result)
+                        elif result.bitrate > pref_bitrate:
+                            higher_quality.append(result)
+                        else:
+                            lower_quality.append(result)
+                    else:
+                        exact_matches.append(result)  # Unknown bitrate, assume match
+                else:
+                    lower_quality.append(result)
+        
+        # Sort each category by quality score and upload speed
+        def sort_key(result):
+            return (result.quality_score, result.upload_speed)
+        
+        exact_matches.sort(key=sort_key, reverse=True)
+        higher_quality.sort(key=sort_key, reverse=True) 
+        lower_quality.sort(key=sort_key, reverse=True)
+        
+        # Return in preference order: exact > higher > lower
+        return exact_matches + higher_quality + lower_quality
     
     async def get_session_info(self) -> Optional[Dict[str, Any]]:
         """Get slskd session information including version"""

@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 import re
 from utils.logging_config import get_logger
 from config.settings import config_manager
+import threading
 
 logger = get_logger("plex_client")
 
@@ -628,6 +629,20 @@ class PlexClient:
             
         except Exception as e:
             logger.error(f"Error updating track metadata: {e}")
+            return False
+    
+    def trigger_library_scan(self, library_name: str = "Music") -> bool:
+        """Trigger Plex library scan for the specified library"""
+        if not self.ensure_connection():
+            return False
+            
+        try:
+            library = self.server.library.section(library_name)
+            library.update()  # Non-blocking scan request
+            logger.info(f"🎵 Triggered Plex library scan for '{library_name}'")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to trigger library scan for '{library_name}': {e}")
             return False
     
     def search_albums(self, album_name: str = "", artist_name: str = "", limit: int = 20) -> List[Dict[str, Any]]:
