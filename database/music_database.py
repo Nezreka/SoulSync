@@ -13,6 +13,14 @@ from pathlib import Path
 from utils.logging_config import get_logger
 
 logger = get_logger("music_database")
+
+# Import matching engine for enhanced similarity logic
+try:
+    from core.matching_engine import MusicMatchingEngine
+    _matching_engine = MusicMatchingEngine()
+except ImportError:
+    logger.warning("Could not import MusicMatchingEngine, falling back to basic similarity")
+    _matching_engine = None
 # Temporarily enable debug logging for edition matching
 logger.setLevel(logging.DEBUG)
 
@@ -860,7 +868,8 @@ class MusicDatabase:
     
     def _string_similarity(self, s1: str, s2: str) -> float:
         """
-        Calculate simple string similarity using Levenshtein distance.
+        Calculate string similarity using enhanced matching engine logic if available,
+        otherwise falls back to Levenshtein distance.
         Returns value between 0.0 (no similarity) and 1.0 (identical)
         """
         if s1 == s2:
@@ -868,6 +877,10 @@ class MusicDatabase:
         
         if not s1 or not s2:
             return 0.0
+        
+        # Use enhanced similarity from matching engine if available
+        if _matching_engine:
+            return _matching_engine.similarity_score(s1, s2)
         
         # Simple Levenshtein distance implementation
         len1, len2 = len(s1), len(s2)
