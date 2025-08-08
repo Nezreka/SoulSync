@@ -95,5 +95,9 @@ class ConfigManager:
             'plex': bool(self.get('plex.base_url')) and bool(self.get('plex.token')),
             'soulseek': bool(self.get('soulseek.slskd_url'))
         }
+    
+    def get_quality_preference(self) -> str:
+        """Get the user's preferred audio quality setting"""
+        return self.get('settings.audio_quality', 'flac')
 
 config_manager = ConfigManager()
