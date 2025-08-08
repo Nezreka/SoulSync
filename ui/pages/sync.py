@@ -291,12 +291,13 @@ class TrackDownloadWorkerSignals(QObject):
 class TrackDownloadWorker(QRunnable):
     """Background worker to download individual tracks via Soulseek"""
     
-    def __init__(self, spotify_track, soulseek_client, download_index, track_index):
+    def __init__(self, spotify_track, soulseek_client, download_index, track_index, quality_preference=None):
         super().__init__()
         self.spotify_track = spotify_track
         self.soulseek_client = soulseek_client
         self.download_index = download_index
         self.track_index = track_index
+        self.quality_preference = quality_preference or 'flac'
         self.signals = TrackDownloadWorkerSignals()
         self._cancelled = False
     
@@ -337,7 +338,7 @@ class TrackDownloadWorker(QRunnable):
                 
                 try:
                     download_id = loop.run_until_complete(
-                        self.soulseek_client.search_and_download_best(query)
+                        self.soulseek_client.search_and_download_best(query, self.quality_preference)
                     )
                     if download_id:
                         break  # Success - stop trying other queries
@@ -4628,15 +4629,34 @@ class DownloadMissingTracksModal(QDialog):
                 print(f"❌ Artist '{spotify_artist_name}' NOT found in path: '{slskd_full_path}'. Discarding candidate.")
 
         if verified_candidates:
+            # Apply quality preference filtering before returning
+            from config.settings import config_manager
+            quality_preference = config_manager.get_quality_preference()
+            
+            # Filter candidates by quality preference with smart fallback
+            if hasattr(self.parent_page, 'soulseek_client'):
+                quality_filtered = self.parent_page.soulseek_client.filter_results_by_quality_preference(
+                    verified_candidates, quality_preference
+                )
+                
+                if quality_filtered:
+                    verified_candidates = quality_filtered
+                    print(f"🎯 Applied quality filtering ({quality_preference}): {len(verified_candidates)} candidates remain")
+                else:
+                    print(f"⚠️ Quality filtering ({quality_preference}) removed all candidates, keeping originals")
+            
             best_confidence = verified_candidates[0].confidence
             best_version = getattr(verified_candidates[0], 'version_type', 'unknown')
-            print(f"✅ Found {len(verified_candidates)} VERIFIED matches for '{spotify_track.name}'. Best: {best_confidence:.2f} ({best_version})")
+            best_quality = getattr(verified_candidates[0], 'quality', 'unknown')
+            print(f"✅ Found {len(verified_candidates)} VERIFIED matches for '{spotify_track.name}'. Best: {best_confidence:.2f} ({best_version}, {best_quality.upper()})")
             
             # Log version breakdown for debugging
             for candidate in verified_candidates[:3]:  # Show top 3
                 version = getattr(candidate, 'version_type', 'unknown')
                 penalty = getattr(candidate, 'version_penalty', 0.0)
-                print(f"   🎵 {candidate.confidence:.2f} - {version} (penalty: {penalty:.2f}) - {candidate.filename[:80]}...")
+                quality = getattr(candidate, 'quality', 'unknown')
+                bitrate_info = f" {candidate.bitrate}kbps" if hasattr(candidate, 'bitrate') and candidate.bitrate else ""
+                print(f"   🎵 {candidate.confidence:.2f} - {version} ({quality.upper()}{bitrate_info}) (penalty: {penalty:.2f}) - {candidate.filename[:80]}...")
                 
         else:
             print(f"⚠️ No verified matches found for '{spotify_track.name}' after checking file paths.")

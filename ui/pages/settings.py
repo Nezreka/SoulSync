@@ -579,6 +579,22 @@ class SettingsPage(QWidget):
             if hasattr(self, 'log_path_display'):
                 self.log_path_display.setText(logging_config.get('path', 'logs/app.log'))
             
+            # Load quality preference
+            if hasattr(self, 'quality_combo'):
+                audio_quality = config_manager.get('settings.audio_quality', 'FLAC')
+                # Map config values to combo box text
+                quality_mapping = {
+                    'flac': 'FLAC',
+                    'mp3_320': '320 kbps MP3',
+                    'mp3_256': '256 kbps MP3', 
+                    'mp3_192': '192 kbps MP3',
+                    'any': 'Any'
+                }
+                display_quality = quality_mapping.get(audio_quality.lower(), audio_quality)
+                index = self.quality_combo.findText(display_quality)
+                if index >= 0:
+                    self.quality_combo.setCurrentIndex(index)
+            
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to load configuration: {e}")
     
@@ -603,6 +619,20 @@ class SettingsPage(QWidget):
             if hasattr(self, 'max_workers_combo'):
                 max_workers = int(self.max_workers_combo.currentText())
                 config_manager.set('database.max_workers', max_workers)
+            
+            # Save Quality preference
+            if hasattr(self, 'quality_combo'):
+                quality_text = self.quality_combo.currentText()
+                # Map combo box text to config values
+                config_mapping = {
+                    'FLAC': 'flac',
+                    '320 kbps MP3': 'mp3_320',
+                    '256 kbps MP3': 'mp3_256',
+                    '192 kbps MP3': 'mp3_192',
+                    'Any': 'any'
+                }
+                config_value = config_mapping.get(quality_text, 'flac')
+                config_manager.set('settings.audio_quality', config_value)
             
             # Emit signals for path changes to update other pages immediately
             self.settings_changed.emit('soulseek.download_path', self.download_path_input.text())
@@ -1218,14 +1248,15 @@ class SettingsPage(QWidget):
         quality_label = QLabel("Preferred Quality:")
         quality_label.setStyleSheet("color: #ffffff; font-size: 12px;")
         
-        quality_combo = QComboBox()
-        quality_combo.addItems(["FLAC", "320 kbps MP3", "256 kbps MP3", "192 kbps MP3", "Any"])
-        quality_combo.setCurrentText("FLAC")
-        quality_combo.setStyleSheet(self.get_combo_style())
-        quality_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.quality_combo = QComboBox()
+        self.quality_combo.addItems(["FLAC", "320 kbps MP3", "256 kbps MP3", "192 kbps MP3", "Any"])
+        self.quality_combo.setCurrentText("FLAC")
+        self.quality_combo.setStyleSheet(self.get_combo_style())
+        self.quality_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.form_inputs['settings.audio_quality'] = self.quality_combo
         
         quality_layout.addWidget(quality_label)
-        quality_layout.addWidget(quality_combo)
+        quality_layout.addWidget(self.quality_combo)
         
         # Download path
         path_container = QVBoxLayout()
