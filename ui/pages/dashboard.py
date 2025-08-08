@@ -725,7 +725,7 @@ class DownloadMissingWishlistTracksModal(QDialog):
         source_key = f"{getattr(slskd_result, 'username', 'unknown')}_{slskd_result.filename}"
         track_info['used_sources'].add(source_key)
         spotify_based_result = self.create_spotify_based_search_result_from_validation(slskd_result, spotify_metadata)
-        self.track_table.setItem(table_index, 4, QTableWidgetItem("... Queued"))
+        self.track_table.setItem(table_index, 3, QTableWidgetItem("... Queued"))
         self.start_matched_download_via_infrastructure_parallel(spotify_based_result, track_index, table_index, download_index)
 
     def start_matched_download_via_infrastructure_parallel(self, spotify_based_result, track_index, table_index, download_index):
@@ -783,7 +783,7 @@ class DownloadMissingWishlistTracksModal(QDialog):
                 self.on_parallel_track_completed(download_index, success=True)
             elif new_status == 'downloading':
                  progress = result.get('progress', 0)
-                 self.track_table.setItem(download_info['table_index'], 4, QTableWidgetItem(f"⏬ Downloading ({progress}%)"))
+                 self.track_table.setItem(download_info['table_index'], 3, QTableWidgetItem(f"⏬ Downloading ({progress}%)"))
                  if 'queued_start_time' in download_info: del download_info['queued_start_time']
                  if progress < 1:
                      if 'downloading_start_time' not in download_info:
@@ -795,7 +795,7 @@ class DownloadMissingWishlistTracksModal(QDialog):
                  else:
                      if 'downloading_start_time' in download_info: del download_info['downloading_start_time']
             elif new_status == 'queued':
-                 self.track_table.setItem(download_info['table_index'], 4, QTableWidgetItem("... Queued"))
+                 self.track_table.setItem(download_info['table_index'], 3, QTableWidgetItem("... Queued"))
                  if 'queued_start_time' not in download_info:
                      download_info['queued_start_time'] = time.time()
                  elif time.time() - download_info['queued_start_time'] > 90:
@@ -838,7 +838,7 @@ class DownloadMissingWishlistTracksModal(QDialog):
         if not next_candidate:
             self.on_parallel_track_failed(download_index, "No alternative sources in cache")
             return
-        self.track_table.setItem(failed_download_info['table_index'], 4, QTableWidgetItem(f"🔄 Retrying ({track_info['retry_count']})..."))
+        self.track_table.setItem(failed_download_info['table_index'], 3, QTableWidgetItem(f"🔄 Retrying ({track_info['retry_count']})..."))
         self.start_validated_download_parallel(next_candidate, track_info['spotify_track'], track_info['track_index'], track_info['table_index'], download_index)
 
     def on_parallel_track_completed(self, download_index, success):
@@ -846,7 +846,7 @@ class DownloadMissingWishlistTracksModal(QDialog):
         if not track_info or track_info.get('completed', False): return
         track_info['completed'] = True
         if success:
-            self.track_table.setItem(track_info['table_index'], 4, QTableWidgetItem("✅ Downloaded"))
+            self.track_table.setItem(track_info['table_index'], 3, QTableWidgetItem("✅ Downloaded"))
             self.downloaded_tracks_count += 1
             self.downloaded_count_label.setText(str(self.downloaded_tracks_count))
             self.successful_downloads += 1
@@ -856,7 +856,7 @@ class DownloadMissingWishlistTracksModal(QDialog):
 
             logger.info(f"Successfully downloaded and removed '{track_info['spotify_track'].name}' from wishlist.")
         else:
-            self.track_table.setItem(track_info['table_index'], 4, QTableWidgetItem("❌ Failed"))
+            self.track_table.setItem(track_info['table_index'], 3, QTableWidgetItem("❌ Failed"))
             self.failed_downloads += 1
             if track_info not in self.permanently_failed_tracks:
                 self.permanently_failed_tracks.append(track_info)
@@ -916,7 +916,7 @@ class DownloadMissingWishlistTracksModal(QDialog):
             final_message += "All tracks were downloaded successfully!"
         logger.info("Wishlist processing complete. Scheduling next run in 60 minutes.")
         self.parent_dashboard.wishlist_retry_timer.start(3600000) # 60 minutes
-        QMessageBox.information(self, "Downloads Complete", final_message)
+        # Removed success modal - users don't need to see completion notification
 
     def on_cancel_clicked(self):
         self.cancel_operations()

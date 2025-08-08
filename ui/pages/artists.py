@@ -2666,34 +2666,65 @@ class DownloadMissingAlbumTracksModal(QDialog):
         failed_count = len(self.permanently_failed_tracks)
         wishlist_added_count = 0
         
+        # DEBUG: Log failed tracks details
+        logger.info(f"DEBUG: Processing {failed_count} failed tracks from album modal")
+        for i, track_info in enumerate(self.permanently_failed_tracks):
+            logger.info(f"DEBUG: Failed track {i+1}: keys={list(track_info.keys())}")
+            if 'spotify_track' in track_info:
+                st = track_info['spotify_track']
+                logger.info(f"DEBUG: Spotify track: {getattr(st, 'name', 'NO_NAME')} by {getattr(st, 'artists', 'NO_ARTISTS')}")
+        
         if self.permanently_failed_tracks:
             try:
                 # Add failed tracks to wishlist
+                # Handle artist name safely - could be string or dict
+                artist_name = 'Unknown Artist'
+                if hasattr(self.album, 'artists') and self.album.artists:
+                    first_artist = self.album.artists[0]
+                    if isinstance(first_artist, str):
+                        artist_name = first_artist
+                    elif isinstance(first_artist, dict):
+                        artist_name = first_artist.get('name', 'Unknown Artist')
+                    else:
+                        artist_name = str(first_artist)
+                
                 source_context = {
                     'album_name': getattr(self.album, 'name', 'Unknown Album'),
                     'album_id': getattr(self.album, 'id', None),
-                    'artist_name': getattr(self.album, 'artists', [{}])[0].get('name', 'Unknown Artist') if hasattr(self.album, 'artists') else 'Unknown Artist',
+                    'artist_name': artist_name,
                     'added_from': 'artists_page_modal',
                     'timestamp': datetime.now().isoformat()
                 }
                 
-                for failed_track_info in self.permanently_failed_tracks:
+                logger.info(f"DEBUG: Source context: {source_context}")
+                
+                for i, failed_track_info in enumerate(self.permanently_failed_tracks):
                     try:
+                        logger.info(f"DEBUG: Attempting to add track {i+1} to wishlist...")
                         success = self.wishlist_service.add_failed_track_from_modal(
                             track_info=failed_track_info,
                             source_type='album',
                             source_context=source_context
                         )
+                        logger.info(f"DEBUG: Track {i+1} add result: {success}")
                         if success:
                             wishlist_added_count += 1
+                        else:
+                            logger.warning(f"DEBUG: Track {i+1} was NOT added to wishlist (returned False)")
                     except Exception as e:
-                        logger.error(f"Failed to add album track to wishlist: {e}")
+                        logger.error(f"Failed to add album track {i+1} to wishlist: {e}")
+                        import traceback
+                        logger.error(f"Full traceback: {traceback.format_exc()}")
                         
                 if wishlist_added_count > 0:
                     logger.info(f"Added {wishlist_added_count} failed tracks to wishlist from album '{self.album.name}'")
+                else:
+                    logger.warning(f"NO TRACKS were added to wishlist despite {failed_count} failed tracks!")
                     
             except Exception as e:
                 logger.error(f"Error adding failed album tracks to wishlist: {e}")
+                import traceback
+                logger.error(f"Full outer traceback: {traceback.format_exc()}")
 
         # Determine the final message based on success or failure
         if self.permanently_failed_tracks:
@@ -3879,9 +3910,20 @@ class ArtistsPage(QWidget):
                         self.toast_manager.info(f"Downloads already in progress for '{album.name}'")
                     return
                 elif existing_modal:
-                    # Modal exists but is not visible - might be finished/cancelled
-                    print("⚠️ Found hidden modal - likely finished or cancelled, creating fresh modal")
-                    del self.active_album_sessions[album.id]
+                    # Modal exists but is not visible - check if downloads are still in progress
+                    if hasattr(existing_modal, 'download_in_progress') and existing_modal.download_in_progress:
+                        print(f"🔄 Resuming hidden modal with active downloads for album: {album.name}")
+                        # Show the existing modal to resume progress tracking
+                        existing_modal.show()
+                        existing_modal.activateWindow()
+                        existing_modal.raise_()
+                        if hasattr(self, 'toast_manager') and self.toast_manager:
+                            self.toast_manager.info(f"Resuming downloads for '{album.name}'")
+                        return
+                    else:
+                        # Modal finished or cancelled, safe to create fresh one
+                        print("⚠️ Found finished modal, creating fresh modal")
+                        del self.active_album_sessions[album.id]
                 else:
                     # No modal reference, clean up stale session
                     print("⚠️ Stale session found, cleaning up")
@@ -3970,13 +4012,24 @@ class ArtistsPage(QWidget):
         
         # Clean up the session when modal is definitely closing
         if album_id in self.active_album_sessions:
-            # Always remove session when modal closes (whether accepted or cancelled)
-            # This ensures a fresh modal is created when user clicks the album again
-            del self.active_album_sessions[album_id]
+            session = self.active_album_sessions[album_id]
+            modal = session.get('modal')
+            
+            # Only remove session if downloads are completely finished or cancelled
             if result == 1:  # QDialog.Accepted = 1 (downloads completed or all tracks exist)
+                del self.active_album_sessions[album_id]
                 print(f"🗑️ Removed completed session for album {album_id}")
+            elif modal and hasattr(modal, 'cancel_requested') and modal.cancel_requested:
+                # User explicitly cancelled - remove session for fresh modal on next click
+                del self.active_album_sessions[album_id]
+                print(f"🗑️ Removed cancelled session for album {album_id} - user requested cancellation")
+            elif modal and hasattr(modal, 'download_in_progress') and not modal.download_in_progress:
+                # Downloads are not in progress, safe to remove session
+                del self.active_album_sessions[album_id]
+                print(f"🗑️ Removed finished session for album {album_id} - no downloads in progress")
             else:
-                print(f"🗑️ Removed cancelled session for album {album_id} - fresh modal will be created on next click")
+                # Downloads still in progress and not cancelled - keep session alive for resumption
+                print(f"💾 Keeping session for album {album_id} - downloads still in progress, can be resumed")
         
         if album_card:
             try:
@@ -3988,11 +4041,16 @@ class ArtistsPage(QWidget):
                 else:
                     # Modal was cancelled/closed - reset the card to allow reopening (but keep session)
                     # Reset any download-in-progress indicators
-                    if hasattr(album_card, 'progress_overlay') and album_card.progress_overlay:
+                    if hasattr(album_card, 'progress_overlay') and album_card.progress_overlay is not None:
                         try:
                             album_card.progress_overlay.hide()
+                            print(f"🔄 Hidden progress overlay for album {album_id}")
                         except RuntimeError:
                             pass
+                    
+                    # Also call the safe hide method if available
+                    if hasattr(album_card, 'safe_hide_overlay'):
+                        album_card.safe_hide_overlay()
                     
                     # Reset the card to allow clicking again (if not already owned)
                     if not album_card.is_owned:
