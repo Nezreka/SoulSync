@@ -874,6 +874,24 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error searching albums with title='{title}', artist='{artist}': {e}")
             return []
+        
+
+
+    def _get_artist_variations(self, artist_name: str) -> List[str]:
+            """Returns a list of known variations for an artist's name."""
+            variations = [artist_name]
+            name_lower = artist_name.lower()
+
+            # Add more aliases here in the future
+            if "korn" in name_lower:
+                if "KoЯn" not in variations:
+                    variations.append("KoЯn")
+                if "Korn" not in variations:
+                    variations.append("Korn")
+            
+            # Return unique variations
+            return list(set(variations))
+
     
     def check_track_exists(self, title: str, artist: str, confidence_threshold: float = 0.8) -> Tuple[Optional[DatabaseTrack], float]:
         """
@@ -895,7 +913,10 @@ class MusicDatabase:
             # Try each title variation
             for title_variation in title_variations:
                 # Search for potential matches with this variation
-                potential_matches = self.search_tracks(title=title_variation, artist=artist, limit=20)
+                potential_matches = []
+                artist_variations = self._get_artist_variations(artist)
+                for artist_variation in artist_variations:
+                    potential_matches.extend(self.search_tracks(title=title_variation, artist=artist_variation, limit=20))
                 
                 if not potential_matches:
                     continue
