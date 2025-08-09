@@ -53,7 +53,14 @@ class MusicMatchingEngine:
         if not text:
             return ""
         # Handle Korn/KoЯn variations - both uppercase Я (U+042F) and lowercase я (U+044F)
-        text = re.sub(r'ko[яЯ]n', 'korn', text, flags=re.IGNORECASE)
+        char_map = {
+            'Я': 'R',  # Cyrillic 'Ya' to 'R'
+            'я': 'r',  # Lowercase Cyrillic 'ya' to 'r'
+        }
+
+        # Apply the character replacements before other normalization steps
+        for original, replacement in char_map.items():
+            text = text.replace(original, replacement)
         text = unidecode(text)
         text = text.lower()
         

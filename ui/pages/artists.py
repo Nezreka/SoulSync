@@ -732,7 +732,8 @@ class DatabaseLibraryWorker(QThread):
                 
                 # Try different artist combinations
                 artists_to_try = spotify_album.artists[:2] if spotify_album.artists else [""]
-                
+                if "Korn" in artists_to_try:
+                    artists_to_try.append("KoЯn")
                 best_album = None
                 best_confidence = 0.0
                 best_owned_tracks = 0
