@@ -52,7 +52,8 @@ class MusicMatchingEngine:
         """
         if not text:
             return ""
-        text = re.sub(r'koяn', 'korn', text, flags=re.IGNORECASE)
+        # Handle Korn/KoЯn variations - both uppercase Я (U+042F) and lowercase я (U+044F)
+        text = re.sub(r'ko[яЯ]n', 'korn', text, flags=re.IGNORECASE)
         text = unidecode(text)
         text = text.lower()
         

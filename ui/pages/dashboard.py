@@ -970,9 +970,20 @@ class DownloadMissingWishlistTracksModal(QDialog):
                 asyncio.set_event_loop(loop)
                 search_result = loop.run_until_complete(self.soulseek_client.search(self.query))
                 results_list = search_result[0] if isinstance(search_result, tuple) and search_result else []
-                self.signals.search_completed.emit(results_list, self.query)
+                
+                # Check if signals object is still valid before emitting
+                try:
+                    self.signals.search_completed.emit(results_list, self.query)
+                except RuntimeError:
+                    # Qt objects deleted during shutdown, ignore
+                    logger.debug(f"Search completed for '{self.query}' but UI already closed")
+                    
             except Exception as e:
-                self.signals.search_failed.emit(self.query, str(e))
+                try:
+                    self.signals.search_failed.emit(self.query, str(e))
+                except RuntimeError:
+                    # Qt objects deleted during shutdown, ignore
+                    logger.debug(f"Search failed for '{self.query}' but UI already closed: {e}")
             finally:
                 if loop: loop.close()
 
