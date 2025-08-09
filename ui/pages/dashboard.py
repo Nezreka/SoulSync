@@ -3351,7 +3351,7 @@ class AutoWishlistProcessorWorker(QRunnable):
             quality_preference = config_manager.get_quality_preference()
             
             # Get wishlist tracks (limit to prevent overwhelming the system)
-            wishlist_tracks = self.wishlist_service.get_wishlist_tracks_for_download(limit=10)
+            wishlist_tracks = self.wishlist_service.get_wishlist_tracks_for_download(limit=25)
             
             if not wishlist_tracks:
                 self.signals.processing_complete.emit(0, 0, 0)
