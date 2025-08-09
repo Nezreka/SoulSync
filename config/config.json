@@ -10,8 +10,8 @@
   "soulseek": {
     "slskd_url": "http://localhost:5030",
     "api_key": "YOUR_SLSKD_API_KEY",
-    "download_path": "/path/to/your/slskd/downloads",
-    "transfer_path": "/path/to/your/music/library"
+    "download_path": "/path/to/your/slskd/download/folder",
+    "transfer_path": "/path/to/your/music_library"
   },
   "logging": {
     "path": "logs/app.log",
@@ -22,9 +22,6 @@
   },
   "database": {
     "path": "database/music_library.db",
-    "batch_size": 50,
-    "auto_refresh": true,
-    "refresh_interval_hours": 24,
     "max_workers": 5
   }
 }
