@@ -192,6 +192,11 @@ class MainWindow(QMainWindow):
             self.dashboard_page.add_activity_item
         )
         
+        # --- ADD THESE TWO LINES TO FIX THE UI UPDATE ---
+        self.sync_page.database_updated_externally.connect(self.dashboard_page.database_updated_externally)
+        self.artists_page.database_updated_externally.connect(self.dashboard_page.database_updated_externally)
+        # ------------------------------------------------
+        
         self.stacked_widget.addWidget(self.dashboard_page)
         self.stacked_widget.addWidget(self.sync_page)
         self.stacked_widget.addWidget(self.downloads_page)
