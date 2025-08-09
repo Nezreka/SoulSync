@@ -49,7 +49,7 @@ class PlexScanManager:
         Args:
             reason: Optional reason for the scan request (for logging)
         """
-        logger.info(f"🔍 DEBUG: Plex scan requested - reason: {reason}")
+        logger.info(f"DEBUG: Plex scan requested - reason: {reason}")
         with self._lock:
             if self._scan_in_progress:
                 # Plex is currently scanning - mark that we need another scan later
@@ -78,8 +78,8 @@ class PlexScanManager:
         with self._lock:
             if callback not in self._scan_completion_callbacks:
                 self._scan_completion_callbacks.append(callback)
-                logger.info(f"🔍 DEBUG: Added scan completion callback: {callback.__name__}")
-                logger.info(f"🔍 DEBUG: Total callbacks registered: {len(self._scan_completion_callbacks)}")
+                logger.info(f"DEBUG: Added scan completion callback: {callback.__name__}")
+                logger.info(f"DEBUG: Total callbacks registered: {len(self._scan_completion_callbacks)}")
     
     def remove_scan_completion_callback(self, callback):
         """
@@ -213,11 +213,11 @@ class PlexScanManager:
             
             # Check if Plex is still scanning
             is_scanning = self.plex_client.is_library_scanning("Music")
-            logger.info(f"🔍 DEBUG: Plex scan status check - is_scanning: {is_scanning}")
+            logger.info(f"DEBUG: Plex scan status check - is_scanning: {is_scanning}")
             
             if is_scanning:
                 # Still scanning, poll again in 30 seconds
-                logger.info("🔍 DEBUG: Plex library still scanning, will check again in 30 seconds")
+                logger.info("DEBUG: Plex library still scanning, will check again in 30 seconds")
                 threading.Timer(30, self._poll_scan_status).start()
             else:
                 # Scan completed!
@@ -260,12 +260,12 @@ class PlexScanManager:
         with self._lock:
             callbacks = self._scan_completion_callbacks.copy()  # Copy to avoid lock issues
         
-        logger.info(f"🔍 DEBUG: Calling {len(callbacks)} scan completion callbacks")
+        logger.info(f"DEBUG: Calling {len(callbacks)} scan completion callbacks")
         for callback in callbacks:
             try:
-                logger.info(f"🔍 DEBUG: Executing callback: {callback.__name__}")
+                logger.info(f"DEBUG: Executing callback: {callback.__name__}")
                 callback()
-                logger.info(f"🔍 DEBUG: Callback {callback.__name__} completed successfully")
+                logger.info(f"DEBUG: Callback {callback.__name__} completed successfully")
             except Exception as e:
                 logger.error(f"Error in scan completion callback {callback.__name__}: {e}")
     
