@@ -172,6 +172,18 @@ class PlaylistSyncService:
             plex_tracks = [r.plex_track for r in matched_tracks if r.plex_track]
             logger.info(f"Creating playlist with {len(plex_tracks)} matched tracks")
             
+            # Validate that all tracks have proper ratingKey attributes for playlist creation
+            valid_tracks = []
+            for i, track in enumerate(plex_tracks):
+                if track and hasattr(track, 'ratingKey'):
+                    valid_tracks.append(track)
+                    logger.debug(f"✔️ Track {i+1} valid for playlist: '{track.title}' (ratingKey: {track.ratingKey})")
+                else:
+                    logger.warning(f"❌ Track {i+1} invalid for playlist: {track} (type: {type(track)}, has ratingKey: {hasattr(track, 'ratingKey') if track else 'N/A'})")
+            
+            logger.info(f"Playlist validation: {len(valid_tracks)}/{len(plex_tracks)} tracks are valid Plex objects with ratingKeys")
+            plex_tracks = valid_tracks
+            
             sync_success = self.plex_client.update_playlist(playlist.name, plex_tracks)
             
             synced_tracks = len(plex_tracks) if sync_success else 0
@@ -232,16 +244,19 @@ class PlaylistSyncService:
                     if db_track and confidence >= 0.7:
                         logger.debug(f"✔️ Database match found for '{original_title}' by '{artist_name}': '{db_track.title}' with confidence {confidence:.2f}")
                         
-                        # Convert database track to format compatible with existing code
-                        class MockPlexTrack:
-                            def __init__(self, db_track):
-                                self.id = str(db_track.id)
-                                self.title = db_track.title
-                                self.artist = db_track.artist_name
-                                self.album = db_track.album_title
-                                self.duration = db_track.duration
+                        # Fetch the actual Plex track object using the database track ID
+                        try:
+                            actual_plex_track = self.plex_client.server.fetchItem(db_track.id)
+                            if actual_plex_track and hasattr(actual_plex_track, 'ratingKey'):
+                                logger.debug(f"✔️ Successfully fetched actual Plex track for '{db_track.title}' (ratingKey: {actual_plex_track.ratingKey})")
+                                return actual_plex_track, confidence
+                            else:
+                                logger.warning(f"❌ Fetched Plex track for '{db_track.title}' lacks ratingKey attribute")
                                 
-                        return MockPlexTrack(db_track), confidence
+                        except Exception as fetch_error:
+                            logger.error(f"❌ Failed to fetch actual Plex track for '{db_track.title}' (ID: {db_track.id}): {fetch_error}")
+                            # Continue to try other artists rather than fail completely
+                            continue
                         
                 except Exception as db_error:
                     logger.error(f"Error checking track existence for '{original_title}' by '{artist_name}': {db_error}")
