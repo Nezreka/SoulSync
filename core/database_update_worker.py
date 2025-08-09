@@ -88,6 +88,21 @@ class DatabaseUpdateWorker(QThread):
                 except Exception as e:
                     logger.warning(f"Could not record full refresh completion: {e}")
             
+            # Cleanup orphaned records after incremental updates (catches fixed matches)
+            if not self.full_refresh and self.database:
+                try:
+                    cleanup_results = self.database.cleanup_orphaned_records()
+                    orphaned_artists = cleanup_results.get('orphaned_artists_removed', 0)
+                    orphaned_albums = cleanup_results.get('orphaned_albums_removed', 0)
+                    
+                    if orphaned_artists > 0 or orphaned_albums > 0:
+                        logger.info(f"🧹 Cleanup complete: {orphaned_artists} orphaned artists, {orphaned_albums} orphaned albums removed")
+                    else:
+                        logger.debug("🧹 Cleanup complete: No orphaned records found")
+                        
+                except Exception as e:
+                    logger.warning(f"Could not cleanup orphaned records: {e}")
+            
             # Emit final results
             self.finished.emit(
                 self.processed_artists,
@@ -149,21 +164,39 @@ class DatabaseUpdateWorker(QThread):
                 self.full_refresh = True
                 return self._get_all_artists()
             
-            # Strategy: Get recently added albums and extract artists from them
-            # Process artists in reverse chronological order until we hit one that's already current
+            # Enhanced Strategy: Get both recently added AND recently updated content
+            # This catches both new content and metadata corrections done in Plex
             
-            logger.info("Getting recently added albums to find new artists...")
+            logger.info("Getting recently added and recently updated content...")
             
-            # Get recently added albums (up to 500 to cast a wide net)  
+            # Get both recently added and recently updated albums
+            all_recent_content = []
+            
             try:
-                # Try to get specifically albums first
+                # Get recently added albums (up to 400 to catch more recent content)  
                 try:
-                    recent_content = self.plex_client.music_library.recentlyAdded(libtype='album', maxresults=500)
-                    logger.info(f"Found {len(recent_content)} recently added albums (album-specific)")
+                    recently_added = self.plex_client.music_library.recentlyAdded(libtype='album', maxresults=400)
+                    all_recent_content.extend(recently_added)
+                    logger.info(f"Found {len(recently_added)} recently added albums")
                 except:
                     # Fallback to general recently added
-                    recent_content = self.plex_client.music_library.recentlyAdded(maxresults=500)
-                    logger.info(f"Found {len(recent_content)} recently added items (mixed types)")
+                    recently_added = self.plex_client.music_library.recentlyAdded(maxresults=400)
+                    all_recent_content.extend(recently_added)
+                    logger.info(f"Found {len(recently_added)} recently added items (mixed types)")
+                
+                # Get recently updated albums (catches metadata corrections) - increased limit
+                try:
+                    recently_updated = self.plex_client.music_library.search(sort='updatedAt:desc', libtype='album', limit=400)
+                    # Remove duplicates (items that are both recently added and updated)
+                    added_keys = {getattr(item, 'ratingKey', None) for item in all_recent_content}
+                    unique_updated = [item for item in recently_updated if getattr(item, 'ratingKey', None) not in added_keys]
+                    all_recent_content.extend(unique_updated)
+                    logger.info(f"Found {len(unique_updated)} additional recently updated albums (after deduplication)")
+                except Exception as e:
+                    logger.warning(f"Could not get recently updated content: {e}")
+                
+                recent_content = all_recent_content
+                logger.info(f"Combined total: {len(recent_content)} recent albums (added + updated)")
                 
                 # Filter to only get Album objects and convert Artist objects to their albums
                 recent_albums = []
@@ -253,8 +286,10 @@ class DatabaseUpdateWorker(QThread):
                 logger.warning("No albums found to process - incremental update cannot proceed")
                 return []
             
-            # New approach: Track-level incremental update with 3-consecutive-tracks stopping
-            consecutive_existing_tracks = 0
+            # Improved approach: Album-level incremental update with smart stopping
+            # Check entire albums at a time and use more robust stopping criteria
+            albums_with_new_content = 0
+            consecutive_complete_albums = 0
             processed_artist_ids = set()
             total_tracks_checked = 0
             
@@ -270,6 +305,7 @@ class DatabaseUpdateWorker(QThread):
                     
                     album_title = getattr(album, 'title', f'Album_{i}')
                     album_has_new_tracks = False
+                    missing_tracks_count = 0
                     
                     # Check each individual track in this album
                     try:
@@ -282,39 +318,48 @@ class DatabaseUpdateWorker(QThread):
                                 track_id = int(track.ratingKey)
                                 track_title = getattr(track, 'title', 'Unknown Track')
                                 
-                                if self.database.track_exists(track_id):
-                                    consecutive_existing_tracks += 1
-                                    logger.debug(f"Track '{track_title}' already exists (consecutive: {consecutive_existing_tracks})")
-                                    
-                                    # Stop after 3 consecutive existing tracks
-                                    if consecutive_existing_tracks >= 3:
-                                        logger.info(f"🛑 Found 3 consecutive existing tracks - stopping incremental scan after checking {total_tracks_checked} tracks")
-                                        stopped_early = True
-                                        break
-                                else:
-                                    # Found missing track - reset counter
-                                    if consecutive_existing_tracks > 0:
-                                        logger.debug(f"Track '{track_title}' missing - resetting consecutive count (was {consecutive_existing_tracks})")
-                                    consecutive_existing_tracks = 0
+                                if not self.database.track_exists(track_id):
+                                    missing_tracks_count += 1
                                     album_has_new_tracks = True
-                                    logger.debug(f"📀 Track '{track_title}' is new - will process album's artist")
+                                    logger.debug(f"📀 Track '{track_title}' is new - album needs processing")
+                                else:
+                                    logger.debug(f"✅ Track '{track_title}' already exists")
                                     
                             except Exception as track_error:
                                 logger.debug(f"Error checking individual track: {track_error}")
-                                # Reset counter on error to be safe
-                                consecutive_existing_tracks = 0
                                 album_has_new_tracks = True  # Assume needs processing if can't check
+                                missing_tracks_count += 1
                                 continue
+                        
+                        # Evaluate album completion status
+                        if album_has_new_tracks:
+                            albums_with_new_content += 1
+                            consecutive_complete_albums = 0  # Reset counter
+                            logger.info(f"📀 Album '{album_title}' has {missing_tracks_count} new tracks - needs processing")
+                        else:
+                            # Check if existing tracks have metadata changes (catches Plex corrections)
+                            metadata_changed = self._check_for_metadata_changes(tracks)
+                            if metadata_changed:
+                                albums_with_new_content += 1
+                                consecutive_complete_albums = 0  # Reset counter
+                                logger.info(f"🔄 Album '{album_title}' has metadata changes - needs processing")
+                                album_has_new_tracks = True  # Mark for artist processing
+                            else:
+                                consecutive_complete_albums += 1
+                                logger.debug(f"✅ Album '{album_title}' is fully up-to-date (consecutive complete: {consecutive_complete_albums})")
                                 
-                        # If we hit the stop condition, break out of album loop too
-                        if stopped_early:
-                            break
+                                # Very conservative stopping criteria: 25 consecutive complete albums after metadata fixes
+                                # This ensures we don't miss scattered updated content from manual corrections
+                                if consecutive_complete_albums >= 25:
+                                    logger.info(f"🛑 Found 25 consecutive complete albums - stopping incremental scan after checking {total_tracks_checked} tracks from {i+1} albums")
+                                    stopped_early = True
+                                    break
                             
                     except Exception as tracks_error:
                         logger.warning(f"Error getting tracks for album '{album_title}': {tracks_error}")
                         # Assume album needs processing if we can't check tracks
                         album_has_new_tracks = True
-                        consecutive_existing_tracks = 0
+                        consecutive_complete_albums = 0  # Reset the correct variable
                     
                     # If album has new tracks, queue its artist for processing
                     if album_has_new_tracks:
@@ -334,14 +379,16 @@ class DatabaseUpdateWorker(QThread):
                 except Exception as e:
                     logger.warning(f"Error processing album at index {i} (type: {type(album).__name__}): {e}")
                     # Reset consecutive count on error to be safe
-                    consecutive_existing_tracks = 0
+                    consecutive_complete_albums = 0
                     continue
             
-            result_msg = f"Smart incremental scan result: {len(artists_to_process)} artists to process"
+            result_msg = f"Smart incremental scan result: {len(artists_to_process)} artists to process from {albums_with_new_content} albums with new content"
             if stopped_early:
-                result_msg += f" (stopped early after finding 3 consecutive existing tracks)"
+                result_msg += f" (stopped early after finding 25 consecutive complete albums)"
             else:
-                result_msg += f" (checked {total_tracks_checked} tracks from {len(recent_albums)} albums)"
+                result_msg += f" (checked all {total_tracks_checked} tracks from {len(recent_albums)} recent albums)"
+            
+            logger.info(f"📊 Incremental scan stats: {len(recent_albums)} recent albums examined, {albums_with_new_content} needed processing")
             
             logger.info(result_msg)
             return artists_to_process
@@ -350,6 +397,50 @@ class DatabaseUpdateWorker(QThread):
             logger.error(f"Error in smart incremental update: {e}")
             # Fallback to empty list - user can try full refresh
             return []
+    
+    def _check_for_metadata_changes(self, plex_tracks) -> bool:
+        """Check if any tracks in the list have metadata changes compared to database"""
+        try:
+            if not self.database or not plex_tracks:
+                return False
+            
+            changes_detected = 0
+            for track in plex_tracks:
+                try:
+                    track_id = int(track.ratingKey)
+                    
+                    # Get current data from database
+                    db_track = self.database.get_track_by_id(track_id)
+                    if not db_track:
+                        continue  # Track doesn't exist in DB, not a metadata change
+                    
+                    # Compare key metadata fields that users commonly fix
+                    current_title = track.title
+                    current_artist = track.artist().title if track.artist() else "Unknown"
+                    current_album = track.album().title if track.album() else "Unknown" 
+                    
+                    if (db_track.title != current_title or 
+                        db_track.artist_name != current_artist or 
+                        db_track.album_title != current_album):
+                        logger.debug(f"🔄 Metadata change detected for track ID {track_id}:")
+                        logger.debug(f"  Title: '{db_track.title}' → '{current_title}'")
+                        logger.debug(f"  Artist: '{db_track.artist_name}' → '{current_artist}'")
+                        logger.debug(f"  Album: '{db_track.album_title}' → '{current_album}'")
+                        changes_detected += 1
+                        
+                except Exception as e:
+                    logger.debug(f"Error checking metadata for track: {e}")
+                    continue
+            
+            if changes_detected > 0:
+                logger.info(f"🔄 Found {changes_detected} tracks with metadata changes")
+                return True
+                
+            return False
+            
+        except Exception as e:
+            logger.debug(f"Error checking for metadata changes: {e}")
+            return False  # Assume no changes if we can't check
     
     def _process_all_artists(self, artists: List):
         """Process all artists and their albums/tracks using thread pool"""

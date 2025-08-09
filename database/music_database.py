@@ -60,6 +60,20 @@ class DatabaseTrack:
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
+@dataclass
+class DatabaseTrackWithMetadata:
+    """Track with joined artist and album names for metadata comparison"""
+    id: int
+    album_id: int
+    artist_id: int
+    title: str
+    artist_name: str
+    album_title: str
+    track_number: Optional[int] = None
+    duration: Optional[int] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
 class MusicDatabase:
     """SQLite database manager for SoulSync music library data"""
     
@@ -225,6 +239,53 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error clearing database: {e}")
             raise
+    
+    def cleanup_orphaned_records(self) -> Dict[str, int]:
+        """Remove artists and albums that have no associated tracks"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Find orphaned artists (no tracks)
+                cursor.execute("""
+                    SELECT COUNT(*) FROM artists 
+                    WHERE id NOT IN (SELECT DISTINCT artist_id FROM tracks WHERE artist_id IS NOT NULL)
+                """)
+                orphaned_artists_count = cursor.fetchone()[0]
+                
+                # Find orphaned albums (no tracks)
+                cursor.execute("""
+                    SELECT COUNT(*) FROM albums 
+                    WHERE id NOT IN (SELECT DISTINCT album_id FROM tracks WHERE album_id IS NOT NULL)
+                """)
+                orphaned_albums_count = cursor.fetchone()[0]
+                
+                # Delete orphaned artists
+                if orphaned_artists_count > 0:
+                    cursor.execute("""
+                        DELETE FROM artists 
+                        WHERE id NOT IN (SELECT DISTINCT artist_id FROM tracks WHERE artist_id IS NOT NULL)
+                    """)
+                    logger.info(f"🧹 Removed {orphaned_artists_count} orphaned artists")
+                
+                # Delete orphaned albums  
+                if orphaned_albums_count > 0:
+                    cursor.execute("""
+                        DELETE FROM albums 
+                        WHERE id NOT IN (SELECT DISTINCT album_id FROM tracks WHERE album_id IS NOT NULL)
+                    """)
+                    logger.info(f"🧹 Removed {orphaned_albums_count} orphaned albums")
+                
+                conn.commit()
+                
+                return {
+                    'orphaned_artists_removed': orphaned_artists_count,
+                    'orphaned_albums_removed': orphaned_albums_count
+                }
+                
+        except Exception as e:
+            logger.error(f"Error cleaning up orphaned records: {e}")
+            return {'orphaned_artists_removed': 0, 'orphaned_albums_removed': 0}
     
     # Artist operations
     def insert_or_update_artist(self, plex_artist) -> bool:
@@ -441,6 +502,42 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error checking if track {track_id} exists: {e}")
             return False
+    
+    def get_track_by_id(self, track_id: int) -> Optional[DatabaseTrackWithMetadata]:
+        """Get a track with artist and album names by Plex ID"""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT t.id, t.album_id, t.artist_id, t.title, t.track_number, 
+                       t.duration, t.created_at, t.updated_at,
+                       a.name as artist_name, al.title as album_title
+                FROM tracks t
+                JOIN artists a ON t.artist_id = a.id
+                JOIN albums al ON t.album_id = al.id
+                WHERE t.id = ?
+            """, (track_id,))
+            
+            row = cursor.fetchone()
+            if row:
+                return DatabaseTrackWithMetadata(
+                    id=row['id'],
+                    album_id=row['album_id'],
+                    artist_id=row['artist_id'],
+                    title=row['title'],
+                    artist_name=row['artist_name'],
+                    album_title=row['album_title'],
+                    track_number=row['track_number'],
+                    duration=row['duration'],
+                    created_at=row['created_at'],
+                    updated_at=row['updated_at']
+                )
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error getting track {track_id}: {e}")
+            return None
     
     def get_tracks_by_album(self, album_id: int) -> List[DatabaseTrack]:
         """Get all tracks by album ID"""
