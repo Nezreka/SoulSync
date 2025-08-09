@@ -35,6 +35,11 @@ class PlexScanManager:
         self._scan_start_time = None  # Track when scan started for timeout
         self._max_scan_time = 1800  # Maximum scan time in seconds (30 minutes)
         
+        # New periodic update system
+        self._periodic_update_timer = None  # Timer for 5-minute periodic updates
+        self._periodic_update_interval = 300  # 5 minutes in seconds
+        self._is_doing_periodic_updates = False  # Track if we're in periodic update mode
+        
         logger.info(f"PlexScanManager initialized with {delay_seconds}s debounce delay")
     
     def request_scan(self, reason: str = "Download completed"):
@@ -107,8 +112,8 @@ class PlexScanManager:
             
             if success:
                 logger.info("✅ Plex library scan initiated successfully")
-                # Start polling to detect when scan actually completes
-                self._start_scan_monitoring()
+                # Start new periodic update system instead of completion detection
+                self._start_periodic_updates()
             else:
                 logger.error("❌ Failed to initiate Plex library scan")
                 self._reset_scan_state()
@@ -117,15 +122,80 @@ class PlexScanManager:
             logger.error(f"Exception during Plex library scan: {e}")
             self._reset_scan_state()
     
-    def _start_scan_monitoring(self):
-        """Start monitoring Plex scan status with polling"""
+    def _start_periodic_updates(self):
+        """Start periodic database updates while Plex is scanning"""
         try:
-            # Initial delay before starting to poll (let scan actually start)
-            threading.Timer(15, self._poll_scan_status).start()
-            logger.debug("Started Plex scan status monitoring (30-second intervals, 30-minute timeout)")
+            with self._lock:
+                if self._is_doing_periodic_updates:
+                    logger.debug("Periodic updates already in progress")
+                    return
+                    
+                self._is_doing_periodic_updates = True
+            
+            logger.info(f"🕒 Starting periodic database updates - will check/update every {self._periodic_update_interval//60} minutes")
+            
+            # Schedule first periodic update after 5 minutes
+            self._periodic_update_timer = threading.Timer(self._periodic_update_interval, self._do_periodic_update)
+            self._periodic_update_timer.start()
+            
         except Exception as e:
-            logger.error(f"Error starting scan monitoring: {e}")
+            logger.error(f"Error starting periodic updates: {e}")
             self._reset_scan_state()
+    
+    def _do_periodic_update(self):
+        """Execute periodic database update and check if scanning continues"""
+        try:
+            with self._lock:
+                if not self._scan_in_progress:
+                    logger.debug("Scan no longer in progress, stopping periodic updates")
+                    return
+                
+                # Check for timeout
+                if self._scan_start_time and (time.time() - self._scan_start_time) > self._max_scan_time:
+                    logger.warning(f"Plex scan timeout reached ({self._max_scan_time}s), stopping periodic updates")
+                    self._stop_periodic_updates()
+                    return
+            
+            # Check if Plex is still scanning
+            is_scanning = self.plex_client.is_library_scanning("Music")
+            elapsed_time = time.time() - self._scan_start_time if self._scan_start_time else 0
+            
+            logger.info(f"🕒 PERIODIC UPDATE: After {elapsed_time//60:.0f} minutes - Plex scanning: {is_scanning}")
+            
+            if is_scanning:
+                # Still scanning - trigger database update and continue periodic updates
+                logger.info("🔄 Plex still scanning - triggering database update")
+                self._call_completion_callbacks()
+                
+                # Schedule next periodic update
+                logger.info(f"🕒 Scheduling next periodic update in {self._periodic_update_interval//60} minutes")
+                self._periodic_update_timer = threading.Timer(self._periodic_update_interval, self._do_periodic_update)
+                self._periodic_update_timer.start()
+            else:
+                # Scanning stopped - final update and cleanup
+                logger.info("✅ Plex scanning completed - doing final database update")
+                self._call_completion_callbacks()
+                self._stop_periodic_updates()
+                
+        except Exception as e:
+            logger.error(f"Error during periodic update: {e}")
+            self._stop_periodic_updates()
+    
+    def _stop_periodic_updates(self):
+        """Stop periodic updates and clean up"""
+        try:
+            with self._lock:
+                self._is_doing_periodic_updates = False
+                
+                if self._periodic_update_timer:
+                    self._periodic_update_timer.cancel()
+                    self._periodic_update_timer = None
+            
+            logger.info("🕒 Stopped periodic database updates")
+            self._scan_completed()
+            
+        except Exception as e:
+            logger.error(f"Error stopping periodic updates: {e}")
     
     def _poll_scan_status(self):
         """Poll Plex to check if library scan is still running"""
@@ -204,6 +274,12 @@ class PlexScanManager:
         with self._lock:
             self._scan_in_progress = False
             self._scan_start_time = None
+            
+            # Cancel periodic updates if running
+            if self._periodic_update_timer:
+                self._periodic_update_timer.cancel()
+                self._periodic_update_timer = None
+            self._is_doing_periodic_updates = False
     
     def force_scan(self):
         """
@@ -238,4 +314,10 @@ class PlexScanManager:
             if self._timer:
                 self._timer.cancel()
                 self._timer = None
-                logger.info("PlexScanManager shutdown - cancelled pending scan")
+                
+            if self._periodic_update_timer:
+                self._periodic_update_timer.cancel()
+                self._periodic_update_timer = None
+                
+            self._is_doing_periodic_updates = False
+            logger.info("PlexScanManager shutdown - cancelled all pending timers")

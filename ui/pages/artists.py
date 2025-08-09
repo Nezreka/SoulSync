@@ -3069,6 +3069,11 @@ class ArtistsPage(QWidget):
             else:
                 logger.info("💡 Automatic database update completed - no new content found")
             
+            # Refresh database statistics in the dashboard to update live display
+            if hasattr(self, 'main_window') and hasattr(self.main_window, 'dashboard_page'):
+                self.main_window.dashboard_page.refresh_database_statistics()
+                logger.info("📊 Refreshed dashboard database statistics after auto update")
+            
             # Clean up the worker
             if hasattr(self, '_auto_database_worker'):
                 self._auto_database_worker.deleteLater()
