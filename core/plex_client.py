@@ -645,6 +645,49 @@ class PlexClient:
             logger.error(f"Failed to trigger library scan for '{library_name}': {e}")
             return False
     
+    def is_library_scanning(self, library_name: str = "Music") -> bool:
+        """Check if Plex library is currently scanning"""
+        if not self.ensure_connection():
+            logger.debug(f"🔍 DEBUG: Not connected to Plex, cannot check scan status")
+            return False
+            
+        try:
+            library = self.server.library.section(library_name)
+            
+            # Check if library has a scanning attribute or is refreshing
+            # The Plex API exposes this through the library's refreshing property
+            refreshing = hasattr(library, 'refreshing') and library.refreshing
+            logger.debug(f"🔍 DEBUG: Library.refreshing = {refreshing}")
+            
+            if refreshing:
+                logger.debug(f"🔍 DEBUG: Library is refreshing")
+                return True
+            
+            # Alternative method: Check server activities for scanning
+            try:
+                activities = self.server.activities()
+                logger.debug(f"🔍 DEBUG: Found {len(activities)} server activities")
+                
+                for activity in activities:
+                    # Look for library scan activities
+                    activity_type = getattr(activity, 'type', 'unknown')
+                    activity_title = getattr(activity, 'title', 'unknown')
+                    logger.debug(f"🔍 DEBUG: Activity - type: {activity_type}, title: {activity_title}")
+                    
+                    if (activity_type in ['library.scan', 'library.refresh'] and
+                        library_name.lower() in activity_title.lower()):
+                        logger.debug(f"🔍 DEBUG: Found matching scan activity: {activity_title}")
+                        return True
+            except Exception as activities_error:
+                logger.debug(f"Could not check server activities: {activities_error}")
+            
+            logger.debug(f"🔍 DEBUG: No scan activity detected")
+            return False
+            
+        except Exception as e:
+            logger.debug(f"Error checking if library is scanning: {e}")
+            return False
+    
     def search_albums(self, album_name: str = "", artist_name: str = "", limit: int = 20) -> List[Dict[str, Any]]:
         """Search for albums in Plex library"""
         if not self.ensure_connection() or not self.music_library:
