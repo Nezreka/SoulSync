@@ -3141,8 +3141,33 @@ class ManualMatchModal(QDialog):
         """Initializes the modal with a direct reference to the parent."""
         super().__init__(parent_modal)
         self.parent_modal = parent_modal
-        self.soulseek_client = parent_modal.parent_page.soulseek_client
-        self.downloads_page = parent_modal.downloads_page
+        
+        # Handle different parent modal types with flexible attribute access
+        try:
+            # Try the standard structure first (DownloadMissingTracksModal, DownloadMissingAlbumTracksModal)
+            self.soulseek_client = parent_modal.parent_page.soulseek_client
+            self.downloads_page = parent_modal.downloads_page
+        except AttributeError:
+            # Fallback for dashboard wishlist modal or other structures
+            try:
+                # Dashboard wishlist modal might have soulseek_client directly
+                self.soulseek_client = getattr(parent_modal, 'soulseek_client', None)
+                self.downloads_page = getattr(parent_modal, 'downloads_page', None)
+                
+                # If still not found, try to get from parent widget hierarchy
+                if not self.soulseek_client:
+                    current_widget = parent_modal.parent()
+                    while current_widget and not self.soulseek_client:
+                        self.soulseek_client = getattr(current_widget, 'soulseek_client', None)
+                        self.downloads_page = getattr(current_widget, 'downloads_page', None)
+                        current_widget = current_widget.parent()
+                        
+            except AttributeError:
+                pass
+                
+        # Validate we have the required clients
+        if not self.soulseek_client:
+            raise RuntimeError("Could not find soulseek_client in parent modal or widget hierarchy")
         
         self.failed_tracks = []
         self.current_track_index = 0
@@ -3312,14 +3337,19 @@ class ManualMatchModal(QDialog):
         preserving the user's current position.
         """
         live_failed_tracks = self.parent_modal.permanently_failed_tracks
+        old_count = len(self.failed_tracks) if hasattr(self, 'failed_tracks') else 0
         
         current_track_id = None
         if self.current_track_info:
             current_track_id = self.current_track_info.get('download_index')
 
         self.failed_tracks = list(live_failed_tracks)
+        new_count = len(self.failed_tracks)
+        
+        print(f"🔄 Track list sync: {old_count} → {new_count} failed tracks, current_track_id={current_track_id}")
 
         if not self.failed_tracks:
+            print("⚠️ No failed tracks remaining")
             return
 
         new_index = -1
@@ -3329,6 +3359,7 @@ class ManualMatchModal(QDialog):
                     new_index = i
                     break
         
+        old_index = self.current_track_index
         if new_index != -1:
             self.current_track_index = new_index
         else:
@@ -3339,25 +3370,38 @@ class ManualMatchModal(QDialog):
         
         if self.current_track_index < 0:
             self.current_track_index = 0
+            
+        if old_index != self.current_track_index:
+            print(f"📍 Index changed: {old_index} → {self.current_track_index}")
 
     def load_current_track(self):
         """Loads the current failed track's info and intelligently triggers a search."""
         self.cancel_current_search()
         self.clear_results()
         
-        # Sync with the parent modal's live list of failed tracks
-        self._update_track_list()
+        # Only sync track list if we don't already have the current track loaded
+        # This prevents the index from being reset when navigating
+        if not hasattr(self, 'failed_tracks') or len(self.failed_tracks) == 0:
+            self._update_track_list()
 
         if not self.failed_tracks:
             QMessageBox.information(self, "Complete", "All failed tracks have been addressed.")
             self.accept()
             return
 
+        # Ensure current_track_index is still valid after any potential sync
+        if self.current_track_index >= len(self.failed_tracks):
+            self.current_track_index = len(self.failed_tracks) - 1
+        if self.current_track_index < 0:
+            self.current_track_index = 0
+
         self.update_navigation_state()
         
         self.current_track_info = self.failed_tracks[self.current_track_index]
         spotify_track = self.current_track_info['spotify_track']
         artist = spotify_track.artists[0] if spotify_track.artists else "Unknown"
+        
+        print(f"📍 Loading track at index {self.current_track_index}: {spotify_track.name} by {artist}")
         
         # Use the original track name for the info label
         self.info_label.setText(f"Could not find: <b>{spotify_track.name}</b><br>by {artist}")
@@ -3369,19 +3413,31 @@ class ManualMatchModal(QDialog):
 
     def load_next_track(self):
         """Navigate to the next failed track."""
-        if self.current_track_index < len(self.parent_modal.permanently_failed_tracks) - 1:
+        # Sync the track list first to handle any resolved tracks
+        self._update_track_list()
+        
+        print(f"🔄 Next clicked: current_index={self.current_track_index}, failed_tracks_count={len(self.failed_tracks)}")
+        
+        if self.current_track_index < len(self.failed_tracks) - 1:
             self.current_track_index += 1
+            print(f"✅ Moving to next track: new_index={self.current_track_index}")
             self.load_current_track()
+        else:
+            print(f"⚠️ Already at last track (index {self.current_track_index} of {len(self.failed_tracks)})")
     
     def load_previous_track(self):
         """Navigate to the previous failed track."""
+        # Sync the track list first to handle any resolved tracks
+        self._update_track_list()
+        
         if self.current_track_index > 0:
             self.current_track_index -= 1
             self.load_current_track()
     
     def update_navigation_state(self):
         """Update the 'Track X of Y' label and enable/disable nav buttons."""
-        total_tracks = len(self.parent_modal.permanently_failed_tracks)
+        # Use the internal synchronized list for consistency
+        total_tracks = len(self.failed_tracks)
         
         # Ensure current_track_index is valid even if list shrinks
         if self.current_track_index >= total_tracks:
@@ -3505,6 +3561,30 @@ class ManualMatchModal(QDialog):
         
         self.track_resolved.emit(self.current_track_info)
         
+        # Auto-advance to the next failed track after successful selection
+        # Use a small delay to allow the parent modal to update the failed tracks list
+        QTimer.singleShot(100, self._advance_to_next_track_after_resolution)
+
+    def _advance_to_next_track_after_resolution(self):
+        """
+        Advances to the next failed track after a successful manual resolution.
+        If no more tracks remain, closes the modal with a success message.
+        """
+        # Sync the track list to reflect the resolved track being removed
+        self._update_track_list()
+        
+        if not self.failed_tracks:
+            # No more failed tracks - show success and close
+            QMessageBox.information(self, "Complete", "All failed tracks have been resolved! 🎉")
+            self.accept()
+            return
+            
+        # Check if we need to adjust the current index after removal
+        if self.current_track_index >= len(self.failed_tracks):
+            self.current_track_index = len(self.failed_tracks) - 1
+            
+        # Load the next track (which might be at the same index if current was removed)
+        print(f"🔄 Auto-advancing after resolution: index {self.current_track_index} of {len(self.failed_tracks)} remaining")
         self.load_current_track()
 
     def clear_results(self):
@@ -4086,7 +4166,11 @@ class DownloadMissingTracksModal(QDialog):
             self.active_parallel_downloads += 1
             self.download_queue_index += 1
         
-        if (self.download_queue_index >= len(self.missing_tracks) and self.active_parallel_downloads == 0):
+        # Check if we're done: either all downloads completed OR all remaining work is done
+        downloads_complete = (self.download_queue_index >= len(self.missing_tracks) and self.active_parallel_downloads == 0)
+        all_work_complete = (self.completed_downloads >= len(self.missing_tracks))
+        
+        if downloads_complete or all_work_complete:
             self.on_all_downloads_complete()
     
     def search_and_download_track_parallel(self, spotify_track, download_index, track_index):
@@ -4443,6 +4527,18 @@ class DownloadMissingTracksModal(QDialog):
         if original_failed_track:
             self.permanently_failed_tracks.remove(original_failed_track)
             print(f"✅ Removed track from permanently_failed_tracks - remaining: {len(self.permanently_failed_tracks)}")
+            
+            # Update progress bar to account for manually resolved track
+            # The track was manually resolved, so we need to count it as "completed"
+            self.successful_downloads += 1
+            self.completed_downloads += 1
+            # Update the progress bar maximum to reflect the actual remaining work
+            total_remaining_work = len(self.missing_tracks) - (self.successful_downloads - len(self.permanently_failed_tracks))
+            if total_remaining_work > 0:
+                # Recalculate progress: completed work / total original work
+                progress_value = self.completed_downloads
+                self.download_progress.setValue(progress_value)
+                print(f"📊 Updated progress: {progress_value}/{self.download_progress.maximum()} (manual fix)")
         else:
             print("⚠️ Could not find original failed track to remove")
         self.update_failed_matches_button()

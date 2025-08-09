@@ -1377,13 +1377,14 @@ class MusicDatabase:
         cleaned = re.sub(r'\s*[\]\)]\s*', ' ', cleaned)  # Convert closing brackets/parens to space
         cleaned = re.sub(r'\s*-\s*', ' ', cleaned)       # Convert dashes to spaces too
         
-        # STEP 2: Remove clear noise patterns
+        # STEP 2: Remove clear noise patterns - very conservative approach
         patterns_to_remove = [
             r'\s*explicit\s*',      # Remove explicit markers (now without brackets)
             r'\s*clean\s*',         # Remove clean markers (now without brackets)  
             r'\s*feat\..*',         # Remove featuring (now without brackets)
             r'\s*featuring.*',      # Remove featuring (now without brackets)
             r'\s*ft\..*',           # Remove ft. (now without brackets)
+            r'\s*edit\s*$',         # Remove "- edit" suffix only (specific case: "Reborn - edit" → "Reborn")
         ]
         
         for pattern in patterns_to_remove:
