@@ -564,7 +564,7 @@ class SpotifyMatchingModal(QDialog):
             self.skipped_matching = False
         # Clean up the image download pool
         self.image_download_pool.clear()
-        self.image_download_pool.waitForDone(-1) # Wait indefinitely for tasks to finish
+        self.image_download_pool.waitForDone(5000) # Wait max 5 seconds for tasks to finish
         self.cancelled.emit()
         super().reject()
 
@@ -9085,21 +9085,20 @@ class DownloadsPage(QWidget):
             try:
                 # Try to get existing event loop first
                 try:
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        # If loop is running, we need to run in a thread
-                        def run_in_thread():
-                            new_loop = asyncio.new_event_loop()
-                            asyncio.set_event_loop(new_loop)
-                            try:
-                                new_loop.run_until_complete(self._cancel_current_streaming_download())
-                            finally:
-                                new_loop.close()
-                        
-                        thread = threading.Thread(target=run_in_thread)
-                        thread.start()
-                        thread.join(timeout=5.0)  # Wait max 5 seconds
-                        return
+                    loop = asyncio.get_running_loop()
+                    # Loop is already running, we need to run in a thread
+                    def run_in_thread():
+                        new_loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(new_loop)
+                        try:
+                            new_loop.run_until_complete(self._cancel_current_streaming_download())
+                        finally:
+                            new_loop.close()
+                    
+                    thread = threading.Thread(target=run_in_thread)
+                    thread.start()
+                    thread.join(timeout=5.0)  # Wait max 5 seconds
+                    return
                 except RuntimeError:
                     # No event loop in current thread
                     pass

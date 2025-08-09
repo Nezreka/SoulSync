@@ -203,6 +203,7 @@ class SoulseekClient:
         self.base_url: Optional[str] = None
         self.api_key: Optional[str] = None
         self.download_path: Path = Path("./downloads")
+        self.active_searches: Dict[str, bool] = {}  # search_id -> still_active
         self._setup_client()
     
     def _setup_client(self):
@@ -566,6 +567,9 @@ class SoulseekClient:
             
             logger.info(f"Search initiated with ID: {search_id}")
             
+            # Track this search as active
+            self.active_searches[search_id] = True
+            
             # Poll for results - process and emit results immediately when found
             all_responses = []
             all_tracks = []
@@ -574,6 +578,11 @@ class SoulseekClient:
             max_polls = int(timeout / poll_interval)  # 20 attempts over 30 seconds
             
             for poll_count in range(max_polls):
+                # Check if search was cancelled
+                if search_id not in self.active_searches:
+                    logger.info(f"Search {search_id} was cancelled, stopping")
+                    return [], []
+                
                 logger.debug(f"Polling for results (attempt {poll_count + 1}/{max_polls}) - elapsed: {poll_count * poll_interval:.1f}s")
                 
                 # Get current search responses
@@ -627,6 +636,10 @@ class SoulseekClient:
         except Exception as e:
             logger.error(f"Error searching: {e}")
             return [], []
+        finally:
+            # Remove from active searches when done
+            if 'search_id' in locals() and search_id in self.active_searches:
+                del self.active_searches[search_id]
     
     async def download(self, username: str, filename: str, file_size: int = 0) -> Optional[str]:
         if not self.base_url:
@@ -1338,9 +1351,26 @@ class SoulseekClient:
         """Check if slskd is configured (has base_url)"""
         return self.base_url is not None
     
+    async def cancel_all_searches(self):
+        """Cancel all active searches"""
+        if not self.active_searches:
+            return
+        
+        logger.info(f"Cancelling {len(self.active_searches)} active searches...")
+        for search_id in list(self.active_searches.keys()):
+            try:
+                # Delete the search via API
+                await self._make_request('DELETE', f'searches/{search_id}')
+                logger.debug(f"Cancelled search {search_id}")
+            except Exception as e:
+                logger.warning(f"Could not cancel search {search_id}: {e}")
+        
+        # Mark all searches as cancelled
+        self.active_searches.clear()
+
     async def close(self):
-        # No persistent session to close - each request creates its own session
-        pass
+        # Cancel any active searches before closing
+        await self.cancel_all_searches()
     
     def __del__(self):
         # No persistent session to clean up

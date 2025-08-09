@@ -5,7 +5,7 @@ import asyncio
 import time
 from pathlib import Path
 from PyQt6.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QStackedWidget
-from PyQt6.QtCore import QThread, pyqtSignal, QTimer
+from PyQt6.QtCore import QThread, pyqtSignal, QTimer, QThreadPool
 from PyQt6.QtGui import QFont, QPalette, QColor
 
 from config.settings import config_manager
@@ -58,7 +58,7 @@ class ServiceStatusThread(QThread):
     def stop(self):
         self.running = False
         self.quit()
-        self.wait()
+        self.wait(2000)  # Wait max 2 seconds
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -321,6 +321,27 @@ class MainWindow(QMainWindow):
                 logger.info("Cleaning up Dashboard page threads...")
                 self.dashboard_page.cleanup_threads()
             
+            # Stop other page threads and background tasks
+            if hasattr(self, 'artists_page') and self.artists_page:
+                logger.info("Cleaning up Artists page threads...")
+                if hasattr(self.artists_page, 'cleanup_threads'):
+                    self.artists_page.cleanup_threads()
+            
+            if hasattr(self, 'sync_page') and self.sync_page:
+                logger.info("Cleaning up Sync page threads...")
+                if hasattr(self.sync_page, 'cleanup_threads'):
+                    self.sync_page.cleanup_threads()
+            
+            if hasattr(self, 'downloads_page') and self.downloads_page:
+                logger.info("Cleaning up Downloads page threads...")
+                if hasattr(self.downloads_page, 'cleanup_threads'):
+                    self.downloads_page.cleanup_threads()
+            
+            # Stop all QThreadPool tasks
+            logger.info("Stopping global thread pool...")
+            QThreadPool.globalInstance().clear()
+            QThreadPool.globalInstance().waitForDone(1000)  # Wait max 1 second
+            
             # Stop status monitoring thread
             if self.status_thread:
                 logger.info("Stopping status monitoring thread...")
@@ -334,8 +355,16 @@ class MainWindow(QMainWindow):
             # Close Soulseek client
             try:
                 logger.info("Closing Soulseek client...")
-                loop = asyncio.get_event_loop()
-                loop.run_until_complete(self.soulseek_client.close())
+                # Use modern asyncio approach instead of deprecated get_event_loop
+                try:
+                    loop = asyncio.get_running_loop()
+                    # Create a new task to close the client
+                    task = asyncio.create_task(self.soulseek_client.close())
+                    # Wait for it to complete
+                    asyncio.run_coroutine_threadsafe(self.soulseek_client.close(), loop).result(timeout=3.0)
+                except RuntimeError:
+                    # No running loop, create new one
+                    asyncio.run(self.soulseek_client.close())
             except Exception as e:
                 logger.error(f"Error closing Soulseek client: {e}")
             
