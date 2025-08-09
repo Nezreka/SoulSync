@@ -2474,7 +2474,7 @@ class DashboardPage(QWidget):
                 logger.info(f"✅ Automatic database update completed: {successful} items processed successfully")
             else:
                 logger.info("💡 Automatic database update completed - no new content found")
-            
+            self.refresh_database_statistics()
             # Clean up the worker
             if hasattr(self, '_auto_database_worker'):
                 self._auto_database_worker.deleteLater()
