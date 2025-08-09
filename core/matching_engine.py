@@ -52,7 +52,7 @@ class MusicMatchingEngine:
         """
         if not text:
             return ""
-        
+        text = re.sub(r'koяn', 'korn', text, flags=re.IGNORECASE)
         text = unidecode(text)
         text = text.lower()
         
