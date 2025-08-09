@@ -47,10 +47,26 @@ class WishlistService:
             
             # Create source info
             source_info = source_context or {}
+            
+            # Clean up candidates to avoid TrackResult serialization issues
+            candidates = track_info.get('candidates', [])
+            cleaned_candidates = []
+            for candidate in candidates:
+                if hasattr(candidate, '__dict__'):
+                    # Convert TrackResult objects to simple dictionaries
+                    cleaned_candidates.append({
+                        'title': getattr(candidate, 'title', 'Unknown'),
+                        'artist': getattr(candidate, 'artist', 'Unknown'),
+                        'filename': getattr(candidate, 'filename', 'Unknown')
+                    })
+                else:
+                    # Keep simple data as-is
+                    cleaned_candidates.append(candidate)
+            
             source_info['original_modal_data'] = {
                 'download_index': track_info.get('download_index'),
                 'table_index': track_info.get('table_index'),
-                'candidates': track_info.get('candidates', [])
+                'candidates': cleaned_candidates
             }
             
             # Add to wishlist via database
@@ -240,27 +256,97 @@ class WishlistService:
             return None
     
     def _spotify_track_object_to_dict(self, spotify_track) -> Dict[str, Any]:
-        """Convert a Spotify track object to a dictionary"""
+        """Convert a Spotify track object or TrackResult object to a dictionary"""
         try:
-            return {
+            # Add debug logging to see what we're dealing with
+            logger.info(f"DEBUG: Converting track object to dict. Type: {type(spotify_track)}")
+            logger.info(f"DEBUG: Has 'title' attribute: {hasattr(spotify_track, 'title')}")
+            logger.info(f"DEBUG: Has 'artist' attribute: {hasattr(spotify_track, 'artist')}")
+            logger.info(f"DEBUG: Has 'id' attribute: {hasattr(spotify_track, 'id')}")
+            
+            # Check if this is a TrackResult object (has title/artist but no id)
+            if hasattr(spotify_track, 'title') and hasattr(spotify_track, 'artist') and not hasattr(spotify_track, 'id'):
+                logger.info("DEBUG: Detected TrackResult object, converting...")
+                # Handle TrackResult objects - these don't have Spotify IDs
+                result = {
+                    'id': f"trackresult_{hash(f'{spotify_track.artist}_{spotify_track.title}')}",
+                    'name': getattr(spotify_track, 'title', 'Unknown Track'),
+                    'artists': [{'name': getattr(spotify_track, 'artist', 'Unknown Artist')}],
+                    'album': {'name': getattr(spotify_track, 'album', 'Unknown Album')},
+                    'duration_ms': 0,  # TrackResult doesn't have duration
+                    'preview_url': None,
+                    'external_urls': {},
+                    'popularity': 0,
+                    'source': 'trackresult'  # Mark as reconstructed from TrackResult
+                }
+                logger.info(f"DEBUG: TrackResult converted successfully: {result['name']} by {result['artists'][0]['name']}")
+                return result
+            
+            # Handle regular Spotify Track objects
+            logger.info("DEBUG: Processing as Spotify Track object")
+            
+            # Handle artists list carefully to avoid TrackResult serialization issues
+            artists_list = []
+            raw_artists = getattr(spotify_track, 'artists', [])
+            logger.info(f"DEBUG: Raw artists: {raw_artists}, type: {type(raw_artists)}")
+            
+            for artist in raw_artists:
+                logger.info(f"DEBUG: Processing artist: {artist}, type: {type(artist)}")
+                if hasattr(artist, 'name'):
+                    artists_list.append({'name': artist.name})
+                elif isinstance(artist, str):
+                    artists_list.append({'name': artist})
+                else:
+                    # Convert any complex objects to string to avoid serialization issues
+                    artists_list.append({'name': str(artist)})
+            
+            # Handle album safely
+            album_name = 'Unknown Album'
+            if hasattr(spotify_track, 'album') and spotify_track.album:
+                if hasattr(spotify_track.album, 'name'):
+                    album_name = spotify_track.album.name
+                else:
+                    album_name = str(spotify_track.album)
+            
+            result = {
                 'id': getattr(spotify_track, 'id', None),
                 'name': getattr(spotify_track, 'name', 'Unknown Track'),
-                'artists': [
-                    {'name': artist.name if hasattr(artist, 'name') else str(artist)}
-                    for artist in getattr(spotify_track, 'artists', [])
-                ],
-                'album': {
-                    'name': getattr(spotify_track.album, 'name', 'Unknown Album')
-                    if hasattr(spotify_track, 'album') and spotify_track.album
-                    else 'Unknown Album'
-                },
+                'artists': artists_list,
+                'album': {'name': album_name},
                 'duration_ms': getattr(spotify_track, 'duration_ms', 0),
                 'preview_url': getattr(spotify_track, 'preview_url', None),
                 'external_urls': getattr(spotify_track, 'external_urls', {}),
                 'popularity': getattr(spotify_track, 'popularity', 0)
             }
+            
+            logger.info(f"DEBUG: Spotify Track converted: {result['name']} by {[a['name'] for a in result['artists']]}")
+            
+            # Test JSON serialization before returning to catch any remaining issues
+            try:
+                import json
+                json.dumps(result)
+                logger.info("DEBUG: Conversion result is JSON serializable")
+            except Exception as json_error:
+                logger.error(f"DEBUG: Conversion result is NOT JSON serializable: {json_error}")
+                logger.error(f"DEBUG: Result content: {result}")
+                # Return a safe fallback
+                return {
+                    'id': f"fallback_{hash(str(spotify_track))}",
+                    'name': str(getattr(spotify_track, 'name', 'Unknown Track')),
+                    'artists': [{'name': 'Unknown Artist'}],
+                    'album': {'name': 'Unknown Album'},
+                    'duration_ms': 0,
+                    'preview_url': None,
+                    'external_urls': {},
+                    'popularity': 0,
+                    'source': 'fallback'
+                }
+                
+            return result
         except Exception as e:
-            logger.error(f"Error converting Spotify track object to dict: {e}")
+            logger.error(f"Error converting track object to dict: {e}")
+            logger.error(f"Object type: {type(spotify_track)}")
+            logger.error(f"Object attributes: {dir(spotify_track)}")
             return {}
 
 # Global singleton instance
