@@ -2377,6 +2377,14 @@ class DashboardPage(QWidget):
             'soulseek_client': soulseek_client,
             'downloads_page': downloads_page
         }
+        
+        # Initialize Plex scan manager for wishlist modal integration
+        self.scan_manager = None
+        if plex_client:
+            self.scan_manager = PlexScanManager(plex_client, delay_seconds=60)
+            # Add automatic incremental database update after Plex scan completion
+            self.scan_manager.add_scan_completion_callback(self._on_plex_scan_completed)
+            logger.info("✅ PlexScanManager initialized for Dashboard wishlist modal")
     
     def set_page_references(self, downloads_page, sync_page):
         """Called from main window to provide page references for live data"""
@@ -2391,6 +2399,98 @@ class DashboardPage(QWidget):
     def set_toast_manager(self, toast_manager):
         """Set the toast manager for showing notifications"""
         self.toast_manager = toast_manager
+    
+    def _on_plex_scan_completed(self):
+        """Callback triggered when Plex scan completes - start automatic incremental database update"""
+        try:
+            # Import here to avoid circular imports
+            from database import get_database
+            from core.database_update_worker import DatabaseUpdateWorker
+            
+            # Check if we should run incremental update
+            plex_client = self.service_clients.get('plex_client')
+            if not plex_client or not plex_client.is_connected():
+                logger.debug("Plex not connected - skipping automatic database update")
+                return
+            
+            # Check if database has a previous full refresh
+            database = get_database()
+            last_full_refresh = database.get_last_full_refresh()
+            if not last_full_refresh:
+                logger.info("No previous full refresh found - skipping automatic incremental update")
+                return
+            
+            # Check if database has sufficient content
+            try:
+                stats = database.get_database_info()
+                track_count = stats.get('tracks', 0)
+                
+                if track_count < 100:
+                    logger.info(f"Database has only {track_count} tracks - skipping automatic incremental update")
+                    return
+            except Exception as e:
+                logger.warning(f"Could not check database stats - skipping automatic update: {e}")
+                return
+            
+            # All conditions met - start incremental update
+            logger.info("🎵 Starting automatic incremental database update after Plex scan")
+            self._start_automatic_incremental_update()
+            
+        except Exception as e:
+            logger.error(f"Error in Plex scan completion callback: {e}")
+    
+    def _start_automatic_incremental_update(self):
+        """Start the automatic incremental database update"""
+        try:
+            from core.database_update_worker import DatabaseUpdateWorker
+            
+            # Avoid duplicate workers
+            if hasattr(self, '_auto_database_worker') and self._auto_database_worker and self._auto_database_worker.isRunning():
+                logger.debug("Automatic database update already running")
+                return
+            
+            # Create worker for incremental update only
+            plex_client = self.service_clients.get('plex_client')
+            self._auto_database_worker = DatabaseUpdateWorker(
+                plex_client,
+                "database/music_library.db",
+                full_refresh=False  # Always incremental for automatic updates
+            )
+            
+            # Connect completion signal to log result
+            self._auto_database_worker.finished.connect(self._on_auto_update_finished)
+            self._auto_database_worker.error.connect(self._on_auto_update_error)
+            
+            # Start the update
+            self._auto_database_worker.start()
+            
+        except Exception as e:
+            logger.error(f"Error starting automatic incremental update: {e}")
+    
+    def _on_auto_update_finished(self, total_artists, total_albums, total_tracks, successful, failed):
+        """Handle completion of automatic database update"""
+        try:
+            if successful > 0:
+                logger.info(f"✅ Automatic database update completed: {successful} items processed successfully")
+            else:
+                logger.info("💡 Automatic database update completed - no new content found")
+            
+            # Clean up the worker
+            if hasattr(self, '_auto_database_worker'):
+                self._auto_database_worker.deleteLater()
+                delattr(self, '_auto_database_worker')
+                
+        except Exception as e:
+            logger.error(f"Error handling automatic update completion: {e}")
+    
+    def _on_auto_update_error(self, error_message):
+        """Handle error in automatic database update"""
+        logger.warning(f"Automatic database update encountered an error: {error_message}")
+        
+        # Clean up the worker
+        if hasattr(self, '_auto_database_worker'):
+            self._auto_database_worker.deleteLater()
+            delattr(self, '_auto_database_worker')
     
     def setup_ui(self):
         self.setStyleSheet("""
