@@ -1963,6 +1963,7 @@ class SyncOptionsPanel(QFrame):
 class SyncPage(QWidget):
     # Signals for dashboard activity tracking
     sync_activity = pyqtSignal(str, str, str, str)  # icon, title, subtitle, time
+    database_updated_externally = pyqtSignal()
     
     def __init__(self, spotify_client=None, plex_client=None, soulseek_client=None, downloads_page=None, parent=None):
         super().__init__(parent)
@@ -2080,10 +2081,9 @@ class SyncPage(QWidget):
             else:
                 logger.info("💡 Automatic database update completed - no new content found")
             
-            # Refresh database statistics in the dashboard to update live display
-            if hasattr(self, 'main_window') and hasattr(self.main_window, 'dashboard_page'):
-                self.main_window.dashboard_page.refresh_database_statistics()
-                logger.info("📊 Refreshed dashboard database statistics after auto update")
+            # Emit the signal to notify the dashboard to refresh its statistics
+            self.database_updated_externally.emit()
+            logger.info("📊 Emitted signal to refresh dashboard database statistics after auto update")
             
             # Clean up the worker
             if hasattr(self, '_auto_database_worker'):

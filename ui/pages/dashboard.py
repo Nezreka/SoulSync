@@ -2294,6 +2294,7 @@ class ActivityItem(QWidget):
         layout.addWidget(time_label)
 
 class DashboardPage(QWidget):
+    database_updated_externally = pyqtSignal()
     def __init__(self, parent=None):
         super().__init__(parent)
         
@@ -2319,7 +2320,8 @@ class DashboardPage(QWidget):
         self.stats_cards = {}
         
         self.setup_ui()
-        
+        self.database_updated_externally.connect(self.refresh_database_statistics)
+
         # Initialize list to track active stats workers
         self._active_stats_workers = []
         
