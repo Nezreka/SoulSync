@@ -7493,6 +7493,46 @@ class DownloadsPage(QWidget):
         except Exception as e:
             print(f"❌ Error re-enabling album buttons: {e}")
     
+
+    def _cleanup_empty_directories(self, download_path, moved_file_path):
+        """
+        Clean up empty directories left after moving a file, ignoring hidden files.
+        Walks up the directory tree until it finds a non-empty folder or the root download path.
+        """
+        import os
+
+        try:
+            # Start with the directory that contained the moved file
+            # For you, this will be 'downloads/SomeAlbumFolder'
+            current_dir = os.path.dirname(moved_file_path)
+
+            # This loop will continue as long as the directory is inside the main download path
+            while current_dir != download_path and current_dir.startswith(download_path):
+                # Check if the directory is empty, IGNORING hidden files like .DS_Store
+                is_empty = True
+                for entry in os.listdir(current_dir):
+                    if not entry.startswith('.'):  # This is the key fix
+                        is_empty = False
+                        break
+                
+                if is_empty:
+                    print(f"Removing empty directory (ignoring hidden files): {current_dir}")
+                    try:
+                        os.rmdir(current_dir)
+                        # After deleting, move up to the parent to check it too
+                        current_dir = os.path.dirname(current_dir)
+                    except OSError as e:
+                        print(f"Warning: Could not remove directory {current_dir}: {e}")
+                        break # Stop if we can't remove a directory
+                else:
+                    # If the directory is not empty, the job is done.
+                    print(f"Stopping cleanup at non-empty directory: {current_dir}")
+                    break
+
+        except Exception as e:
+            print(f"Warning: An error occurred during directory cleanup: {e}")
+
+
     def _organize_matched_download(self, download_item, original_file_path: str) -> Optional[str]:
         """Organize a matched download into the Transfer folder structure"""
         try:

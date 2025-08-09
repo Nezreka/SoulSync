@@ -1468,7 +1468,7 @@ class MusicDatabase:
                     SELECT id, spotify_track_id, spotify_data, failure_reason, retry_count, 
                            last_attempted, date_added, source_type, source_info
                     FROM wishlist_tracks 
-                    ORDER BY date_added ASC
+                    ORDER BY RANDOM()
                 """
                 
                 if limit:
