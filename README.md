@@ -83,7 +83,7 @@ docker run -d \
   slskd/slskd:latest
 ```
 
-**Option 2: Manual Installation(RECOMMENDED)**
+**Option 2: Manual Installation (RECOMMENDED)**
 1. Download the latest release from [slskd GitHub releases](https://github.com/slskd/slskd/releases)
 2. Extract and run the executable
 3. Default web interface will be available at `http://localhost:5030`
