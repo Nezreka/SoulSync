@@ -4,6 +4,9 @@ SoulSync is a powerful desktop application designed to bridge the gap between yo
 
 The core philosophy of SoulSync is to let you enjoy music discovery on Spotify while it handles the tedious work of building and maintaining a pristine, locally-hosted music collection for you in Plex.
 
+## ⚠️ Regarding Apple Music & Youtube Music Playlists
+This wlil not be possible for the time being. Youtube does not offer api access to their Youtube music playlists and Apple requires a $99 fee to access their api.
+
 ## ✨ Core Features
 
 ### 🗄️ **Lightning-Fast Database Engine**
