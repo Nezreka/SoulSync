@@ -18,6 +18,14 @@ from core.matching_engine import MusicMatchingEngine
 import requests
 from typing import List, Optional
 from dataclasses import dataclass
+# Metadata enhancement imports
+from mutagen import File as MutagenFile
+from mutagen.id3 import ID3, TIT2, TPE1, TALB, TDRC, TRCK, TCON, TPE2, TPOS, TXXX, APIC
+from mutagen.flac import FLAC, Picture
+from mutagen.mp4 import MP4, MP4Cover
+from mutagen.oggvorbis import OggVorbis
+import urllib.request
+import mimetypes
 
 @dataclass
 class ArtistMatch:
@@ -7709,6 +7717,13 @@ class DownloadsPage(QWidget):
             
             print(f"🧹 File successfully moved and original cleaned up")
             
+            # 🆕 METADATA ENHANCEMENT - Enhance with Spotify data
+            print(f"🎵 Starting metadata enhancement for: {os.path.basename(new_file_path)}")
+            if self._enhance_file_metadata(new_file_path, download_item, artist, album_info):
+                print(f"✅ Metadata enhanced with Spotify data")
+            else:
+                print(f"⚠️ Metadata enhancement failed, using original tags")
+            
             # Clean up any empty directories left in the downloads folder
             try:
                 downloads_path = config_manager.get('soulseek.download_path', './Downloads')
@@ -10717,6 +10732,400 @@ class DownloadsPage(QWidget):
 
         # Allow the next worker to run
         self._is_status_update_running = False    
+
+    # =====================================
+    # METADATA ENHANCEMENT SYSTEM
+    # =====================================
+    
+    def _enhance_file_metadata(self, file_path: str, download_item, artist: Artist, album_info: dict) -> bool:
+        """
+        Core function to enhance audio file metadata using Spotify data
+        
+        Args:
+            file_path: Path to the audio file in Transfer folder
+            download_item: Original search result with attached Spotify metadata
+            artist: Matched Spotify Artist object  
+            album_info: Album detection results with track numbering
+            
+        Returns:
+            bool: Success/failure of metadata enhancement
+        """
+        try:
+            # Check if metadata enhancement is enabled
+            if not config_manager.get('metadata_enhancement.enabled', True):
+                print("🎵 Metadata enhancement disabled in config")
+                return True
+                
+            print(f"🎵 Enhancing metadata for: {os.path.basename(file_path)}")
+            
+            # Load the audio file
+            audio_file = MutagenFile(file_path)
+            if audio_file is None:
+                print(f"❌ Could not load audio file with Mutagen: {file_path}")
+                return False
+                
+            # Extract comprehensive metadata from Spotify
+            metadata = self._extract_spotify_metadata(download_item, artist, album_info)
+            if not metadata:
+                print(f"⚠️ Could not extract Spotify metadata, preserving original tags")
+                return True
+                
+            # Determine file format and apply appropriate tags
+            file_format = self._detect_audio_format(file_path, audio_file)
+            success = False
+            
+            if file_format == 'mp3':
+                print(f"🎵 Applying ID3 tags for {file_path}")
+                success = self._apply_id3_tags(audio_file, metadata, file_path)
+            elif file_format == 'flac':
+                print(f"🎵 Applying FLAC tags for {file_path}")
+                success = self._apply_flac_tags(audio_file, metadata, file_path)
+            elif file_format in ['mp4', 'm4a']:
+                print(f"🎵 Applying MP4 tags for {file_path}")
+                success = self._apply_mp4_tags(audio_file, metadata, file_path)
+            elif file_format == 'ogg':
+                print(f"🎵 Applying OGG tags for {file_path}")
+                success = self._apply_ogg_tags(audio_file, metadata, file_path)
+            else:
+                print(f"⚠️ Unsupported audio format for metadata enhancement: {file_format}")
+                return True
+                
+            if success:
+                # Optionally embed album art
+                if config_manager.get('metadata_enhancement.embed_album_art', True):
+                    self._embed_album_art_metadata(file_path, audio_file, metadata, file_format)
+                    
+                print(f"✅ Metadata enhanced with Spotify data")
+                return True
+            else:
+                print(f"⚠️ Metadata enhancement failed, original tags preserved")
+                return False
+                
+        except Exception as e:
+            print(f"❌ Error enhancing metadata for {file_path}: {e}")
+            return False
+    
+    def _extract_spotify_metadata(self, download_item, artist: Artist, album_info: dict) -> dict:
+        """
+        Extract comprehensive metadata from Spotify objects
+        
+        Returns complete metadata dictionary with:
+        - Basic tags (title, artist, album, year, track#)
+        - Advanced tags (genres, album artist, total tracks)
+        - Plex-specific optimizations
+        - Album art URL for embedding
+        - Spotify IDs for future enhancements
+        """
+        try:
+            metadata = {}
+            
+            # Basic track information
+            metadata['title'] = getattr(download_item, '_spotify_clean_title', download_item.title)
+            metadata['artist'] = artist.name
+            metadata['album_artist'] = artist.name  # Critical for Plex
+            
+            # Album information
+            if album_info and album_info.get('is_album'):
+                metadata['album'] = album_info.get('album_name', 'Unknown Album')
+                metadata['track_number'] = album_info.get('track_number', 1)
+                metadata['total_tracks'] = album_info.get('total_tracks', 1)
+                if album_info.get('disc_number'):
+                    metadata['disc_number'] = album_info['disc_number']
+            else:
+                # Single track
+                metadata['album'] = metadata['title']  # For singles, album = title
+                metadata['track_number'] = 1
+                metadata['total_tracks'] = 1
+            
+            # Release date
+            if hasattr(download_item, 'matched_album') and download_item.matched_album:
+                if hasattr(download_item.matched_album, 'release_date'):
+                    metadata['date'] = download_item.matched_album.release_date[:4] if download_item.matched_album.release_date else None
+            
+            # Genre information from artist
+            if hasattr(artist, 'genres') and artist.genres:
+                # Use first genre or combine multiple
+                if len(artist.genres) == 1:
+                    metadata['genre'] = artist.genres[0]
+                else:
+                    # Combine up to 3 genres
+                    metadata['genre'] = ', '.join(artist.genres[:3])
+            
+            # Album art URL
+            if hasattr(download_item, 'matched_album') and download_item.matched_album:
+                if hasattr(download_item.matched_album, 'image_url') and download_item.matched_album.image_url:
+                    metadata['album_art_url'] = download_item.matched_album.image_url
+            
+            # Spotify IDs for future enhancements
+            metadata['spotify_artist_id'] = artist.id if hasattr(artist, 'id') else None
+            if hasattr(download_item, 'matched_album') and download_item.matched_album:
+                metadata['spotify_album_id'] = getattr(download_item.matched_album, 'id', None)
+            
+            print(f"🎯 Extracted metadata: {metadata.get('artist')} - {metadata.get('title')} ({metadata.get('album')})")
+            return metadata
+            
+        except Exception as e:
+            print(f"❌ Error extracting Spotify metadata: {e}")
+            return {}
+    
+    def _detect_audio_format(self, file_path: str, audio_file) -> str:
+        """Detect the audio format for appropriate tag handling"""
+        try:
+            file_ext = os.path.splitext(file_path)[1].lower()
+            
+            # Direct extension mapping
+            format_map = {
+                '.mp3': 'mp3',
+                '.flac': 'flac', 
+                '.m4a': 'm4a',
+                '.mp4': 'mp4',
+                '.ogg': 'ogg',
+                '.oga': 'ogg'
+            }
+            
+            if file_ext in format_map:
+                return format_map[file_ext]
+                
+            # Fallback to mutagen detection
+            if hasattr(audio_file, 'mime'):
+                mime_type = audio_file.mime[0] if audio_file.mime else ''
+                if 'mp3' in mime_type or 'mpeg' in mime_type:
+                    return 'mp3'
+                elif 'flac' in mime_type:
+                    return 'flac'
+                elif 'mp4' in mime_type or 'm4a' in mime_type:
+                    return 'mp4'
+                elif 'ogg' in mime_type:
+                    return 'ogg'
+            
+            return 'unknown'
+            
+        except Exception as e:
+            print(f"⚠️ Could not detect audio format: {e}")
+            return 'unknown'
+    
+    def _apply_id3_tags(self, audio_file, metadata: dict, file_path: str) -> bool:
+        """Handle MP3 ID3v2.4 tags with full Unicode support"""
+        try:
+            # Ensure ID3 tags exist
+            if not hasattr(audio_file, 'tags') or audio_file.tags is None:
+                audio_file.add_tags()
+            
+            tags = audio_file.tags
+            
+            # Basic tags
+            tags.setall('TIT2', [TIT2(encoding=3, text=metadata.get('title', ''))])  # Title
+            tags.setall('TPE1', [TPE1(encoding=3, text=metadata.get('artist', ''))])  # Artist
+            tags.setall('TPE2', [TPE2(encoding=3, text=metadata.get('album_artist', ''))])  # Album Artist
+            tags.setall('TALB', [TALB(encoding=3, text=metadata.get('album', ''))])  # Album
+            
+            # Date
+            if metadata.get('date'):
+                tags.setall('TDRC', [TDRC(encoding=3, text=metadata['date'])])
+            
+            # Track number
+            track_text = f"{metadata.get('track_number', 1)}/{metadata.get('total_tracks', 1)}"
+            tags.setall('TRCK', [TRCK(encoding=3, text=track_text)])
+            
+            # Genre
+            if metadata.get('genre'):
+                tags.setall('TCON', [TCON(encoding=3, text=metadata['genre'])])
+            
+            # Disc number
+            if metadata.get('disc_number'):
+                tags.setall('TPOS', [TPOS(encoding=3, text=str(metadata['disc_number']))])
+            
+            # Spotify IDs for future reference
+            if metadata.get('spotify_artist_id'):
+                tags.setall('TXXX:Spotify Artist ID', [TXXX(encoding=3, desc='Spotify Artist ID', text=metadata['spotify_artist_id'])])
+            if metadata.get('spotify_album_id'):
+                tags.setall('TXXX:Spotify Album ID', [TXXX(encoding=3, desc='Spotify Album ID', text=metadata['spotify_album_id'])])
+            
+           
+            
+            audio_file.save()
+            return True
+            
+        except Exception as e:
+            print(f"❌ Error applying ID3 tags: {e}")
+            return False
+    
+    def _apply_flac_tags(self, audio_file, metadata: dict, file_path: str) -> bool:
+        """Handle FLAC Vorbis comments for lossless files"""
+        try:
+            # Basic tags
+            audio_file['TITLE'] = metadata.get('title', '')
+            audio_file['ARTIST'] = metadata.get('artist', '')
+            audio_file['ALBUMARTIST'] = metadata.get('album_artist', '')
+            audio_file['ALBUM'] = metadata.get('album', '')
+            
+            # Date
+            if metadata.get('date'):
+                audio_file['DATE'] = metadata['date']
+            
+            # Track number
+            audio_file['TRACKNUMBER'] = str(metadata.get('track_number', 1))
+            audio_file['TRACKTOTAL'] = str(metadata.get('total_tracks', 1))
+            
+            # Genre
+            if metadata.get('genre'):
+                audio_file['GENRE'] = metadata['genre']
+            
+            # Disc number
+            if metadata.get('disc_number'):
+                audio_file['DISCNUMBER'] = str(metadata['disc_number'])
+            
+            # Spotify IDs
+            if metadata.get('spotify_artist_id'):
+                audio_file['SPOTIFY_ARTIST_ID'] = metadata['spotify_artist_id']
+            if metadata.get('spotify_album_id'):
+                audio_file['SPOTIFY_ALBUM_ID'] = metadata['spotify_album_id']
+            
+            
+            audio_file.save()
+            return True
+            
+        except Exception as e:
+            print(f"❌ Error applying FLAC tags: {e}")
+            return False
+    
+    def _apply_mp4_tags(self, audio_file, metadata: dict, file_path: str) -> bool:
+        """Handle MP4/M4A iTunes-style tags"""
+        try:
+            # Basic tags
+            audio_file['\xa9nam'] = [metadata.get('title', '')]  # Title
+            audio_file['\xa9ART'] = [metadata.get('artist', '')]  # Artist
+            audio_file['aART'] = [metadata.get('album_artist', '')]  # Album Artist
+            audio_file['\xa9alb'] = [metadata.get('album', '')]  # Album
+            
+            # Date
+            if metadata.get('date'):
+                audio_file['\xa9day'] = [metadata['date']]
+            
+            # Track number
+            track_num = metadata.get('track_number', 1)
+            total_tracks = metadata.get('total_tracks', 1)
+            audio_file['trkn'] = [(track_num, total_tracks)]
+            
+            # Genre
+            if metadata.get('genre'):
+                audio_file['\xa9gen'] = [metadata['genre']]
+            
+            # Disc number
+            if metadata.get('disc_number'):
+                audio_file['disk'] = [(metadata['disc_number'], 0)]
+            
+            # Spotify IDs (using custom tags)
+            if metadata.get('spotify_artist_id'):
+                audio_file['----:com.apple.iTunes:Spotify Artist ID'] = [metadata['spotify_artist_id'].encode('utf-8')]
+            if metadata.get('spotify_album_id'):
+                audio_file['----:com.apple.iTunes:Spotify Album ID'] = [metadata['spotify_album_id'].encode('utf-8')]
+            
+            
+            
+            audio_file.save()
+            return True
+            
+        except Exception as e:
+            print(f"❌ Error applying MP4 tags: {e}")
+            return False
+    
+    def _apply_ogg_tags(self, audio_file, metadata: dict, file_path: str) -> bool:
+        """Handle OGG Vorbis comments"""
+        try:
+            # Basic tags
+            audio_file['TITLE'] = metadata.get('title', '')
+            audio_file['ARTIST'] = metadata.get('artist', '')
+            audio_file['ALBUMARTIST'] = metadata.get('album_artist', '')
+            audio_file['ALBUM'] = metadata.get('album', '')
+            
+            # Date
+            if metadata.get('date'):
+                audio_file['DATE'] = metadata['date']
+            
+            # Track number
+            audio_file['TRACKNUMBER'] = str(metadata.get('track_number', 1))
+            audio_file['TRACKTOTAL'] = str(metadata.get('total_tracks', 1))
+            
+            # Genre
+            if metadata.get('genre'):
+                audio_file['GENRE'] = metadata['genre']
+            
+            # Disc number
+            if metadata.get('disc_number'):
+                audio_file['DISCNUMBER'] = str(metadata['disc_number'])
+            
+            # Spotify IDs
+            if metadata.get('spotify_artist_id'):
+                audio_file['SPOTIFY_ARTIST_ID'] = metadata['spotify_artist_id']
+            if metadata.get('spotify_album_id'):
+                audio_file['SPOTIFY_ALBUM_ID'] = metadata['spotify_album_id']
+            
+            audio_file.save()
+            return True
+            
+        except Exception as e:
+            print(f"❌ Error applying OGG tags: {e}")
+            return False
+    
+    def _embed_album_art_metadata(self, file_path: str, audio_file, metadata: dict, file_format: str) -> bool:
+        """Download and embed high-quality Spotify album art"""
+        try:
+            if not metadata.get('album_art_url'):
+                print("🎨 No album art URL available for embedding")
+                return True
+                
+            print(f"🎨 Downloading album art for embedding...")
+            
+            # Download album art
+            album_art_url = metadata['album_art_url']
+            response = urllib.request.urlopen(album_art_url, timeout=10)
+            image_data = response.read()
+            
+            if not image_data:
+                print("❌ Failed to download album art data")
+                return False
+                
+            # Determine image format
+            image_format = 'image/jpeg'  # Spotify typically uses JPEG
+            
+            # Embed based on format
+            if file_format == 'mp3':
+                if not hasattr(audio_file, 'tags') or audio_file.tags is None:
+                    audio_file.add_tags()
+                    
+                audio_file.tags.setall('APIC', [APIC(
+                    encoding=3,  # UTF-8
+                    mime=image_format,
+                    type=3,  # Cover (front)
+                    desc='Cover',
+                    data=image_data
+                )])
+                
+            elif file_format == 'flac':
+                picture = Picture()
+                picture.data = image_data
+                picture.type = 3  # Cover (front)
+                picture.mime = image_format
+                picture.width = 640
+                picture.height = 640
+                picture.depth = 24
+                audio_file.add_picture(picture)
+                
+            elif file_format in ['mp4', 'm4a']:
+                if image_format == 'image/jpeg':
+                    audio_file['covr'] = [MP4Cover(image_data, imageformat=MP4Cover.FORMAT_JPEG)]
+                else:
+                    audio_file['covr'] = [MP4Cover(image_data, imageformat=MP4Cover.FORMAT_PNG)]
+            
+            # Save with embedded art
+            audio_file.save()
+            print(f"🎨 ✅ Album art successfully embedded")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Error embedding album art: {e}")
+            return False
     
     def cleanup_resources(self):
         """Clean up resources when page is destroyed"""
