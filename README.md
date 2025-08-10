@@ -5,7 +5,7 @@ SoulSync is a powerful desktop application designed to bridge the gap between yo
 The core philosophy of SoulSync is to let you enjoy music discovery on Spotify while it handles the tedious work of building and maintaining a pristine, locally-hosted music collection for you in Plex.
 
 ## ⚠️ Regarding Apple Music, YouTube Music, and Docker Support
-This won't be possible for the time being. Youtube doesn't offer API access to their Youtube music playlists and Apple requires a $99 fee to access their API. Docker is unlikely.
+This won't be possible for the time being. Youtube doesn't offer API access to their Youtube music playlists and Apple requires a $99 fee to access their API. Docker is unlikely since this is a fully GUI based app. The unique setup would be difficult for most users and my knowledge of docker is pathetic, sadly.
 
 ## ✨ Core Features
 
