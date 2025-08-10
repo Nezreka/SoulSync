@@ -1,17 +1,17 @@
 {
   "spotify": {
-    "client_id": "YOUR_SPOTIFY_CLIENT_ID",
-    "client_secret": "YOUR_SPOTIFY_CLIENT_SECRET"
+    "client_id": "YOUR_SPOTIFY_CLIENT_ID_HERE",
+    "client_secret": "YOUR_SPOTIFY_CLIENT_SECRET_HERE"
   },
   "plex": {
-    "base_url": "http://YOUR_PLEX_IP_ADDRESS:32400",
-    "token": "YOUR_PLEX_TOKEN"
+    "base_url": "http://192.168.86.36:32400",
+    "token": "YOUR_PLEX_TOKEN_HERE"
   },
   "soulseek": {
     "slskd_url": "http://localhost:5030",
-    "api_key": "YOUR_SLSKD_API_KEY",
-    "download_path": "/path/to/your/slskd/download/folder",
-    "transfer_path": "/path/to/your/music_library"
+    "api_key": "YOUR_SOULSEEK_API_KEY_HERE",
+    "download_path": "E:/path/to/your/slskd/download/folder",
+    "transfer_path": "E:/path/to/your/music/folder"
   },
   "logging": {
     "path": "logs/app.log",
@@ -23,5 +23,20 @@
   "database": {
     "path": "database/music_library.db",
     "max_workers": 5
+  },
+  "metadata_enhancement": {
+    "enabled": true,
+    "embed_album_art": true,
+    "plex_optimizations": true,
+    "preserve_original_tags": false,
+    "supported_formats": [
+      "mp3",
+      "flac",
+      "mp4",
+      "m4a",
+      "ogg"
+    ],
+    "fallback_behavior": "preserve_original",
+    "logging_level": "info"
   }
 }
