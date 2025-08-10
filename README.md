@@ -9,6 +9,12 @@ This won't be possible for the time being. Youtube doesn't offer API access to t
 
 ## ✨ Core Features
 
+### 🔄 Powerful Playlist Synchronization
+Keep your Plex library perfectly in sync with your Spotify playlists. SoulSync uses snapshot-based change detection to identify new or removed tracks without re-scanning entire playlists. You can download all missing tracks from a playlist with a single click, and the Multi-Sync feature allows you to select and queue multiple playlists for sequential, automated synchronization, making large library updates effortless.
+
+### 💾 Automated Playlist Backups
+Sync with confidence. Before any modifications are made to a Plex playlist, SoulSync automatically creates a timestamped backup (e.g., "Playlist Name Backup"). This ensures that you can always revert to a previous version, protecting your curated playlists from accidental changes or data loss.
+
 ### 🗄️ **Lightning-Fast Database Engine**
 SoulSync maintains a complete local SQLite database of your Plex library metadata, eliminating slow API calls and enabling instant matching operations. The database automatically synchronizes with your Plex server through intelligent background updates triggered by file changes, library scans, and download completions. Advanced features include thread-safe operations with WAL mode, connection pooling for concurrent access, smart Plex scan management with debounced library scanning, and a built-in database health monitoring widget showing sync status and performance metrics.
 
