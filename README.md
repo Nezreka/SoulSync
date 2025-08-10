@@ -18,6 +18,9 @@ Never lose track of music you couldn't find. SoulSync automatically captures fai
 ### 🧠 **Sophisticated Matching & Search Engine**
 At the core of SoulSync is an advanced matching engine that goes far beyond simple text comparison. It features version-aware scoring that automatically prioritizes original versions over remixes, live recordings, or instrumentals. The system handles complex text normalization including Cyrillic characters (КоЯn → Korn), accents, and special symbols like A$AP Rocky. Smart album detection removes album names from track titles ("Track - Album" → "Track") for cleaner matching, while multi-query generation creates several optimized search variations per track to maximize success rates. Every match includes detailed confidence scoring to help you make informed decisions.
 
+### 🎼 **Automatic Metadata Enhancement & Spotify Integration**
+Transform messy Soulseek files into professionally tagged, Plex-ready tracks with SoulSync's intelligent metadata enhancement system. Every matched download is automatically enriched with accurate Spotify metadata including artist names, album titles, track numbers, release dates, and music genres. The system features **universal format support** for MP3 (ID3v2.4), FLAC (Vorbis Comments), MP4/M4A (iTunes tags), and OGG (Vorbis) files with format-specific optimization for each audio type. **High-quality album art embedding** downloads 640x640 images directly from Spotify's CDN and embeds them into files using appropriate format standards (ID3 APIC for MP3, PICTURE blocks for FLAC, covr atoms for MP4). The enhancement system includes **Plex-specific optimizations** with Album Artist tags, proper track numbering, and metadata formatting that ensures instant recognition and perfect organization in Plex libraries. All processing happens automatically after file organization with comprehensive error handling that preserves original tags if enhancement fails. Configuration is simple with just two settings: enable/disable the entire system and control album art embedding, making every download emerge with professional-grade metadata quality.
+
 ### 📊 **Real-Time Dashboard & Monitoring**
 Stay informed with SoulSync's comprehensive monitoring system featuring live service status indicators for Spotify, Plex, and Soulseek connections with automatic reconnection capabilities. Track real-time download statistics including active downloads, queue status, completion rates, and transfer speeds. Monitor system performance metrics like database size, search history count, memory usage, and application uptime. The chronological activity feed provides a complete stream of all application activities with timestamps and context, while the toast notification system delivers non-intrusive success, warning, and error messages.
 
@@ -46,7 +49,7 @@ The application follows a clear, automated workflow to enhance and expand your m
 
 4. **Search & Download**: For each missing track, SoulSync generates multiple optimized search queries to increase the likelihood of finding a high-quality match. It then uses the slskd API to search the Soulseek network, prioritizing FLAC files and reliable users, and automatically queues them for download.
 
-5. **Organize**: Once a download is complete, SoulSync automatically organizes the file from the download directory into the transfer directory. The download folder is where slskd places raw downloads, while the transfer folder is where processed and organized files go. SoulSync creates a clean folder structure in the transfer directory based on the artist and album (`/Transfer/Artist Name/Artist Name - Album Name/Track.flac`), making it simple for you to move the files into your main Plex music folder.
+5. **Organize & Enhance**: Once a download is complete, SoulSync automatically organizes the file from the download directory into the transfer directory, creating a clean folder structure based on the artist and album (`/Transfer/Artist Name/Artist Name - Album Name/Track.flac`). Immediately after organization, the metadata enhancement system enriches the file with accurate Spotify data including proper artist/album names, track numbers, release dates, genres, and high-quality embedded album art. This ensures every file emerges perfectly tagged and ready for Plex, requiring no manual metadata editing.
 
 ## 🚀 Getting Started
 
@@ -199,7 +202,7 @@ python main.py
 
 - **Artists**: Complete discography explorer with full artist catalog browsing, ownership status indicators for every album, chronological release timeline with Plex library overlay, bulk download operations for entire discographies, album-level missing track downloads, and integration with matched download system for accurate metadata assignment.
 
-- **Settings**: Service configuration hub for Spotify/Plex/Soulseek credentials, download/transfer path management, database operations (update, rebuild, health check), performance tuning options (thread limits, cache settings), notification preferences, and application logging controls.
+- **Settings**: Service configuration hub for Spotify/Plex/Soulseek credentials, download/transfer path management, metadata enhancement controls (enable/disable automatic tagging and album art embedding), database operations (update, rebuild, health check), performance tuning options (thread limits, cache settings), notification preferences, and application logging controls.
 
 ## 🐍 Key Components
 
