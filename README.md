@@ -9,6 +9,13 @@ This won't be possible for the time being. Youtube doesn't offer API access to t
 
 ## ✨ Core Features
 
+### 🤖 **Complete Automation Engine**
+SoulSync transforms music collection management into a fully automated, hands-off experience. The automation engine orchestrates **concurrent multi-playlist syncing**, allowing you to queue multiple Spotify playlists for simultaneous processing without waiting for each to complete. **Intelligent download queue management** prioritizes FLAC files and reliable sources while automatically handling retries and failures. **Smart file organization** moves completed downloads from your slskd download directory to organized transfer folders with proper Artist/Album structure, while **automatic Plex library scanning** ensures new music appears in your library within minutes of download completion.
+
+The system features **background wishlist processing** that runs every 60 minutes, automatically attempting to download up to 25 failed tracks without user intervention—making temporarily unavailable music self-acquiring when sources become available. **Auto-detection technology** scans your network to automatically discover and connect to Plex servers and slskd instances, eliminating manual IP configuration. **Automatic playlist backups** are created before any sync operations, protecting your curated playlists from accidental changes. The entire system maintains itself through **automatic service reconnection** with exponential backoff and **self-healing connections** when services restart, ensuring uninterrupted operation.
+
+Once configured, SoulSync operates like a personal music librarian—monitoring your Spotify playlists, downloading missing tracks, organizing files, enhancing metadata, and keeping your Plex library perfectly synchronized, all while you sleep.
+
 ### 🔄 Powerful Playlist Synchronization
 Keep your Plex library perfectly in sync with your Spotify playlists. SoulSync uses snapshot-based change detection to identify new or removed tracks without re-scanning entire playlists. You can download all missing tracks from a playlist with a single click, and the Multi-Sync feature allows you to select and queue multiple playlists for sequential, automated synchronization, making large library updates effortless.
 
