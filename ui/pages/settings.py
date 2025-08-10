@@ -1166,7 +1166,7 @@ class SettingsPage(QWidget):
         
         soulseek_title = QLabel("Soulseek")
         soulseek_title.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-        soulseek_title.setStyleSheet("color: #ff6b35;")
+        soulseek_title.setStyleSheet("color: #5dade2;")
         soulseek_layout.addWidget(soulseek_title)
         
         # slskd URL
