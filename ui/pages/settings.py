@@ -601,8 +601,6 @@ class SettingsPage(QWidget):
                 self.metadata_enabled_checkbox.setChecked(metadata_config.get('enabled', True))
             if hasattr(self, 'embed_album_art_checkbox'):
                 self.embed_album_art_checkbox.setChecked(metadata_config.get('embed_album_art', True))
-            if hasattr(self, 'plex_optimizations_checkbox'):
-                self.plex_optimizations_checkbox.setChecked(metadata_config.get('plex_optimizations', True))
             
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to load configuration: {e}")
@@ -1425,11 +1423,6 @@ class SettingsPage(QWidget):
         self.embed_album_art_checkbox.setStyleSheet(self.metadata_enabled_checkbox.styleSheet())
         self.form_inputs['metadata_enhancement.embed_album_art'] = self.embed_album_art_checkbox
         
-        # Plex optimizations checkbox
-        self.plex_optimizations_checkbox = QCheckBox("Apply Plex-specific tag optimizations")
-        self.plex_optimizations_checkbox.setChecked(True)
-        self.plex_optimizations_checkbox.setStyleSheet(self.metadata_enabled_checkbox.styleSheet())
-        self.form_inputs['metadata_enhancement.plex_optimizations'] = self.plex_optimizations_checkbox
         
         # Supported formats display
         supported_formats_layout = QHBoxLayout()
@@ -1456,7 +1449,6 @@ class SettingsPage(QWidget):
         
         metadata_layout.addWidget(self.metadata_enabled_checkbox)
         metadata_layout.addWidget(self.embed_album_art_checkbox)
-        metadata_layout.addWidget(self.plex_optimizations_checkbox)
         metadata_layout.addLayout(supported_formats_layout)
         metadata_layout.addWidget(help_text)
         
