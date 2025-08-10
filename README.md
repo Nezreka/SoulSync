@@ -126,6 +126,7 @@ docker run -d \
 2. The very first thing you should do is navigate to the **Settings** page using the sidebar.
 3. Fill in all the required fields for Spotify, Plex, and Soulseek.
 4. Click "Save Settings". The app is now ready to use.
+5. Restart the app for good luck.
 
 #### Option 2: Edit the config.json File Manually
 
