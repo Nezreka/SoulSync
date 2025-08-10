@@ -352,6 +352,9 @@ class DownloadMissingWishlistTracksModal(QDialog):
             self.total_tracks = len(self.wishlist_tracks)
             self.total_count_label.setText(str(self.total_tracks))
             self.populate_track_table()
+            
+            # Update button states after loading tracks
+            self._update_button_states()
 
         except Exception as e:
             logger.error(f"Failed to load wishlist tracks: {e}")
@@ -535,6 +538,10 @@ class DownloadMissingWishlistTracksModal(QDialog):
         self.correct_failed_btn.setStyleSheet("QPushButton { background-color: #ffc107; color: #000; border-radius: 20px; font-weight: bold; }")
         self.correct_failed_btn.clicked.connect(self.on_correct_failed_matches_clicked)
         self.correct_failed_btn.hide()
+        self.clear_wishlist_btn = QPushButton("🗑️ Clear Wishlist")
+        self.clear_wishlist_btn.setFixedSize(150, 40)
+        self.clear_wishlist_btn.setStyleSheet("QPushButton { background-color: #d32f2f; color: #fff; border-radius: 20px; font-size: 14px; font-weight: bold; }")
+        self.clear_wishlist_btn.clicked.connect(self.on_clear_wishlist_clicked)
         self.begin_search_btn = QPushButton("Begin Search")
         self.begin_search_btn.setFixedSize(160, 40)
         self.begin_search_btn.setStyleSheet("QPushButton { background-color: #1db954; color: #000; border: none; border-radius: 20px; font-size: 14px; font-weight: bold; }")
@@ -549,6 +556,7 @@ class DownloadMissingWishlistTracksModal(QDialog):
         self.close_btn.setStyleSheet("QPushButton { background-color: #616161; color: #fff; border-radius: 20px;}")
         self.close_btn.clicked.connect(self.on_close_clicked)
         layout.addStretch()
+        layout.addWidget(self.clear_wishlist_btn)
         layout.addWidget(self.begin_search_btn)
         layout.addWidget(self.cancel_btn)
         layout.addWidget(self.correct_failed_btn)
@@ -567,6 +575,7 @@ class DownloadMissingWishlistTracksModal(QDialog):
         self.analysis_progress.setMaximum(self.total_tracks)
         self.analysis_progress.setValue(0)
         self.download_in_progress = True
+        self._update_button_states()
         self.start_plex_analysis()
 
     def start_plex_analysis(self):
@@ -636,6 +645,7 @@ class DownloadMissingWishlistTracksModal(QDialog):
             self.start_download_progress()
         else:
             self.download_in_progress = False
+            self._update_button_states()
             self.cancel_btn.hide()
             self.process_finished.emit()
             QMessageBox.information(self, "Analysis Complete", "All wishlist tracks already exist in your library!")
@@ -894,6 +904,7 @@ class DownloadMissingWishlistTracksModal(QDialog):
 
     def on_all_downloads_complete(self):
         self.download_in_progress = False
+        self._update_button_states()
         self.parent_dashboard.auto_processing_wishlist = False
         self.cancel_btn.hide()
         self.process_finished.emit()
@@ -920,8 +931,119 @@ class DownloadMissingWishlistTracksModal(QDialog):
 
     def on_cancel_clicked(self):
         self.cancel_operations()
+        self._update_button_states()
         self.process_finished.emit()
         self.reject()
+
+    def on_clear_wishlist_clicked(self):
+        """Handle Clear Wishlist button click with confirmation"""
+        # Don't allow clearing during active download
+        if self.download_in_progress:
+            return
+            
+        # Show confirmation dialog
+        reply = QMessageBox.question(
+            self, 
+            "Clear Wishlist", 
+            "Are you sure you want to clear the entire wishlist?\n\n"
+            "This action cannot be undone and will permanently remove all wishlist tracks.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                # Clear the wishlist using the service
+                success = self.wishlist_service.clear_wishlist()
+                
+                if success:
+                    # Reset all UI elements
+                    self._reset_ui_after_clear()
+                    
+                    # Update dashboard wishlist button count
+                    self.parent_dashboard.update_wishlist_button_count()
+                    
+                    # Show success message
+                    QMessageBox.information(
+                        self,
+                        "Wishlist Cleared",
+                        "The wishlist has been successfully cleared."
+                    )
+                    
+                    logger.info("Wishlist cleared successfully by user")
+                    
+                else:
+                    QMessageBox.critical(
+                        self,
+                        "Error",
+                        "Failed to clear the wishlist. Please try again."
+                    )
+                    logger.error("Failed to clear wishlist")
+                    
+            except Exception as e:
+                QMessageBox.critical(
+                    self,
+                    "Error",
+                    f"An error occurred while clearing the wishlist: {str(e)}"
+                )
+                logger.error(f"Error clearing wishlist: {e}")
+    
+    def _reset_ui_after_clear(self):
+        """Reset all UI elements after clearing the wishlist"""
+        # Reset counters
+        self.wishlist_tracks = []
+        self.total_tracks = 0
+        self.matched_tracks_count = 0
+        self.tracks_to_download_count = 0
+        self.downloaded_tracks_count = 0
+        self.analysis_complete = False
+        self.permanently_failed_tracks = []
+        self.analysis_results = []
+        self.missing_tracks = []
+        
+        # Update counter labels
+        self.total_count_label.setText("0")
+        self.matched_count_label.setText("0")
+        self.download_count_label.setText("0")
+        self.downloaded_count_label.setText("0")
+        
+        # Clear and reset track table
+        self.track_table.setRowCount(0)
+        
+        # Reset progress bars
+        self.analysis_progress.setValue(0)
+        self.analysis_progress.setVisible(False)
+        self.download_progress.setValue(0)
+        self.download_progress.setVisible(False)
+        
+        # Reset buttons to initial state
+        self.begin_search_btn.show()
+        self.cancel_btn.hide()
+        self.correct_failed_btn.hide()
+        
+        # Update button state
+        self._update_button_states()
+
+    def _update_button_states(self):
+        """Update button states based on current modal state"""
+        # Disable Clear Wishlist button during download operations
+        if self.download_in_progress:
+            self.clear_wishlist_btn.setEnabled(False)
+            self.clear_wishlist_btn.setStyleSheet(
+                "QPushButton { background-color: #666666; color: #999999; border-radius: 20px; font-size: 14px; font-weight: bold; }"
+            )
+        else:
+            # Enable only if there are tracks to clear
+            has_tracks = len(self.wishlist_tracks) > 0
+            self.clear_wishlist_btn.setEnabled(has_tracks)
+            if has_tracks:
+                self.clear_wishlist_btn.setStyleSheet(
+                    "QPushButton { background-color: #d32f2f; color: #fff; border-radius: 20px; font-size: 14px; font-weight: bold; }"
+                )
+            else:
+                self.clear_wishlist_btn.setStyleSheet(
+                    "QPushButton { background-color: #666666; color: #999999; border-radius: 20px; font-size: 14px; font-weight: bold; }"
+                )
 
     def on_close_clicked(self):
         if self.cancel_requested or not self.download_in_progress:
