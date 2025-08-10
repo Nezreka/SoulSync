@@ -6,17 +6,33 @@ The core philosophy of SoulSync is to let you enjoy music discovery on Spotify w
 
 ## ✨ Core Features
 
-**Spotify Playlist Sync**: Intelligently scans your Spotify playlists, using snapshot IDs to efficiently detect changes and avoid re-scanning unmodified playlists. It then performs a deep comparison against your Plex music library to accurately identify any missing tracks, saving you from the tedious task of manual cross-referencing.
+### 🗄️ **Lightning-Fast Database Engine**
+SoulSync maintains a complete local SQLite database of your Plex library metadata, eliminating slow API calls and enabling instant matching operations. The database automatically synchronizes with your Plex server through intelligent background updates triggered by file changes, library scans, and download completions. Advanced features include thread-safe operations with WAL mode, connection pooling for concurrent access, smart Plex scan management with debounced library scanning, and a built-in database health monitoring widget showing sync status and performance metrics.
 
-**Artist Discography Explorer**: Go beyond playlists and explore the complete discography of any artist. Search for an artist, and SoulSync will fetch their entire catalog of albums and singles from Spotify. It then instantly cross-references this catalog with your Plex library to show you, at a glance, which albums you already own and which ones you're missing.
+### 🎵 **Integrated Media Player & Streaming**
+Experience music before downloading with SoulSync's full-featured media player integrated directly into the sidebar. Stream tracks from Soulseek sources for instant preview, with native support for FLAC, MP3, OGG, AAC, WMA, and WAV formats. The player features play/pause/stop controls, volume adjustment, smart scrolling text for long track names, loading animations, and synchronized playback state across all application pages. Preview any search result with a single click to ensure it's the right track before committing to a download.
 
-**Automated Downloads via Soulseek**: SoulSync seamlessly integrates with slskd, a headless Soulseek client, to find and download your missing music. It automatically generates multiple, optimized search queries for each track and prioritizes high-quality formats like FLAC, ensuring your library is of the highest fidelity.
+### 📋 **Advanced Wishlist & Failed Download Management**  
+Never lose track of music you couldn't find. SoulSync automatically captures failed downloads into a comprehensive wishlist system that preserves the source context (which playlist, album, or search originated the request) along with detailed failure reasons. The wishlist offers one-click retry mechanisms with updated search queries, failure analytics to identify patterns, and bulk operations for mass retry, removal, or re-queuing of items. This ensures that temporarily unavailable tracks can be easily revisited and downloaded when sources become available.
 
-**Intelligent Matching Engine**: At the heart of SoulSync is a robust matching algorithm. It normalizes and compares metadata between Spotify, Plex, and Soulseek, cleverly handling variations like "(Deluxe Edition)", "(Remastered)", feature tags, and typos to ensure you get the correct version of the track or album with minimal manual intervention.
+### 🧠 **Sophisticated Matching & Search Engine**
+At the core of SoulSync is an advanced matching engine that goes far beyond simple text comparison. It features version-aware scoring that automatically prioritizes original versions over remixes, live recordings, or instrumentals. The system handles complex text normalization including Cyrillic characters (КоЯn → Korn), accents, and special symbols like A$AP Rocky. Smart album detection removes album names from track titles ("Track - Album" → "Track") for cleaner matching, while multi-query generation creates several optimized search variations per track to maximize success rates. Every match includes detailed confidence scoring to help you make informed decisions.
 
-**Centralized Dashboard**: The main dashboard provides a real-time, at-a-glance overview of your connected services (Spotify, Plex, Soulseek), live download statistics (active downloads, speed), and a feed of the most recent application activities.
+### 📊 **Real-Time Dashboard & Monitoring**
+Stay informed with SoulSync's comprehensive monitoring system featuring live service status indicators for Spotify, Plex, and Soulseek connections with automatic reconnection capabilities. Track real-time download statistics including active downloads, queue status, completion rates, and transfer speeds. Monitor system performance metrics like database size, search history count, memory usage, and application uptime. The chronological activity feed provides a complete stream of all application activities with timestamps and context, while the toast notification system delivers non-intrusive success, warning, and error messages.
 
-**Plex Metadata Enhancement**: Keep your Plex library looking beautiful and organized. SoulSync can automatically fetch high-quality artist posters and detailed genre information from Spotify and apply them to the artists in your Plex library, ensuring a rich and consistent browsing experience.
+### 🎯 **Advanced UI Pages & Workflows**
+
+**Downloads Page**: The heart of music acquisition featuring a unified search interface that switches between Albums and Singles modes while maintaining persistent search history. Every search result includes a stream button for instant preview, and the matched download system provides artist/album matching modals for accurate metadata assignment. Real-time progress bars show download status and queue position, with direct access to the wishlist for failed download recovery and retry management.
+
+**Sync Page**: Sophisticated playlist management with snapshot-based change detection to avoid unnecessary re-scanning. The playlist analysis engine provides confidence-based matching with color-coded scores for each track, bulk "Download Missing Tracks" operations with progress tracking, and intelligent retry logic that automatically improves search queries for previously failed downloads.
+
+**Artists Page**: Complete discography exploration showing full artist catalogs with ownership status indicators for every album. Perform album-level operations to download entire missing albums or individual tracks, view releases in chronological timeline format with Plex ownership overlay, and execute bulk operations to download all missing content for an artist with a single click.
+
+**Dashboard Page**: Centralized control center with a service connection matrix showing real-time status for all connected services, performance overview displaying database health and system resource usage, live activity stream of downloads and system events, and quick action buttons for common operations without page navigation.
+
+### 🚀 **Performance & Reliability Enhancements**
+Built on a modern multi-threaded architecture, SoulSync processes searches, downloads, and database operations in parallel for maximum performance. Smart resource management automatically cleans up temporary files and maintains an optimized search history of the 200 most recent queries. Connection resilience features include automatic reconnection logic with exponential backoff for all services, while memory optimization ensures efficient object lifecycle management. All intensive operations run in background threads to maintain complete UI responsiveness, making SoulSync feel fast and fluid even during heavy operations.
 
 ## ⚙️ How It Works
 
@@ -172,29 +188,50 @@ Run the main application file to launch the GUI:
 python main.py
 ```
 
-### Pages
+### Application Pages
 
-- **Dashboard**: Provides a high-level overview of system status and recent activities.
-- **Sync**: Load your Spotify playlists, analyze them against your Plex library, and initiate the process of finding and downloading missing tracks.
-- **Downloads**: Monitor your active and completed downloads from Soulseek in real-time.
-- **Artists**: A powerful tool to search for any artist, view their discography, and see which albums you already own in Plex. You can initiate downloads for missing albums directly from this page.
-- **Settings**: Configure all your service credentials and application paths.
+- **Dashboard**: Real-time system overview with service connection matrix (Spotify/Plex/Soulseek status), live download statistics (active transfers, speeds, queue status), database health metrics (size, sync status, last update), chronological activity feed of all application events, and quick action buttons for common operations.
+
+- **Sync**: Advanced playlist management featuring Spotify playlist loading with snapshot-based change detection, confidence-scored track matching with color-coded indicators, bulk "Download Missing Tracks" with progress tracking, intelligent retry logic for failed downloads, and detailed match analysis showing why tracks were or weren't found in your Plex library.
+
+- **Downloads**: Comprehensive download management with unified Albums/Singles search interface, stream-before-download capability for every result, matched download system with artist/album selection modals, real-time progress monitoring with queue positions, failed download recovery via integrated wishlist access, and persistent search history across sessions.
+
+- **Artists**: Complete discography explorer with full artist catalog browsing, ownership status indicators for every album, chronological release timeline with Plex library overlay, bulk download operations for entire discographies, album-level missing track downloads, and integration with matched download system for accurate metadata assignment.
+
+- **Settings**: Service configuration hub for Spotify/Plex/Soulseek credentials, download/transfer path management, database operations (update, rebuild, health check), performance tuning options (thread limits, cache settings), notification preferences, and application logging controls.
 
 ## 🐍 Key Components
 
-The application is structured into several core modules:
+The application is built on a modern, layered architecture with distinct separation of concerns:
 
-- **main.py**: The main entry point for the PyQt6 application.
-- **core/**: Contains the business logic for interacting with external services.
-  - `spotify_client.py`: Handles all communication with the Spotify API.
-  - `plex_client.py`: Manages interactions with the Plex Media Server API.
-  - `soulseek_client.py`: Communicates with the slskd headless client.
-  - `matching_engine.py`: The brain of the application, responsible for intelligent metadata comparison and matching.
-- **ui/**: Contains all the PyQt6 graphical user interface components.
-  - `sidebar.py`: The main navigation sidebar.
-  - `pages/`: Each file corresponds to a different page in the application (`dashboard.py`, `sync.py`, etc.).
-- **config/**: Manages application settings via `config.json`.
-- **utils/**: Utility scripts, including logging configuration.
+- **main.py**: PyQt6 application entry point with main window management, service initialization, media player signal routing, and application lifecycle management.
+
+- **core/**: Business logic and service integration layer
+  - `spotify_client.py`: Spotify Web API integration with OAuth2 authentication, playlist/artist data retrieval, and metadata normalization.
+  - `plex_client.py`: Plex Media Server API client with library scanning, metadata retrieval, and server status monitoring.
+  - `soulseek_client.py`: slskd API communication handling search operations, download management, and queue monitoring.
+  - `matching_engine.py`: Advanced metadata comparison engine with version-aware scoring, text normalization, and confidence calculation.
+  - `wishlist_service.py`: Failed download management with retry mechanisms and source context preservation.
+  - `plex_scan_manager.py`: Intelligent Plex library scan coordination with debouncing and periodic updates.
+
+- **database/**: Data persistence and management layer
+  - `music_database.py`: SQLite database operations with thread-safe connections, WAL mode, and metadata synchronization.
+  - `music_library.db`: Local database storing complete Plex library metadata for instant access.
+
+- **ui/**: Modern PyQt6 user interface with responsive design
+  - `sidebar.py`: Navigation sidebar with integrated media player, service status indicators, and scrolling track info.
+  - `components/`: Reusable UI elements including toast notifications, loading animations, and database status widgets.
+  - `pages/`: Application pages (`dashboard.py`, `sync.py`, `downloads.py`, `artists.py`, `settings.py`) with specialized workflows.
+
+- **services/**: Background service layer
+  - `sync_service.py`: High-level sync orchestration with playlist analysis and download coordination.
+
+- **config/**: Configuration management
+  - `config.json`: Service credentials, paths, and application settings.
+  - `settings.py`: Configuration file handling and validation.
+
+- **utils/**: Shared utilities
+  - `logging_config.py`: Centralized logging configuration with file and console output.
 
 ## 🤝 Contributing
 
