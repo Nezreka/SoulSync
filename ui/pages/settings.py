@@ -594,6 +594,15 @@ class SettingsPage(QWidget):
                 index = self.quality_combo.findText(display_quality)
                 if index >= 0:
                     self.quality_combo.setCurrentIndex(index)
+                
+            # Load metadata enhancement settings
+            metadata_config = config_manager.get('metadata_enhancement', {})
+            if hasattr(self, 'metadata_enabled_checkbox'):
+                self.metadata_enabled_checkbox.setChecked(metadata_config.get('enabled', True))
+            if hasattr(self, 'embed_album_art_checkbox'):
+                self.embed_album_art_checkbox.setChecked(metadata_config.get('embed_album_art', True))
+            if hasattr(self, 'plex_optimizations_checkbox'):
+                self.plex_optimizations_checkbox.setChecked(metadata_config.get('plex_optimizations', True))
             
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to load configuration: {e}")
@@ -1377,8 +1386,83 @@ class SettingsPage(QWidget):
         logging_layout.addLayout(log_level_layout)
         logging_layout.addLayout(log_path_container)
         
+        # Metadata Enhancement Settings
+        metadata_group = SettingsGroup("🎵 Metadata Enhancement")
+        metadata_layout = QVBoxLayout(metadata_group)
+        metadata_layout.setContentsMargins(16, 20, 16, 16)
+        metadata_layout.setSpacing(12)
+        
+        # Enable metadata enhancement checkbox
+        self.metadata_enabled_checkbox = QCheckBox("Enable metadata enhancement with Spotify data")
+        self.metadata_enabled_checkbox.setChecked(True)
+        self.metadata_enabled_checkbox.setStyleSheet("""
+            QCheckBox {
+                color: #ffffff;
+                font-size: 12px;
+                spacing: 8px;
+            }
+            QCheckBox::indicator {
+                width: 16px;
+                height: 16px;
+                border-radius: 3px;
+                border: 2px solid #606060;
+                background-color: #404040;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #1db954;
+                border-color: #1db954;
+                image: url(data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTEzLjUgNC41TDYuNSAxMS41TDIuNSA3LjUiIHN0cm9rZT0id2hpdGUiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+Cjwvc3ZnPgo=);
+            }
+            QCheckBox::indicator:hover {
+                border-color: #1db954;
+            }
+        """)
+        self.form_inputs['metadata_enhancement.enabled'] = self.metadata_enabled_checkbox
+        
+        # Embed album art checkbox
+        self.embed_album_art_checkbox = QCheckBox("Embed high-quality album art from Spotify")
+        self.embed_album_art_checkbox.setChecked(True)
+        self.embed_album_art_checkbox.setStyleSheet(self.metadata_enabled_checkbox.styleSheet())
+        self.form_inputs['metadata_enhancement.embed_album_art'] = self.embed_album_art_checkbox
+        
+        # Plex optimizations checkbox
+        self.plex_optimizations_checkbox = QCheckBox("Apply Plex-specific tag optimizations")
+        self.plex_optimizations_checkbox.setChecked(True)
+        self.plex_optimizations_checkbox.setStyleSheet(self.metadata_enabled_checkbox.styleSheet())
+        self.form_inputs['metadata_enhancement.plex_optimizations'] = self.plex_optimizations_checkbox
+        
+        # Supported formats display
+        supported_formats_layout = QHBoxLayout()
+        formats_label = QLabel("Supported Formats:")
+        formats_label.setStyleSheet("color: #ffffff; font-size: 12px;")
+        
+        formats_display = QLabel("MP3, FLAC, MP4/M4A, OGG")
+        formats_display.setStyleSheet("""
+            color: #b3b3b3; 
+            font-size: 11px; 
+            background-color: #404040;
+            border: 1px solid #606060;
+            border-radius: 4px;
+            padding: 6px;
+        """)
+        
+        supported_formats_layout.addWidget(formats_label)
+        supported_formats_layout.addWidget(formats_display)
+        
+        # Help text
+        help_text = QLabel("Automatically enhances downloaded tracks with accurate Spotify metadata including artist, album, track numbers, genres, and release dates. Perfect for Plex libraries!")
+        help_text.setStyleSheet("color: #888888; font-size: 10px; font-style: italic;")
+        help_text.setWordWrap(True)
+        
+        metadata_layout.addWidget(self.metadata_enabled_checkbox)
+        metadata_layout.addWidget(self.embed_album_art_checkbox)
+        metadata_layout.addWidget(self.plex_optimizations_checkbox)
+        metadata_layout.addLayout(supported_formats_layout)
+        metadata_layout.addWidget(help_text)
+        
         layout.addWidget(download_group)
         layout.addWidget(database_group)
+        layout.addWidget(metadata_group)
         layout.addWidget(logging_group)
         layout.addStretch()  # Push content to top, prevent stretching
         
