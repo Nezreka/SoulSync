@@ -7682,24 +7682,24 @@ class DownloadsPage(QWidget):
                     print(f"❌ Could not locate downloaded file anywhere")
                     return None
             
-            # Copy the file to the new location
-            if os.path.exists(new_file_path):
-                print(f"⚠️ File already exists at destination: {new_file_path}")
-                # Add counter to avoid conflicts
-                base, ext = os.path.splitext(new_file_path)
-                counter = 1
-                while os.path.exists(f"{base} ({counter}){ext}"):
-                    counter += 1
-                new_file_path = f"{base} ({counter}){ext}"
+            # File organization and overwrite logic will be handled after metadata enhancement
             
-            print(f"📂 Moving file to: {new_file_path}")
+            # 🆕 METADATA ENHANCEMENT - Enhance BEFORE moving to avoid race conditions
+            if self._enhance_file_metadata(original_file_path, download_item, artist, album_info):
+                print(f"✅ Metadata enhanced with Spotify data")
+            else:
+                print(f"⚠️ Metadata enhancement failed, using original tags")
             
             # Verify source file exists before attempting move
             if not os.path.exists(original_file_path):
                 print(f"❌ Source file not found: {original_file_path}")
                 return None
                 
-            # Move the file (this will delete the original automatically)
+            # Explicit overwrite: check if file exists, remove it, then move
+            if os.path.isfile(new_file_path):
+                os.remove(new_file_path)
+            
+            # Move the enhanced file to destination
             shutil.move(original_file_path, new_file_path)
             
             # Verify the move was successful
@@ -7708,21 +7708,10 @@ class DownloadsPage(QWidget):
                 return None
                 
             if os.path.exists(original_file_path):
-                print(f"⚠️ Warning: Original file still exists after move: {original_file_path}")
                 try:
                     os.remove(original_file_path)
-                    print(f"🗑️ Cleaned up remaining original file")
                 except Exception as cleanup_error:
                     print(f"⚠️ Could not remove original file: {cleanup_error}")
-            
-            print(f"🧹 File successfully moved and original cleaned up")
-            
-            # 🆕 METADATA ENHANCEMENT - Enhance with Spotify data
-            print(f"🎵 Starting metadata enhancement for: {os.path.basename(new_file_path)}")
-            if self._enhance_file_metadata(new_file_path, download_item, artist, album_info):
-                print(f"✅ Metadata enhanced with Spotify data")
-            else:
-                print(f"⚠️ Metadata enhancement failed, using original tags")
             
             # Clean up any empty directories left in the downloads folder
             try:
@@ -10819,6 +10808,17 @@ class DownloadsPage(QWidget):
         try:
             metadata = {}
             
+            # Debug: Log what we're working with
+            print(f"🔍 Extracting metadata for: {download_item.title}")
+            print(f"   - Artist: {artist.name if artist else 'None'}")
+            print(f"   - Album info: {album_info}")
+            print(f"   - Has _spotify_clean_title: {hasattr(download_item, '_spotify_clean_title')}")
+            print(f"   - Has matched_album: {hasattr(download_item, 'matched_album')}")
+            
+            if not artist:
+                print(f"❌ No artist provided for metadata extraction")
+                return {}
+            
             # Basic track information
             metadata['title'] = getattr(download_item, '_spotify_clean_title', download_item.title)
             metadata['artist'] = artist.name
@@ -10861,11 +10861,22 @@ class DownloadsPage(QWidget):
             if hasattr(download_item, 'matched_album') and download_item.matched_album:
                 metadata['spotify_album_id'] = getattr(download_item.matched_album, 'id', None)
             
-            print(f"🎯 Extracted metadata: {metadata.get('artist')} - {metadata.get('title')} ({metadata.get('album')})")
+            print(f"🎯 Extracted metadata summary:")
+            print(f"   - Title: {metadata.get('title')}")
+            print(f"   - Artist: {metadata.get('artist')}")
+            print(f"   - Album: {metadata.get('album')}")
+            print(f"   - Track #: {metadata.get('track_number')}")
+            print(f"   - Date: {metadata.get('date')}")
+            print(f"   - Genre: {metadata.get('genre')}")
+            print(f"   - Album art: {'Yes' if metadata.get('album_art_url') else 'No'}")
+            print(f"   - Total fields: {len(metadata)}")
+            
             return metadata
             
         except Exception as e:
             print(f"❌ Error extracting Spotify metadata: {e}")
+            import traceback
+            traceback.print_exc()
             return {}
     
     def _detect_audio_format(self, file_path: str, audio_file) -> str:
@@ -10953,11 +10964,15 @@ class DownloadsPage(QWidget):
     def _apply_flac_tags(self, audio_file, metadata: dict, file_path: str) -> bool:
         """Handle FLAC Vorbis comments for lossless files"""
         try:
+            print(f"🎵 Applying FLAC tags with {len(metadata)} metadata fields")
+            
             # Basic tags
             audio_file['TITLE'] = metadata.get('title', '')
             audio_file['ARTIST'] = metadata.get('artist', '')
             audio_file['ALBUMARTIST'] = metadata.get('album_artist', '')
             audio_file['ALBUM'] = metadata.get('album', '')
+            
+            print(f"   - Applied basic tags: Title='{metadata.get('title')}', Artist='{metadata.get('artist')}'")
             
             # Date
             if metadata.get('date'):
@@ -10982,11 +10997,15 @@ class DownloadsPage(QWidget):
                 audio_file['SPOTIFY_ALBUM_ID'] = metadata['spotify_album_id']
             
             
+            print(f"   - Saving FLAC file with enhanced metadata...")
             audio_file.save()
+            print(f"   - ✅ FLAC tags saved successfully")
             return True
             
         except Exception as e:
             print(f"❌ Error applying FLAC tags: {e}")
+            import traceback
+            traceback.print_exc()
             return False
     
     def _apply_mp4_tags(self, audio_file, metadata: dict, file_path: str) -> bool:
