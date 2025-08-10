@@ -5,6 +5,180 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QFont
 from config.settings import config_manager
 
+class PlexDetectionThread(QThread):
+    progress_updated = pyqtSignal(int, str)  # progress value, current url
+    detection_completed = pyqtSignal(str)  # found_url (empty if not found)
+    
+    def __init__(self):
+        super().__init__()
+        self.cancelled = False
+    
+    def cancel(self):
+        self.cancelled = True
+    
+    def run(self):
+        import requests
+        import socket
+        import ipaddress
+        import subprocess
+        import platform
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        
+        def get_network_info():
+            """Get comprehensive network information with subnet detection"""
+            try:
+                # Get local IP using socket method
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.connect(("8.8.8.8", 80))
+                local_ip = s.getsockname()[0]
+                s.close()
+                
+                # Try to get actual subnet mask
+                try:
+                    if platform.system() == "Windows":
+                        # Windows: Use netsh to get subnet info
+                        result = subprocess.run(['netsh', 'interface', 'ip', 'show', 'config'], 
+                                              capture_output=True, text=True, timeout=3)
+                        # Parse output for subnet mask (simplified)
+                        subnet_mask = "255.255.255.0"  # Default fallback
+                    else:
+                        # Linux/Mac: Try to parse network interfaces
+                        result = subprocess.run(['ip', 'route', 'show'], 
+                                              capture_output=True, text=True, timeout=3)
+                        subnet_mask = "255.255.255.0"  # Default fallback
+                except:
+                    subnet_mask = "255.255.255.0"  # Default /24
+                
+                # Calculate network range
+                network = ipaddress.IPv4Network(f"{local_ip}/{subnet_mask}", strict=False)
+                return str(network.network_address), str(network.netmask), local_ip, network
+                
+            except Exception as e:
+                # Fallback to original method
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.connect(("8.8.8.8", 80))
+                local_ip = s.getsockname()[0]
+                s.close()
+                
+                # Default to /24 network
+                network = ipaddress.IPv4Network(f"{local_ip}/24", strict=False)
+                return str(network.network_address), "255.255.255.0", local_ip, network
+        
+        def test_plex_server(ip, port=32400):
+            """Test if a Plex server is running at the given IP and port"""
+            try:
+                url = f"http://{ip}:{port}/web/index.html"
+                response = requests.get(url, timeout=2, allow_redirects=True)
+                
+                # Check for Plex-specific indicators
+                if response.status_code == 200:
+                    # Check if it's actually Plex
+                    if 'plex' in response.text.lower() or 'X-Plex' in str(response.headers):
+                        return f"http://{ip}:{port}"
+                        
+                    # Also try the API endpoint
+                    api_url = f"http://{ip}:{port}/identity"
+                    api_response = requests.get(api_url, timeout=1)
+                    if api_response.status_code == 200 and 'MediaContainer' in api_response.text:
+                        return f"http://{ip}:{port}"
+                        
+            except:
+                pass
+            return None
+        
+        try:
+            network_addr, netmask, local_ip, network = get_network_info()
+            
+            # Build list of IPs to test
+            test_ips = []
+            
+            # Priority 1: Test localhost first
+            if not self.cancelled:
+                self.progress_updated.emit(5, "http://localhost:32400")
+                localhost_result = test_plex_server("localhost")
+                if localhost_result:
+                    self.detection_completed.emit(localhost_result)
+                    return
+            
+            # Priority 2: Test local IP
+            if not self.cancelled:
+                self.progress_updated.emit(10, f"http://{local_ip}:32400")
+                local_result = test_plex_server(local_ip)
+                if local_result:
+                    self.detection_completed.emit(local_result)
+                    return
+            
+            # Priority 3: Test common IPs (router gateway, etc.)
+            common_ips = [
+                local_ip.rsplit('.', 1)[0] + '.1',  # Typical gateway
+                local_ip.rsplit('.', 1)[0] + '.2',  # Alternative gateway
+                local_ip.rsplit('.', 1)[0] + '.100', # Common static IP
+            ]
+            
+            progress = 15
+            for ip in common_ips:
+                if self.cancelled:
+                    break
+                    
+                self.progress_updated.emit(progress, f"http://{ip}:32400")
+                result = test_plex_server(ip)
+                if result:
+                    self.detection_completed.emit(result)
+                    return
+                progress += 5
+            
+            # Priority 4: Scan the network range (limited to reasonable size)
+            network_hosts = list(network.hosts())
+            if len(network_hosts) > 50:
+                # Limit scan to reasonable size for performance
+                step = max(1, len(network_hosts) // 50)
+                network_hosts = network_hosts[::step]
+            
+            progress_step = max(1, (85 - progress) // len(network_hosts))
+            
+            # Use ThreadPoolExecutor for concurrent scanning
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                # Submit all tasks
+                future_to_ip = {executor.submit(test_plex_server, str(ip)): str(ip) 
+                               for ip in network_hosts}
+                
+                try:
+                    for future in as_completed(future_to_ip):
+                        if self.cancelled:
+                            # Cancel all pending futures
+                            for f in future_to_ip:
+                                if not f.done():
+                                    f.cancel()
+                            break
+                            
+                        ip = future_to_ip[future]
+                        progress = min(95, progress + progress_step)
+                        self.progress_updated.emit(progress, f"http://{ip}:32400")
+                        
+                        try:
+                            result = future.result()
+                            if result:
+                                # Cancel all pending futures before returning
+                                for f in future_to_ip:
+                                    if not f.done():
+                                        f.cancel()
+                                self.detection_completed.emit(result)
+                                return
+                        except:
+                            pass
+                finally:
+                    # Ensure executor is properly shutdown
+                    # Use wait=False if cancelled to avoid blocking
+                    executor.shutdown(wait=not self.cancelled)
+            
+            # If we get here, no Plex server was found
+            self.progress_updated.emit(100, "Scan complete")
+            self.detection_completed.emit("")  # Empty string = not found
+            
+        except Exception as e:
+            print(f"Plex detection error: {e}")
+            self.detection_completed.emit("")  # Empty string = not found
+
 class SlskdDetectionThread(QThread):
     progress_updated = pyqtSignal(int, str)  # progress value, current url
     detection_completed = pyqtSignal(str)  # found_url (empty if not found)
@@ -180,35 +354,41 @@ class SlskdDetectionThread(QThread):
                     for target in targets
                 }
                 
-                # Process completed tasks
-                for future in as_completed(future_to_url):
-                    if self.cancelled:
-                        # Cancel remaining futures
-                        for f in future_to_url:
-                            f.cancel()
-                        break
-                    
-                    completed_count += 1
-                    progress = int((completed_count / len(targets)) * 100)
-                    current_url = future_to_url[future]
-                    
-                    # Update progress
-                    self.progress_updated.emit(progress, f"Scanning {current_url.split('//')[1]}")
-                    
-                    # Check result
-                    try:
-                        result_url, confidence = future.result()
-                        if result_url:
-                            found_url = result_url
-                            self.progress_updated.emit(100, f"Found: {result_url}")
-                            
-                            # Cancel remaining futures for faster completion
+                try:
+                    # Process completed tasks
+                    for future in as_completed(future_to_url):
+                        if self.cancelled:
+                            # Cancel remaining futures
                             for f in future_to_url:
                                 if not f.done():
                                     f.cancel()
                             break
-                    except:
-                        continue
+                        
+                        completed_count += 1
+                        progress = int((completed_count / len(targets)) * 100)
+                        current_url = future_to_url[future]
+                        
+                        # Update progress
+                        self.progress_updated.emit(progress, f"Scanning {current_url.split('//')[1]}")
+                        
+                        # Check result
+                        try:
+                            result_url, confidence = future.result()
+                            if result_url:
+                                found_url = result_url
+                                self.progress_updated.emit(100, f"Found: {result_url}")
+                                
+                                # Cancel remaining futures for faster completion
+                                for f in future_to_url:
+                                    if not f.done():
+                                        f.cancel()
+                                break
+                        except:
+                            continue
+                finally:
+                    # Ensure executor is properly shutdown
+                    # Use wait=False if cancelled to avoid blocking
+                    executor.shutdown(wait=not self.cancelled)
             
             return found_url
         
@@ -723,6 +903,110 @@ class SettingsPage(QWidget):
         }
         self.start_service_test('soulseek', test_config)
     
+    def auto_detect_plex(self):
+        """Auto-detect Plex server URL using background thread"""
+        # Don't start new detection if one is already running
+        if self.detection_thread and self.detection_thread.isRunning():
+            return
+        
+        # Create animated loading dialog
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
+        from PyQt6.QtCore import QTimer, QPropertyAnimation, QRect
+        from PyQt6.QtGui import QPainter, QColor
+        
+        self.detection_dialog = QDialog(self)
+        self.detection_dialog.setWindowTitle("Auto-detecting Plex Server")
+        self.detection_dialog.setModal(True)
+        self.detection_dialog.setFixedSize(400, 180)
+        self.detection_dialog.setWindowFlags(self.detection_dialog.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        
+        # Apply dark theme styling
+        self.detection_dialog.setStyleSheet("""
+            QDialog {
+                background-color: #282828;
+                color: #ffffff;
+                border: 1px solid #404040;
+                border-radius: 8px;
+            }
+            QLabel {
+                color: #ffffff;
+                font-size: 14px;
+            }
+            QPushButton {
+                background-color: #404040;
+                border: 1px solid #606060;
+                border-radius: 4px;
+                color: #ffffff;
+                padding: 8px 16px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #505050;
+            }
+        """)
+        
+        layout = QVBoxLayout(self.detection_dialog)
+        layout.setSpacing(20)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Title label
+        title_label = QLabel("Searching for Plex servers...")
+        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(title_label)
+        
+        # Status label
+        self.status_label = QLabel("Checking local machine...")
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.status_label.setStyleSheet("color: #b3b3b3; font-size: 12px;")
+        layout.addWidget(self.status_label)
+        
+        # Animated loading bar container
+        loading_container = QLabel()
+        loading_container.setFixedHeight(8)
+        loading_container.setStyleSheet("""
+            QLabel {
+                background-color: #404040;
+                border: 1px solid #606060;
+                border-radius: 4px;
+            }
+        """)
+        layout.addWidget(loading_container)
+        
+        # Animated orange bar for Plex
+        self.loading_bar = QLabel(loading_container)
+        self.loading_bar.setFixedHeight(6)
+        self.loading_bar.setStyleSheet("""
+            background-color: #e5a00d;
+            border-radius: 3px;
+            border: none;
+        """)
+        
+        # Start animation
+        self.loading_animation = QPropertyAnimation(self.loading_bar, b"geometry")
+        self.loading_animation.setDuration(1500)  # 1.5 seconds
+        self.loading_animation.setStartValue(QRect(1, 1, 0, 6))
+        self.loading_animation.setEndValue(QRect(1, 1, loading_container.width() - 2, 6))
+        self.loading_animation.setLoopCount(-1)  # Infinite loop
+        self.loading_animation.start()
+        
+        # Cancel button
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.cancel_detection)
+        button_layout.addWidget(cancel_btn)
+        
+        layout.addLayout(button_layout)
+        
+        # Start Plex detection thread
+        self.detection_thread = PlexDetectionThread()
+        self.detection_thread.progress_updated.connect(self.on_detection_progress, Qt.ConnectionType.QueuedConnection)
+        self.detection_thread.detection_completed.connect(self.on_plex_detection_completed, Qt.ConnectionType.QueuedConnection)
+        self.detection_thread.start()
+        
+        self.detection_dialog.show()
+    
     def auto_detect_slskd(self):
         """Auto-detect slskd URL using background thread"""
         # Don't start new detection if one is already running
@@ -737,7 +1021,7 @@ class SettingsPage(QWidget):
         self.detection_dialog = QDialog(self)
         self.detection_dialog.setWindowTitle("Auto-detecting slskd")
         self.detection_dialog.setModal(True)
-        self.detection_dialog.setFixedSize(350, 150)
+        self.detection_dialog.setFixedSize(400, 180)
         self.detection_dialog.setWindowFlags(self.detection_dialog.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
         
         # Apply dark theme styling
@@ -830,7 +1114,20 @@ class SettingsPage(QWidget):
     def cancel_detection(self):
         """Cancel the ongoing detection"""
         if self.detection_thread:
+            # Set cancellation flag first
             self.detection_thread.cancel()
+            
+            # If thread is still running, terminate it
+            if self.detection_thread.isRunning():
+                self.detection_thread.quit()
+                # Don't wait too long during cancellation to avoid blocking UI
+                if not self.detection_thread.wait(500):  # Wait only 500ms
+                    # Force terminate if it doesn't respond
+                    self.detection_thread.terminate()
+                    self.detection_thread.wait()
+            
+            self.detection_thread.deleteLater()
+            self.detection_thread = None
         
         # Close dialog
         if hasattr(self, 'detection_dialog') and self.detection_dialog:
@@ -847,8 +1144,8 @@ class SettingsPage(QWidget):
             else:
                 self.status_label.setText("Checking network...")
     
-    def on_detection_completed(self, found_url):
-        """Handle detection completion"""
+    def on_plex_detection_completed(self, found_url):
+        """Handle Plex detection completion"""
         # Stop animation and close dialog
         if hasattr(self, 'loading_animation'):
             self.loading_animation.stop()
@@ -857,7 +1154,43 @@ class SettingsPage(QWidget):
             self.detection_dialog.close()
             self.detection_dialog = None
         
+        # Properly cleanup thread
         if self.detection_thread:
+            if self.detection_thread.isRunning():
+                self.detection_thread.quit()
+                self.detection_thread.wait(1000)  # Wait up to 1 second for thread to finish
+            self.detection_thread.deleteLater()
+            self.detection_thread = None
+        
+        if found_url:
+            self.plex_url_input.setText(found_url)
+            self.show_plex_success_dialog(found_url)
+        else:
+            QMessageBox.warning(self, "Auto-detect Failed", 
+                              "Could not find Plex server running on local machine or network.\n\n"
+                              "Please ensure Plex Media Server is running and try:\n"
+                              "• Check if Plex Media Server service is started\n"
+                              "• Verify firewall allows access to Plex port (32400)\n"
+                              "• Enter the URL manually if on a different network\n\n"
+                              "Common URLs:\n"
+                              "• http://localhost:32400 (local default)\n"
+                              "• http://192.168.1.100:32400 (network example)")
+    
+    def on_detection_completed(self, found_url):
+        """Handle slskd detection completion"""
+        # Stop animation and close dialog
+        if hasattr(self, 'loading_animation'):
+            self.loading_animation.stop()
+        
+        if hasattr(self, 'detection_dialog') and self.detection_dialog:
+            self.detection_dialog.close()
+            self.detection_dialog = None
+        
+        # Properly cleanup thread
+        if self.detection_thread:
+            if self.detection_thread.isRunning():
+                self.detection_thread.quit()
+                self.detection_thread.wait(1000)  # Wait up to 1 second for thread to finish
             self.detection_thread.deleteLater()
             self.detection_thread = None
         
@@ -875,8 +1208,119 @@ class SettingsPage(QWidget):
                               "• http://localhost:5030 (local default)\n"
                               "• http://192.168.1.100:5030 (network example)")
     
+    def show_plex_success_dialog(self, found_url):
+        """Show custom Plex success dialog with copy functionality"""
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit
+        from PyQt6.QtCore import Qt
+        from PyQt6.QtGui import QClipboard
+        
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Plex Auto-detect Success")
+        dialog.setModal(True)
+        dialog.setFixedSize(380, 160)
+        dialog.setWindowFlags(dialog.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        
+        # Apply dark theme styling
+        dialog.setStyleSheet("""
+            QDialog {
+                background-color: #282828;
+                color: #ffffff;
+                border: 1px solid #404040;
+                border-radius: 8px;
+            }
+            QLabel {
+                color: #ffffff;
+                font-size: 12px;
+            }
+            QTextEdit {
+                background-color: #404040;
+                border: 1px solid #606060;
+                border-radius: 4px;
+                color: #ffffff;
+                font-size: 11px;
+                font-family: 'Courier New', monospace;
+                padding: 8px;
+            }
+            QPushButton {
+                background-color: #404040;
+                border: 1px solid #606060;
+                border-radius: 4px;
+                color: #ffffff;
+                padding: 6px 12px;
+                font-size: 11px;
+                min-width: 50px;
+                min-height: 28px;
+            }
+            QPushButton:hover {
+                background-color: #505050;
+            }
+            #copyButton {
+                background-color: #e5a00d;
+                border: 1px solid #e5a00d;
+                color: #000000;
+                font-weight: bold;
+                min-height: 28px;
+            }
+            #copyButton:hover {
+                background-color: #f5b00d;
+            }
+        """)
+        
+        layout = QVBoxLayout(dialog)
+        layout.setSpacing(8)
+        layout.setContentsMargins(15, 15, 15, 15)
+        
+        # Success message
+        location_type = "locally" if "localhost" in found_url or "127.0.0.1" in found_url else "on network"
+        success_label = QLabel(f"✓ Found Plex server running {location_type}!")
+        success_label.setStyleSheet("color: #e5a00d; font-size: 13px; font-weight: bold;")
+        success_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(success_label)
+        
+        # URL display with copy functionality
+        url_label = QLabel("Detected URL:")
+        layout.addWidget(url_label)
+        
+        url_container = QHBoxLayout()
+        url_container.setSpacing(5)
+        
+        url_display = QTextEdit()
+        url_display.setPlainText(found_url)
+        url_display.setReadOnly(True)
+        url_display.setFixedHeight(30)
+        url_display.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        url_container.addWidget(url_display)
+        
+        copy_btn = QPushButton("Copy")
+        copy_btn.setObjectName("copyButton")
+        copy_btn.setFixedSize(55, 30)
+        copy_btn.clicked.connect(lambda: self.copy_to_clipboard(found_url, copy_btn))
+        url_container.addWidget(copy_btn)
+        
+        layout.addLayout(url_container)
+        
+        # Info text
+        info_label = QLabel("URL automatically filled in settings above.")
+        info_label.setStyleSheet("color: #b3b3b3; font-size: 9px; font-style: italic;")
+        info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(info_label)
+        
+        # OK button
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        
+        ok_btn = QPushButton("OK")
+        ok_btn.setFixedSize(60, 28)
+        ok_btn.clicked.connect(dialog.accept)
+        ok_btn.setDefault(True)
+        button_layout.addWidget(ok_btn)
+        
+        layout.addLayout(button_layout)
+        
+        dialog.exec()
+    
     def show_success_dialog(self, found_url):
-        """Show custom success dialog with copy functionality"""
+        """Show custom slskd success dialog with copy functionality"""
         from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit
         from PyQt6.QtCore import Qt
         from PyQt6.QtGui import QClipboard
@@ -1146,11 +1590,20 @@ class SettingsPage(QWidget):
         plex_url_label.setStyleSheet("color: #ffffff; font-size: 11px;")
         plex_layout.addWidget(plex_url_label)
         
+        plex_url_input_layout = QHBoxLayout()
         self.plex_url_input = QLineEdit()
         self.plex_url_input.setStyleSheet(self.get_input_style())
         self.plex_url_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.form_inputs['plex.base_url'] = self.plex_url_input
-        plex_layout.addWidget(self.plex_url_input)
+        
+        plex_detect_btn = QPushButton("Auto-detect")
+        plex_detect_btn.setFixedSize(80, 30)
+        plex_detect_btn.clicked.connect(self.auto_detect_plex)
+        plex_detect_btn.setStyleSheet(self.get_test_button_style())
+        
+        plex_url_input_layout.addWidget(self.plex_url_input)
+        plex_url_input_layout.addWidget(plex_detect_btn)
+        plex_layout.addLayout(plex_url_input_layout)
         
         # Token
         plex_token_label = QLabel("Token:")
