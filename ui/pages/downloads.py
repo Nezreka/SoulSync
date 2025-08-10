@@ -379,7 +379,12 @@ class SpotifyMatchingModal(QDialog):
         main_layout.setContentsMargins(20, 20, 20, 20)
         main_layout.setSpacing(15)
 
-        self.header_label = QLabel("Step 1: Select the correct Artist")
+        # Different header text based on mode
+        if self.is_album:
+            header_text = "Step 1: Select the correct Artist"
+        else:
+            header_text = "Select the correct Artist for this Single"
+        self.header_label = QLabel(header_text)
         self.header_label.setStyleSheet("font-size: 22px; font-weight: bold; color: #1DB954;")
         main_layout.addWidget(self.header_label)
 
@@ -532,7 +537,16 @@ class SpotifyMatchingModal(QDialog):
     def select_artist(self, artist: Artist):
         self.selected_artist = artist
         print(f"Artist selected: {artist.name}")
-        self.transition_to_album_stage()
+        
+        # For singles mode, we can confirm with just the artist selection
+        if not self.is_album:
+            self.confirm_btn.setEnabled(True)
+            self.confirm_btn.setText(f"Confirm: {artist.name[:30]}...")
+            # Update header to indicate completion
+            self.header_label.setText("✅ Artist Selected - Ready to Download")
+        else:
+            # For album mode, proceed to album selection
+            self.transition_to_album_stage()
 
     def select_album(self, album: Album):
         self.selected_album = album
@@ -551,9 +565,24 @@ class SpotifyMatchingModal(QDialog):
         self.generate_auto_album_suggestions()
 
     def confirm_selection(self):
-        if self.selected_artist and self.selected_album:
-            self.match_confirmed.emit(self.selected_artist, self.selected_album)
-            self.accept()
+        if self.selected_artist:
+            # For singles mode, we only need the artist
+            if not self.is_album:
+                # Create a dummy album object for singles mode
+                dummy_album = Album(
+                    id="singles-dummy", 
+                    name="Singles Collection", 
+                    artists=[self.selected_artist.name], 
+                    total_tracks=1, 
+                    release_date="", 
+                    album_type="single"
+                )
+                self.match_confirmed.emit(self.selected_artist, dummy_album)
+                self.accept()
+            # For album mode, we need both artist and album
+            elif self.selected_album:
+                self.match_confirmed.emit(self.selected_artist, self.selected_album)
+                self.accept()
 
     def skip_matching(self):
         self.skipped_matching = True
@@ -6969,7 +6998,12 @@ class DownloadsPage(QWidget):
                 print(f"🎯 Confirmed single track match: '{original_result.title}' -> Artist: '{artist.name}', Album: '{album.name}'")
                 original_result.matched_artist = artist
                 original_result.matched_album = album
-                original_result.album = album.name
+                
+                # For singles-only mode, don't overwrite with dummy album name
+                if album.id != "singles-dummy":
+                    original_result.album = album.name
+                # If it's our dummy album, keep the original album name from the search result
+                
                 self._start_download_with_artist(original_result, artist)
 
         except Exception as e:
