@@ -10871,6 +10871,17 @@ class DownloadsPage(QWidget):
             print(f"   - Album art: {'Yes' if metadata.get('album_art_url') else 'No'}")
             print(f"   - Total fields: {len(metadata)}")
             
+            # Special debugging for problematic tracks
+            if metadata.get('title') == 'Tell Me What You Want' or metadata.get('track_number') == 13:
+                print(f"🔍 [DEBUG] Special track detected - Tell Me What You Want:")
+                print(f"   - Full metadata dict: {metadata}")
+                print(f"   - Album info dict: {album_info}")
+                print(f"   - Artist object: {artist}")
+                if hasattr(download_item, 'matched_album'):
+                    print(f"   - matched_album: {download_item.matched_album}")
+                else:
+                    print(f"   - No matched_album attribute")
+            
             return metadata
             
         except Exception as e:
@@ -10966,25 +10977,56 @@ class DownloadsPage(QWidget):
         try:
             print(f"🎵 Applying FLAC tags with {len(metadata)} metadata fields")
             
-            # Basic tags
-            audio_file['TITLE'] = metadata.get('title', '')
-            audio_file['ARTIST'] = metadata.get('artist', '')
-            audio_file['ALBUMARTIST'] = metadata.get('album_artist', '')
-            audio_file['ALBUM'] = metadata.get('album', '')
+            # Read existing tags first to preserve non-empty values
+            existing_title = audio_file.get('TITLE', [''])[0] if audio_file.get('TITLE') else ''
+            existing_artist = audio_file.get('ARTIST', [''])[0] if audio_file.get('ARTIST') else ''
+            existing_album = audio_file.get('ALBUM', [''])[0] if audio_file.get('ALBUM') else ''
+            existing_date = audio_file.get('DATE', [''])[0] if audio_file.get('DATE') else ''
+            existing_genre = audio_file.get('GENRE', [''])[0] if audio_file.get('GENRE') else ''
             
-            print(f"   - Applied basic tags: Title='{metadata.get('title')}', Artist='{metadata.get('artist')}'")
+            print(f"   - Existing tags: Title='{existing_title}', Artist='{existing_artist}', Album='{existing_album}'")
             
-            # Date
-            if metadata.get('date'):
+            # Only update if we have non-empty Spotify data OR if existing tag is empty
+            if metadata.get('title') and metadata.get('title').strip():
+                audio_file['TITLE'] = metadata['title']
+                print(f"   - Updated TITLE: '{existing_title}' → '{metadata['title']}'")
+            elif existing_title:
+                print(f"   - Preserving existing TITLE: '{existing_title}' (Spotify data empty)")
+            
+            if metadata.get('artist') and metadata.get('artist').strip():
+                audio_file['ARTIST'] = metadata['artist']
+                print(f"   - Updated ARTIST: '{existing_artist}' → '{metadata['artist']}'")
+            elif existing_artist:
+                print(f"   - Preserving existing ARTIST: '{existing_artist}' (Spotify data empty)")
+            
+            if metadata.get('album_artist') and metadata.get('album_artist').strip():
+                audio_file['ALBUMARTIST'] = metadata['album_artist']
+            elif not audio_file.get('ALBUMARTIST'):
+                audio_file['ALBUMARTIST'] = metadata.get('album_artist', '')
+            
+            if metadata.get('album') and metadata.get('album').strip():
+                audio_file['ALBUM'] = metadata['album']
+                print(f"   - Updated ALBUM: '{existing_album}' → '{metadata['album']}'")
+            elif existing_album:
+                print(f"   - Preserving existing ALBUM: '{existing_album}' (Spotify data empty)")
+            
+            # Date - only update if we have a date and existing is empty OR we have better data
+            if metadata.get('date') and metadata.get('date').strip():
                 audio_file['DATE'] = metadata['date']
+                print(f"   - Updated DATE: '{existing_date}' → '{metadata['date']}'")
+            elif existing_date:
+                print(f"   - Preserving existing DATE: '{existing_date}' (Spotify data empty)")
             
-            # Track number
+            # Track number - always update since this comes from album detection
             audio_file['TRACKNUMBER'] = str(metadata.get('track_number', 1))
             audio_file['TRACKTOTAL'] = str(metadata.get('total_tracks', 1))
             
-            # Genre
-            if metadata.get('genre'):
+            # Genre - only update if we have genre data and existing is empty OR we have better data
+            if metadata.get('genre') and metadata.get('genre').strip():
                 audio_file['GENRE'] = metadata['genre']
+                print(f"   - Updated GENRE: '{existing_genre}' → '{metadata['genre']}'")
+            elif existing_genre:
+                print(f"   - Preserving existing GENRE: '{existing_genre}' (Spotify data empty)")
             
             # Disc number
             if metadata.get('disc_number'):
