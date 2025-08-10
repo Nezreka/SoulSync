@@ -200,6 +200,9 @@ Alternatively, you can paste this key directly into the API Key field in the Set
   "metadata_enhancement": {
     "enabled": true,
     "embed_album_art": true
+  },
+  "playlist_sync": {
+    "create_backup": true
   }
 }
 ```
