@@ -1,17 +1,17 @@
 {
   "spotify": {
-    "client_id": "<YOUR_SPOTIFY_CLIENT_ID>",
-    "client_secret": "<YOUR_SPOTIFY_CLIENT_SECRET>"
+    "client_id": "YOUR CLIENT ID",
+    "client_secret": "YOUR CLIENT SECRET"
   },
   "plex": {
-    "base_url": "<YOUR_PLEX_SERVER_URL>",
-    "token": "<YOUR_PLEX_TOKEN>"
+    "base_url": "http://192.168.86.36:32400",
+    "token": "YOUR PLEX TOKEN"
   },
   "soulseek": {
-    "slskd_url": "<YOUR_SLSKD_URL>",
-    "api_key": "<YOUR_SLSKD_API_KEY>",
-    "download_path": "./path/to/slskd/download/folder",
-    "transfer_path": "./path/to/music/folder"
+    "slskd_url": "http://localhost:5030",
+    "api_key": "1234567891234567",
+    "download_path": "./Downloads",
+    "transfer_path": "./Music"
   },
   "logging": {
     "path": "logs/app.log",
@@ -27,5 +27,8 @@
   "metadata_enhancement": {
     "enabled": true,
     "embed_album_art": true
+  },
+  "playlist_sync": {
+    "create_backup": true
   }
 }
