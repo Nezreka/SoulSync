@@ -569,8 +569,8 @@ class SyncWorker(QRunnable):
             self.sync_service.cancel_sync()
         
         # Clear the progress callback to stop further progress updates
-        if hasattr(self.sync_service, 'set_progress_callback'):
-            self.sync_service.set_progress_callback(None)
+        if hasattr(self.sync_service, 'clear_progress_callback'):
+            self.sync_service.clear_progress_callback(self.playlist.name)
         
         # Log the cancellation request
         print(f"DEBUG: SyncWorker.cancel() called for playlist {getattr(self.playlist, 'name', 'unknown')}")
@@ -587,7 +587,7 @@ class SyncWorker(QRunnable):
                 if not self._cancelled:
                     self.signals.progress.emit(progress)
             
-            self.sync_service.set_progress_callback(on_progress)
+            self.sync_service.set_progress_callback(on_progress, self.playlist.name)
             
             # Create new event loop for this thread
             loop = asyncio.new_event_loop()

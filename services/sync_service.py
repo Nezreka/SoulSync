@@ -44,13 +44,29 @@ class PlaylistSyncService:
         self.spotify_client = spotify_client
         self.plex_client = plex_client
         self.soulseek_client = soulseek_client
-        self.progress_callback = None
-        self.is_syncing = False
+        self.progress_callbacks = {}  # Playlist-specific progress callbacks
+        self.syncing_playlists = set()  # Track multiple syncing playlists
         self._cancelled = False
         self.matching_engine = MusicMatchingEngine()
     
-    def set_progress_callback(self, callback):
-        self.progress_callback = callback
+    @property
+    def is_syncing(self):
+        """Check if any playlist is currently syncing"""
+        return len(self.syncing_playlists) > 0
+    
+    def set_progress_callback(self, callback, playlist_name=None):
+        """Set progress callback for specific playlist or global if no playlist specified"""
+        if playlist_name:
+            self.progress_callbacks[playlist_name] = callback
+        else:
+            # Legacy support - set for all current syncing playlists
+            for playlist in self.syncing_playlists:
+                self.progress_callbacks[playlist] = callback
+    
+    def clear_progress_callback(self, playlist_name):
+        """Clear progress callback for specific playlist"""
+        if playlist_name in self.progress_callbacks:
+            del self.progress_callbacks[playlist_name]
     
     def cancel_sync(self):
         """Cancel the current sync operation"""
@@ -58,10 +74,12 @@ class PlaylistSyncService:
         self._cancelled = True
         self.is_syncing = False
     
-    def _update_progress(self, step: str, track: str, progress: float, total_steps: int, current_step: int, 
+    def _update_progress(self, playlist_name: str, step: str, track: str, progress: float, total_steps: int, current_step: int, 
                         total_tracks: int = 0, matched_tracks: int = 0, failed_tracks: int = 0):
-        if self.progress_callback:
-            self.progress_callback(SyncProgress(
+        # Send progress update to the specific playlist's callback
+        callback = self.progress_callbacks.get(playlist_name)
+        if callback:
+            callback(SyncProgress(
                 current_step=step,
                 current_track=track,
                 progress=progress,
@@ -73,8 +91,9 @@ class PlaylistSyncService:
             ))
     
     async def sync_playlist(self, playlist: SpotifyPlaylist, download_missing: bool = False) -> SyncResult:
-        if self.is_syncing:
-            logger.warning("Sync already in progress")
+        # Check if THIS specific playlist is already syncing
+        if playlist.name in self.syncing_playlists:
+            logger.warning(f"Sync already in progress for playlist: {playlist.name}")
             return SyncResult(
                 playlist_name=playlist.name,
                 total_tracks=0,
@@ -83,10 +102,11 @@ class PlaylistSyncService:
                 downloaded_tracks=0,
                 failed_tracks=0,
                 sync_time=datetime.now(),
-                errors=["Sync already in progress"]
+                errors=[f"Sync already in progress for playlist: {playlist.name}"]
             )
         
-        self.is_syncing = True
+        # Add this playlist to syncing set
+        self.syncing_playlists.add(playlist.name)
         self._cancelled = False
         errors = []
         
@@ -97,7 +117,7 @@ class PlaylistSyncService:
                 return self._create_error_result(playlist.name, ["Sync cancelled"])
             
             # Skip fetching playlist since we already have it
-            self._update_progress("Preparing playlist sync", "", 10, 5, 1)
+            self._update_progress(playlist.name, "Preparing playlist sync", "", 10, 5, 1)
             
             if not playlist.tracks:
                 errors.append(f"Playlist '{playlist.name}' has no tracks")
@@ -108,7 +128,7 @@ class PlaylistSyncService:
             
             total_tracks = len(playlist.tracks)
             
-            self._update_progress("Matching tracks against Plex library", "", 20, 5, 2, total_tracks=total_tracks)
+            self._update_progress(playlist.name, "Matching tracks against Plex library", "", 20, 5, 2, total_tracks=total_tracks)
             
             # Use the same robust matching approach as "Download Missing Tracks"
             match_results = []
@@ -119,7 +139,7 @@ class PlaylistSyncService:
                 # Update progress for each track
                 progress_percent = 20 + (40 * (i + 1) / total_tracks)  # 20-60% for matching
                 current_track_name = f"{track.artists[0]} - {track.name}" if track.artists else track.name
-                self._update_progress("Matching tracks", current_track_name, progress_percent, 5, 2, 
+                self._update_progress(playlist.name, "Matching tracks", current_track_name, progress_percent, 5, 2, 
                                     total_tracks=total_tracks,
                                     matched_tracks=len([r for r in match_results if r.is_match]),
                                     failed_tracks=len([r for r in match_results if not r.is_match]))
@@ -145,7 +165,7 @@ class PlaylistSyncService:
                 return self._create_error_result(playlist.name, ["Sync cancelled"])
             
             # Update progress with match results
-            self._update_progress("Matching completed", "", 60, 5, 3, 
+            self._update_progress(playlist.name, "Matching completed", "", 60, 5, 3, 
                                 total_tracks=total_tracks, 
                                 matched_tracks=len(matched_tracks), 
                                 failed_tracks=len(unmatched_tracks))
@@ -154,7 +174,7 @@ class PlaylistSyncService:
             if download_missing and unmatched_tracks:
                 if self._cancelled:
                     return self._create_error_result(playlist.name, ["Sync cancelled"])
-                self._update_progress("Downloading missing tracks", "", 70, 5, 4, 
+                self._update_progress(playlist.name, "Downloading missing tracks", "", 70, 5, 4, 
                                     total_tracks=total_tracks,
                                     matched_tracks=len(matched_tracks),
                                     failed_tracks=len(unmatched_tracks))
@@ -163,7 +183,7 @@ class PlaylistSyncService:
             if self._cancelled:
                 return self._create_error_result(playlist.name, ["Sync cancelled"])
             
-            self._update_progress("Creating/updating Plex playlist", "", 80, 5, 4,
+            self._update_progress(playlist.name, "Creating/updating Plex playlist", "", 80, 5, 4,
                                 total_tracks=total_tracks,
                                 matched_tracks=len(matched_tracks),
                                 failed_tracks=len(unmatched_tracks))
@@ -189,7 +209,7 @@ class PlaylistSyncService:
             synced_tracks = len(plex_tracks) if sync_success else 0
             failed_tracks = len(playlist.tracks) - synced_tracks - downloaded_tracks
             
-            self._update_progress("Sync completed", "", 100, 5, 5,
+            self._update_progress(playlist.name, "Sync completed", "", 100, 5, 5,
                                 total_tracks=total_tracks,
                                 matched_tracks=len(matched_tracks),
                                 failed_tracks=failed_tracks)
@@ -214,7 +234,9 @@ class PlaylistSyncService:
             return self._create_error_result(playlist.name, errors)
         
         finally:
-            self.is_syncing = False
+            # Remove this playlist from syncing set and clear its callback
+            self.syncing_playlists.discard(playlist.name)
+            self.clear_progress_callback(playlist.name)
             self._cancelled = False
     
     async def _find_track_in_plex(self, spotify_track: SpotifyTrack) -> Tuple[Optional[PlexTrackInfo], float]:
