@@ -218,6 +218,10 @@ Run the main application file to launch the GUI:
 ```bash
 python main.py
 ```
+or for mac:
+```bash
+python3 main.py
+```
 
 ### Application Pages
 
