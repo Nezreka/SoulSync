@@ -2814,6 +2814,23 @@ class DashboardPage(QWidget):
             # Get update type from dropdown
             full_refresh = self.database_widget.is_full_refresh()
             
+            # Show confirmation dialog for full refresh
+            if full_refresh:
+                reply = QMessageBox.question(
+                    self, 
+                    "Confirm Full Database Refresh",
+                    "⚠️ You've selected FULL REFRESH mode.\n\n"
+                    "This will completely rebuild your database and may take several minutes.\n"
+                    "All existing data will be cleared and rebuilt from your Plex library.\n\n"
+                    "Are you sure you want to continue?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No  # Default to No for safety
+                )
+                
+                if reply != QMessageBox.StandardButton.Yes:
+                    logger.debug("Full refresh cancelled by user")
+                    return  # Cancel the operation
+            
             # Start the database update worker
             self.database_worker = DatabaseUpdateWorker(
                 self.data_provider.service_clients['plex_client'],
