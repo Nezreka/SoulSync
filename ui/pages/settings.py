@@ -602,6 +602,11 @@ class SettingsPage(QWidget):
             if hasattr(self, 'embed_album_art_checkbox'):
                 self.embed_album_art_checkbox.setChecked(metadata_config.get('embed_album_art', True))
             
+            # Load playlist sync settings
+            playlist_sync_config = config_manager.get('playlist_sync', {})
+            if hasattr(self, 'create_backup_checkbox'):
+                self.create_backup_checkbox.setChecked(playlist_sync_config.get('create_backup', True))
+            
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to load configuration: {e}")
     
@@ -1234,7 +1239,55 @@ class SettingsPage(QWidget):
         
         api_layout.addLayout(test_layout)
         
+        # Logging Settings
+        logging_group = SettingsGroup("Logging Settings")
+        logging_layout = QVBoxLayout(logging_group)
+        logging_layout.setContentsMargins(16, 20, 16, 16)
+        logging_layout.setSpacing(12)
+        
+        # Log level (read-only)
+        log_level_layout = QHBoxLayout()
+        log_level_label = QLabel("Log Level:")
+        log_level_label.setStyleSheet("color: #ffffff; font-size: 12px;")
+        
+        self.log_level_display = QLabel("DEBUG")
+        self.log_level_display.setStyleSheet("""
+            color: #b3b3b3; 
+            font-size: 11px; 
+            background-color: #404040;
+            border: 1px solid #606060;
+            border-radius: 4px;
+            padding: 8px;
+        """)
+        self.log_level_display.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        
+        log_level_layout.addWidget(log_level_label)
+        log_level_layout.addWidget(self.log_level_display)
+        
+        # Log file path (read-only)
+        log_path_container = QVBoxLayout()
+        log_path_label = QLabel("Log File Path:")
+        log_path_label.setStyleSheet("color: #ffffff; font-size: 12px;")
+        log_path_container.addWidget(log_path_label)
+        
+        self.log_path_display = QLabel("logs/app.log")
+        self.log_path_display.setStyleSheet("""
+            color: #b3b3b3; 
+            font-size: 11px; 
+            background-color: #404040;
+            border: 1px solid #606060;
+            border-radius: 4px;
+            padding: 8px;
+            font-family: 'Courier New', monospace;
+        """)
+        self.log_path_display.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        log_path_container.addWidget(self.log_path_display)
+        
+        logging_layout.addLayout(log_level_layout)
+        logging_layout.addLayout(log_path_container)
+        
         layout.addWidget(api_group)
+        layout.addWidget(logging_group)
         layout.addStretch()
         
         return column
@@ -1337,53 +1390,6 @@ class SettingsPage(QWidget):
         database_layout.addLayout(workers_layout)
         database_layout.addWidget(workers_help)
         
-        # Logging Settings
-        logging_group = SettingsGroup("Logging Settings")
-        logging_layout = QVBoxLayout(logging_group)
-        logging_layout.setContentsMargins(16, 20, 16, 16)
-        logging_layout.setSpacing(12)
-        
-        # Log level (read-only)
-        log_level_layout = QHBoxLayout()
-        log_level_label = QLabel("Log Level:")
-        log_level_label.setStyleSheet("color: #ffffff; font-size: 12px;")
-        
-        self.log_level_display = QLabel("DEBUG")
-        self.log_level_display.setStyleSheet("""
-            color: #b3b3b3; 
-            font-size: 11px; 
-            background-color: #404040;
-            border: 1px solid #606060;
-            border-radius: 4px;
-            padding: 8px;
-        """)
-        self.log_level_display.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        
-        log_level_layout.addWidget(log_level_label)
-        log_level_layout.addWidget(self.log_level_display)
-        
-        # Log file path (read-only)
-        log_path_container = QVBoxLayout()
-        log_path_label = QLabel("Log File Path:")
-        log_path_label.setStyleSheet("color: #ffffff; font-size: 12px;")
-        log_path_container.addWidget(log_path_label)
-        
-        self.log_path_display = QLabel("logs/app.log")
-        self.log_path_display.setStyleSheet("""
-            color: #b3b3b3; 
-            font-size: 11px; 
-            background-color: #404040;
-            border: 1px solid #606060;
-            border-radius: 4px;
-            padding: 8px;
-            font-family: 'Courier New', monospace;
-        """)
-        self.log_path_display.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        log_path_container.addWidget(self.log_path_display)
-        
-        logging_layout.addLayout(log_level_layout)
-        logging_layout.addLayout(log_path_container)
-        
         # Metadata Enhancement Settings
         metadata_group = SettingsGroup("🎵 Metadata Enhancement")
         metadata_layout = QVBoxLayout(metadata_group)
@@ -1452,10 +1458,53 @@ class SettingsPage(QWidget):
         metadata_layout.addLayout(supported_formats_layout)
         metadata_layout.addWidget(help_text)
         
+        # Playlist Sync Settings
+        playlist_sync_group = SettingsGroup("🎶 Playlist Sync")
+        playlist_sync_layout = QVBoxLayout(playlist_sync_group)
+        playlist_sync_layout.setContentsMargins(16, 20, 16, 16)
+        playlist_sync_layout.setSpacing(12)
+        
+        # Create backup checkbox
+        self.create_backup_checkbox = QCheckBox("🛡️ Create backup of existing playlists before sync")
+        self.create_backup_checkbox.setChecked(True)
+        self.create_backup_checkbox.setStyleSheet("""
+            QCheckBox {
+                color: #ffffff;
+                font-size: 12px;
+                spacing: 8px;
+            }
+            QCheckBox::indicator {
+                width: 16px;
+                height: 16px;
+                border-radius: 3px;
+                border: 2px solid #606060;
+                background-color: #404040;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #1db954;
+                border-color: #1db954;
+                image: url(data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTEzLjUgNC41TDYuNSAxMS41TDIuNSA3LjUiIHN0cm9rZT0id2hpdGUiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+Cjwvc3ZnPgo=);
+            }
+            QCheckBox::indicator:hover {
+                border-color: #1db954;
+            }
+        """)
+        
+        # Help text for playlist sync
+        playlist_help_text = QLabel("When enabled, existing Plex playlists will be backed up as '[Playlist Name] Backup' before being overwritten during sync. Only one backup per playlist is maintained.")
+        playlist_help_text.setStyleSheet("color: #888888; font-size: 10px; font-style: italic;")
+        playlist_help_text.setWordWrap(True)
+        
+        playlist_sync_layout.addWidget(self.create_backup_checkbox)
+        playlist_sync_layout.addWidget(playlist_help_text)
+        
+        # Add to form inputs for saving
+        self.form_inputs['playlist_sync.create_backup'] = self.create_backup_checkbox
+
         layout.addWidget(download_group)
         layout.addWidget(database_group)
         layout.addWidget(metadata_group)
-        layout.addWidget(logging_group)
+        layout.addWidget(playlist_sync_group)
         layout.addStretch()  # Push content to top, prevent stretching
         
         return column

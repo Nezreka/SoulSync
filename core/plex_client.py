@@ -266,14 +266,86 @@ class PlexClient:
             logger.error(f"Error creating playlist '{name}': {e}")
             return False
     
+    def copy_playlist(self, source_name: str, target_name: str) -> bool:
+        """Copy a playlist to create a backup"""
+        if not self.ensure_connection():
+            return False
+        
+        try:
+            # Get the source playlist
+            source_playlist = self.server.playlist(source_name)
+            
+            # Get all tracks from source playlist
+            source_tracks = source_playlist.items()
+            logger.debug(f"Retrieved {len(source_tracks) if source_tracks else 0} tracks from source playlist")
+            
+            # Validate tracks
+            if not source_tracks:
+                logger.warning(f"Source playlist '{source_name}' has no tracks to copy")
+                return False
+                
+            # Filter for valid track objects
+            valid_tracks = [track for track in source_tracks if hasattr(track, 'ratingKey')]
+            logger.debug(f"Found {len(valid_tracks)} valid tracks with ratingKeys")
+            
+            if not valid_tracks:
+                logger.error(f"No valid tracks found in source playlist '{source_name}'")
+                return False
+            
+            # Delete target playlist if it exists (for overwriting backup)
+            try:
+                target_playlist = self.server.playlist(target_name)
+                target_playlist.delete()
+                logger.info(f"Deleted existing backup playlist '{target_name}'")
+            except NotFound:
+                pass  # Target doesn't exist, which is fine
+            
+            # Create new playlist with copied tracks
+            try:
+                self.server.createPlaylist(target_name, items=valid_tracks)
+                logger.info(f"✅ Created backup playlist '{target_name}' with {len(valid_tracks)} tracks")
+                return True
+            except Exception as create_error:
+                logger.error(f"Failed to create backup playlist: {create_error}")
+                # Try alternative method
+                try:
+                    new_playlist = self.server.createPlaylist(target_name)
+                    new_playlist.addItems(valid_tracks)
+                    logger.info(f"✅ Created backup playlist '{target_name}' with {len(valid_tracks)} tracks (alternative method)")
+                    return True
+                except Exception as alt_error:
+                    logger.error(f"Alternative backup creation also failed: {alt_error}")
+                    return False
+                
+        except NotFound:
+            logger.error(f"Source playlist '{source_name}' not found")
+            return False
+        except Exception as e:
+            logger.error(f"Error copying playlist '{source_name}' to '{target_name}': {e}")
+            return False
+
     def update_playlist(self, playlist_name: str, tracks: List[PlexTrackInfo]) -> bool:
         if not self.ensure_connection():
             return False
         
         try:
             existing_playlist = self.server.playlist(playlist_name)
-            existing_playlist.delete()
             
+            # Check if backup is enabled in config
+            from config.settings import config_manager
+            create_backup = config_manager.get('playlist_sync.create_backup', True)
+            
+            if create_backup:
+                backup_name = f"{playlist_name} Backup"
+                logger.info(f"🛡️ Creating backup playlist '{backup_name}' before sync")
+                
+                if self.copy_playlist(playlist_name, backup_name):
+                    logger.info(f"✅ Backup created successfully")
+                else:
+                    logger.warning(f"⚠️ Failed to create backup, continuing with sync")
+            
+            # Delete original and recreate
+            existing_playlist.delete()
             return self.create_playlist(playlist_name, tracks)
             
         except NotFound:
