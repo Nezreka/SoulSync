@@ -167,22 +167,33 @@ Alternatively, you can paste this key directly into the API Key field in the Set
 ```json
 {
   "spotify": {
-    "client_id": "YOUR_SPOTIFY_CLIENT_ID",
-    "client_secret": "YOUR_SPOTIFY_CLIENT_SECRET"
+    "client_id": "<YOUR_SPOTIFY_CLIENT_ID>",
+    "client_secret": "<YOUR_SPOTIFY_CLIENT_SECRET>"
   },
   "plex": {
-    "base_url": "http://YOUR_PLEX_SERVER_IP:32400",
-    "token": "YOUR_PLEX_TOKEN"
+    "base_url": "<YOUR_PLEX_SERVER_URL>",
+    "token": "<YOUR_PLEX_TOKEN>"
   },
   "soulseek": {
-    "slskd_url": "http://YOUR_SLSKD_IP:5030",
-    "api_key": "PASTE_YOUR_SLSKD_API_KEY_HERE",
-    "download_path": "FULL_PATH_TO_SLSKD_DOWNLOADS_FOLDER",
-    "transfer_path": "FULL_PATH_TO_YOUR_PLEX_MUSIC_FOLDER"
+    "slskd_url": "<YOUR_SLSKD_URL>",
+    "api_key": "<YOUR_SLSKD_API_KEY>",
+    "download_path": "./path/to/slskd/download/folder",
+    "transfer_path": "./path/to/music/folder"
   },
   "logging": {
-    "level": "INFO",
-    "path": "logs/app.log"
+    "path": "logs/app.log",
+    "level": "INFO"
+  },
+  "settings": {
+    "audio_quality": "flac"
+  },
+  "database": {
+    "path": "database/music_library.db",
+    "max_workers": 5
+  },
+  "metadata_enhancement": {
+    "enabled": true,
+    "embed_album_art": true
   }
 }
 ```
