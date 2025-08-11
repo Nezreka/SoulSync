@@ -64,6 +64,17 @@ class MusicMatchingEngine:
         text = unidecode(text)
         text = text.lower()
         
+        # Expand specific abbreviations for better matching
+        abbreviation_map = {
+            r'\bpt\.': 'part',      # "pt." → "part"
+            r'\bvol\.': 'volume',   # "vol." → "volume"
+            r'\bfeat\.': 'featured' # "feat." → "featured"
+            # Removed "ft." → "featured" (ambiguous: could be "feet" in measurements)
+        }
+        
+        for pattern, replacement in abbreviation_map.items():
+            text = re.sub(pattern, replacement, text)
+        
         # --- IMPROVEMENT V4 ---
         # The user correctly pointed out that replacing '$' with 's' was incorrect
         # as it breaks searching for stylized names like A$AP Rocky.
@@ -84,9 +95,9 @@ class MusicMatchingEngine:
         """Returns a 'core' version of a string with only letters and numbers for a strict comparison."""
         if not text:
             return ""
-        # Transliterate, lowercase, and remove everything that isn't a letter or digit.
-        text = unidecode(text).lower()
-        return re.sub(r'[^a-z0-9]', '', text)
+        # Use normalize_string first to get abbreviation expansion, then strip to core
+        normalized = self.normalize_string(text)
+        return re.sub(r'[^a-z0-9]', '', normalized)
 
     def clean_title(self, title: str) -> str:
         """Cleans title by removing common extra info using regex for fuzzy matching."""
