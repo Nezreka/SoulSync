@@ -207,7 +207,7 @@ class SoulseekClient:
         
         # Rate limiting for searches
         self.search_timestamps: List[float] = []  # Track search timestamps
-        self.max_searches_per_window = 45  # Conservative limit (vs 34 mentioned online)
+        self.max_searches_per_window = 35  # Conservative limit to prevent Soulseek bans
         self.rate_limit_window = 220  # seconds (3 minutes 40 seconds)
         
         self._setup_client()
