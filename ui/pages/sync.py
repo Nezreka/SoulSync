@@ -1895,8 +1895,8 @@ class PlaylistItem(QFrame):
         """Store reference to the download modal"""
         self.download_modal = modal
     
-    def update_sync_status(self, new_status):
-        """Update the sync status and style the label accordingly"""
+    def update_sync_status_text(self, new_status):
+        """Update the sync status text and style the label accordingly"""
         self.sync_status = new_status
         if hasattr(self, 'sync_status_label'):
             self.sync_status_label.setText(new_status)
@@ -3084,10 +3084,10 @@ class SyncPage(QWidget):
                         sync_status = "Synced (legacy)"
             
             # Update the playlist item's sync status
-            playlist_item.update_sync_status(sync_status)
+            playlist_item.update_sync_status_text(sync_status)
         except Exception as e:
             # Fallback to simple status if anything goes wrong
-            playlist_item.update_sync_status("Unknown")
+            playlist_item.update_sync_status_text("Unknown")
     
     def animate_item_fade_in(self, item):
         """Add a subtle fade-in animation to playlist items"""
