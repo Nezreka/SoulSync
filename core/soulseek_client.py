@@ -204,6 +204,12 @@ class SoulseekClient:
         self.api_key: Optional[str] = None
         self.download_path: Path = Path("./downloads")
         self.active_searches: Dict[str, bool] = {}  # search_id -> still_active
+        
+        # Rate limiting for searches
+        self.search_timestamps: List[float] = []  # Track search timestamps
+        self.max_searches_per_window = 45  # Conservative limit (vs 34 mentioned online)
+        self.rate_limit_window = 220  # seconds (3 minutes 40 seconds)
+        
         self._setup_client()
     
     def _setup_client(self):
@@ -219,6 +225,40 @@ class SoulseekClient:
         self.download_path.mkdir(parents=True, exist_ok=True)
         
         logger.info(f"Soulseek client configured with slskd at {self.base_url}")
+    
+    def _clean_old_timestamps(self):
+        """Remove timestamps older than the rate limit window"""
+        current_time = time.time()
+        cutoff_time = current_time - self.rate_limit_window
+        self.search_timestamps = [ts for ts in self.search_timestamps if ts > cutoff_time]
+    
+    async def _wait_for_rate_limit(self):
+        """Wait if necessary to respect rate limiting"""
+        self._clean_old_timestamps()
+        
+        if len(self.search_timestamps) >= self.max_searches_per_window:
+            # Calculate how long to wait
+            oldest_timestamp = self.search_timestamps[0]
+            wait_time = oldest_timestamp + self.rate_limit_window - time.time()
+            
+            if wait_time > 0:
+                logger.info(f"Rate limit reached ({len(self.search_timestamps)}/{self.max_searches_per_window} searches). Waiting {wait_time:.1f} seconds...")
+                await asyncio.sleep(wait_time)
+                # Clean up again after waiting
+                self._clean_old_timestamps()
+        
+        # Record this search attempt
+        self.search_timestamps.append(time.time())
+    
+    def get_rate_limit_status(self) -> Dict[str, Any]:
+        """Get current rate limiting status"""
+        self._clean_old_timestamps()
+        return {
+            'searches_in_window': len(self.search_timestamps),
+            'max_searches_per_window': self.max_searches_per_window,
+            'window_seconds': self.rate_limit_window,
+            'searches_remaining': max(0, self.max_searches_per_window - len(self.search_timestamps))
+        }
     
     def _get_headers(self) -> Dict[str, str]:
         headers = {'Content-Type': 'application/json'}
@@ -539,6 +579,9 @@ class SoulseekClient:
         if not self.base_url:
             logger.error("Soulseek client not configured")
             return [], []
+        
+        # Apply rate limiting before search
+        await self._wait_for_rate_limit()
         
         try:
             logger.info(f"Starting search for: '{query}'")
