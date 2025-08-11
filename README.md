@@ -95,7 +95,6 @@ This application requires **slskd**, a web-based Soulseek client, to handle musi
 1. Download the latest release from [slskd GitHub releases](https://github.com/slskd/slskd/releases)
 2. Extract and run the executable
 3. Default web interface will be available at `http://localhost:5030`
-4. An application directory will be created in either ~/.local/share/slskd (on Linux and macOS) or %localappdata%/slskd (on Windows). In the root of this directory the file slskd.yml will be created the first time the application runs. Edit this file to enter your credentials for the Soulseek network, and tweak any additional settings using the configuration guide.
 
 **Option 2: Docker (MAYBE? UNTESTED)**
 ```bash
