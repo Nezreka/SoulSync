@@ -121,6 +121,7 @@ docker run -d \
    - Generate a random string (letters and numbers) like `abc123def456ghi7`
    - Add this to your slskd configuration file as the API key
    - Use the same key in SoulSync configuration
+5. **CONFIG SETUP**: An application directory will be created in either ~/.local/share/slskd (on Linux and macOS) or %localappdata%/slskd (on Windows). In the root of this directory the file slskd.yml will be created the first time the application runs. Edit this file to enter your credentials for the Soulseek network, and tweak any additional settings using the
 
 **Important Notes:**
 - slskd must be running before starting SoulSync
