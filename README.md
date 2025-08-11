@@ -1,5 +1,7 @@
 
-![A screenshot of my awesome app in action.](./assets/trans.png)
+<p align="center">
+  <img src="./assets/trans.png" alt="Logo">
+</p>
 
 # 🎵 SoulSync - Automated Music Discovery and Collection Manager
 
