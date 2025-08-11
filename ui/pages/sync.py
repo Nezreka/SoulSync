@@ -645,12 +645,16 @@ class PlaylistDetailsModal(QDialog):
         self.sync_status_widget = None
         self.sync_button = None
         
+        # Clear existing tracks BEFORE setup_ui to prevent synchronous population
+        if self.spotify_client:
+            self.playlist.tracks = []
+        
         self.setup_ui()
         
         # Restore sync state if playlist is currently syncing
         self.restore_sync_state()
         
-        # Load tracks asynchronously if not already cached
+        # Load tracks asynchronously if not already loaded
         if not self.playlist.tracks and self.spotify_client:
             # Check cache first
             if hasattr(parent, 'track_cache') and playlist.id in parent.track_cache:
@@ -1484,11 +1488,16 @@ class PlaylistDetailsModal(QDialog):
         if not hasattr(self, 'track_table'):
             return
             
-        self.track_table.setRowCount(len(self.playlist.tracks))
+        # Limit tracks to prevent UI blocking on large playlists
+        total_tracks = len(self.playlist.tracks)
+        display_limit = 100
+        tracks_to_show = self.playlist.tracks[:display_limit]
+        
+        self.track_table.setRowCount(len(tracks_to_show))
         self.track_table.clearSpans()  # Remove any spans from loading state
         
-        # Populate table
-        for row, track in enumerate(self.playlist.tracks):
+        # Populate table with limited tracks
+        for row, track in enumerate(tracks_to_show):
             # Track name with ellipsis label
             track_label = EllipsisLabel(track.name)
             track_label.setFont(QFont("SF Pro Text", 11, QFont.Weight.Medium))
@@ -1514,6 +1523,16 @@ class PlaylistDetailsModal(QDialog):
             duration_item.setFlags(duration_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             duration_item.setFont(QFont("SF Mono", 10))
             self.track_table.setItem(row, 3, duration_item)
+        
+        # Add info message if tracks were limited
+        if total_tracks > display_limit:
+            # Update the modal title to show track count info
+            if hasattr(self, 'setWindowTitle'):
+                original_title = f"Playlist Details - {self.playlist.name}"
+                self.setWindowTitle(f"{original_title} (Showing {display_limit} of {total_tracks:,} tracks)")
+            
+            # Also show a subtle message at the bottom of the table
+            print(f"📊 Playlist Details: Showing first {display_limit} of {total_tracks:,} tracks for better performance")
 
 class PlaylistItem(QFrame):
     view_details_clicked = pyqtSignal(object)  # Signal to emit playlist object
@@ -1875,6 +1894,20 @@ class PlaylistItem(QFrame):
     def set_download_modal(self, modal):
         """Store reference to the download modal"""
         self.download_modal = modal
+    
+    def update_sync_status(self, new_status):
+        """Update the sync status and style the label accordingly"""
+        self.sync_status = new_status
+        if hasattr(self, 'sync_status_label'):
+            self.sync_status_label.setText(new_status)
+            
+            # Update color based on status
+            if "Synced" in new_status:
+                self.sync_status_label.setStyleSheet("color: #1db954;")
+            elif new_status == "Needs Sync":
+                self.sync_status_label.setStyleSheet("color: #ffa500;")
+            else:
+                self.sync_status_label.setStyleSheet("color: #e22134;")
     
     def on_status_clicked(self):
         """Handle status button click - reopen modal"""
@@ -3010,23 +3043,12 @@ class SyncPage(QWidget):
     
     def add_playlist_to_ui(self, playlist):
         """Add a single playlist to the UI as it's loaded"""
-        sync_info = self.sync_statuses.get(playlist.id)
-        sync_status = "Never Synced"
-        if sync_info and 'last_synced' in sync_info:
-            # Defensively get snapshot_id from both the current playlist object and the stored data
-            current_snapshot_id = getattr(playlist, 'snapshot_id', None)
-            stored_snapshot_id = sync_info.get('snapshot_id')
-
-            # If we have both IDs, we can check for changes. Otherwise, we can't be sure.
-            if current_snapshot_id and stored_snapshot_id and current_snapshot_id != stored_snapshot_id:
-                sync_status = "Needs Sync"
-            else:
-                try:
-                    last_synced_dt = datetime.fromisoformat(sync_info['last_synced'])
-                    sync_status = f"Synced: {last_synced_dt.strftime('%b %d, %H:%M')}"
-                except (ValueError, KeyError):
-                    sync_status = "Synced (legacy)"
+        # Start with simple sync status to avoid datetime operations during loading
+        sync_status = "Checking..."
         item = PlaylistItem(playlist.name, playlist.total_tracks, sync_status, playlist, self)
+        
+        # Queue sync status update for after UI creation
+        QTimer.singleShot(0, lambda: self.update_playlist_sync_status(item, playlist))
         item.view_details_clicked.connect(self.show_playlist_details)
         
         # Add subtle fade-in animation
@@ -3041,6 +3063,31 @@ class SyncPage(QWidget):
         
         # Update log
         self.log_area.append(f"Added playlist: {playlist.name} ({playlist.total_tracks} tracks)")
+    
+    def update_playlist_sync_status(self, playlist_item, playlist):
+        """Update playlist sync status after UI creation to avoid blocking"""
+        try:
+            sync_info = self.sync_statuses.get(playlist.id)
+            sync_status = "Never Synced"
+            
+            if sync_info and 'last_synced' in sync_info:
+                current_snapshot_id = getattr(playlist, 'snapshot_id', None)
+                stored_snapshot_id = sync_info.get('snapshot_id')
+                
+                if current_snapshot_id and stored_snapshot_id and current_snapshot_id != stored_snapshot_id:
+                    sync_status = "Needs Sync"
+                else:
+                    try:
+                        last_synced_dt = datetime.fromisoformat(sync_info['last_synced'])
+                        sync_status = f"Synced: {last_synced_dt.strftime('%b %d, %H:%M')}"
+                    except (ValueError, KeyError):
+                        sync_status = "Synced (legacy)"
+            
+            # Update the playlist item's sync status
+            playlist_item.update_sync_status(sync_status)
+        except Exception as e:
+            # Fallback to simple status if anything goes wrong
+            playlist_item.update_sync_status("Unknown")
     
     def animate_item_fade_in(self, item):
         """Add a subtle fade-in animation to playlist items"""
@@ -3207,7 +3254,7 @@ class SyncPage(QWidget):
         """Show playlist details modal"""
         if playlist:
             modal = PlaylistDetailsModal(playlist, self)
-            modal.exec()
+            modal.show()
     
     def clear_playlists(self):
         """Clear all playlist items from the layout"""
