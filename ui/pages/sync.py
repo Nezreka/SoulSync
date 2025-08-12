@@ -3815,6 +3815,7 @@ class DownloadMissingTracksModal(QDialog):
         self.cancel_requested = False
         
         self.permanently_failed_tracks = [] 
+        self.cancelled_tracks = set()  # Track indices of cancelled tracks
         
         print(f"📊 Total tracks: {self.total_tracks}")
         
@@ -4102,13 +4103,15 @@ class DownloadMissingTracksModal(QDialog):
         header_label.setStyleSheet("color: #ffffff; padding: 5px;")
         
         self.track_table = QTableWidget()
-        self.track_table.setColumnCount(5)
-        self.track_table.setHorizontalHeaderLabels(["Track", "Artist", "Duration", "Matched", "Status"])
+        self.track_table.setColumnCount(6)
+        self.track_table.setHorizontalHeaderLabels(["Track", "Artist", "Duration", "Matched", "Status", "Cancel"])
         self.track_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.track_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
         self.track_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Interactive)
+        self.track_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
         self.track_table.setColumnWidth(2, 90)
         self.track_table.setColumnWidth(3, 140)
+        self.track_table.setColumnWidth(5, 70)
         
         self.track_table.setStyleSheet("""
             QTableWidget {
@@ -4126,7 +4129,7 @@ class DownloadMissingTracksModal(QDialog):
         
         self.track_table.setAlternatingRowColors(True)
         self.track_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.track_table.verticalHeader().setDefaultSectionSize(35)
+        self.track_table.verticalHeader().setDefaultSectionSize(50)
         self.track_table.verticalHeader().setVisible(False)
         
         self.populate_track_table()
@@ -4153,6 +4156,16 @@ class DownloadMissingTracksModal(QDialog):
             status_item = QTableWidgetItem("—")
             status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.track_table.setItem(i, 4, status_item)
+            
+            # Create empty container for cancel button (will be populated later for missing tracks only)
+            container = QWidget()
+            container.setStyleSheet("background: transparent;")
+            layout = QVBoxLayout(container)
+            layout.setContentsMargins(5, 5, 5, 5)
+            layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            
+            self.track_table.setCellWidget(i, 5, container)
+            
             for col in range(5):
                 self.track_table.item(i, col).setFlags(self.track_table.item(i, col).flags() & ~Qt.ItemFlag.ItemIsEditable)
 
@@ -4160,6 +4173,107 @@ class DownloadMissingTracksModal(QDialog):
         """Convert milliseconds to MM:SS format"""
         seconds = duration_ms // 1000
         return f"{seconds // 60}:{seconds % 60:02d}"
+    
+    def add_cancel_button_to_row(self, row):
+        """Add cancel button to a specific row (only for missing tracks)"""
+        container = self.track_table.cellWidget(row, 5)
+        if container and container.layout().count() == 0:  # Only add if container is empty
+            cancel_button = QPushButton("×")
+            cancel_button.setFixedSize(20, 20)
+            cancel_button.setMinimumSize(20, 20)
+            cancel_button.setMaximumSize(20, 20)
+            cancel_button.setStyleSheet("""
+                QPushButton {
+                    background-color: #dc3545; 
+                    color: white; 
+                    border: 1px solid #c82333;
+                    border-radius: 3px; 
+                    font-size: 14px; 
+                    font-weight: bold;
+                    padding: 0px;
+                    margin: 0px;
+                    text-align: center;
+                    min-width: 20px;
+                    max-width: 20px;
+                    width: 20px;
+                }
+                QPushButton:hover { 
+                    background-color: #c82333; 
+                    border-color: #bd2130;
+                }
+                QPushButton:pressed { 
+                    background-color: #bd2130; 
+                    border-color: #b21f2d;
+                }
+                QPushButton:disabled { 
+                    background-color: #28a745; 
+                    color: white; 
+                    border-color: #1e7e34;
+                }
+            """)
+            cancel_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            cancel_button.clicked.connect(lambda checked, row_idx=row: self.cancel_track(row_idx))
+            
+            layout = container.layout()
+            layout.addWidget(cancel_button)
+    
+    def hide_cancel_button_for_row(self, row):
+        """Hide cancel button for a specific row (when track is downloaded)"""
+        container = self.track_table.cellWidget(row, 5)
+        if container:
+            layout = container.layout()
+            if layout and layout.count() > 0:
+                cancel_button = layout.itemAt(0).widget()
+                if cancel_button:
+                    cancel_button.setVisible(False)
+                    print(f"🫥 Hidden cancel button for downloaded track at row {row}")
+    
+    def cancel_track(self, row):
+        """Cancel a specific track - works at any phase"""
+        # Get cancel button and disable it
+        container = self.track_table.cellWidget(row, 5)
+        if container:
+            layout = container.layout()
+            if layout and layout.count() > 0:
+                cancel_button = layout.itemAt(0).widget()
+                if cancel_button:
+                    cancel_button.setEnabled(False)
+                    cancel_button.setText("✓")
+        
+        # Update status to cancelled
+        self.track_table.setItem(row, 4, QTableWidgetItem("🚫 Cancelled"))
+        
+        # Add to cancelled tracks set
+        if not hasattr(self, 'cancelled_tracks'):
+            self.cancelled_tracks = set()
+        self.cancelled_tracks.add(row)
+        
+        track = self.playlist.tracks[row]
+        print(f"🚫 Track cancelled: {track.name} (row {row})")
+        
+        # If downloads are active, also handle active download cancellation
+        download_index = None
+        
+        # Check active_downloads list
+        if hasattr(self, 'active_downloads'):
+            for download in self.active_downloads:
+                if download.get('table_index') == row:
+                    download_index = download.get('download_index', row)
+                    print(f"🚫 Found active download {download_index} for cancelled track")
+                    break
+        
+        # Check parallel_search_tracking for download index
+        if download_index is None and hasattr(self, 'parallel_search_tracking'):
+            for idx, track_info in self.parallel_search_tracking.items():
+                if track_info.get('table_index') == row:
+                    download_index = idx
+                    print(f"🚫 Found parallel tracking {download_index} for cancelled track")
+                    break
+        
+        # If we found an active download, trigger completion to free up the worker
+        if download_index is not None and hasattr(self, 'on_parallel_track_completed'):
+            print(f"🚫 Triggering completion for active download {download_index}")
+            self.on_parallel_track_completed(download_index, success=False)
         
     def create_buttons(self):
             """Create improved button section"""
@@ -4247,6 +4361,7 @@ class DownloadMissingTracksModal(QDialog):
     def on_track_analyzed(self, track_index, result):
         """Handle individual track analysis completion with live UI updates"""
         self.analysis_progress.setValue(track_index)
+        row_index = track_index - 1
         if result.exists_in_plex:
             matched_text = f"✅ Found ({result.confidence:.1f})"
             self.matched_tracks_count += 1
@@ -4255,7 +4370,9 @@ class DownloadMissingTracksModal(QDialog):
             matched_text = "❌ Missing"
             self.tracks_to_download_count += 1
             self.download_count_label.setText(str(self.tracks_to_download_count))
-        self.track_table.setItem(track_index - 1, 3, QTableWidgetItem(matched_text))
+            # Add cancel button for missing tracks only
+            self.add_cancel_button_to_row(row_index)
+        self.track_table.setItem(row_index, 3, QTableWidgetItem(matched_text))
         
     def on_analysis_completed(self, results):
         """Handle analysis completion"""
@@ -4304,6 +4421,14 @@ class DownloadMissingTracksModal(QDialog):
             track_result = self.missing_tracks[self.download_queue_index]
             track = track_result.spotify_track
             track_index = self.find_track_index_in_playlist(track)
+            
+            # Skip if track was cancelled
+            if hasattr(self, 'cancelled_tracks') and track_index in self.cancelled_tracks:
+                print(f"🚫 Skipping cancelled track at index {track_index}: {track.name}")
+                self.download_queue_index += 1
+                self.completed_downloads += 1
+                continue
+                
             self.track_table.setItem(track_index, 4, QTableWidgetItem("🔍 Searching..."))
             self.search_and_download_track_parallel(track, self.download_queue_index, track_index)
             self.active_parallel_downloads += 1
@@ -4617,6 +4742,9 @@ class DownloadMissingTracksModal(QDialog):
 
     def on_parallel_track_completed(self, download_index, success):
         """Handle completion of a parallel track download"""
+        if not hasattr(self, 'parallel_search_tracking'):
+            print(f"⚠️ parallel_search_tracking not initialized yet, skipping completion for download {download_index}")
+            return
         track_info = self.parallel_search_tracking.get(download_index)
         if not track_info or track_info.get('completed', False): return
         
@@ -4624,18 +4752,26 @@ class DownloadMissingTracksModal(QDialog):
         if success:
             print(f"🔧 Track {download_index} completed successfully - updating table index {track_info['table_index']} to '✅ Downloaded'")
             self.track_table.setItem(track_info['table_index'], 4, QTableWidgetItem("✅ Downloaded"))
+            # Hide cancel button since track is now downloaded
+            self.hide_cancel_button_for_row(track_info['table_index'])
             self.downloaded_tracks_count += 1
             # --- FIX ---
             # Corrected the label update to use the incremented counter variable.
             self.downloaded_count_label.setText(str(self.downloaded_tracks_count))
             self.successful_downloads += 1
         else:
-            print(f"🔧 Track {download_index} failed - updating table index {track_info['table_index']} to '❌ Failed'")
-            self.track_table.setItem(track_info['table_index'], 4, QTableWidgetItem("❌ Failed"))
+            # Check if track was cancelled (don't overwrite cancelled status)
+            table_index = track_info['table_index']
+            current_status = self.track_table.item(table_index, 4)
+            if current_status and "🚫 Cancelled" in current_status.text():
+                print(f"🔧 Track {download_index} was cancelled - preserving cancelled status")
+            else:
+                print(f"🔧 Track {download_index} failed - updating table index {table_index} to '❌ Failed'")
+                self.track_table.setItem(table_index, 4, QTableWidgetItem("❌ Failed"))
+                if track_info not in self.permanently_failed_tracks:
+                    self.permanently_failed_tracks.append(track_info)
+                self.update_failed_matches_button()
             self.failed_downloads += 1
-            if track_info not in self.permanently_failed_tracks:
-                self.permanently_failed_tracks.append(track_info)
-            self.update_failed_matches_button()
         
         self.completed_downloads += 1
         self.active_parallel_downloads -= 1
@@ -4705,6 +4841,44 @@ class DownloadMissingTracksModal(QDialog):
             # Request Plex library scan if we have successful downloads
             if self.successful_downloads > 0 and hasattr(self, 'parent_sync_page') and self.parent_sync_page.scan_manager:
                 self.parent_sync_page.scan_manager.request_scan(f"Playlist download completed ({self.successful_downloads} tracks)")
+
+            # Add cancelled tracks that were missing from Plex to permanently_failed_tracks for wishlist inclusion
+            if hasattr(self, 'cancelled_tracks') and hasattr(self, 'missing_tracks'):
+                for cancelled_row in self.cancelled_tracks:
+                    # Check if this cancelled track was actually missing from Plex
+                    cancelled_track = self.playlist.tracks[cancelled_row]
+                    missing_track_result = None
+                    
+                    # Find the corresponding missing track result
+                    for missing_result in self.missing_tracks:
+                        if missing_result.spotify_track.id == cancelled_track.id:
+                            missing_track_result = missing_result
+                            break
+                    
+                    # Only add to wishlist if track was actually missing from Plex AND not successfully downloaded
+                    if missing_track_result:
+                        # Check if track was successfully downloaded (don't add downloaded tracks to wishlist)
+                        status_item = self.track_table.item(cancelled_row, 4)
+                        current_status = status_item.text() if status_item else ""
+                        
+                        if "✅ Downloaded" in current_status:
+                            print(f"🚫 Cancelled track {cancelled_track.name} was already downloaded, skipping wishlist addition")
+                        else:
+                            cancelled_track_info = {
+                                'download_index': cancelled_row,
+                                'table_index': cancelled_row,
+                                'track': cancelled_track,
+                                'track_name': cancelled_track.name,
+                                'artist_name': cancelled_track.artists[0] if cancelled_track.artists else "Unknown",
+                                'retry_count': 0,
+                                'spotify_track': missing_track_result.spotify_track  # Include the spotify track for wishlist
+                            }
+                            # Check if not already in permanently_failed_tracks
+                            if not any(t.get('table_index') == cancelled_row for t in self.permanently_failed_tracks):
+                                self.permanently_failed_tracks.append(cancelled_track_info)
+                                print(f"🚫 Added cancelled missing track {cancelled_track.name} to failed list for wishlist")
+                    else:
+                        print(f"🚫 Cancelled track {cancelled_track.name} was not missing from Plex, skipping wishlist addition")
 
             # Add permanently failed tracks to wishlist before showing completion message
             failed_count = len(self.permanently_failed_tracks)
