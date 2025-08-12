@@ -81,7 +81,7 @@ Follow these steps to get SoulSync up and running on your system.
 Before you begin, ensure you have the following installed and configured:
 
 - **Python 3.8+**: The core runtime for the application.
-- **Plex Media Server**: You need a running Plex server with an existing music library that SoulSync can scan.
+- **Plex Media Server(NOT REQUIRED)**: You need a running Plex server with an existing music library that SoulSync can scan.
 - **slskd**: A headless Soulseek client. This is the engine that powers the downloading feature. See detailed setup instructions below.
 - **Spotify Account**: A regular or premium Spotify account is required to access your playlists and artist data.
 
