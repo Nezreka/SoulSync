@@ -9612,6 +9612,7 @@ class DownloadsPage(QWidget):
         
         def handle_status_update_v2(transfers_data):
             """Enhanced status update handler with robust state management"""
+            import time
             try:
                 if not transfers_data:
                     return
@@ -9647,6 +9648,13 @@ class DownloadsPage(QWidget):
                     
                     # Update UI counters
                     self.download_queue.update_tab_counts()
+                    
+                    # Enhanced logging: periodic queue health summary
+                    if not hasattr(self, '_last_queue_summary_time'):
+                        self._last_queue_summary_time = 0
+                    if time.time() - self._last_queue_summary_time > 30:  # Every 30 seconds
+                        self._log_queue_health_summary(download_items)
+                        self._last_queue_summary_time = time.time()
                 
             except Exception as e:
                 print(f"[ERROR] Status update v2 failed: {e}")
@@ -9668,6 +9676,45 @@ class DownloadsPage(QWidget):
             
         except Exception as e:
             print(f"[ERROR] Failed to start status update thread v2: {e}")
+    
+    def _log_queue_health_summary(self, download_items):
+        """Log periodic queue health summary for debugging stuck downloads"""
+        import time
+        
+        try:
+            if not download_items:
+                return
+                
+            # Count downloads by status
+            status_counts = {}
+            stuck_downloads = []
+            
+            for item in download_items:
+                status = item.status.lower()
+                status_counts[status] = status_counts.get(status, 0) + 1
+                
+                # Check for potentially stuck downloads
+                if hasattr(item, 'queue_start_time') and item.queue_start_time:
+                    queue_age = time.time() - item.queue_start_time
+                    if queue_age > 15:  # More than 15 seconds in queue
+                        stuck_downloads.append((item.title, queue_age))
+                
+                # Check for items with high API missing counts
+                if hasattr(item, 'api_missing_count_v2') and item.api_missing_count_v2 > 1:
+                    stuck_downloads.append((item.title, f"API missing {item.api_missing_count_v2} cycles"))
+            
+            # Log summary
+            print(f"📊 Queue Health: {status_counts}")
+            if stuck_downloads:
+                print(f"⚠️ Potentially stuck downloads: {len(stuck_downloads)}")
+                for title, issue in stuck_downloads[:3]:  # Show first 3
+                    if isinstance(issue, str):
+                        print(f"   - {title}: {issue}")
+                    else:
+                        print(f"   - {title}: queued for {issue:.1f}s")
+                        
+        except Exception as e:
+            pass  # Silent logging failures
     
     def _find_matching_transfer_v2(self, download_item, all_transfers, matched_ids):
         """Enhanced transfer matching with better ID tracking"""
@@ -9694,9 +9741,15 @@ class DownloadsPage(QWidget):
         return None
     
     def _process_transfer_match_v2(self, download_item, transfer):
-        """Process matched transfer with atomic state updates"""
+        """Process matched transfer with atomic state updates and progressive timeout logic"""
+        import time
+        
         state = transfer.get('state', 'Unknown')
         progress = min(100, max(0, transfer.get('percentComplete', 0)))
+        
+        # Initialize queue tracking if needed
+        if not hasattr(download_item, 'queue_start_time'):
+            download_item.queue_start_time = None
         
         # Determine new status
         if 'Completed' in state or 'Succeeded' in state:
@@ -9711,6 +9764,16 @@ class DownloadsPage(QWidget):
         else:
             new_status = 'queued'
         
+        # Track queue state transitions for progressive timeout
+        if new_status in ['queued', 'initializing'] and download_item.queue_start_time is None:
+            download_item.queue_start_time = time.time()
+            print(f"🕐 Download entered queue: {download_item.title}")
+        elif new_status in ['downloading', 'completed', 'cancelled', 'failed']:
+            if download_item.queue_start_time:
+                queue_duration = time.time() - download_item.queue_start_time
+                print(f"⏱️ Download '{download_item.title}' was in queue for {queue_duration:.1f}s")
+            download_item.queue_start_time = None  # Reset queue timer
+        
         # Atomic status update
         self._queue_manager.atomic_state_transition(
             download_item, new_status,
@@ -9724,6 +9787,11 @@ class DownloadsPage(QWidget):
             download_speed=int(transfer.get('averageSpeed', 0)),
             file_path=transfer.get('filename', download_item.file_path)
         )
+        
+        # Reset API missing count when transfer is found and add enhanced logging
+        if hasattr(download_item, 'api_missing_count_v2') and download_item.api_missing_count_v2 > 0:
+            print(f"✅ Download reconnected to API after {download_item.api_missing_count_v2} missing cycles: {download_item.title}")
+            download_item.api_missing_count_v2 = 0
         
         # Update ID mapping if needed
         transfer_id = transfer.get('id')
@@ -9751,14 +9819,40 @@ class DownloadsPage(QWidget):
                     self._schedule_fallback_cleanup_check()
     
     def _handle_missing_transfer_v2(self, download_item):
-        """Handle downloads missing from API with improved grace period"""
+        """Handle downloads missing from API with improved grace period and queue age tracking"""
+        import time
+        
+        # Initialize tracking attributes
         if not hasattr(download_item, 'api_missing_count_v2'):
             download_item.api_missing_count_v2 = 0
+        if not hasattr(download_item, 'queue_start_time'):
+            download_item.queue_start_time = None
+        
+        # Track when downloads first enter queued state
+        current_status = download_item.status.lower()
+        if current_status in ['queued', 'initializing'] and download_item.queue_start_time is None:
+            download_item.queue_start_time = time.time()
+            print(f"🕐 Started tracking queue time for: {download_item.title}")
+        elif current_status not in ['queued', 'initializing']:
+            download_item.queue_start_time = None  # Reset if no longer queued
         
         download_item.api_missing_count_v2 += 1
         
-        # Longer grace period for stability
-        if download_item.api_missing_count_v2 >= 5:  # 5 polling cycles
+        # Enhanced timeout logic with queue age consideration
+        queue_timeout_exceeded = False
+        if download_item.queue_start_time:
+            queue_age = time.time() - download_item.queue_start_time
+            queue_timeout = 180.0  # 3 minutes max in queue
+            if queue_age > queue_timeout:
+                queue_timeout_exceeded = True
+                print(f"⏰ Queue timeout exceeded: {download_item.title} stuck in queue for {queue_age:.1f}s")
+        
+        # Fail download if API missing for 3 cycles OR queue timeout exceeded
+        if download_item.api_missing_count_v2 >= 3 or queue_timeout_exceeded:
+            if queue_timeout_exceeded:
+                print(f"⚠️ Download failed due to queue timeout: {download_item.title}")
+            else:
+                print(f"⚠️ Download missing from API for {download_item.api_missing_count_v2} cycles: {download_item.title}")
             self._queue_manager.atomic_state_transition(download_item, 'failed')
             self.download_queue.move_to_finished(download_item)
     
