@@ -2,9 +2,9 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                            QFrame, QPushButton, QListWidget, QListWidgetItem,
                            QProgressBar, QTextEdit, QCheckBox, QComboBox,
                            QScrollArea, QSizePolicy, QMessageBox, QDialog,
-                           QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QLineEdit)
+                           QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QLineEdit, QTabWidget)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QPropertyAnimation, QEasingCurve, QRunnable, QThreadPool, QObject
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QBrush, QColor
 import os
 import json
 from datetime import datetime
@@ -19,6 +19,8 @@ from ui.components.toast_manager import ToastType
 from database.music_database import get_database
 from core.plex_scan_manager import PlexScanManager
 from utils.logging_config import get_logger
+import yt_dlp
+from core.spotify_client import Track, Playlist
 
 logger = get_logger("sync")
 
@@ -135,6 +137,372 @@ def clean_track_name_for_search(track_name):
         print(f"🧹 Intelligent track cleaning: '{track_name}' -> '{cleaned_name}'")
     
     return cleaned_name
+
+def clean_youtube_track_title(title, artist_name=None):
+    """
+    Aggressively clean YouTube track titles by removing video noise and extracting clean track names
+    
+    Examples:
+    'No Way Jose (Official Music Video)' → 'No Way Jose'
+    'bbno$ - mary poppins (official music video)' → 'mary poppins'
+    'Beyond (From "Moana 2") (Official Video) ft. Rachel House' → 'Beyond'
+    'Temporary (feat. Skylar Grey) [Official Music Video]' → 'Temporary'
+    'ALL MY LOVE (Directors\' Cut)' → 'ALL MY LOVE'
+    'Espresso Macchiato | Estonia 🇪🇪 | Official Music Video | #Eurovision2025' → 'Espresso Macchiato'
+    """
+    import re
+    
+    if not title:
+        return title
+    
+    original_title = title
+    
+    # FIRST: Remove artist name if it appears at the start with a dash
+    # Handle formats like "LITTLE BIG - MOUSTACHE" → "MOUSTACHE"
+    if artist_name:
+        # Create a regex pattern to match artist name at the beginning followed by dash
+        # Use word boundaries and case-insensitive matching for better accuracy
+        artist_pattern = r'^' + re.escape(artist_name.strip()) + r'\s*[-–—]\s*'
+        cleaned_title = re.sub(artist_pattern, '', title, flags=re.IGNORECASE).strip()
+        
+        # Debug logging for artist removal
+        if cleaned_title != title:
+            print(f"🎯 Removed artist from title: '{title}' -> '{cleaned_title}' (artist: '{artist_name}')")
+        
+        title = cleaned_title
+    
+    # Remove content in brackets/braces of any type SECOND (before general dash removal)
+    title = re.sub(r'【[^】]*】', '', title)  # Japanese brackets
+    title = re.sub(r'\s*\([^)]*\)', '', title)   # Parentheses - removes everything after first (
+    title = re.sub(r'\s*\(.*$', '', title)      # Remove everything after lone ( (unmatched parentheses)
+    title = re.sub(r'\[[^\]]*\]', '', title)  # Square brackets
+    title = re.sub(r'\{[^}]*\}', '', title)   # Curly braces
+    title = re.sub(r'<[^>]*>', '', title)     # Angle brackets
+    
+    # Remove everything after a dash (often album or extra info)
+    title = re.sub(r'\s*-\s*.*$', '', title)
+    
+    # Remove everything after pipes (|) - often used for additional context
+    title = re.split(r'\s*\|\s*', title)[0].strip()
+    
+    # Remove common video/platform noise
+    noise_patterns = [
+        r'\bapple\s+music\b',
+        r'\bfull\s+video\b', 
+        r'\bmusic\s+video\b',
+        r'\bofficial\s+video\b',
+        r'\bofficial\s+music\s+video\b',
+        r'\bofficial\b',
+        r'\bcensored\s+version\b',
+        r'\buncensored\s+version\b',
+        r'\bexplicit\s+version\b',
+        r'\blive\s+version\b',
+        r'\bversion\b',
+        r'\btopic\b',
+        r'\baudio\b',
+        r'\blyrics?\b',
+        r'\blyric\s+video\b',
+        r'\bwith\s+lyrics?\b',
+        r'\bvisuali[sz]er\b',
+        r'\bmv\b',
+        r'\bdirectors?\s+cut\b',
+        r'\bremaster(ed)?\b',
+        r'\bremix\b'
+    ]
+    
+    for pattern in noise_patterns:
+        title = re.sub(pattern, '', title, flags=re.IGNORECASE)
+    
+    # Remove artist name from title if present
+    if artist_name:
+        # Try removing exact artist name
+        title = re.sub(rf'\b{re.escape(artist_name)}\b', '', title, flags=re.IGNORECASE)
+        # Try removing artist name with common separators
+        title = re.sub(rf'\b{re.escape(artist_name)}\s*[-–—:]\s*', '', title, flags=re.IGNORECASE)
+        title = re.sub(rf'^{re.escape(artist_name)}\s*[-–—:]\s*', '', title, flags=re.IGNORECASE)
+    
+    # Remove all quotes and other punctuation
+    title = re.sub(r'["\'''""„‚‛‹›«»]', '', title)
+    
+    # Remove featured artist patterns (after removing parentheses)
+    feat_patterns = [
+        r'\s+feat\.?\s+.+$',     # " feat Artist" at end
+        r'\s+ft\.?\s+.+$',       # " ft Artist" at end  
+        r'\s+featuring\s+.+$',   # " featuring Artist" at end
+        r'\s+with\s+.+$',        # " with Artist" at end
+    ]
+    
+    for pattern in feat_patterns:
+        title = re.sub(pattern, '', title, flags=re.IGNORECASE).strip()
+    
+    # Clean up whitespace and punctuation
+    title = re.sub(r'\s+', ' ', title).strip()
+    title = re.sub(r'^[-–—:,.\s]+|[-–—:,.\s]+$', '', title).strip()
+    
+    # If we cleaned too much, return original
+    if not title.strip() or len(title.strip()) < 2:
+        title = original_title
+    
+    if title != original_title:
+        print(f"🧹 YouTube title cleaned: '{original_title}' → '{title}'")
+    
+    return title
+
+def clean_youtube_artist(artist_string):
+    """
+    Clean YouTube artist strings to get primary artist name
+    
+    Examples:
+    'Yung Gravy, bbno$ (BABY GRAVY)' → 'Yung Gravy'
+    'Y2K, bbno$' → 'Y2K'
+    'LITTLE BIG' → 'LITTLE BIG'
+    'Artist "Nickname" Name' → 'Artist Nickname Name'
+    'ArtistVEVO' → 'Artist'
+    """
+    import re
+    
+    if not artist_string:
+        return artist_string
+    
+    original_artist = artist_string
+    
+    # Remove all quotes - they're usually not part of artist names
+    artist_string = artist_string.replace('"', '').replace("'", '').replace(''', '').replace(''', '').replace('"', '').replace('"', '')
+    
+    # Remove anything in parentheses (often group/label names)
+    artist_string = re.sub(r'\s*\([^)]*\)', '', artist_string).strip()
+    
+    # Remove anything in brackets (often additional info)
+    artist_string = re.sub(r'\s*\[[^\]]*\]', '', artist_string).strip()
+    
+    # Remove common YouTube channel suffixes
+    channel_suffixes = [
+        r'\s*VEVO\s*$',
+        r'\s*Music\s*$',
+        r'\s*Official\s*$',
+        r'\s*Records\s*$',
+        r'\s*Entertainment\s*$',
+        r'\s*TV\s*$',
+        r'\s*Channel\s*$'
+    ]
+    
+    for suffix in channel_suffixes:
+        artist_string = re.sub(suffix, '', artist_string, flags=re.IGNORECASE).strip()
+    
+    # Split on common separators and take the first artist
+    separators = [',', '&', ' and ', ' x ', ' X ', ' feat.', ' ft.', ' featuring', ' with', ' vs ', ' vs.']
+    
+    for sep in separators:
+        if sep in artist_string:
+            parts = artist_string.split(sep)
+            artist_string = parts[0].strip()
+            break
+    
+    # Clean up extra whitespace and punctuation
+    artist_string = re.sub(r'\s+', ' ', artist_string).strip()
+    artist_string = re.sub(r'^\-\s*|\s*\-$', '', artist_string).strip()  # Remove leading/trailing dashes
+    artist_string = re.sub(r'^,\s*|\s*,$', '', artist_string).strip()    # Remove leading/trailing commas
+    
+    # If we cleaned too much, return original
+    if not artist_string.strip():
+        artist_string = original_artist
+    
+    if artist_string != original_artist:
+        print(f"🧹 YouTube artist cleaned: '{original_artist}' → '{artist_string}'")
+    
+    return artist_string
+
+def parse_youtube_playlist(url):
+    """
+    Parse a YouTube Music playlist URL and extract track information using yt-dlp
+    Uses flat playlist extraction to avoid rate limits and get all tracks
+    Returns a list of track dictionaries compatible with our Track structure
+    """
+    try:
+        # Configure yt-dlp options for flat playlist extraction (avoids rate limits)
+        ydl_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'extract_flat': True,  # Only extract basic info, no individual video metadata
+            'flat_playlist': True,  # Extract all playlist entries without hitting API for each video
+            'skip_download': True,  # Don't download, just extract IDs and basic info
+            # Remove all limits to get complete playlist
+        }
+        
+        tracks = []
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            # Extract playlist info
+            playlist_info = ydl.extract_info(url, download=False)
+            
+            if not playlist_info:
+                raise Exception("Could not extract playlist information")
+            
+            # Get playlist entries
+            entries = playlist_info.get('entries', [])
+            
+            if not entries:
+                raise Exception("No tracks found in playlist")
+            
+            # Extract playlist title
+            playlist_title = playlist_info.get('title', 'YouTube Playlist')
+            print(f"🎵 Found {len(entries)} tracks in YouTube playlist: '{playlist_title}'")
+            print(f"📊 Playlist info keys: {list(playlist_info.keys())}")
+            if 'playlist_count' in playlist_info:
+                print(f"📊 Reported playlist count: {playlist_info['playlist_count']}")
+            if 'n_entries' in playlist_info:
+                print(f"📊 Reported n_entries: {playlist_info['n_entries']}")
+            print(f"📊 Actual entries length: {len(entries)}")
+            
+            # Convert each entry to our Track format
+            for i, entry in enumerate(entries):
+                if not entry:  # Skip None entries
+                    continue
+                    
+                try:
+                    # Extract title and uploader
+                    raw_title = entry.get('title', f'Unknown Track {i+1}')
+                    raw_uploader = entry.get('uploader', 'Unknown Artist')
+                    duration = entry.get('duration', 0)
+                    
+                    # Start with uploader as default artist
+                    artists = [clean_youtube_artist(raw_uploader)]
+                    track_name = raw_title
+                    
+                    # Try to extract artist and track from title patterns
+                    # Pattern 1: "LITTLE BIG – HARDCORE AMERICAN COWBOY" (artist in title)
+                    if ' – ' in raw_title or ' - ' in raw_title:
+                        separator = ' – ' if ' – ' in raw_title else ' - '
+                        parts = raw_title.split(separator, 1)
+                        if len(parts) == 2:
+                            potential_artist = clean_youtube_artist(parts[0].strip())
+                            potential_track = clean_youtube_track_title(parts[1].strip(), potential_artist)
+                            
+                            # Use the artist from title if it looks valid
+                            if potential_artist and len(potential_artist) > 1:
+                                artists = [potential_artist]
+                                track_name = potential_track
+                            else:
+                                track_name = clean_youtube_track_title(raw_title)
+                        else:
+                            track_name = clean_youtube_track_title(raw_title)
+                    
+                    # Pattern 2: "Track by Artist" or "Track : Artist"
+                    elif ' by ' in raw_title.lower():
+                        parts = raw_title.lower().split(' by ', 1)
+                        if len(parts) == 2:
+                            track_name = clean_youtube_track_title(raw_title[:len(parts[0])].strip())
+                            potential_artist = clean_youtube_artist(raw_title[len(parts[0]) + 4:].strip())
+                            if potential_artist and len(potential_artist) > 1:
+                                artists = [potential_artist]
+                    
+                    elif ': ' in raw_title and len(raw_title.split(': ')) == 2:
+                        parts = raw_title.split(': ', 1)
+                        potential_artist = clean_youtube_artist(parts[0].strip())
+                        potential_track = clean_youtube_track_title(parts[1].strip(), potential_artist)
+                        
+                        if potential_artist and len(potential_artist) > 1:
+                            artists = [potential_artist]
+                            track_name = potential_track
+                        else:
+                            track_name = clean_youtube_track_title(raw_title)
+                    
+                    else:
+                        # No clear pattern, just clean the title
+                        track_name = clean_youtube_track_title(raw_title)
+                    
+                    # Final cleanup
+                    track_name = track_name.strip()
+                    artists = [artist.strip() for artist in artists if artist.strip()]
+                    if not artists or not artists[0]:
+                        artists = ['Unknown Artist']
+                    
+                    # Create track dict compatible with our Track structure
+                    track_data = {
+                        'id': entry.get('id', f'youtube_{i}'),
+                        'name': track_name,
+                        'artists': artists,
+                        'album': 'YouTube Music',  # Default album name
+                        'duration_ms': duration * 1000 if duration else 0,
+                        'popularity': 0,  # YouTube doesn't provide popularity
+                        'preview_url': None,
+                        'external_urls': {'youtube': entry.get('webpage_url', '')},
+                        # Store original uncleaned data for fallback searches
+                        'raw_title': raw_title,
+                        'raw_uploader': raw_uploader
+                    }
+                    
+                    tracks.append(track_data)
+                    
+                    # Log the parsing result for debugging
+                    if track_name != raw_title or artists[0] != raw_uploader:
+                        print(f"🎯 Parsed: '{raw_title}' by '{raw_uploader}' → '{track_name}' by '{artists[0]}'")
+                    
+                except Exception as e:
+                    print(f"⚠️ Error processing track {i}: {e}")
+                    continue
+        
+        print(f"✅ Successfully processed {len(tracks)} tracks out of {len(entries)} entries")
+        if len(tracks) != len(entries):
+            skipped = len(entries) - len(tracks)
+            print(f"⚠️ Skipped {skipped} tracks due to processing errors")
+        
+        return tracks, playlist_title
+        
+    except Exception as e:
+        print(f"❌ Error parsing YouTube playlist: {e}")
+        raise e
+
+def create_youtube_playlist_object(tracks_data, playlist_url, playlist_title=None):
+    """
+    Create a Playlist object from YouTube tracks data that's compatible 
+    with the existing DownloadMissingTracksModal
+    """
+    try:
+        # Convert track dictionaries to Track objects
+        tracks = []
+        for track_data in tracks_data:
+            track = Track(
+                id=track_data['id'],
+                name=track_data['name'],
+                artists=track_data['artists'],
+                album=track_data['album'],
+                duration_ms=track_data['duration_ms'],
+                popularity=track_data['popularity'],
+                preview_url=track_data['preview_url'],
+                external_urls=track_data['external_urls']
+            )
+            
+            # Add raw uncleaned data for fallback searches
+            if 'raw_title' in track_data and 'raw_uploader' in track_data:
+                track.raw_title = track_data['raw_title']
+                track.raw_uploader = track_data['raw_uploader']
+            
+            tracks.append(track)
+        
+        # Create playlist object
+        # Use provided playlist title or fall back to generic name
+        if playlist_title:
+            playlist_name = playlist_title
+        else:
+            playlist_name = f"YouTube Playlist ({len(tracks)} tracks)"
+        
+        playlist = Playlist(
+            id=f"youtube_{hash(playlist_url)}",  # Generate unique ID from URL
+            name=playlist_name,
+            description=f"Imported from YouTube Music: {playlist_url}",
+            owner="YouTube Music",
+            public=True,
+            collaborative=False,
+            tracks=tracks,
+            total_tracks=len(tracks)
+        )
+        
+        return playlist
+        
+    except Exception as e:
+        print(f"❌ Error creating YouTube playlist object: {e}")
+        raise e
 
 @dataclass
 class TrackAnalysisResult:
@@ -2024,6 +2392,14 @@ class SyncPage(QWidget):
         self.thread_pool = QThreadPool()
         self.thread_pool.setMaxThreadCount(3)  # Limit concurrent Spotify API calls
         
+        # YouTube playlist tracking
+        self.active_youtube_processes = {}  # URL -> modal instance
+        self.youtube_worker = None  # Current parsing worker
+        self.youtube_status_widgets = {}  # playlist_id -> status widget
+        
+        # YouTube playlist download modal references for reopening
+        self.active_youtube_download_modals = {}  # playlist_id -> modal instance
+        
         # Initialize Plex scan manager
         self.scan_manager = None
         if self.plex_client:
@@ -2590,38 +2966,61 @@ class SyncPage(QWidget):
             self.log_area.append(f"❌ Sync failed: {error_msg}")
     
     def update_open_modals_progress(self, playlist_id, progress):
-        """Update any open PlaylistDetailsModal for this playlist with sync progress"""
-        # Find all open PlaylistDetailsModal instances for this playlist
-        # We need to check all top-level widgets that might be modals
+        """Update any open modals for this playlist with sync progress"""
+        # Find all open modal instances for this playlist
         from PyQt6.QtWidgets import QApplication
         for widget in QApplication.topLevelWidgets():
+            # Handle PlaylistDetailsModal
             if (isinstance(widget, PlaylistDetailsModal) and 
                 hasattr(widget, 'playlist') and 
                 widget.playlist.id == playlist_id and
                 widget.isVisible()):
                 # Update the modal's progress display
                 widget.on_sync_progress(playlist_id, progress)
+            
+            # Handle YouTubeDownloadMissingTracksModal
+            elif (isinstance(widget, YouTubeDownloadMissingTracksModal) and 
+                  hasattr(widget, 'playlist') and 
+                  widget.playlist.id == playlist_id):
+                # Update the YouTube modal's progress display (even if hidden)
+                widget.on_sync_progress(playlist_id, progress)
     
     def update_open_modals_completion(self, playlist_id, result):
-        """Update any open PlaylistDetailsModal for this playlist with sync completion"""
+        """Update any open modals for this playlist with sync completion"""
         from PyQt6.QtWidgets import QApplication
         for widget in QApplication.topLevelWidgets():
+            # Handle PlaylistDetailsModal
             if (isinstance(widget, PlaylistDetailsModal) and 
                 hasattr(widget, 'playlist') and 
                 widget.playlist.id == playlist_id and
                 widget.isVisible()):
                 # Update the modal's completion display
                 widget.on_sync_finished(playlist_id, result)
+            
+            # Handle YouTubeDownloadMissingTracksModal
+            elif (isinstance(widget, YouTubeDownloadMissingTracksModal) and 
+                  hasattr(widget, 'playlist') and 
+                  widget.playlist.id == playlist_id):
+                # Update the YouTube modal's completion display (even if hidden)
+                widget.on_sync_finished(playlist_id, result)
     
     def update_open_modals_error(self, playlist_id, error_msg):
-        """Update any open PlaylistDetailsModal for this playlist with sync error"""
+        """Update any open modals for this playlist with sync error"""
         from PyQt6.QtWidgets import QApplication
         for widget in QApplication.topLevelWidgets():
+            # Handle PlaylistDetailsModal
             if (isinstance(widget, PlaylistDetailsModal) and 
                 hasattr(widget, 'playlist') and 
                 widget.playlist.id == playlist_id and
                 widget.isVisible()):
                 # Update the modal's error display
+                widget.on_sync_error(playlist_id, error_msg)
+            
+            # Handle YouTubeDownloadMissingTracksModal
+            elif (isinstance(widget, YouTubeDownloadMissingTracksModal) and 
+                  hasattr(widget, 'playlist') and 
+                  widget.playlist.id == playlist_id):
+                # Update the YouTube modal's error display (even if hidden)
                 widget.on_sync_error(playlist_id, error_msg)
     
     # Add these three methods inside the SyncPage class
@@ -2652,6 +3051,11 @@ class SyncPage(QWidget):
     def on_download_process_finished(self, playlist_id):
         """Re-enables refresh button if no other downloads are active."""
         print(f"Download process finished or cancelled for playlist: {playlist_id}.")
+        
+        # Skip refresh button updates for YouTube workflows (they don't affect Spotify playlist refresh)
+        if playlist_id.startswith("youtube_"):
+            print(f"Ignoring YouTube workflow finish for refresh button: {playlist_id}")
+            return
         
         # Clear download modal reference even if not in active_download_processes
         playlist_item_widget = None
@@ -2757,8 +3161,8 @@ class SyncPage(QWidget):
         content_layout = QHBoxLayout()
         content_layout.setSpacing(15)  # Reduced from 25 to 15 for tighter spacing
         
-        # Left side - Playlist list
-        playlist_section = self.create_playlist_section()
+        # Left side - Tabbed playlist section
+        playlist_section = self.create_tabbed_playlist_section()
         content_layout.addWidget(playlist_section, 2)
         
         # Right side - Options and actions
@@ -2856,6 +3260,484 @@ class SyncPage(QWidget):
         layout.addWidget(playlist_container)
         
         return section
+    
+    def create_tabbed_playlist_section(self):
+        """Create tabbed section with Spotify and YouTube playlist tabs"""
+        section = QWidget()
+        layout = QVBoxLayout(section)
+        layout.setSpacing(0)
+        
+        # Create tab widget
+        self.playlist_tabs = QTabWidget()
+        self.playlist_tabs.setStyleSheet("""
+            QTabWidget::pane {
+                border: 1px solid #404040;
+                border-radius: 8px;
+                background: #282828;
+                margin: 0px;
+            }
+            QTabWidget::tab-bar {
+                alignment: center;
+            }
+            QTabBar::tab {
+                background: #181818;
+                color: #b3b3b3;
+                border: 1px solid #404040;
+                border-bottom: none;
+                border-top-left-radius: 8px;
+                border-top-right-radius: 8px;
+                padding: 12px 24px;
+                margin-right: 2px;
+                font-size: 13px;
+                font-weight: bold;
+                min-width: 120px;
+            }
+            QTabBar::tab:selected {
+                background: #1db954;
+                color: #000000;
+                border-color: #1db954;
+            }
+            QTabBar::tab:hover:!selected {
+                background: #404040;
+                color: #ffffff;
+            }
+        """)
+        
+        # Create Spotify tab (move existing functionality here)
+        spotify_tab = self.create_spotify_playlist_tab()
+        self.playlist_tabs.addTab(spotify_tab, "Spotify Playlists")
+        
+        # Create YouTube tab (placeholder for now)
+        youtube_tab = self.create_youtube_playlist_tab()
+        self.playlist_tabs.addTab(youtube_tab, "YouTube Playlists")
+        
+        # Set default to Spotify tab
+        self.playlist_tabs.setCurrentIndex(0)
+        
+        layout.addWidget(self.playlist_tabs)
+        
+        return section
+    
+    def create_spotify_playlist_tab(self):
+        """Create the Spotify playlist tab (existing functionality)"""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setSpacing(15)
+        layout.setContentsMargins(15, 15, 15, 15)
+        
+        # Section header (same as before)
+        header_layout = QHBoxLayout()
+        
+        section_title = QLabel("Your Spotify Playlists")
+        section_title.setFont(QFont("Arial", 16, QFont.Weight.Bold))
+        section_title.setStyleSheet("color: #ffffff;")
+        
+        self.refresh_btn = QPushButton("🔄 Refresh")
+        self.refresh_btn.setFixedSize(100, 35)
+        self.refresh_btn.clicked.connect(self.load_playlists_async)
+        self.refresh_btn.setStyleSheet("""
+            QPushButton {
+                background: #1db954;
+                border: none;
+                border-radius: 17px;
+                color: #000000;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #1ed760;
+            }
+            QPushButton:pressed {
+                background: #1aa34a;
+            }
+        """)
+        
+        header_layout.addWidget(section_title)
+        header_layout.addStretch()
+        header_layout.addWidget(self.refresh_btn)
+        
+        # Playlist container (same as before)
+        playlist_container = QScrollArea()
+        playlist_container.setWidgetResizable(True)
+        playlist_container.setStyleSheet("""
+            QScrollArea {
+                border: none;
+                background: transparent;
+            }
+            QScrollBar:vertical {
+                background: #282828;
+                width: 8px;
+                border-radius: 4px;
+            }
+            QScrollBar::handle:vertical {
+                background: #1db954;
+                border-radius: 4px;
+            }
+        """)
+        
+        self.playlist_widget = QWidget()
+        self.playlist_layout = QVBoxLayout(self.playlist_widget)
+        self.playlist_layout.setSpacing(10)
+        
+        # Playlists will be loaded asynchronously after UI setup
+        
+        self.playlist_layout.addStretch()
+        playlist_container.setWidget(self.playlist_widget)
+        
+        layout.addLayout(header_layout)
+        layout.addWidget(playlist_container)
+        
+        return tab
+    
+    def create_youtube_playlist_tab(self):
+        """Create the YouTube playlist tab (placeholder for future implementation)"""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setSpacing(20)
+        layout.setContentsMargins(15, 15, 15, 15)
+        
+        # Header
+        header_label = QLabel("YouTube Music Playlists")
+        header_label.setFont(QFont("Arial", 16, QFont.Weight.Bold))
+        header_label.setStyleSheet("color: #ffffff;")
+        
+        # URL input section
+        url_section = QFrame()
+        url_section.setStyleSheet("""
+            QFrame {
+                background: #181818;
+                border: 1px solid #404040;
+                border-radius: 8px;
+                padding: 20px;
+            }
+        """)
+        
+        url_layout = QVBoxLayout(url_section)
+        url_layout.setSpacing(15)
+        
+        url_label = QLabel("Paste YouTube Music Playlist URL:")
+        url_label.setFont(QFont("Arial", 12))
+        url_label.setStyleSheet("color: #b3b3b3;")
+        
+        self.youtube_url_input = QLineEdit()
+        self.youtube_url_input.setPlaceholderText("https://music.youtube.com/playlist?list=...")
+        self.youtube_url_input.setStyleSheet("""
+            QLineEdit {
+                background: #282828;
+                border: 1px solid #404040;
+                border-radius: 6px;
+                padding: 12px;
+                color: #ffffff;
+                font-size: 12px;
+            }
+            QLineEdit:focus {
+                border-color: #1db954;
+            }
+        """)
+        
+        self.parse_btn = QPushButton("Parse Playlist")
+        self.parse_btn.setFixedHeight(40)
+        self.parse_btn.clicked.connect(self.parse_youtube_playlist)
+        self.parse_btn.setStyleSheet("""
+            QPushButton {
+                background: #1db954;
+                border: none;
+                border-radius: 20px;
+                color: #000000;
+                font-size: 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #1ed760;
+            }
+            QPushButton:pressed {
+                background: #1aa34a;
+            }
+            QPushButton:disabled {
+                background: #404040;
+                color: #666666;
+            }
+        """)
+        
+        url_layout.addWidget(url_label)
+        url_layout.addWidget(self.youtube_url_input)
+        url_layout.addWidget(self.parse_btn)
+        
+        # Content area that will show placeholder or status widget
+        self.youtube_content_area = QFrame()
+        self.youtube_content_area.setStyleSheet("""
+            QFrame {
+                background: #181818;
+                border: 1px solid #404040;
+                border-radius: 8px;
+            }
+        """)
+        
+        self.youtube_content_layout = QVBoxLayout(self.youtube_content_area)
+        self.youtube_content_layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Initial placeholder content
+        self.show_youtube_placeholder()
+        
+        
+        # Add everything to main layout
+        layout.addWidget(header_label)
+        layout.addWidget(url_section)
+        layout.addWidget(self.youtube_content_area, 1)  # Stretch to fill remaining space
+        
+        return tab
+    
+    def show_youtube_placeholder(self):
+        """Show the placeholder content in YouTube tab"""
+        # Clear existing content
+        for i in reversed(range(self.youtube_content_layout.count())):
+            child = self.youtube_content_layout.itemAt(i).widget()
+            if child:
+                child.setParent(None)
+        
+        placeholder_label = QLabel("YouTube playlist tracks will appear here")
+        placeholder_label.setFont(QFont("Arial", 12))
+        placeholder_label.setStyleSheet("color: #666666;")
+        placeholder_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        self.youtube_content_layout.addStretch()  # Add stretch before to center
+        self.youtube_content_layout.addWidget(placeholder_label)
+        self.youtube_content_layout.addStretch()  # Add stretch after to center
+    
+    def show_youtube_download_status(self, playlist_name, track_count, playlist_id=None):
+        """Show download status widget in YouTube tab - styled like PlaylistItem"""
+        print(f"📋 show_youtube_download_status called with playlist_id: {playlist_id}")
+        
+        # If no playlist_id provided, generate one from name (for backward compatibility)
+        if playlist_id is None:
+            playlist_id = f"youtube_{hash(playlist_name)}"
+            print(f"📋 Generated fallback playlist_id: {playlist_id}")
+        else:
+            print(f"📋 Using provided playlist_id: {playlist_id}")
+        
+        # Remove any existing status widget for this playlist
+        if playlist_id in self.youtube_status_widgets:
+            existing_widget = self.youtube_status_widgets[playlist_id]
+            existing_widget.setParent(None)
+            del self.youtube_status_widgets[playlist_id]
+        
+        # Clear placeholder content only if this is the first status widget
+        if not self.youtube_status_widgets:
+            for i in reversed(range(self.youtube_content_layout.count())):
+                child = self.youtube_content_layout.itemAt(i).widget()
+                if child:
+                    child.setParent(None)
+        
+        # Create playlist-style status widget
+        status_widget = QFrame()
+        status_widget.setFixedHeight(80)
+        status_widget.setStyleSheet("""
+            QFrame {
+                background: #282828;
+                border-radius: 8px;
+                border: 1px solid #404040;
+            }
+            QFrame:hover {
+                background: #333333;
+                border: 1px solid #1db954;
+            }
+        """)
+        status_widget.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        
+        layout = QHBoxLayout(status_widget)
+        layout.setContentsMargins(20, 15, 20, 15)
+        layout.setSpacing(15)
+        
+        # Status icon (instead of checkbox)
+        status_icon = QLabel("🎵")
+        status_icon.setFont(QFont("Arial", 18))
+        status_icon.setFixedSize(22, 22)
+        status_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        # Content section (playlist name and info)
+        content_layout = QVBoxLayout()
+        content_layout.setSpacing(5)
+        
+        # Playlist name
+        name_label = QLabel(playlist_name)
+        name_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        name_label.setStyleSheet("color: #ffffff;")
+        
+        # Info section
+        info_layout = QHBoxLayout()
+        info_layout.setSpacing(20)
+        
+        track_label = QLabel(f"{track_count} tracks")
+        track_label.setFont(QFont("Arial", 10))
+        track_label.setStyleSheet("color: #b3b3b3;")
+        
+        status_label = QLabel("Downloading...")
+        status_label.setFont(QFont("Arial", 10))
+        status_label.setStyleSheet("color: #1db954;")
+        
+        info_layout.addWidget(track_label)
+        info_layout.addWidget(status_label)
+        info_layout.addStretch()
+        
+        content_layout.addWidget(name_label)
+        content_layout.addLayout(info_layout)
+        
+        # View Progress button (styled like Sync / Download button)
+        view_progress_btn = QPushButton("View Progress")
+        view_progress_btn.setFixedSize(120, 30)
+        view_progress_btn.clicked.connect(lambda: self.open_youtube_download_modal(playlist_id))
+        view_progress_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                border: 1px solid #1db954;
+                border-radius: 15px;
+                color: #1db954;
+                font-size: 10px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #1db954;
+                color: #000000;
+            }
+        """)
+        
+        # Add everything to main layout
+        layout.addWidget(status_icon)
+        layout.addLayout(content_layout)
+        layout.addStretch()
+        layout.addWidget(view_progress_btn)
+        
+        # Store widget reference for tracking
+        self.youtube_status_widgets[playlist_id] = status_widget
+        
+        # Add status widget at the top (multiple widgets will stack)
+        self.youtube_content_layout.insertWidget(len(self.youtube_status_widgets) - 1, status_widget)
+        
+        # Add stretch only if this is the first widget
+        if len(self.youtube_status_widgets) == 1:
+            self.youtube_content_layout.addStretch()  # Fill remaining space
+    
+    def show_youtube_sync_status(self, playlist_name, track_count, playlist_id=None):
+        """Show sync status widget in YouTube tab - styled like PlaylistItem for sync operations"""
+        # If no playlist_id provided, generate one from name (for backward compatibility)
+        if playlist_id is None:
+            playlist_id = f"youtube_{hash(playlist_name)}"
+        
+        # Remove any existing status widget for this playlist
+        if playlist_id in self.youtube_status_widgets:
+            existing_widget = self.youtube_status_widgets[playlist_id]
+            existing_widget.setParent(None)
+            del self.youtube_status_widgets[playlist_id]
+        
+        # Clear placeholder content only if this is the first status widget
+        if not self.youtube_status_widgets:
+            for i in reversed(range(self.youtube_content_layout.count())):
+                child = self.youtube_content_layout.itemAt(i).widget()
+                if child:
+                    child.setParent(None)
+        
+        # Create playlist-style sync status widget
+        status_widget = QFrame()
+        status_widget.setFixedHeight(80)
+        status_widget.setStyleSheet("""
+            QFrame {
+                background: #282828;
+                border-radius: 8px;
+                border: 1px solid #404040;
+            }
+            QFrame:hover {
+                background: #333333;
+                border: 1px solid #1db954;
+            }
+        """)
+        
+        # Main layout
+        layout = QHBoxLayout(status_widget)
+        layout.setContentsMargins(20, 15, 20, 15)
+        layout.setSpacing(15)
+        
+        # Status icon (sync icon)
+        status_icon = QLabel("🔄")
+        status_icon.setFont(QFont("Arial", 16))
+        status_icon.setFixedSize(22, 22)
+        status_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        # Content section (playlist name and info)
+        content_layout = QVBoxLayout()
+        content_layout.setSpacing(5)
+        
+        # Playlist name
+        name_label = QLabel(playlist_name)
+        name_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        name_label.setStyleSheet("color: #ffffff;")
+        
+        # Info section
+        info_layout = QHBoxLayout()
+        info_layout.setSpacing(20)
+        
+        track_label = QLabel(f"{track_count} tracks")
+        track_label.setFont(QFont("Arial", 10))
+        track_label.setStyleSheet("color: #b3b3b3;")
+        
+        status_label = QLabel("Syncing...")
+        status_label.setFont(QFont("Arial", 10))
+        status_label.setStyleSheet("color: #ff6b6b;")
+        
+        info_layout.addWidget(track_label)
+        info_layout.addWidget(status_label)
+        info_layout.addStretch()
+        
+        content_layout.addWidget(name_label)
+        content_layout.addLayout(info_layout)
+        
+        # View Progress button (styled like Sync / Download button)
+        view_progress_btn = QPushButton("View Progress")
+        view_progress_btn.setFixedSize(120, 30)
+        view_progress_btn.clicked.connect(lambda: self.open_youtube_download_modal(playlist_id))
+        view_progress_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                border: 1px solid #ff6b6b;
+                border-radius: 15px;
+                color: #ff6b6b;
+                font-size: 10px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #ff6b6b;
+                color: #ffffff;
+            }
+        """)
+        
+        # Add everything to main layout
+        layout.addWidget(status_icon)
+        layout.addLayout(content_layout)
+        layout.addStretch()
+        layout.addWidget(view_progress_btn)
+        
+        # Store widget reference for tracking
+        self.youtube_status_widgets[playlist_id] = status_widget
+        
+        # Add status widget at the top (multiple widgets will stack)
+        self.youtube_content_layout.insertWidget(len(self.youtube_status_widgets) - 1, status_widget)
+        
+        # Add stretch only if this is the first widget
+        if len(self.youtube_status_widgets) == 1:
+            self.youtube_content_layout.addStretch()  # Fill remaining space
+    
+    def open_youtube_download_modal(self, playlist_id):
+        """Open the YouTube download modal when View Progress button is clicked"""
+        print(f"🔍 Attempting to open modal for playlist_id: {playlist_id}")
+        print(f"🔍 Available modals: {list(self.active_youtube_download_modals.keys())}")
+        
+        if playlist_id in self.active_youtube_download_modals:
+            modal = self.active_youtube_download_modals[playlist_id]
+            print(f"✅ Found modal, opening...")
+            modal.show()
+            modal.raise_()
+            modal.activateWindow()
+        else:
+            print(f"❌ No modal found for playlist_id: {playlist_id}")
     
     def create_right_sidebar(self):
         section = QWidget()
@@ -3271,6 +4153,862 @@ class SyncPage(QWidget):
             else:
                 self.playlist_layout.removeItem(item)
     
+    def parse_youtube_playlist(self):
+        """Parse YouTube playlist URL and open the download missing tracks modal"""
+        url = self.youtube_url_input.text().strip()
+        
+        if not url:
+            self.show_youtube_error("Please enter a YouTube Music playlist URL")
+            return
+        
+        # Basic URL validation
+        if not ('youtube.com' in url or 'youtu.be' in url):
+            self.show_youtube_error("Please enter a valid YouTube Music playlist URL")
+            return
+        
+        # Check if this URL is already being processed
+        if url in self.active_youtube_processes:
+            existing_modal = self.active_youtube_processes[url]
+            if existing_modal and not existing_modal.isHidden():
+                # Modal is still open - bring it to front
+                existing_modal.show()
+                existing_modal.raise_()
+                existing_modal.activateWindow()
+                
+                # Determine modal type for better error message
+                modal_type = "discovery" if isinstance(existing_modal, YouTubeDownloadMissingTracksModal) else "download"
+                self.show_youtube_error(f"This playlist is already being processed in the {modal_type} phase. The existing modal has been brought to the front.")
+                return
+            elif existing_modal:
+                # Modal exists but is hidden - reopen it
+                existing_modal.show()
+                existing_modal.raise_()
+                existing_modal.activateWindow()
+                return
+            else:
+                # Stale reference - clean it up
+                del self.active_youtube_processes[url]
+        
+        # Show loading state
+        self.parse_btn.setEnabled(False)
+        self.parse_btn.setText("Parsing...")
+        
+        # Show modal immediately with loading state
+        self.show_youtube_modal_loading(url)
+        
+        # Store URL for later use in completion handlers
+        self.current_youtube_url = url
+        
+        # Start parsing in a separate thread to avoid blocking UI
+        self.youtube_worker = YouTubeParsingWorker(url)
+        self.youtube_worker.finished.connect(self.on_youtube_parsing_finished)
+        self.youtube_worker.error.connect(self.on_youtube_parsing_error)
+        self.youtube_worker.start()
+    
+    def show_youtube_modal_loading(self, url):
+        """Show the YouTube modal immediately with loading state"""
+        # Create a dummy playlist item widget (required by modal)
+        dummy_playlist_item = type('DummyPlaylistItem', (), {
+            'playlist_name': "Loading...",
+            'track_count': 0,
+            'download_modal': None,
+            'show_operation_status': lambda self, status_text="View Progress": None,
+            'hide_operation_status': lambda self: None
+        })()
+        
+        # Create empty playlist for loading state
+        empty_playlist = type('Playlist', (), {
+            'name': f"Parsing YouTube Playlist...",
+            'tracks': [],
+            'total_tracks': 0
+        })()
+        
+        # Open the modal in loading state
+        print("🚀 Opening YouTubeDownloadMissingTracksModal in loading state...")
+        self.current_youtube_modal = YouTubeDownloadMissingTracksModal(
+            empty_playlist, 
+            dummy_playlist_item,
+            self, 
+            self.downloads_page
+        )
+        
+        # Store URL in modal for cleanup purposes
+        self.current_youtube_modal.youtube_url = url
+        
+        # Register this modal for the URL to prevent duplicates
+        self.active_youtube_processes[url] = self.current_youtube_modal
+        
+        # Show a loading message in the modal
+        self.current_youtube_modal.show_loading_state()
+        self.current_youtube_modal.show()
+    
+    def on_youtube_parsing_finished(self, playlist):
+        """Handle successful YouTube playlist parsing"""
+        try:
+            print(f"✅ Successfully parsed YouTube playlist: {playlist.name}")
+            print(f"🔍 Playlist ID: {playlist.id}")
+            
+            # Reset button state
+            self.parse_btn.setEnabled(True)
+            self.parse_btn.setText("Parse Playlist")
+            
+            # Update the existing modal with the parsed playlist data
+            print(f"🔍 Has current_youtube_modal: {hasattr(self, 'current_youtube_modal') and self.current_youtube_modal is not None}")
+            if hasattr(self, 'current_youtube_modal') and self.current_youtube_modal:
+                print(f"🔍 Calling populate_with_playlist_data...")
+                self.current_youtube_modal.populate_with_playlist_data(playlist)
+            else:
+                # Fallback: create new modal if loading modal wasn't created
+                dummy_playlist_item = type('DummyPlaylistItem', (), {
+                    'playlist_name': playlist.name,
+                    'track_count': len(playlist.tracks),
+                    'download_modal': None,
+                    'show_operation_status': lambda self, status_text="View Progress": None,
+                    'hide_operation_status': lambda self: None
+                })()
+                
+                modal = YouTubeDownloadMissingTracksModal(
+                    playlist, 
+                    dummy_playlist_item, 
+                    self, 
+                    self.downloads_page
+                )
+                
+                # Store URL and register in tracking
+                if hasattr(self, 'current_youtube_url'):
+                    modal.youtube_url = self.current_youtube_url
+                    self.active_youtube_processes[self.current_youtube_url] = modal
+                
+                modal.exec()
+            
+            # Clear the URL input after successful parsing
+            self.youtube_url_input.clear()
+            
+        except Exception as e:
+            print(f"❌ Error handling YouTube parsing result: {e}")
+            self.on_youtube_parsing_error(str(e))
+    
+    def on_youtube_parsing_error(self, error_message):
+        """Handle YouTube playlist parsing error"""
+        print(f"❌ YouTube parsing error: {error_message}")
+        
+        # Clean up URL tracking on error
+        if hasattr(self, 'current_youtube_url') and self.current_youtube_url in self.active_youtube_processes:
+            print(f"🧹 Cleaning up URL tracking on error for: {self.current_youtube_url}")
+            del self.active_youtube_processes[self.current_youtube_url]
+        
+        # Reset button state
+        self.parse_btn.setEnabled(True)
+        self.parse_btn.setText("Parse Playlist")
+        
+        # Show error message
+        self.show_youtube_error(f"Failed to parse playlist: {error_message}")
+    
+    def show_youtube_error(self, message):
+        """Show error message for YouTube functionality"""
+        # You can enhance this with a proper toast notification if available
+        if hasattr(self, 'toast_manager') and self.toast_manager:
+            self.toast_manager.show_toast(message, ToastType.ERROR)
+        else:
+            print(f"⚠️ YouTube Error: {message}")
+            # Fallback to a simple message box
+            msg_box = QMessageBox(self)
+            msg_box.setIcon(QMessageBox.Icon.Warning)
+            msg_box.setWindowTitle("YouTube Playlist Error")
+            msg_box.setText(message)
+            msg_box.exec()
+
+
+class OptimizedSpotifyDiscoveryWorkerSignals(QObject):
+    track_discovered = pyqtSignal(int, object, str)  # row, spotify_track, status
+    progress_updated = pyqtSignal(int)  # current progress
+    finished = pyqtSignal(int)  # total successful discoveries
+
+class OptimizedSpotifyDiscoveryWorker(QRunnable):
+    def __init__(self, youtube_tracks, spotify_client, matching_engine):
+        super().__init__()
+        self.youtube_tracks = youtube_tracks
+        self.spotify_client = spotify_client
+        self.matching_engine = matching_engine
+        self.signals = OptimizedSpotifyDiscoveryWorkerSignals()
+        self.is_cancelled = False
+    
+    def cancel(self):
+        self.is_cancelled = True
+    
+    def run(self):
+        """Discover Spotify tracks for YouTube tracks with optimized timing"""
+        successful_discoveries = 0
+        
+        for i, youtube_track in enumerate(self.youtube_tracks):
+            if self.is_cancelled:
+                break
+                
+            try:
+                # Create search query from YouTube track data
+                if youtube_track.artists:
+                    query = f"{youtube_track.artists[0]} {youtube_track.name}"
+                else:
+                    query = youtube_track.name
+                
+                # Debug logging for search queries
+                print(f"🔍 Spotify search query: '{query}' (track: '{youtube_track.name}', artist: '{youtube_track.artists[0] if youtube_track.artists else 'None'}')")
+                
+                # Search Spotify - get more results for validation
+                spotify_results = self.spotify_client.search_tracks(query, limit=10)
+                
+                # Debug logging for search results
+                if spotify_results:
+                    print(f"📊 Found {len(spotify_results)} Spotify results:")
+                    for idx, result in enumerate(spotify_results[:3]):  # Show first 3
+                        album_name = result.album if isinstance(result.album, str) else getattr(result.album, 'name', 'Unknown')
+                        print(f"   {idx+1}. '{result.name}' by '{result.artists[0] if result.artists else 'Unknown'}' from '{album_name}'")
+                else:
+                    print(f"❌ No Spotify results for query: '{query}'")
+                
+                if spotify_results:
+                    # Use matching engine to find the best validated match
+                    best_track = self.find_best_validated_match(youtube_track, spotify_results)
+                    if best_track:
+                        self.signals.track_discovered.emit(i, best_track, "found")
+                        successful_discoveries += 1
+                    else:
+                        # Try swapping artist and track name (sometimes YouTube data is swapped)
+                        best_track = self.retry_with_swapped_fields(youtube_track)
+                        if best_track:
+                            print(f"🔄 Found match after swapping artist/track for: '{youtube_track.name}' by '{youtube_track.artists[0] if youtube_track.artists else 'Unknown'}'")
+                            self.signals.track_discovered.emit(i, best_track, "found")
+                            successful_discoveries += 1
+                        else:
+                            # Third resort: try with uncleaned original data
+                            best_track = self.retry_with_uncleaned_data(youtube_track)
+                            if best_track:
+                                print(f"🔍 Found match with uncleaned data for: '{youtube_track.name}' by '{youtube_track.artists[0] if youtube_track.artists else 'Unknown'}'")
+                                self.signals.track_discovered.emit(i, best_track, "found")
+                                successful_discoveries += 1
+                            else:
+                                # Final resort: try with raw title + raw artist combined
+                                best_track = self.retry_with_raw_title_and_artist(youtube_track)
+                                if best_track:
+                                    print(f"🎯 Found match with title+artist fallback for: '{youtube_track.name}' by '{youtube_track.artists[0] if youtube_track.artists else 'Unknown'}'")
+                                    self.signals.track_discovered.emit(i, best_track, "found")
+                                    successful_discoveries += 1
+                                else:
+                                    # No result met confidence threshold even after all retries
+                                    self.signals.track_discovered.emit(i, None, "low_confidence")
+                else:
+                    # No Spotify search results found - try swapping before giving up
+                    best_track = self.retry_with_swapped_fields(youtube_track)
+                    if best_track:
+                        print(f"🔄 Found match after swapping artist/track for: '{youtube_track.name}' by '{youtube_track.artists[0] if youtube_track.artists else 'Unknown'}'")
+                        self.signals.track_discovered.emit(i, best_track, "found")
+                        successful_discoveries += 1
+                    else:
+                        # Third resort: try with uncleaned original data
+                        best_track = self.retry_with_uncleaned_data(youtube_track)
+                        if best_track:
+                            print(f"🔍 Found match with uncleaned data for: '{youtube_track.name}' by '{youtube_track.artists[0] if youtube_track.artists else 'Unknown'}'")
+                            self.signals.track_discovered.emit(i, best_track, "found")
+                            successful_discoveries += 1
+                        else:
+                            # Final resort: try with raw title + raw artist combined
+                            best_track = self.retry_with_raw_title_and_artist(youtube_track)
+                            if best_track:
+                                print(f"🎯 Found match with title+artist fallback for: '{youtube_track.name}' by '{youtube_track.artists[0] if youtube_track.artists else 'Unknown'}'")
+                                self.signals.track_discovered.emit(i, best_track, "found")
+                                successful_discoveries += 1
+                            else:
+                                self.signals.track_discovered.emit(i, None, "not_found")
+            
+            except Exception as e:
+                print(f"❌ Error searching Spotify for track {i}: {e}")
+                self.signals.track_discovered.emit(i, None, f"error: {str(e)}")
+            
+            # Update progress
+            self.signals.progress_updated.emit(i + 1)
+            
+            # Reduced delay for faster processing - Spotify client has built-in rate limiting
+            if not self.is_cancelled:
+                import time
+                time.sleep(0.15)  # 150ms between requests
+        
+        self.signals.finished.emit(successful_discoveries)
+    
+    def find_best_validated_match(self, youtube_track, spotify_results):
+        """Find the best Spotify match using the matching engine for validation"""
+        if not spotify_results:
+            return None
+        
+        # Clean YouTube track name for better matching (already cleaned in parsing, but ensure consistency)
+        cleaned_youtube_name = self.clean_for_youtube_matching(youtube_track.name)
+        
+        # Create a mock Spotify track from YouTube data for comparison
+        youtube_as_spotify = type('Track', (), {
+            'name': cleaned_youtube_name,
+            'artists': youtube_track.artists if youtube_track.artists else ["Unknown"],
+            'album': getattr(youtube_track, 'album', 'Unknown Album'),
+            'duration_ms': getattr(youtube_track, 'duration_ms', 0)
+        })()
+        
+        best_match = None
+        best_confidence = 0.0
+        best_match_type = "no_match"
+        
+        # Score each Spotify result using your matching engine
+        for spotify_track in spotify_results:
+            try:
+                # Clean the Spotify track name for better YouTube-to-Spotify matching
+                cleaned_spotify_track = self.create_cleaned_spotify_track_for_matching(spotify_track)
+                
+                # Debug logging for track cleaning
+                if cleaned_spotify_track.name != spotify_track.name:
+                    print(f"🧹 Cleaned Spotify track: '{spotify_track.name}' -> '{cleaned_spotify_track.name}'")
+                
+                # Use your matching engine to calculate confidence
+                confidence, match_type = self.matching_engine.calculate_match_confidence(
+                    youtube_as_spotify, 
+                    self.convert_spotify_to_plex_format(cleaned_spotify_track)
+                )
+                
+                # Apply album preference bonus (your existing logic)
+                album_bonus = self.calculate_album_preference_bonus(spotify_track)
+                adjusted_confidence = confidence + album_bonus
+                
+                if adjusted_confidence > best_confidence:
+                    best_confidence = adjusted_confidence
+                    best_match = spotify_track
+                    best_match_type = match_type
+                    
+            except Exception as e:
+                print(f"⚠️ Error calculating match confidence: {e}")
+                continue
+        
+        # Apply your matching engine's confidence threshold (0.8 for high confidence)
+        confidence_threshold = 0.75  # Slightly lower for YouTube discovery
+        
+        if best_confidence >= confidence_threshold:
+            print(f"✅ Validated match: '{best_match.name}' by '{best_match.artists[0]}' (confidence: {best_confidence:.3f}, type: {best_match_type})")
+            return best_match
+        else:
+            print(f"❌ No high-confidence match found. Best was {best_confidence:.3f} < {confidence_threshold}")
+            if best_match:
+                print(f"   Best candidate was: '{best_match.name}' by '{best_match.artists[0] if best_match.artists else 'Unknown'}'")
+            return None
+    
+    def convert_spotify_to_plex_format(self, spotify_track):
+        """Convert Spotify track to Plex format for matching engine compatibility"""
+        return type('PlexTrackInfo', (), {
+            'title': spotify_track.name,
+            'artist': spotify_track.artists[0] if spotify_track.artists else "Unknown",
+            'album': spotify_track.album if isinstance(spotify_track.album, str) else getattr(spotify_track.album, 'name', 'Unknown Album'),
+            'duration': getattr(spotify_track, 'duration_ms', 0)
+        })()
+    
+    def calculate_album_preference_bonus(self, spotify_track):
+        """Calculate album preference bonus (simplified version of your existing logic)"""
+        try:
+            album_info = spotify_track.album if hasattr(spotify_track, 'album') else None
+            if album_info and not isinstance(album_info, str):
+                album_type = getattr(album_info, 'album_type', album_info.get('album_type', 'unknown') if hasattr(album_info, 'get') else 'unknown')
+                
+                if isinstance(album_type, str):
+                    if album_type.lower() == 'album':
+                        return 0.05  # Small bonus for albums
+                    elif album_type.lower() == 'single':
+                        return -0.02  # Small penalty for singles
+                    elif album_type.lower() == 'compilation':
+                        return 0.02  # Small bonus for compilations
+            
+            return 0.0
+        except:
+            return 0.0
+    
+    def choose_best_spotify_match(self, spotify_results):
+        """Choose the best Spotify track from search results, preferring album versions"""
+        if not spotify_results:
+            return None
+            
+        # If only one result, return it
+        if len(spotify_results) == 1:
+            return spotify_results[0]
+        
+        # Score each track based on preference criteria
+        scored_tracks = []
+        
+        for track in spotify_results:
+            score = 0
+            
+            # 1. Prefer album tracks over singles (highest priority)
+            try:
+                # Access album type through the album attribute
+                album_info = track.album if hasattr(track, 'album') else None
+                if album_info:
+                    # Handle both string and dict album info
+                    if isinstance(album_info, str):
+                        # If album is just a string name, we can't determine type
+                        score += 50  # Medium score for unknown type
+                    else:
+                        # Try to get album_type from album object or dict
+                        album_type = getattr(album_info, 'album_type', album_info.get('album_type', 'unknown') if hasattr(album_info, 'get') else 'unknown')
+                        
+                        if isinstance(album_type, str):
+                            if album_type.lower() == 'album':
+                                score += 100  # Strong preference for albums
+                            elif album_type.lower() == 'single':
+                                score += 20   # Lower preference for singles
+                            elif album_type.lower() == 'compilation':
+                                score += 60   # Medium preference for compilations
+                        else:
+                            score += 50  # Unknown type gets medium score
+                else:
+                    score += 30  # No album info gets low score
+            except Exception as e:
+                print(f"⚠️ Error accessing album type: {e}")
+                score += 30  # Error case gets low score
+            
+            # 2. Prefer tracks with more total tracks in album (indicates full album)
+            try:
+                album_info = track.album if hasattr(track, 'album') else None
+                if album_info and not isinstance(album_info, str):
+                    total_tracks = getattr(album_info, 'total_tracks', album_info.get('total_tracks', 0) if hasattr(album_info, 'get') else 0)
+                    
+                    if total_tracks > 10:
+                        score += 50  # Full album
+                    elif total_tracks > 5:
+                        score += 30  # EP
+                    elif total_tracks > 1:
+                        score += 10  # Multi-track release
+                    # Singles (1 track) get no bonus
+            except Exception as e:
+                print(f"⚠️ Error accessing total_tracks: {e}")
+                pass
+            
+            # 3. Consider popularity as tiebreaker
+            try:
+                popularity = getattr(track, 'popularity', 0)
+                score += popularity * 0.1  # Small influence from popularity
+            except:
+                pass
+            
+            # 4. Prefer tracks with explicit marking if available (often more complete metadata)
+            try:
+                if hasattr(track, 'explicit') and track.explicit is not None:
+                    score += 5
+            except:
+                pass
+            
+            scored_tracks.append((score, track))
+            
+        # Sort by score (highest first) and return the best match
+        scored_tracks.sort(key=lambda x: x[0], reverse=True)
+        best_track = scored_tracks[0][1]
+        
+        # Debug logging for first few tracks
+        if len(self.youtube_tracks) <= 5 or len(scored_tracks) > 1:
+            try:
+                album_name = best_track.album if isinstance(best_track.album, str) else getattr(best_track.album, 'name', 'Unknown Album')
+                print(f"🎯 Chose: '{best_track.name}' from '{album_name}' (score: {scored_tracks[0][0]:.1f})")
+                if len(scored_tracks) > 1:
+                    alt_album = scored_tracks[1][1].album if isinstance(scored_tracks[1][1].album, str) else getattr(scored_tracks[1][1].album, 'name', 'Unknown Album')
+                    print(f"   vs. '{scored_tracks[1][1].name}' from '{alt_album}' (score: {scored_tracks[1][0]:.1f})")
+            except:
+                pass  # Don't let debug logging crash the worker
+        
+        return best_track
+    
+    def clean_for_youtube_matching(self, track_name):
+        """Clean track name for YouTube-to-Spotify matching"""
+        if not track_name:
+            return ""
+        
+        cleaned = track_name
+        
+        # Remove all parentheses content for YouTube matching
+        # This handles cases like "MOUSTACHE (Feat. Netta)" -> "MOUSTACHE"
+        cleaned = re.sub(r'\s*\([^)]*\)', '', cleaned)
+        
+        # Remove brackets content
+        cleaned = re.sub(r'\s*\[[^\]]*\]', '', cleaned)
+        
+        # Remove extra whitespace and return
+        return cleaned.strip()
+    
+    def create_cleaned_spotify_track_for_matching(self, spotify_track):
+        """Create a cleaned version of Spotify track for better YouTube matching"""
+        # Clean the track name 
+        cleaned_name = self.clean_for_youtube_matching(spotify_track.name)
+        
+        # Create a copy of the track with cleaned name
+        cleaned_track = type('Track', (), {
+            'id': getattr(spotify_track, 'id', ''),
+            'name': cleaned_name,  # Use cleaned name
+            'artists': spotify_track.artists,
+            'album': spotify_track.album,
+            'duration_ms': getattr(spotify_track, 'duration_ms', 0),
+            'popularity': getattr(spotify_track, 'popularity', 0),
+            'preview_url': getattr(spotify_track, 'preview_url', None),
+            'external_urls': getattr(spotify_track, 'external_urls', None)
+        })()
+        
+        return cleaned_track
+    
+    def retry_with_swapped_fields(self, youtube_track):
+        """Retry search with artist and track names swapped (handles YouTube data inconsistencies)"""
+        if not youtube_track.artists or not youtube_track.artists[0]:
+            return None
+        
+        try:
+            # Create swapped query: use track name as artist and artist as track
+            swapped_artist = youtube_track.name
+            swapped_track = youtube_track.artists[0]
+            
+            # Clean the swapped values
+            swapped_artist_clean = clean_youtube_artist(swapped_artist)
+            swapped_track_clean = clean_youtube_track_title(swapped_track, swapped_artist_clean)
+            
+            swapped_query = f"{swapped_artist_clean} {swapped_track_clean}"
+            
+            print(f"🔄 Retrying with swapped fields: '{swapped_query}' (was '{youtube_track.artists[0]} {youtube_track.name}')")
+            
+            # Search Spotify with swapped query
+            spotify_results = self.spotify_client.search_tracks(swapped_query, limit=10)
+            
+            if spotify_results:
+                # Create a swapped YouTube track for matching
+                swapped_youtube_track = type('Track', (), {
+                    'name': swapped_track_clean,
+                    'artists': [swapped_artist_clean],
+                    'album': getattr(youtube_track, 'album', 'Unknown Album'),
+                    'duration_ms': getattr(youtube_track, 'duration_ms', 0)
+                })()
+                
+                # Use matching engine to validate the swapped results
+                best_track = self.find_best_validated_match(swapped_youtube_track, spotify_results)
+                return best_track
+            
+            return None
+            
+        except Exception as e:
+            print(f"❌ Error in retry with swapped fields: {e}")
+            return None
+    
+    def retry_with_uncleaned_data(self, youtube_track):
+        """Last resort: retry search with original uncleaned YouTube data"""
+        # Check if we have raw uncleaned data
+        if not hasattr(youtube_track, 'raw_title') or not hasattr(youtube_track, 'raw_uploader'):
+            print("🔍 No raw data available for uncleaned fallback search")
+            return None
+        
+        try:
+            # Use completely uncleaned data
+            raw_title = youtube_track.raw_title
+            raw_uploader = youtube_track.raw_uploader
+            
+            # Create query with minimal cleaning - just basic text normalization
+            uncleaned_query = f"{raw_uploader} {raw_title}".strip()
+            
+            print(f"🔍 Last resort: Trying uncleaned data: '{uncleaned_query}' (was '{youtube_track.artists[0]} {youtube_track.name}')")
+            
+            # Search Spotify with uncleaned query
+            spotify_results = self.spotify_client.search_tracks(uncleaned_query, limit=10)
+            
+            if spotify_results:
+                print(f"📊 Found {len(spotify_results)} results with uncleaned data")
+                
+                # Create an uncleaned YouTube track for comparison
+                uncleaned_youtube_track = type('Track', (), {
+                    'name': raw_title,  # Use raw title
+                    'artists': [raw_uploader],  # Use raw uploader  
+                    'album': getattr(youtube_track, 'album', 'Unknown Album'),
+                    'duration_ms': getattr(youtube_track, 'duration_ms', 0)
+                })()
+                
+                # Use matching engine to validate results with lower confidence threshold
+                # Note: We don't clean Spotify tracks here since we're using raw data
+                best_match = None
+                best_confidence = 0.0
+                
+                for spotify_track in spotify_results:
+                    try:
+                        # Use original Spotify track names (no cleaning) for raw data matching
+                        confidence, match_type = self.matching_engine.calculate_match_confidence(
+                            uncleaned_youtube_track,
+                            self.convert_spotify_to_plex_format(spotify_track)
+                        )
+                        
+                        if confidence > best_confidence:
+                            best_confidence = confidence
+                            best_match = spotify_track
+                    except Exception as e:
+                        print(f"⚠️ Error calculating confidence for uncleaned fallback: {e}")
+                        continue
+                
+                # Use lower confidence threshold for uncleaned fallback (0.6 instead of 0.75)
+                confidence_threshold = 0.6
+                
+                if best_confidence >= confidence_threshold:
+                    print(f"✅ Uncleaned fallback match: '{best_match.name}' by '{best_match.artists[0]}' (confidence: {best_confidence:.3f})")
+                    return best_match
+                else:
+                    print(f"❌ Uncleaned fallback: Best confidence {best_confidence:.3f} < {confidence_threshold}")
+            
+            return None
+            
+        except Exception as e:
+            print(f"❌ Error in retry with uncleaned data: {e}")
+            return None
+    
+    def retry_with_raw_title_and_artist(self, youtube_track):
+        """Final fallback: search with raw title + raw artist as combined query"""
+        # Check if we have raw uncleaned data
+        if not hasattr(youtube_track, 'raw_title') or not hasattr(youtube_track, 'raw_uploader'):
+            print("🔍 No raw data available for title+artist fallback search")
+            return None
+        
+        try:
+            raw_title = youtube_track.raw_title
+            raw_uploader = youtube_track.raw_uploader
+            
+            # Create a combined query with raw title and raw artist
+            # This is different from the previous fallback which used "uploader title"
+            # This uses "title artist" order which sometimes works better
+            combined_query = f"{raw_title} {raw_uploader}".strip()
+            
+            print(f"🔍 Final fallback: Trying raw title+artist: '{combined_query}'")
+            
+            # Search Spotify with the combined query
+            spotify_results = self.spotify_client.search_tracks(combined_query, limit=10)
+            
+            if spotify_results:
+                print(f"📊 Found {len(spotify_results)} results with title+artist search")
+                
+                # Create a track object for matching with raw data in title+artist order
+                combined_youtube_track = type('Track', (), {
+                    'name': raw_title,
+                    'artists': [raw_uploader],
+                    'album': getattr(youtube_track, 'album', 'Unknown Album'),
+                    'duration_ms': getattr(youtube_track, 'duration_ms', 0)
+                })()
+                
+                # Use matching engine with even lower confidence threshold
+                best_match = None
+                best_confidence = 0.0
+                
+                for spotify_track in spotify_results:
+                    try:
+                        confidence, match_type = self.matching_engine.calculate_match_confidence(
+                            combined_youtube_track,
+                            self.convert_spotify_to_plex_format(spotify_track)
+                        )
+                        
+                        if confidence > best_confidence:
+                            best_confidence = confidence
+                            best_match = spotify_track
+                    except Exception as e:
+                        print(f"⚠️ Error calculating confidence for title+artist fallback: {e}")
+                        continue
+                
+                # Use very low confidence threshold for this final attempt (0.5 instead of 0.6)
+                confidence_threshold = 0.5
+                
+                if best_confidence >= confidence_threshold:
+                    print(f"✅ Title+artist fallback match: '{best_match.name}' by '{best_match.artists[0]}' (confidence: {best_confidence:.3f})")
+                    return best_match
+                else:
+                    print(f"❌ Title+artist fallback: Best confidence {best_confidence:.3f} < {confidence_threshold}")
+            else:
+                print(f"❌ No results found for title+artist query: '{combined_query}'")
+            
+            return None
+            
+        except Exception as e:
+            print(f"❌ Error in retry with title+artist: {e}")
+            return None
+
+class SpotifyDiscoveryManagerSignals(QObject):
+    track_discovered = pyqtSignal(int, object, str)  # row, spotify_track, status
+    progress_updated = pyqtSignal(int)  # current progress
+    all_finished = pyqtSignal(int)  # total successful discoveries
+
+class SpotifyDiscoveryWorker(QRunnable):
+    def __init__(self, track_batch, spotify_client, worker_id, manager_signals):
+        super().__init__()
+        self.track_batch = track_batch  # List of (index, youtube_track) tuples
+        self.spotify_client = spotify_client
+        self.worker_id = worker_id
+        self.signals = manager_signals
+        self.is_cancelled = False
+    
+    def cancel(self):
+        self.is_cancelled = True
+    
+    def run(self):
+        """Process a batch of tracks with staggered delays to avoid rate limits"""
+        import time
+        
+        # Stagger start times to spread out API calls
+        initial_delay = self.worker_id * 0.2  # 200ms stagger between workers
+        time.sleep(initial_delay)
+        
+        successful_discoveries = 0
+        
+        for track_index, youtube_track in self.track_batch:
+            if self.is_cancelled:
+                break
+                
+            try:
+                # Create search query from YouTube track data
+                if youtube_track.artists:
+                    query = f"{youtube_track.artists[0]} {youtube_track.name}"
+                else:
+                    query = youtube_track.name
+                
+                # Search Spotify with rate limiting (built into spotify_client)
+                spotify_results = self.spotify_client.search_tracks(query, limit=10)
+                
+                if spotify_results:
+                    # Choose the best match preferring album versions
+                    best_track = choose_best_spotify_match(spotify_results)
+                    self.signals.track_discovered.emit(track_index, best_track, "found")
+                    successful_discoveries += 1
+                else:
+                    # No Spotify match found
+                    self.signals.track_discovered.emit(track_index, None, "not_found")
+            
+            except Exception as e:
+                print(f"❌ Worker {self.worker_id} error searching Spotify for track {track_index}: {e}")
+                self.signals.track_discovered.emit(track_index, None, f"error: {str(e)}")
+            
+            # Update progress
+            self.signals.progress_updated.emit(track_index)
+            
+            # Distributed rate limiting - longer delay since we have multiple workers
+            if not self.is_cancelled:
+                time.sleep(0.5)  # 500ms delay with 3 workers = ~6 requests/second total
+        
+        print(f"🎵 Worker {self.worker_id} completed: {successful_discoveries} discoveries")
+
+class SpotifyDiscoveryManager:
+    def __init__(self, youtube_tracks, spotify_client, num_workers=3):
+        self.youtube_tracks = youtube_tracks
+        self.spotify_client = spotify_client
+        self.num_workers = num_workers
+        self.signals = SpotifyDiscoveryManagerSignals()
+        self.workers = []
+        self.completed_workers = 0
+        self.total_successful = 0
+        self.processed_tracks = set()
+    
+    def start_discovery(self):
+        """Start concurrent Spotify discovery with multiple workers"""
+        print(f"🚀 Starting Spotify discovery with {self.num_workers} concurrent workers")
+        
+        # Divide tracks among workers
+        track_batches = self.distribute_tracks()
+        
+        # Create and start workers
+        for worker_id, batch in enumerate(track_batches):
+            worker = SpotifyDiscoveryWorker(batch, self.spotify_client, worker_id, self.signals)
+            
+            # Connect to progress tracking
+            worker.signals.track_discovered.connect(self.on_track_discovered)
+            worker.signals.progress_updated.connect(self.on_progress_updated)
+            
+            self.workers.append(worker)
+            QThreadPool.globalInstance().start(worker)
+    
+    def distribute_tracks(self):
+        """Distribute tracks evenly among workers"""
+        total_tracks = len(self.youtube_tracks)
+        tracks_per_worker = total_tracks // self.num_workers
+        remainder = total_tracks % self.num_workers
+        
+        batches = []
+        start_idx = 0
+        
+        for worker_id in range(self.num_workers):
+            # Add one extra track to first 'remainder' workers
+            batch_size = tracks_per_worker + (1 if worker_id < remainder else 0)
+            end_idx = start_idx + batch_size
+            
+            # Create batch with (index, track) tuples
+            batch = [(i, self.youtube_tracks[i]) for i in range(start_idx, end_idx)]
+            batches.append(batch)
+            
+            print(f"📦 Worker {worker_id}: tracks {start_idx}-{end_idx-1} ({len(batch)} tracks)")
+            start_idx = end_idx
+        
+        return batches
+    
+    def on_track_discovered(self, track_index, spotify_track, status):
+        """Handle track discovery from any worker"""
+        self.processed_tracks.add(track_index)
+        if status == "found":
+            self.total_successful += 1
+        
+        # Forward to UI
+        self.signals.track_discovered.emit(track_index, spotify_track, status)
+    
+    def on_progress_updated(self, track_index):
+        """Handle progress updates"""
+        # Update overall progress based on completed tracks
+        completed_count = len(self.processed_tracks)
+        self.signals.progress_updated.emit(completed_count)
+        
+        # Check if all tracks are processed
+        if completed_count >= len(self.youtube_tracks):
+            self.signals.all_finished.emit(self.total_successful)
+    
+    def cancel_all(self):
+        """Cancel all running workers"""
+        for worker in self.workers:
+            worker.cancel()
+    
+def choose_best_spotify_match(spotify_results):
+    """Choose the best Spotify track from search results, preferring album versions"""
+    if not spotify_results:
+        return None
+        
+    # If only one result, return it
+    if len(spotify_results) == 1:
+        return spotify_results[0]
+    
+    # For now, just return the first result to avoid the complex scoring
+    # TODO: Re-implement the scoring logic once we identify the attribute access issue
+    return spotify_results[0]
+
+class YouTubeParsingWorker(QThread):
+    """Worker thread for parsing YouTube playlists without blocking the UI"""
+    finished = pyqtSignal(object)  # Emits the playlist object
+    error = pyqtSignal(str)  # Emits error message
+    
+    def __init__(self, url):
+        super().__init__()
+        self.url = url
+    
+    def run(self):
+        """Parse the YouTube playlist in a separate thread"""
+        try:
+            print(f"🎵 Starting YouTube playlist parsing for: {self.url}")
+            
+            # Parse tracks using yt-dlp
+            tracks_data, playlist_title = parse_youtube_playlist(self.url)
+            
+            if not tracks_data:
+                self.error.emit("No tracks found in the playlist")
+                return
+            
+            # Create playlist object with actual title
+            playlist = create_youtube_playlist_object(tracks_data, self.url, playlist_title)
+            
+            print(f"✅ Successfully created playlist with {len(playlist.tracks)} tracks")
+            self.finished.emit(playlist)
+            
+        except Exception as e:
+            error_message = str(e)
+            print(f"❌ YouTube parsing worker error: {error_message}")
+            self.error.emit(error_message)
+
 
 class ManualMatchModal(QDialog):
     """
@@ -3793,7 +5531,7 @@ class ManualMatchModal(QDialog):
 class DownloadMissingTracksModal(QDialog):
     """Enhanced modal for downloading missing tracks with live progress tracking"""
     process_finished = pyqtSignal()
-    def __init__(self, playlist, playlist_item, parent_page, downloads_page):
+    def __init__(self, playlist, playlist_item, parent_page, downloads_page, is_youtube_workflow=False):
         super().__init__(parent_page)
         self.playlist = playlist
         self.playlist_item = playlist_item
@@ -3802,6 +5540,7 @@ class DownloadMissingTracksModal(QDialog):
         self.downloads_page = downloads_page
         self.matching_engine = MusicMatchingEngine()
         self.wishlist_service = get_wishlist_service()
+        self.is_youtube_workflow = is_youtube_workflow  # Flag to track if this is from YouTube discovery
         
         # State tracking
         self.total_tracks = len(playlist.tracks)
@@ -3940,6 +5679,15 @@ class DownloadMissingTracksModal(QDialog):
         
         button_section = self.create_buttons()
         main_layout.addWidget(button_section)
+    
+    def is_downloading(self):
+        """Check if any downloads are currently in progress"""
+        return (self.download_in_progress or 
+                not self.analysis_complete or
+                len(self.active_workers) > 0 or
+                (hasattr(self, 'tracks_to_download_count') and 
+                 hasattr(self, 'downloaded_tracks_count') and 
+                 self.downloaded_tracks_count < self.tracks_to_download_count))
         
     def create_compact_top_section(self):
         """Create compact top section with header and dashboard combined"""
@@ -4331,9 +6079,11 @@ class DownloadMissingTracksModal(QDialog):
 
     def on_begin_search_clicked(self):
         """Handle Begin Search button click - starts Plex analysis"""
-        # --- FIX: Trigger the UI change on the main page ---
-        # This is the correct point to signal that the process has started.
-        self.parent_page.on_download_process_started(self.playlist.id, self.playlist_item)
+        # Only update refresh button state for Spotify workflows, not YouTube workflows
+        if not self.is_youtube_workflow:
+            # --- FIX: Trigger the UI change on the main page ---
+            # This is the correct point to signal that the process has started.
+            self.parent_page.on_download_process_started(self.playlist.id, self.playlist_item)
 
         self.begin_search_btn.hide()
         self.cancel_btn.show()
@@ -4387,6 +6137,13 @@ class DownloadMissingTracksModal(QDialog):
             # Handle case where no tracks are missing
             self.download_in_progress = False # Mark process as finished
             self.cancel_btn.hide()
+            
+            # If this is a YouTube workflow, clean up status widget (no downloads needed)
+            if self.is_youtube_workflow and hasattr(self.parent_page, 'show_youtube_placeholder'):
+                self.parent_page.show_youtube_placeholder()
+                if self.playlist.id in self.parent_page.active_youtube_download_modals:
+                    del self.parent_page.active_youtube_download_modals[self.playlist.id]
+            
             # The modal now stays open.
             # The process_finished signal is still emitted to unlock the main UI.
             self.process_finished.emit() 
@@ -4835,6 +6592,12 @@ class DownloadMissingTracksModal(QDialog):
             print("🎉 All downloads completed!")
             self.cancel_btn.hide()
             
+            # If this is a YouTube workflow, clean up status widget
+            if self.is_youtube_workflow and hasattr(self.parent_page, 'show_youtube_placeholder'):
+                self.parent_page.show_youtube_placeholder()
+                if self.playlist.id in self.parent_page.active_youtube_download_modals:
+                    del self.parent_page.active_youtube_download_modals[self.playlist.id]
+            
             # The process_finished signal is still emitted to unlock the main UI.
             self.process_finished.emit()
             
@@ -4933,17 +6696,51 @@ class DownloadMissingTracksModal(QDialog):
 
     def on_cancel_clicked(self):
         """Handle Cancel button - cancels operations, emits finished signal, and closes modal."""
-        # --- FIX: The full cancellation logic is now centralized here. ---
+        print("🛑 Cancel button clicked - cancelling all operations and cleaning up")
+        
+        # Cancel all operations
         self.cancel_operations()
+        
+        # If this is a YouTube workflow, clean up status widget (user cancelled)
+        if self.is_youtube_workflow and hasattr(self.parent_page, 'show_youtube_placeholder'):
+            self.parent_page.show_youtube_placeholder()
+            if self.playlist.id in self.parent_page.active_youtube_download_modals:
+                del self.parent_page.active_youtube_download_modals[self.playlist.id]
+        
+        # Signal completion and close
         self.process_finished.emit() # Signal the main page to clean up and reset the button.
         self.reject() # Close the modal.
         
     def on_close_clicked(self):
-        # Use same logic as closeEvent - emit process_finished when no download is active
+        """Handle close button click - same logic as closeEvent"""
+        print(f"🔍 DEBUG: Close button clicked - cancel_requested: {self.cancel_requested}, download_in_progress: {self.download_in_progress}")
+        print(f"🔍 DEBUG: analysis_complete: {self.analysis_complete}, active_workers: {len(self.active_workers)}")
+        print(f"🔍 DEBUG: is_youtube_workflow: {self.is_youtube_workflow}")
+        
         if self.cancel_requested or not self.download_in_progress:
+            # If cancelled or finished, close for real and cancel operations
+            print("🔍 DEBUG: Closing modal and cancelling operations")
             self.cancel_operations()
             self.process_finished.emit()
-        self.reject()
+            self.reject()
+            
+            # If this was a YouTube workflow and modal is closing, clean up status widget
+            if self.is_youtube_workflow and hasattr(self.parent_page, 'show_youtube_placeholder'):
+                self.parent_page.show_youtube_placeholder()
+                if self.playlist.id in self.parent_page.active_youtube_download_modals:
+                    del self.parent_page.active_youtube_download_modals[self.playlist.id]
+        else:
+            # If downloads are running, just hide the window (don't cancel)
+            print("🔍 DEBUG: Hiding modal (downloads still active)")
+            self.hide()
+            
+            # If this is a YouTube workflow, show status widget
+            if self.is_youtube_workflow and hasattr(self.parent_page, 'show_youtube_download_status'):
+                self.parent_page.show_youtube_download_status(
+                    self.playlist.name,
+                    len(self.playlist.tracks),
+                    self.playlist.id
+                )
         
     def cancel_operations(self):
         """Cancel any ongoing operations, including active slskd downloads."""
@@ -5008,10 +6805,31 @@ class DownloadMissingTracksModal(QDialog):
             self.cancel_operations()
             self.process_finished.emit()
             event.accept()
+            
+            # If this was a YouTube workflow and modal is closing, clean up status widget and URL tracking
+            if self.is_youtube_workflow and hasattr(self.parent_page, 'show_youtube_placeholder'):
+                self.parent_page.show_youtube_placeholder()
+                
+                # Clean up YouTube URL tracking when download modal closes
+                if (hasattr(self, 'youtube_url') and 
+                    hasattr(self.parent_page, 'active_youtube_processes') and
+                    self.youtube_url in self.parent_page.active_youtube_processes):
+                    print(f"🧹 Cleaning up YouTube URL tracking from download modal: {self.youtube_url}")
+                    del self.parent_page.active_youtube_processes[self.youtube_url]
+                if self.playlist.id in self.parent_page.active_youtube_download_modals:
+                    del self.parent_page.active_youtube_download_modals[self.playlist.id]
         else:
             # If downloads are running, just hide the window.
             self.hide()
             event.ignore()
+            
+            # If this is a YouTube workflow, show status widget
+            if self.is_youtube_workflow and hasattr(self.parent_page, 'show_youtube_download_status'):
+                self.parent_page.show_youtube_download_status(
+                    self.playlist.name,
+                    len(self.playlist.tracks),
+                    self.playlist.id
+                )
 
     # Inner class for the search worker
     class ParallelSearchWorker(QRunnable):
@@ -5141,6 +6959,711 @@ class DownloadMissingTracksModal(QDialog):
                 self.title = spotify_metadata.name
                 self.album = spotify_metadata.album
         return SpotifyBasedSearchResult()
+
+
+class YouTubeDownloadMissingTracksModal(QDialog):
+    """Enhanced modal for downloading YouTube playlist tracks with Spotify discovery"""
+    process_finished = pyqtSignal()
+    
+    def __init__(self, playlist, playlist_item, parent_page, downloads_page):
+        super().__init__(parent_page)
+        self.playlist = playlist  # YouTube playlist with cleaned tracks
+        self.playlist_item = playlist_item
+        self.parent_page = parent_page
+        self.downloads_page = downloads_page
+        self.total_tracks = len(playlist.tracks) if playlist else 0
+        
+        # Progress tracking
+        self.spotify_discovered_tracks = [None] * self.total_tracks  # List of discovered Spotify tracks
+        self.spotify_search_completed = False
+        self.spotify_worker = None
+        
+        # UI components
+        self.track_table = None
+        self.analysis_progress = None
+        self.spotify_progress = None
+        self.begin_search_btn = None
+        self.cancel_btn = None
+        self.sync_btn = None
+        
+        # Sync state tracking
+        self.sync_in_progress = False
+        self.is_youtube_workflow = True
+        
+        self.setup_ui()
+        if self.playlist and self.total_tracks > 0:
+            self.populate_initial_table()
+            self.start_spotify_discovery()
+    
+    def setup_ui(self):
+        """Set up the YouTube-specific modal UI"""
+        self.setWindowTitle(f"YouTube Playlist Discovery - {self.playlist.name}")
+        self.resize(1400, 900)
+        self.setWindowFlags(Qt.WindowType.Window)
+        
+        self.setStyleSheet("""
+            QDialog { background-color: #1e1e1e; color: #ffffff; }
+            QLabel { color: #ffffff; }
+            QPushButton {
+                background-color: #1db954; color: #000000; border: none;
+                border-radius: 6px; font-size: 13px; font-weight: bold;
+                padding: 10px 20px; min-width: 100px;
+            }
+            QPushButton:hover { background-color: #1ed760; }
+            QPushButton:disabled { background-color: #404040; color: #888888; }
+        """)
+        
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(25, 25, 25, 25)
+        main_layout.setSpacing(15)
+        
+        # Header section
+        header_section = self.create_header_section()
+        main_layout.addWidget(header_section)
+        
+        # Progress section
+        progress_section = self.create_progress_section()
+        main_layout.addWidget(progress_section)
+        
+        # Table section
+        table_section = self.create_track_table()
+        main_layout.addWidget(table_section, stretch=1)
+        
+        # Button section
+        button_section = self.create_buttons()
+        main_layout.addWidget(button_section)
+    
+    def create_header_section(self):
+        """Create header with title and summary"""
+        header_frame = QFrame()
+        header_frame.setStyleSheet("""
+            QFrame {
+                background-color: #2d2d2d; border: 1px solid #444444;
+                border-radius: 8px; padding: 15px;
+            }
+        """)
+        
+        layout = QVBoxLayout(header_frame)
+        
+        title = QLabel("🎵 YouTube Playlist Discovery")
+        title.setFont(QFont("Arial", 16, QFont.Weight.Bold))
+        title.setStyleSheet("color: #1db954;")
+        
+        subtitle = QLabel(f"Playlist: {self.playlist.name} ({self.total_tracks} tracks)")
+        subtitle.setFont(QFont("Arial", 11))
+        subtitle.setStyleSheet("color: #aaaaaa;")
+        
+        description = QLabel("Discovering clean Spotify metadata for YouTube tracks...")
+        description.setFont(QFont("Arial", 10))
+        description.setStyleSheet("color: #888888;")
+        
+        layout.addWidget(title)
+        layout.addWidget(subtitle)
+        layout.addWidget(description)
+        
+        return header_frame
+    
+    def create_progress_section(self):
+        """Create progress tracking section"""
+        progress_frame = QFrame()
+        progress_frame.setStyleSheet("""
+            QFrame {
+                background-color: #2d2d2d; border: 1px solid #444444;
+                border-radius: 8px; padding: 15px;
+            }
+        """)
+        
+        layout = QVBoxLayout(progress_frame)
+        
+        # Spotify discovery progress
+        spotify_label = QLabel("🔍 Spotify Discovery Progress")
+        spotify_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        
+        self.spotify_progress = QProgressBar()
+        self.spotify_progress.setFixedHeight(20)
+        self.spotify_progress.setMaximum(self.total_tracks)
+        self.spotify_progress.setValue(0)
+        self.spotify_progress.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid #555555; border-radius: 10px; text-align: center;
+                background-color: #444444; color: #ffffff; font-size: 11px; font-weight: bold;
+            }
+            QProgressBar::chunk { background-color: #1db954; border-radius: 9px; }
+        """)
+        
+        # Plex analysis progress (hidden initially)
+        analysis_label = QLabel("📊 Plex Analysis Progress")
+        analysis_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        
+        self.analysis_progress = QProgressBar()
+        self.analysis_progress.setFixedHeight(20)
+        self.analysis_progress.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid #555555; border-radius: 10px; text-align: center;
+                background-color: #444444; color: #ffffff; font-size: 11px; font-weight: bold;
+            }
+            QProgressBar::chunk { background-color: #ff6b6b; border-radius: 9px; }
+        """)
+        self.analysis_progress.setVisible(False)
+        analysis_label.setVisible(False)
+        
+        layout.addWidget(spotify_label)
+        layout.addWidget(self.spotify_progress)
+        layout.addWidget(analysis_label)
+        layout.addWidget(self.analysis_progress)
+        
+        return progress_frame
+    
+    def create_track_table(self):
+        """Create track table with YouTube-specific columns"""
+        table_frame = QFrame()
+        table_frame.setStyleSheet("""
+            QFrame {
+                background-color: #2d2d2d; border: 1px solid #444444;
+                border-radius: 8px; padding: 0px;
+            }
+        """)
+        
+        layout = QVBoxLayout(table_frame)
+        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setSpacing(10)
+        
+        header_label = QLabel("📋 Track Discovery & Analysis")
+        header_label.setFont(QFont("Arial", 13, QFont.Weight.Bold))
+        header_label.setStyleSheet("color: #ffffff; padding: 5px;")
+        
+        self.track_table = QTableWidget()
+        self.track_table.setColumnCount(7)
+        self.track_table.setHorizontalHeaderLabels([
+            "YT Track", "YT Artist", "Spotify Match Status", 
+            "Spotify Track", "Spotify Artist", "Spotify Album", "Status"
+        ])
+        
+        # Set columns to span full width evenly
+        header = self.track_table.horizontalHeader()
+        
+        for i in range(7):
+            header.setSectionResizeMode(i, QHeaderView.ResizeMode.Stretch)
+        
+        self.track_table.setAlternatingRowColors(True)
+        self.track_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.track_table.setStyleSheet("""
+            QTableWidget {
+                background-color: #1e1e1e; color: #ffffff;
+                gridline-color: #404040; border: none;
+            }
+            QTableWidget::item { padding: 8px; border-bottom: 1px solid #333333; }
+            QTableWidget::item:selected { background-color: #404040; }
+            QHeaderView::section {
+                background-color: #333333; color: #ffffff; border: none;
+                padding: 10px; font-weight: bold; font-size: 11px;
+            }
+        """)
+        
+        layout.addWidget(header_label)
+        layout.addWidget(self.track_table)
+        
+        return table_frame
+    
+    def create_buttons(self):
+        """Create button section"""
+        button_frame = QFrame()
+        layout = QHBoxLayout(button_frame)
+        layout.setSpacing(10)
+        
+        layout.addStretch()
+        
+        # Sync button - appears to the left of Begin Search
+        self.sync_btn = QPushButton("🔄 Sync This Playlist")
+        self.sync_btn.setEnabled(False)  # Disabled until Spotify discovery completes
+        self.sync_btn.clicked.connect(self.on_sync_clicked)
+        self.sync_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #ff6b6b; color: #ffffff; border: none;
+                border-radius: 6px; font-size: 13px; font-weight: bold;
+                padding: 10px 20px; min-width: 120px;
+            }
+            QPushButton:hover { background-color: #ff5252; }
+            QPushButton:disabled { background-color: #404040; color: #888888; }
+        """)
+        
+        self.begin_search_btn = QPushButton("🔍 Download Missing Tracks")
+        self.begin_search_btn.setEnabled(False)  # Disabled until Spotify discovery completes
+        self.begin_search_btn.clicked.connect(self.on_begin_plex_analysis)
+        
+        self.cancel_btn = QPushButton("❌ Cancel")
+        self.cancel_btn.clicked.connect(self.on_cancel_clicked)
+        
+        layout.addWidget(self.sync_btn)
+        layout.addWidget(self.begin_search_btn)
+        layout.addWidget(self.cancel_btn)
+        
+        return button_frame
+    
+    def populate_initial_table(self):
+        """Populate table with initial YouTube track data"""
+        self.track_table.setRowCount(self.total_tracks)
+        
+        for i, track in enumerate(self.playlist.tracks):
+            # YT Track
+            yt_track_item = QTableWidgetItem(track.name)
+            yt_track_item.setFlags(yt_track_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.track_table.setItem(i, 0, yt_track_item)
+            
+            # YT Artist
+            yt_artist = track.artists[0] if track.artists else "Unknown"
+            yt_artist_item = QTableWidgetItem(yt_artist)
+            yt_artist_item.setFlags(yt_artist_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.track_table.setItem(i, 1, yt_artist_item)
+            
+            # Spotify Match Status
+            status_item = QTableWidgetItem("Pending...")
+            status_item.setFlags(status_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.track_table.setItem(i, 2, status_item)
+            
+            # Empty cells for Spotify data (to be filled during discovery)
+            for col in [3, 4, 5, 6]:
+                empty_item = QTableWidgetItem("")
+                empty_item.setFlags(empty_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                self.track_table.setItem(i, col, empty_item)
+    
+    def start_spotify_discovery(self):
+        """Start the Spotify discovery process using background worker"""
+        print(f"🔍 Starting Spotify discovery for {self.total_tracks} tracks...")
+        
+        # Update all rows to show "Searching..." status
+        for row in range(self.total_tracks):
+            status_item = self.track_table.item(row, 2)
+            if status_item:
+                status_item.setText("🔍 Pending...")
+        
+        # Create and start a single optimized Spotify discovery worker
+        # Import matching engine for validation
+        from core.matching_engine import MusicMatchingEngine
+        matching_engine = MusicMatchingEngine()
+        
+        self.spotify_worker = OptimizedSpotifyDiscoveryWorker(
+            self.playlist.tracks, 
+            self.parent_page.spotify_client,
+            matching_engine
+        )
+        
+        # Connect signals
+        self.spotify_worker.signals.track_discovered.connect(self.on_track_discovered)
+        self.spotify_worker.signals.progress_updated.connect(self.on_discovery_progress)
+        self.spotify_worker.signals.finished.connect(self.on_spotify_discovery_finished)
+        
+        # Start the worker
+        QThreadPool.globalInstance().start(self.spotify_worker)
+    
+    def on_track_discovered(self, row, spotify_track, status):
+        """Handle a track being discovered (or not) on Spotify"""
+        try:
+            if status == "found" and spotify_track:
+                self.spotify_discovered_tracks[row] = spotify_track
+                self.update_table_with_spotify_match(row, spotify_track)
+            elif status == "not_found":
+                self.update_table_with_no_match(row)
+            elif status == "low_confidence":
+                self.update_table_with_low_confidence(row)
+            else:  # error
+                self.update_table_with_error(row, status.replace("error: ", ""))
+        except Exception as e:
+            print(f"❌ Error updating UI for track {row}: {e}")
+    
+    def on_discovery_progress(self, current):
+        """Update the discovery progress"""
+        self.spotify_progress.setValue(current)
+    
+    def on_spotify_discovery_finished(self, successful_discoveries):
+        """Handle Spotify discovery completion"""
+        self.spotify_discovery_completed()
+        print(f"🎵 Spotify discovery completed: {successful_discoveries}/{self.total_tracks} tracks found")
+    
+    def update_table_with_spotify_match(self, row, spotify_track):
+        """Update table row with successful Spotify match"""
+        # Spotify Match Status
+        status_item = self.track_table.item(row, 2)
+        status_item.setText("✅ Found")
+        status_item.setForeground(QBrush(QColor("#4CAF50")))
+        
+        # Spotify Track
+        spotify_track_item = QTableWidgetItem(spotify_track.name)
+        spotify_track_item.setFlags(spotify_track_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        self.track_table.setItem(row, 3, spotify_track_item)
+        
+        # Spotify Artist
+        spotify_artist = spotify_track.artists[0] if spotify_track.artists else "Unknown"
+        spotify_artist_item = QTableWidgetItem(spotify_artist)
+        spotify_artist_item.setFlags(spotify_artist_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        self.track_table.setItem(row, 4, spotify_artist_item)
+        
+        # Spotify Album
+        album_name = spotify_track.album if isinstance(spotify_track.album, str) else getattr(spotify_track.album, 'name', 'Unknown Album')
+        spotify_album_item = QTableWidgetItem(album_name)
+        spotify_album_item.setFlags(spotify_album_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        self.track_table.setItem(row, 5, spotify_album_item)
+        
+        # Status
+        status_col_item = self.track_table.item(row, 6)
+        status_col_item.setText("Ready for Plex analysis")
+    
+    def update_table_with_no_match(self, row):
+        """Update table row when no Spotify match found"""
+        # Spotify Match Status
+        status_item = self.track_table.item(row, 2)
+        status_item.setText("❌ Not Found")
+        status_item.setForeground(QBrush(QColor("#ff6b6b")))
+        
+        # Status
+        status_col_item = self.track_table.item(row, 6)
+        status_col_item.setText("Skipped - No Spotify match")
+        status_col_item.setForeground(QBrush(QColor("#888888")))
+    
+    def update_table_with_low_confidence(self, row):
+        """Update table row when Spotify matches were found but confidence too low"""
+        # Spotify Match Status
+        status_item = self.track_table.item(row, 2)
+        status_item.setText("⚠️ Low Confidence")
+        status_item.setForeground(QBrush(QColor("#FFA500")))
+        
+        # Status
+        status_col_item = self.track_table.item(row, 6)
+        status_col_item.setText("Skipped - No reliable match")
+        status_col_item.setForeground(QBrush(QColor("#FFA500")))
+    
+    def update_table_with_error(self, row, error_msg):
+        """Update table row when search error occurred"""
+        # Spotify Match Status
+        status_item = self.track_table.item(row, 2)
+        status_item.setText("⚠️ Error")
+        status_item.setForeground(QBrush(QColor("#FFA500")))
+        
+        # Status
+        status_col_item = self.track_table.item(row, 6)
+        status_col_item.setText(f"Error: {error_msg[:30]}...")
+        status_col_item.setForeground(QBrush(QColor("#FFA500")))
+    
+    def spotify_discovery_completed(self):
+        """Called when Spotify discovery is complete"""
+        self.spotify_search_completed = True
+        
+        # Count successful discoveries
+        successful_discoveries = sum(1 for track in self.spotify_discovered_tracks if track is not None)
+        
+        print(f"🎵 Spotify discovery completed: {successful_discoveries}/{self.total_tracks} tracks found")
+        
+        # Enable the Plex analysis and sync buttons
+        self.begin_search_btn.setEnabled(True)
+        self.begin_search_btn.setText(f"🔍 Download Missing Tracks ({successful_discoveries} tracks)")
+        
+        self.sync_btn.setEnabled(True)
+    
+    def on_begin_plex_analysis(self):
+        """Create discovered playlist and open regular download modal"""
+        # Filter out tracks that weren't found on Spotify
+        valid_spotify_tracks = [track for track in self.spotify_discovered_tracks if track is not None]
+        
+        if not valid_spotify_tracks:
+            QMessageBox.warning(self, "No Tracks", "No tracks were successfully discovered on Spotify.")
+            return
+        
+        print(f"🎵 Creating discovered playlist with {len(valid_spotify_tracks)} Spotify tracks...")
+        
+        # Create a Spotify-compatible playlist from discovered tracks
+        discovered_playlist = self.create_discovered_playlist(valid_spotify_tracks)
+        
+        # Mark that we're transitioning to download modal (don't clean up URL tracking)
+        self.transitioning_to_download = True
+        
+        # Close this discovery modal
+        self.accept()
+        
+        # Create a dummy playlist item for the regular modal
+        dummy_playlist_item = type('DummyPlaylistItem', (), {
+            'playlist_name': discovered_playlist.name,
+            'track_count': len(discovered_playlist.tracks),
+            'download_modal': None,
+            'show_operation_status': lambda self, status_text="View Progress": None,
+            'hide_operation_status': lambda self: None
+        })()
+        
+        # Open the regular DownloadMissingTracksModal with the discovered playlist
+        print("🚀 Opening regular DownloadMissingTracksModal with discovered tracks...")
+        modal = DownloadMissingTracksModal(
+            discovered_playlist,
+            dummy_playlist_item,
+            self.parent_page,
+            self.downloads_page,
+            is_youtube_workflow=True  # Flag to indicate this is from YouTube discovery
+        )
+        
+        # Transfer URL tracking from discovery modal to download modal
+        if hasattr(self, 'youtube_url'):
+            modal.youtube_url = self.youtube_url
+            self.parent_page.active_youtube_processes[self.youtube_url] = modal
+            print(f"🔄 Transferred URL tracking to download modal: {self.youtube_url}")
+        
+        # Store the modal reference using the ID of the NEWLY created playlist object.
+        # This ensures the "View Progress" button can find it later.
+        print(f"📝 Storing modal with CORRECT discovered_playlist.id: {discovered_playlist.id}")
+        
+        print(f"📝 Available modals before storing: {list(self.parent_page.active_youtube_download_modals.keys())}")
+        self.parent_page.active_youtube_download_modals[discovered_playlist.id] = modal
+        print(f"📝 Available modals after storing: {list(self.parent_page.active_youtube_download_modals.keys())}")
+
+        # Also update the status widget on the main page to use the correct new ID
+        self.parent_page.show_youtube_download_status(
+            discovered_playlist.name,
+            len(discovered_playlist.tracks),
+            discovered_playlist.id  # Pass the correct ID here
+        )
+        modal.exec()
+    
+    def on_sync_clicked(self):
+        """Handle Sync This Playlist button click"""
+        if self.sync_in_progress:
+            # Cancel ongoing sync
+            print(f"🛑 Cancelling sync for playlist: {self.playlist.name}")
+            
+            if hasattr(self.parent_page, 'cancel_playlist_sync'):
+                self.parent_page.cancel_playlist_sync(self.playlist.id)
+            
+            # Reset sync state immediately (don't wait for callback)
+            self.sync_in_progress = False
+            self.sync_btn.setText("🔄 Sync This Playlist")
+            self.sync_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #ff6b6b; color: #ffffff; border: none;
+                    border-radius: 6px; font-size: 13px; font-weight: bold;
+                    padding: 10px 20px; min-width: 120px;
+                }
+                QPushButton:hover { background-color: #ff5252; }
+                QPushButton:disabled { background-color: #404040; color: #888888; }
+            """)
+            
+            # Hide status widget if it exists
+            if hasattr(self.parent_page, 'show_youtube_placeholder'):
+                self.parent_page.show_youtube_placeholder()
+        
+        else:
+            # Start sync using the parent page's sync infrastructure
+            print(f"🔄 Starting sync for playlist: {self.playlist.name}")
+            
+            if hasattr(self.parent_page, 'start_playlist_sync') and self.parent_page.start_playlist_sync(self.playlist):
+                print(f"✅ Sync started successfully for: {self.playlist.name}")
+                
+                # Update UI to show sync is active
+                self.sync_in_progress = True
+                self.sync_btn.setText("Cancel Sync")
+                self.sync_btn.setStyleSheet("""
+                    QPushButton {
+                        background-color: #e22134; color: #ffffff; border: none;
+                        border-radius: 6px; font-size: 13px; font-weight: bold;
+                        padding: 10px 20px; min-width: 120px;
+                    }
+                    QPushButton:hover { background-color: #d32f2f; }
+                """)
+                
+                # Show progress in status widget if modal is hidden
+                if self.is_youtube_workflow and hasattr(self.parent_page, 'show_youtube_download_status'):
+                    self.update_youtube_status_for_sync()
+                    
+            else:
+                print(f"❌ Failed to start sync for: {self.playlist.name}")
+                QMessageBox.warning(self, "Sync Failed", "Failed to start playlist sync. Please try again.")
+    
+    def update_youtube_status_for_sync(self):
+        """Update YouTube status widget to show sync progress"""
+        if hasattr(self.parent_page, 'show_youtube_sync_status'):
+            self.parent_page.show_youtube_sync_status(self.playlist.name, len(self.playlist.tracks), self.playlist.id)
+    
+    def on_cancel_clicked(self):
+        """Handle cancel button click - cancel sync or close modal"""
+        print("🛑 Cancel button clicked")
+        
+        # Cancel any running Spotify discovery worker
+        if self.spotify_worker:
+            print("🛑 Cancelling Spotify discovery worker")
+            self.spotify_worker.cancel()
+            self.spotify_worker = None
+        
+        if self.sync_in_progress:
+            # Cancel sync operation
+            print("🛑 Cancelling sync operation")
+            if hasattr(self.parent_page, 'cancel_playlist_sync'):
+                self.parent_page.cancel_playlist_sync(self.playlist.id)
+            
+            # Reset sync state
+            self.sync_in_progress = False
+            self.sync_btn.setText("🔄 Sync This Playlist")
+            self.sync_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #ff6b6b; color: #ffffff; border: none;
+                    border-radius: 6px; font-size: 13px; font-weight: bold;
+                    padding: 10px 20px; min-width: 120px;
+                }
+                QPushButton:hover { background-color: #ff5252; }
+                QPushButton:disabled { background-color: #404040; color: #888888; }
+            """)
+            
+            # Hide status widget if it exists
+            if hasattr(self.parent_page, 'show_youtube_placeholder'):
+                self.parent_page.show_youtube_placeholder()
+        
+        # Clean up URL tracking before closing (but not during download transition)
+        if (hasattr(self, 'youtube_url') and hasattr(self.parent_page, 'active_youtube_processes') and
+            not getattr(self, 'transitioning_to_download', False)):
+            if self.youtube_url in self.parent_page.active_youtube_processes:
+                print(f"🧹 Cleaning up URL tracking on cancel for: {self.youtube_url}")
+                del self.parent_page.active_youtube_processes[self.youtube_url]
+        
+        # Always close/hide the modal when cancel is clicked
+        print("🛑 Closing modal")
+        self.reject()
+    
+    def on_sync_finished(self, playlist_id, result):
+        """Handle sync completion (called from parent page)"""
+        if playlist_id == self.playlist.id:
+            print(f"🎉 Sync completed for YouTube playlist: {self.playlist.name}")
+            
+            # Reset sync state
+            self.sync_in_progress = False
+            
+            # Reset sync button to original state
+            self.sync_btn.setText("🔄 Sync This Playlist")
+            self.sync_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #ff6b6b; color: #ffffff; border: none;
+                    border-radius: 6px; font-size: 13px; font-weight: bold;
+                    padding: 10px 20px; min-width: 120px;
+                }
+                QPushButton:hover { background-color: #ff5252; }
+                QPushButton:disabled { background-color: #404040; color: #888888; }
+            """)
+    
+    def on_sync_error(self, playlist_id, error_msg):
+        """Handle sync error (called from parent page)"""
+        if playlist_id == self.playlist.id:
+            print(f"❌ Sync error for YouTube playlist: {self.playlist.name} - {error_msg}")
+            
+            # Reset sync state
+            self.sync_in_progress = False
+            
+            # Reset sync button to original state
+            self.sync_btn.setText("🔄 Sync This Playlist")
+            self.sync_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #ff6b6b; color: #ffffff; border: none;
+                    border-radius: 6px; font-size: 13px; font-weight: bold;
+                    padding: 10px 20px; min-width: 120px;
+                }
+                QPushButton:hover { background-color: #ff5252; }
+                QPushButton:disabled { background-color: #404040; color: #888888; }
+            """)
+    
+    def on_sync_progress(self, playlist_id, progress):
+        """Handle sync progress updates (called from parent page)"""
+        if playlist_id == self.playlist.id:
+            # Progress updates are handled by the status widget automatically
+            # This method exists for compatibility with the modal update system
+            pass
+    
+    def create_discovered_playlist(self, spotify_tracks):
+        """Create a playlist object from discovered Spotify tracks"""
+        import time
+        
+        # Create a playlist object compatible with existing system
+        discovered_playlist = type('Playlist', (), {
+            'id': f"youtube_discovered_{int(time.time())}",
+            'name': f"YouTube Discovered: {self.playlist.name}",
+            'description': f"Discovered from YouTube playlist with {len(spotify_tracks)} matched tracks",
+            'owner': "YouTube Discovery",
+            'public': False,
+            'collaborative': False,
+            'tracks': spotify_tracks,
+            'total_tracks': len(spotify_tracks)
+        })()
+        
+        return discovered_playlist
+    
+    def show_loading_state(self):
+        """Show loading state in the modal"""
+        # Update window title
+        self.setWindowTitle("YouTube Playlist Discovery - Loading...")
+        
+        # Clear the table
+        self.track_table.setRowCount(0)
+        
+        # Show loading message
+        loading_item = QTableWidgetItem("🔄 Parsing YouTube playlist...")
+        loading_item.setFlags(loading_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        
+        self.track_table.setRowCount(1)
+        self.track_table.setSpan(0, 0, 1, 7)  # Span all columns
+        self.track_table.setItem(0, 0, loading_item)
+        
+        # Disable buttons
+        self.begin_search_btn.setEnabled(False)
+        self.begin_search_btn.setText("Waiting for playlist data...")
+    
+    def populate_with_playlist_data(self, playlist):
+        """Populate the modal with actual playlist data"""
+        print(f"📊 Populating modal with {len(playlist.tracks)} tracks")
+        
+        # Update modal properties
+        self.playlist = playlist
+        
+        # IMPORTANT: Re-store the modal with the correct playlist.id now that we have real data
+        if hasattr(self.parent_page, 'active_youtube_download_modals'):
+            print(f"📝 Re-storing modal with correct playlist.id: {playlist.id}")
+            # Also store with fallback hash ID to match status widget expectations
+            fallback_id = f"youtube_{hash(playlist.name)}"
+            print(f"📝 Also storing with fallback hash ID: {fallback_id}")
+            self.parent_page.active_youtube_download_modals[playlist.id] = self
+            self.parent_page.active_youtube_download_modals[fallback_id] = self
+        self.total_tracks = len(playlist.tracks)
+        self.spotify_discovered_tracks = [None] * self.total_tracks
+        
+        # Update window title
+        self.setWindowTitle(f"YouTube Playlist Discovery - {playlist.name}")
+        
+        # Update progress bars
+        self.spotify_progress.setMaximum(self.total_tracks)
+        self.spotify_progress.setValue(0)
+        
+        # Populate the table with actual track data
+        self.populate_initial_table()
+        
+        # Start Spotify discovery
+        self.start_spotify_discovery()
+    
+    def closeEvent(self, event):
+        """Handle modal closing - hide when sync is active, otherwise close"""
+        print(f"🔍 DEBUG: YouTube modal closeEvent - sync_in_progress: {self.sync_in_progress}")
+        
+        # If sync is in progress, just hide the modal (don't close)
+        if self.sync_in_progress:
+            print("🔍 DEBUG: Sync in progress - hiding modal instead of closing")
+            event.ignore()  # Prevent actual closing
+            self.hide()
+            return
+        
+        # Normal close behavior - cancel any running workers
+        if self.spotify_worker:
+            print("🛑 closeEvent: Cancelling Spotify discovery worker")
+            self.spotify_worker.cancel()
+            self.spotify_worker = None
+        
+        # Clean up URL tracking when modal is actually closed (not just hidden)
+        # But don't clean up if we're transitioning to download modal
+        if (hasattr(self, 'youtube_url') and hasattr(self.parent_page, 'active_youtube_processes') and
+            not getattr(self, 'transitioning_to_download', False)):
+            if self.youtube_url in self.parent_page.active_youtube_processes:
+                print(f"🧹 Cleaning up URL tracking for: {self.youtube_url}")
+                del self.parent_page.active_youtube_processes[self.youtube_url]
+        
+        super().closeEvent(event)
 
 
 
