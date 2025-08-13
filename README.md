@@ -12,8 +12,8 @@ The core philosophy of SoulSync is to let you enjoy music discovery on Spotify w
 
 ![A screenshot of my awesome app in action.](./assets/dashboard.png)
 
-## ⚠️ Regarding Apple Music, YouTube Music, and Docker Support
-This won't be possible for the time being. Youtube doesn't offer API access to their Youtube music playlists and Apple requires a $99 fee to access their API. Docker is unlikely since this is a fully GUI based app. The unique setup would be difficult for most users and my knowledge of docker is pathetic, sadly.
+## ⚠️ Docker Support
+Docker is unlikely since this is a fully GUI based app. The unique setup would be difficult for most users and my knowledge of docker is pathetic, sadly.
 
 ## ✨ Core Features
 
