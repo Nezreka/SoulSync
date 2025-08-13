@@ -952,9 +952,14 @@ class SyncWorker(QRunnable):
             
             # Set up progress callback for sync service
             def on_progress(progress):
+                print(f"⚡ SyncWorker progress callback called! total={progress.total_tracks}, matched={progress.matched_tracks}")
                 if not self._cancelled:
+                    print(f"⚡ Emitting progress signal to parent page")
                     self.signals.progress.emit(progress)
+                else:
+                    print(f"⚡ Sync was cancelled, not emitting signal")
             
+            print(f"⚡ Setting up progress callback for playlist: '{self.playlist.name}'")
             self.sync_service.set_progress_callback(on_progress, self.playlist.name)
             
             # Create new event loop for this thread
@@ -2863,16 +2868,23 @@ class SyncPage(QWidget):
     
     def on_sync_progress(self, playlist_id, progress):
         """Handle sync progress updates"""
+        print(f"🚀 PARENT PAGE on_sync_progress called! playlist_id={playlist_id}")
+        print(f"🚀 Progress: total={progress.total_tracks}, matched={progress.matched_tracks}, failed={progress.failed_tracks}")
+        
         # Update playlist item status
         playlist_item = self.find_playlist_item_widget(playlist_id)
         if playlist_item:
+            print(f"🚀 Found playlist item widget, updating status")
             playlist_item.update_sync_status(
                 progress.total_tracks,
                 progress.matched_tracks,
                 progress.failed_tracks
             )
+        else:
+            print(f"🚀 No playlist item widget found for playlist_id: {playlist_id}")
         
         # Update any open modal for this playlist
+        print(f"🚀 About to call update_open_modals_progress")
         self.update_open_modals_progress(playlist_id, progress)
     
     def on_sync_finished(self, playlist_id, result, snapshot_id):
@@ -2967,23 +2979,50 @@ class SyncPage(QWidget):
     
     def update_open_modals_progress(self, playlist_id, progress):
         """Update any open modals for this playlist with sync progress"""
+        print(f"🔍 Looking for modals to update progress for playlist_id: {playlist_id}")
+        print(f"🔍 Progress data: total={progress.total_tracks}, matched={progress.matched_tracks}, failed={progress.failed_tracks}")
+        
         # Find all open modal instances for this playlist
         from PyQt6.QtWidgets import QApplication
+        youtube_modals_found = 0
+        spotify_modals_found = 0
+        
         for widget in QApplication.topLevelWidgets():
+            widget_name = type(widget).__name__
+            print(f"🔍 Checking widget: {widget_name}")
+            
             # Handle PlaylistDetailsModal
-            if (isinstance(widget, PlaylistDetailsModal) and 
-                hasattr(widget, 'playlist') and 
-                widget.playlist.id == playlist_id and
-                widget.isVisible()):
-                # Update the modal's progress display
-                widget.on_sync_progress(playlist_id, progress)
+            if isinstance(widget, PlaylistDetailsModal):
+                if hasattr(widget, 'playlist'):
+                    widget_playlist_id = getattr(widget.playlist, 'id', 'NO_ID')
+                    is_visible = widget.isVisible()
+                    print(f"🔍 Spotify modal: playlist_id={widget_playlist_id}, visible={is_visible}, target={playlist_id}")
+                    
+                    if widget_playlist_id == playlist_id and is_visible:
+                        print(f"📊 Updating Spotify modal progress: {playlist_id}")
+                        spotify_modals_found += 1
+                        widget.on_sync_progress(playlist_id, progress)
+                else:
+                    print(f"🔍 Spotify modal without playlist attribute")
             
             # Handle YouTubeDownloadMissingTracksModal
-            elif (isinstance(widget, YouTubeDownloadMissingTracksModal) and 
-                  hasattr(widget, 'playlist') and 
-                  widget.playlist.id == playlist_id):
-                # Update the YouTube modal's progress display (even if hidden)
-                widget.on_sync_progress(playlist_id, progress)
+            elif isinstance(widget, YouTubeDownloadMissingTracksModal):
+                youtube_modals_found += 1
+                if hasattr(widget, 'playlist'):
+                    widget_playlist_id = getattr(widget.playlist, 'id', 'NO_ID')
+                    is_visible = widget.isVisible()
+                    print(f"🔍 YouTube modal #{youtube_modals_found}: playlist_id={widget_playlist_id}, visible={is_visible}, target={playlist_id}")
+                    
+                    if widget_playlist_id == playlist_id:
+                        print(f"📊 ✅ Found matching YouTube modal for playlist_id: {playlist_id}, calling on_sync_progress")
+                        # Update the YouTube modal's progress display (even if hidden)
+                        widget.on_sync_progress(playlist_id, progress)
+                    else:
+                        print(f"📊 ❌ YouTube modal playlist_id mismatch: {widget_playlist_id} vs {playlist_id}")
+                else:
+                    print(f"🔍 YouTube modal #{youtube_modals_found} without playlist attribute")
+        
+        print(f"🔍 Summary: Found {spotify_modals_found} Spotify modals, {youtube_modals_found} YouTube modals total")
     
     def update_open_modals_completion(self, playlist_id, result):
         """Update any open modals for this playlist with sync completion"""
@@ -7173,6 +7212,10 @@ class YouTubeDownloadMissingTracksModal(QDialog):
         
         layout.addStretch()
         
+        # Create sync status display (hidden by default)
+        self.sync_status_widget = self.create_sync_status_display()
+        layout.addWidget(self.sync_status_widget)
+        
         # Sync button - appears to the left of Begin Search
         self.sync_btn = QPushButton("🔄 Sync This Playlist")
         self.sync_btn.setEnabled(False)  # Disabled until Spotify discovery completes
@@ -7199,6 +7242,85 @@ class YouTubeDownloadMissingTracksModal(QDialog):
         layout.addWidget(self.cancel_btn)
         
         return button_frame
+    
+    def create_sync_status_display(self):
+        """Create sync status display widget (hidden by default) - same as Spotify modal"""
+        sync_status = QFrame()
+        sync_status.setStyleSheet("""
+            QFrame {
+                background: rgba(29, 185, 84, 0.1);
+                border: 1px solid rgba(29, 185, 84, 0.3);
+                border-radius: 12px;
+            }
+        """)
+        sync_status.setMinimumHeight(36)
+        sync_status.hide()  # Hidden by default
+        
+        layout = QHBoxLayout(sync_status)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(12)
+        
+        # Total tracks
+        self.total_tracks_label = QLabel("♪ 0")
+        self.total_tracks_label.setFont(QFont("SF Pro Text", 12, QFont.Weight.Medium))
+        self.total_tracks_label.setStyleSheet("color: #ffa500; background: transparent; border: none;")
+        
+        # Matched tracks
+        self.matched_tracks_label = QLabel("✓ 0")
+        self.matched_tracks_label.setFont(QFont("SF Pro Text", 12, QFont.Weight.Medium))
+        self.matched_tracks_label.setStyleSheet("color: #1db954; background: transparent; border: none;")
+        
+        # Failed tracks
+        self.failed_tracks_label = QLabel("✗ 0")
+        self.failed_tracks_label.setFont(QFont("SF Pro Text", 12, QFont.Weight.Medium))
+        self.failed_tracks_label.setStyleSheet("color: #e22134; background: transparent; border: none;")
+        
+        # Percentage
+        self.percentage_label = QLabel("0%")
+        self.percentage_label.setFont(QFont("SF Pro Text", 12, QFont.Weight.Bold))
+        self.percentage_label.setStyleSheet("color: #1db954; background: transparent; border: none;")
+        
+        layout.addWidget(self.total_tracks_label)
+        
+        # Separator 1
+        sep1 = QLabel("/")
+        sep1.setFont(QFont("SF Pro Text", 12, QFont.Weight.Medium))
+        sep1.setStyleSheet("color: #666666; background: transparent; border: none;")
+        layout.addWidget(sep1)
+        
+        layout.addWidget(self.matched_tracks_label)
+        
+        # Separator 2
+        sep2 = QLabel("/")
+        sep2.setFont(QFont("SF Pro Text", 12, QFont.Weight.Medium))
+        sep2.setStyleSheet("color: #666666; background: transparent; border: none;")
+        layout.addWidget(sep2)
+        
+        layout.addWidget(self.failed_tracks_label)
+        
+        # Separator 3
+        sep3 = QLabel("/")
+        sep3.setFont(QFont("SF Pro Text", 12, QFont.Weight.Medium))
+        sep3.setStyleSheet("color: #666666; background: transparent; border: none;")
+        layout.addWidget(sep3)
+        
+        layout.addWidget(self.percentage_label)
+        
+        return sync_status
+    
+    def update_sync_status(self, total_tracks=0, matched_tracks=0, failed_tracks=0):
+        """Update sync status display"""
+        if self.sync_status_widget:
+            self.total_tracks_label.setText(f"♪ {total_tracks}")
+            self.matched_tracks_label.setText(f"✓ {matched_tracks}")
+            self.failed_tracks_label.setText(f"✗ {failed_tracks}")
+            
+            if total_tracks > 0:
+                processed_tracks = matched_tracks + failed_tracks
+                percentage = int((processed_tracks / total_tracks) * 100)
+                self.percentage_label.setText(f"{percentage}%")
+            else:
+                self.percentage_label.setText("0%")
     
     def populate_initial_table(self):
         """Populate table with initial YouTube track data"""
@@ -7465,6 +7587,11 @@ class YouTubeDownloadMissingTracksModal(QDialog):
                     QPushButton:hover { background-color: #d32f2f; }
                 """)
                 
+                # Show sync status widget (same as Spotify modal)
+                if self.sync_status_widget:
+                    self.sync_status_widget.show()
+                    self.update_sync_status(len(self.playlist.tracks), 0, 0)
+                
                 # Show progress in status widget if modal is hidden
                 if self.is_youtube_workflow and hasattr(self.parent_page, 'show_youtube_download_status'):
                     self.update_youtube_status_for_sync()
@@ -7522,6 +7649,48 @@ class YouTubeDownloadMissingTracksModal(QDialog):
         print("🛑 Closing modal")
         self.reject()
     
+    def on_sync_progress(self, playlist_id, progress):
+        """Handle sync progress updates (called from parent page)"""
+        try:
+            print(f"🔍 YouTube modal sync progress called: playlist_id={playlist_id}, my_id={self.playlist.id}")
+            print(f"🔍 YouTube modal sync_in_progress={self.sync_in_progress}")
+            print(f"🔍 YouTube modal progress data: total={progress.total_tracks}, matched={progress.matched_tracks}, failed={progress.failed_tracks}")
+            
+            if playlist_id == self.playlist.id:
+                print(f"🔄 ✅ Playlist ID matches - processing sync progress for YouTube playlist")
+                if self.sync_in_progress:
+                    print(f"🔄 ✅ Sync in progress - updating status widget")
+                    
+                    # Show and update the sync status widget (same as Spotify modal)
+                    if self.sync_status_widget:
+                        print(f"📊 ✅ Status widget exists - showing and updating")
+                        self.sync_status_widget.show()
+                        self.update_sync_status(
+                            progress.total_tracks,
+                            progress.matched_tracks, 
+                            progress.failed_tracks
+                        )
+                        print(f"📊 ✅ Status widget updated successfully")
+                    else:
+                        print("❌ sync_status_widget is None!")
+                else:
+                    print(f"🔄 ❌ Sync not in progress (sync_in_progress={self.sync_in_progress})")
+            else:
+                print(f"🔄 ❌ Playlist ID mismatch: {playlist_id} != {self.playlist.id}")
+                
+        except Exception as e:
+            print(f"💥 EXCEPTION in YouTube modal on_sync_progress: {e}")
+            import traceback
+            print(f"💥 Traceback: {traceback.format_exc()}")
+            
+            # Also update the status widget on the main page if this modal is hidden
+            if hasattr(self.parent_page, 'show_youtube_sync_status'):
+                self.parent_page.show_youtube_sync_status(
+                    self.playlist.name, 
+                    progress.total_tracks, 
+                    self.playlist.id
+                )
+
     def on_sync_finished(self, playlist_id, result):
         """Handle sync completion (called from parent page)"""
         if playlist_id == self.playlist.id:
@@ -7529,6 +7698,10 @@ class YouTubeDownloadMissingTracksModal(QDialog):
             
             # Reset sync state
             self.sync_in_progress = False
+            
+            # Hide sync status widget (same as Spotify modal)
+            if self.sync_status_widget:
+                self.sync_status_widget.hide()
             
             # Reset sync button to original state
             self.sync_btn.setText("🔄 Sync This Playlist")
@@ -7550,6 +7723,10 @@ class YouTubeDownloadMissingTracksModal(QDialog):
             # Reset sync state
             self.sync_in_progress = False
             
+            # Hide sync status widget (same as Spotify modal)
+            if self.sync_status_widget:
+                self.sync_status_widget.hide()
+            
             # Reset sync button to original state
             self.sync_btn.setText("🔄 Sync This Playlist")
             self.sync_btn.setStyleSheet("""
@@ -7561,13 +7738,6 @@ class YouTubeDownloadMissingTracksModal(QDialog):
                 QPushButton:hover { background-color: #ff5252; }
                 QPushButton:disabled { background-color: #404040; color: #888888; }
             """)
-    
-    def on_sync_progress(self, playlist_id, progress):
-        """Handle sync progress updates (called from parent page)"""
-        if playlist_id == self.playlist.id:
-            # Progress updates are handled by the status widget automatically
-            # This method exists for compatibility with the modal update system
-            pass
     
     def create_discovered_playlist(self, spotify_tracks):
         """Create a playlist object from discovered Spotify tracks"""
