@@ -98,7 +98,7 @@ Follow these steps to get SoulSync up and running on your system.
 Before you begin, ensure you have the following installed and configured:
 
 - **Python 3.8+**: The core runtime for the application.
-- **Plex Media Server(NOT REQUIRED)**: You need a running Plex server with an existing music library that SoulSync can scan.
+- **Plex Media Server (OPTIONAL)**: Optional but recommended. If connected, SoulSync will scan your existing music library to identify missing tracks. Without Plex, all tracks will be considered "missing" and automatically downloaded.
 - **slskd**: A headless Soulseek client. This is the engine that powers the downloading feature. See detailed setup instructions below.
 - **Spotify Account**: A regular or premium Spotify account is required to access your playlists and artist data.
 
@@ -166,7 +166,7 @@ docker run -d \
 
 1. Launch the application (`python main.py`).
 2. The very first thing you should do is navigate to the **Settings** page using the sidebar.
-3. Fill in all the required fields for Spotify, Plex, and Soulseek.
+3. Fill in the required fields for Spotify and Soulseek. Plex configuration is optional but recommended.
 4. Click "Save Settings". The app is now ready to use.
 5. Restart the app for good luck.
 
