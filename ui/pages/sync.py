@@ -2288,6 +2288,308 @@ class PlaylistItem(QFrame):
             self.download_modal.show()
             self.download_modal.activateWindow()
             self.download_modal.raise_()
+
+class YouTubePlaylistCard(QFrame):
+    """YouTube playlist card with persistent state tracking across all phases"""
+    card_clicked = pyqtSignal(str, str)  # Signal: (url, phase)
+    
+    def __init__(self, url: str, playlist_name: str = "Loading...", track_count: int = 0, parent=None):
+        super().__init__(parent)
+        self.url = url
+        self.playlist_name = playlist_name
+        self.track_count = track_count
+        self.phase = "discovering"  # discovering, discovery_complete, syncing, sync_complete, downloading, download_complete
+        self.progress_data = {'total': 0, 'matched': 0, 'failed': 0}
+        
+        # Modal references
+        self.discovery_modal = None
+        self.download_modal = None
+        
+        # State data
+        self.playlist_data = None
+        self.discovered_tracks = []
+        
+        self.setup_ui()
+        self.update_display()
+    
+    def setup_ui(self):
+        self.setFixedHeight(80)
+        self.setStyleSheet("""
+            YouTubePlaylistCard {
+                background: #282828;
+                border-radius: 8px;
+                border: 1px solid #404040;
+            }
+            YouTubePlaylistCard:hover {
+                background: #333333;
+                border: 1px solid #ff0000;
+            }
+        """)
+        
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(20, 15, 20, 15)
+        layout.setSpacing(15)
+        
+        # YouTube icon indicator
+        yt_icon = QLabel("▶")
+        yt_icon.setFixedSize(24, 24)
+        yt_icon.setStyleSheet("""
+            QLabel {
+                color: #ff0000;
+                font-size: 16px;
+                font-weight: bold;
+                background: transparent;
+                text-align: center;
+                border-radius: 12px;
+                border: 1px solid #ff0000;
+            }
+        """)
+        yt_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        # Content layout
+        content_layout = QVBoxLayout()
+        content_layout.setSpacing(5)
+        
+        self.name_label = QLabel(self.playlist_name)
+        self.name_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        self.name_label.setStyleSheet("color: #ffffff;")
+        
+        info_layout = QHBoxLayout()
+        info_layout.setSpacing(20)
+        
+        self.track_label = QLabel(f"{self.track_count} tracks")
+        self.track_label.setFont(QFont("Arial", 10))
+        self.track_label.setStyleSheet("color: #b3b3b3;")
+        
+        self.phase_label = QLabel(self.get_phase_text())
+        self.phase_label.setFont(QFont("Arial", 10))
+        self.update_phase_style()
+        
+        info_layout.addWidget(self.track_label)
+        info_layout.addWidget(self.phase_label)
+        info_layout.addStretch()
+        
+        content_layout.addWidget(self.name_label)
+        content_layout.addLayout(info_layout)
+        
+        # Progress status widget (similar to PlaylistItem)
+        self.progress_widget = self.create_progress_display()
+        self.progress_widget.hide()  # Initially hidden
+        
+        # Action button
+        self.action_btn = QPushButton(self.get_action_text())
+        self.action_btn.setFixedSize(120, 30)
+        self.action_btn.clicked.connect(self.on_action_clicked)
+        self.action_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                border: 1px solid #ff0000;
+                border-radius: 15px;
+                color: #ff0000;
+                font-size: 10px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #ff0000;
+                color: #ffffff;
+            }
+        """)
+        
+        layout.addWidget(yt_icon)
+        layout.addLayout(content_layout)
+        layout.addWidget(self.progress_widget)
+        layout.addWidget(self.action_btn)
+    
+    def create_progress_display(self):
+        """Create sync status display widget like PlaylistItem"""
+        sync_status = QFrame()
+        sync_status.setFixedHeight(30)
+        sync_status.setStyleSheet("""
+            QFrame {
+                background: rgba(0, 0, 0, 0.3);
+                border-radius: 15px;
+                border: 1px solid rgba(255, 255, 255, 0.1);
+            }
+        """)
+        
+        layout = QHBoxLayout(sync_status)
+        layout.setContentsMargins(12, 6, 12, 6)
+        layout.setSpacing(8)
+        
+        # Create labels for progress display
+        self.total_tracks_label = QLabel(f"♪ {self.progress_data['total']}")
+        self.total_tracks_label.setFont(QFont("SF Pro Text", 9, QFont.Weight.Medium))
+        self.total_tracks_label.setStyleSheet("color: #b3b3b3; background: transparent; border: none;")
+        layout.addWidget(self.total_tracks_label)
+        
+        sep1 = QLabel("/")
+        sep1.setFont(QFont("SF Pro Text", 9, QFont.Weight.Medium))
+        sep1.setStyleSheet("color: #666666; background: transparent; border: none;")
+        layout.addWidget(sep1)
+        
+        self.matched_tracks_label = QLabel(f"✓ {self.progress_data['matched']}")
+        self.matched_tracks_label.setFont(QFont("SF Pro Text", 9, QFont.Weight.Medium))
+        self.matched_tracks_label.setStyleSheet("color: #1db954; background: transparent; border: none;")
+        layout.addWidget(self.matched_tracks_label)
+        
+        sep2 = QLabel("/")
+        sep2.setFont(QFont("SF Pro Text", 9, QFont.Weight.Medium))
+        sep2.setStyleSheet("color: #666666; background: transparent; border: none;")
+        layout.addWidget(sep2)
+        
+        self.failed_tracks_label = QLabel(f"✗ {self.progress_data['failed']}")
+        self.failed_tracks_label.setFont(QFont("SF Pro Text", 9, QFont.Weight.Medium))
+        self.failed_tracks_label.setStyleSheet("color: #e22134; background: transparent; border: none;")
+        layout.addWidget(self.failed_tracks_label)
+        
+        sep3 = QLabel("/")
+        sep3.setFont(QFont("SF Pro Text", 9, QFont.Weight.Medium))
+        sep3.setStyleSheet("color: #666666; background: transparent; border: none;")
+        layout.addWidget(sep3)
+        
+        self.percentage_label = QLabel("0%")
+        self.percentage_label.setFont(QFont("SF Pro Text", 9, QFont.Weight.Medium))
+        self.percentage_label.setStyleSheet("color: #ffffff; background: transparent; border: none;")
+        layout.addWidget(self.percentage_label)
+        
+        return sync_status
+    
+    def get_phase_text(self):
+        """Get display text for current phase"""
+        phase_texts = {
+            'discovering': 'Discovering tracks...',
+            'discovery_complete': 'Discovery complete',
+            'syncing': 'Syncing...',
+            'sync_complete': 'Sync complete',
+            'downloading': 'Downloading...',
+            'download_complete': 'Complete'
+        }
+        return phase_texts.get(self.phase, self.phase)
+    
+    def get_action_text(self):
+        """Get action button text based on phase"""
+        action_texts = {
+            'discovering': 'View Progress',
+            'discovery_complete': 'View Details',
+            'syncing': 'View Progress',
+            'sync_complete': 'Download Missing',
+            'downloading': 'View Downloads',
+            'download_complete': 'View Results'
+        }
+        return action_texts.get(self.phase, 'Open')
+    
+    def update_phase_style(self):
+        """Update phase label color based on current phase"""
+        phase_colors = {
+            'discovering': '#ffa500',        # Orange
+            'discovery_complete': '#1db954',  # Green
+            'syncing': '#ffa500',            # Orange  
+            'sync_complete': '#1db954',       # Green
+            'downloading': '#ffa500',         # Orange
+            'download_complete': '#1db954'    # Green
+        }
+        color = phase_colors.get(self.phase, '#b3b3b3')
+        self.phase_label.setStyleSheet(f"color: {color};")
+    
+    def update_display(self):
+        """Update all display elements based on current state"""
+        self.name_label.setText(self.playlist_name)
+        self.track_label.setText(f"{self.track_count} tracks")
+        self.phase_label.setText(self.get_phase_text())
+        self.action_btn.setText(self.get_action_text())
+        self.update_phase_style()
+    
+    def set_phase(self, phase: str):
+        """Update the current phase and refresh display"""
+        self.phase = phase
+        self.update_display()
+        
+        # Show/hide progress widget based on phase
+        if phase in ['syncing', 'downloading', 'sync_complete']:
+            print(f"🎬 Card phase set to {phase} - showing progress widget")
+            self.progress_widget.show()
+            self.action_btn.hide()
+            # For syncing phase, initialize with current progress data
+            if phase == 'syncing':
+                # Ensure we show some initial progress data
+                if self.progress_data['total'] == 0:
+                    # Initialize with track count if available
+                    self.progress_data['total'] = self.track_count
+                    self.total_tracks_label.setText(f"♪ {self.progress_data['total']}")
+                self.matched_tracks_label.setText(f"✓ {self.progress_data['matched']}")
+                self.failed_tracks_label.setText(f"✗ {self.progress_data['failed']}")
+            # For sync_complete, hide progress after a delay to show final results
+            elif phase == 'sync_complete':
+                from PyQt6.QtCore import QTimer
+                QTimer.singleShot(5000, lambda: self.progress_widget.hide() if self.phase == 'sync_complete' else None)
+                QTimer.singleShot(5000, lambda: self.action_btn.show() if self.phase == 'sync_complete' else None)
+        else:
+            print(f"🎬 Card phase set to {phase} - hiding progress widget")
+            self.progress_widget.hide()
+            self.action_btn.show()
+    
+    def update_progress(self, total=None, matched=None, failed=None):
+        """Update progress data and display"""
+        print(f"🎬 Card update_progress called: total={total}, matched={matched}, failed={failed}, phase={self.phase}")
+        
+        if total is not None:
+            self.progress_data['total'] = total
+        if matched is not None:
+            self.progress_data['matched'] = matched
+        if failed is not None:
+            self.progress_data['failed'] = failed
+        
+        # Update labels
+        self.total_tracks_label.setText(f"♪ {self.progress_data['total']}")
+        self.matched_tracks_label.setText(f"✓ {self.progress_data['matched']}")
+        self.failed_tracks_label.setText(f"✗ {self.progress_data['failed']}")
+        
+        # Ensure progress widget is visible when progress is being updated
+        # This ensures live status display is always shown during active operations
+        if self.phase in ['syncing', 'downloading']:
+            print(f"🎬 Card in {self.phase} phase - ensuring progress widget is visible")
+            self.progress_widget.show()
+            self.action_btn.hide()
+        else:
+            print(f"🎬 Card not in active phase ({self.phase}) - progress widget state unchanged")
+        
+        # Calculate percentage
+        total = self.progress_data['total']
+        if total > 0:
+            processed = self.progress_data['matched'] + self.progress_data['failed']
+            percentage = int((processed / total) * 100)
+            self.percentage_label.setText(f"{percentage}%")
+        else:
+            self.percentage_label.setText("0%")
+    
+    def update_playlist_info(self, name: str, track_count: int):
+        """Update playlist name and track count"""
+        self.playlist_name = name
+        self.track_count = track_count
+        self.update_display()
+    
+    def set_playlist_data(self, data):
+        """Store discovered playlist data"""
+        self.playlist_data = data
+        if hasattr(data, 'tracks'):
+            self.discovered_tracks = data.tracks
+            self.track_count = len(data.tracks)
+            self.update_display()
+    
+    def on_action_clicked(self):
+        """Handle action button click - emit signal with current phase"""
+        self.card_clicked.emit(self.url, self.phase)
+    
+    def mousePressEvent(self, event):
+        """Handle card clicks"""
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.card_clicked.emit(self.url, self.phase)
+        super().mousePressEvent(event)
+
 class SyncOptionsPanel(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -2404,6 +2706,11 @@ class SyncPage(QWidget):
         
         # YouTube playlist download modal references for reopening
         self.active_youtube_download_modals = {}  # playlist_id -> modal instance
+        
+        # YouTube playlist card hub system
+        self.youtube_playlist_states = {}  # url -> {phase, data, card, modals}
+        self.youtube_cards = {}  # url -> YouTubePlaylistCard instance
+        self.youtube_cards_container = None  # Container for all YouTube cards
         
         # Initialize Plex scan manager
         self.scan_manager = None
@@ -2871,7 +3178,7 @@ class SyncPage(QWidget):
         print(f"🚀 PARENT PAGE on_sync_progress called! playlist_id={playlist_id}")
         print(f"🚀 Progress: total={progress.total_tracks}, matched={progress.matched_tracks}, failed={progress.failed_tracks}")
         
-        # Update playlist item status
+        # Update playlist item status (for Spotify playlists)
         playlist_item = self.find_playlist_item_widget(playlist_id)
         if playlist_item:
             print(f"🚀 Found playlist item widget, updating status")
@@ -2883,6 +3190,35 @@ class SyncPage(QWidget):
         else:
             print(f"🚀 No playlist item widget found for playlist_id: {playlist_id}")
         
+        # Update YouTube card progress (for YouTube playlists)
+        # Find the YouTube card by matching playlist IDs
+        youtube_card_updated = False
+        print(f"🎬 Searching for YouTube card with playlist_id: {playlist_id}")
+        for url, state in self.youtube_playlist_states.items():
+            playlist_data = state.get('playlist_data')
+            if playlist_data and hasattr(playlist_data, 'id'):
+                print(f"🎬 Checking YouTube card: URL={url}, stored playlist_id={playlist_data.id}")
+                if playlist_data.id == playlist_id:
+                    print(f"🎬 ✅ Found matching YouTube card for playlist_id: {playlist_id}, updating progress")
+                    self.update_youtube_card_progress(
+                        url,
+                        total=progress.total_tracks,
+                        matched=progress.matched_tracks,
+                        failed=progress.failed_tracks
+                    )
+                    youtube_card_updated = True
+                    break
+                else:
+                    print(f"🎬 ❌ Playlist ID mismatch: {playlist_data.id} != {playlist_id}")
+            else:
+                print(f"🎬 YouTube card state missing playlist_data or id: URL={url}")
+        
+        if not youtube_card_updated:
+            print(f"🎬 ❌ No matching YouTube card found for playlist_id: {playlist_id}")
+        
+        if not playlist_item and not youtube_card_updated:
+            print(f"🚀 No playlist widget OR YouTube card found for playlist_id: {playlist_id}")
+        
         # Update any open modal for this playlist
         print(f"🚀 About to call update_open_modals_progress")
         self.update_open_modals_progress(playlist_id, progress)
@@ -2893,8 +3229,10 @@ class SyncPage(QWidget):
         if playlist_id in self.active_sync_workers:
             del self.active_sync_workers[playlist_id]
 
-        # Update playlist item status
+        # Update playlist item status (for Spotify playlists)
         playlist_item = self.find_playlist_item_widget(playlist_id)
+        playlist_name = "Unknown Playlist"
+        
         if playlist_item:
             playlist_item.is_syncing = False
             playlist_item.update_sync_status(
@@ -2902,9 +3240,26 @@ class SyncPage(QWidget):
                 result.matched_tracks,
                 result.failed_tracks
             )
-
+            playlist_name = playlist_item.name
             # Hide status widget after completion with delay
             QTimer.singleShot(3000, lambda: playlist_item.sync_status_widget.hide() if playlist_item.sync_status_widget else None)
+
+        # Update YouTube card status (for YouTube playlists)
+        youtube_card_updated = False
+        for url, state in self.youtube_playlist_states.items():
+            playlist_data = state.get('playlist_data')
+            if playlist_data and hasattr(playlist_data, 'id') and playlist_data.id == playlist_id:
+                print(f"🎬 YouTube sync finished for playlist_id: {playlist_id}, updating card to sync_complete")
+                self.update_youtube_card_phase(url, 'sync_complete')
+                self.update_youtube_card_progress(
+                    url,
+                    total=result.total_tracks,
+                    matched=result.matched_tracks,
+                    failed=result.failed_tracks
+                )
+                playlist_name = playlist_data.name
+                youtube_card_updated = True
+                break
 
         # Update any open modals
         self.update_open_modals_completion(playlist_id, result)
@@ -2913,7 +3268,6 @@ class SyncPage(QWidget):
         self._update_and_save_sync_status(playlist_id, result, snapshot_id)
         
         # Emit activity signal for sync completion
-        playlist_name = playlist_item.name if playlist_item else "Unknown Playlist"
         success_msg = f"Completed: {result.matched_tracks}/{result.total_tracks} tracks"
         self.sync_activity.emit("✅", "Sync Complete", f"'{playlist_name}' - {success_msg}", "Now")
         
@@ -3547,27 +3901,21 @@ class SyncPage(QWidget):
         """Show download status widget in YouTube tab - styled like PlaylistItem"""
         print(f"📋 show_youtube_download_status called with playlist_id: {playlist_id}")
         
-        # If no playlist_id provided, generate one from name (for backward compatibility)
         if playlist_id is None:
             playlist_id = f"youtube_{hash(playlist_name)}"
-            print(f"📋 Generated fallback playlist_id: {playlist_id}")
-        else:
-            print(f"📋 Using provided playlist_id: {playlist_id}")
         
-        # Remove any existing status widget for this playlist
+        # If a status widget for this playlist already exists, do nothing.
         if playlist_id in self.youtube_status_widgets:
-            existing_widget = self.youtube_status_widgets[playlist_id]
-            existing_widget.setParent(None)
-            del self.youtube_status_widgets[playlist_id]
-        
-        # Clear placeholder content only if this is the first status widget
-        if not self.youtube_status_widgets:
-            for i in reversed(range(self.youtube_content_layout.count())):
-                child = self.youtube_content_layout.itemAt(i).widget()
-                if child:
-                    child.setParent(None)
-        
-        # Create playlist-style status widget
+            print(f"📋 Status widget for {playlist_id} already exists. No action taken.")
+            return
+
+        # --- THE FIX ---
+        # The destructive loop that cleared the layout has been removed.
+        # By the time this function is called, the placeholder is already gone
+        # and the main card container is in place. There is no need to clear anything.
+        # This function now only ADDS the status widget, preserving the main card.
+
+        # Create playlist-style status widget (the "green card")
         status_widget = QFrame()
         status_widget.setFixedHeight(80)
         status_widget.setStyleSheet("""
@@ -3597,12 +3945,10 @@ class SyncPage(QWidget):
         content_layout = QVBoxLayout()
         content_layout.setSpacing(5)
         
-        # Playlist name
         name_label = QLabel(playlist_name)
         name_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
         name_label.setStyleSheet("color: #ffffff;")
         
-        # Info section
         info_layout = QHBoxLayout()
         info_layout.setSpacing(20)
         
@@ -3621,7 +3967,7 @@ class SyncPage(QWidget):
         content_layout.addWidget(name_label)
         content_layout.addLayout(info_layout)
         
-        # View Progress button (styled like Sync / Download button)
+        # View Progress button
         view_progress_btn = QPushButton("View Progress")
         view_progress_btn.setFixedSize(120, 30)
         view_progress_btn.clicked.connect(lambda: self.open_youtube_download_modal(playlist_id))
@@ -3640,129 +3986,15 @@ class SyncPage(QWidget):
             }
         """)
         
-        # Add everything to main layout
         layout.addWidget(status_icon)
         layout.addLayout(content_layout)
         layout.addStretch()
         layout.addWidget(view_progress_btn)
         
-        # Store widget reference for tracking
+        # Store widget reference and add it to the top of the layout
         self.youtube_status_widgets[playlist_id] = status_widget
-        
-        # Add status widget at the top (multiple widgets will stack)
-        self.youtube_content_layout.insertWidget(len(self.youtube_status_widgets) - 1, status_widget)
-        
-        # Add stretch only if this is the first widget
-        if len(self.youtube_status_widgets) == 1:
-            self.youtube_content_layout.addStretch()  # Fill remaining space
+        self.youtube_content_layout.insertWidget(0, status_widget)
     
-    def show_youtube_sync_status(self, playlist_name, track_count, playlist_id=None):
-        """Show sync status widget in YouTube tab - styled like PlaylistItem for sync operations"""
-        # If no playlist_id provided, generate one from name (for backward compatibility)
-        if playlist_id is None:
-            playlist_id = f"youtube_{hash(playlist_name)}"
-        
-        # Remove any existing status widget for this playlist
-        if playlist_id in self.youtube_status_widgets:
-            existing_widget = self.youtube_status_widgets[playlist_id]
-            existing_widget.setParent(None)
-            del self.youtube_status_widgets[playlist_id]
-        
-        # Clear placeholder content only if this is the first status widget
-        if not self.youtube_status_widgets:
-            for i in reversed(range(self.youtube_content_layout.count())):
-                child = self.youtube_content_layout.itemAt(i).widget()
-                if child:
-                    child.setParent(None)
-        
-        # Create playlist-style sync status widget
-        status_widget = QFrame()
-        status_widget.setFixedHeight(80)
-        status_widget.setStyleSheet("""
-            QFrame {
-                background: #282828;
-                border-radius: 8px;
-                border: 1px solid #404040;
-            }
-            QFrame:hover {
-                background: #333333;
-                border: 1px solid #1db954;
-            }
-        """)
-        
-        # Main layout
-        layout = QHBoxLayout(status_widget)
-        layout.setContentsMargins(20, 15, 20, 15)
-        layout.setSpacing(15)
-        
-        # Status icon (sync icon)
-        status_icon = QLabel("🔄")
-        status_icon.setFont(QFont("Arial", 16))
-        status_icon.setFixedSize(22, 22)
-        status_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        # Content section (playlist name and info)
-        content_layout = QVBoxLayout()
-        content_layout.setSpacing(5)
-        
-        # Playlist name
-        name_label = QLabel(playlist_name)
-        name_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-        name_label.setStyleSheet("color: #ffffff;")
-        
-        # Info section
-        info_layout = QHBoxLayout()
-        info_layout.setSpacing(20)
-        
-        track_label = QLabel(f"{track_count} tracks")
-        track_label.setFont(QFont("Arial", 10))
-        track_label.setStyleSheet("color: #b3b3b3;")
-        
-        status_label = QLabel("Syncing...")
-        status_label.setFont(QFont("Arial", 10))
-        status_label.setStyleSheet("color: #ff6b6b;")
-        
-        info_layout.addWidget(track_label)
-        info_layout.addWidget(status_label)
-        info_layout.addStretch()
-        
-        content_layout.addWidget(name_label)
-        content_layout.addLayout(info_layout)
-        
-        # View Progress button (styled like Sync / Download button)
-        view_progress_btn = QPushButton("View Progress")
-        view_progress_btn.setFixedSize(120, 30)
-        view_progress_btn.clicked.connect(lambda: self.open_youtube_download_modal(playlist_id))
-        view_progress_btn.setStyleSheet("""
-            QPushButton {
-                background: transparent;
-                border: 1px solid #ff6b6b;
-                border-radius: 15px;
-                color: #ff6b6b;
-                font-size: 10px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background: #ff6b6b;
-                color: #ffffff;
-            }
-        """)
-        
-        # Add everything to main layout
-        layout.addWidget(status_icon)
-        layout.addLayout(content_layout)
-        layout.addStretch()
-        layout.addWidget(view_progress_btn)
-        
-        # Store widget reference for tracking
-        self.youtube_status_widgets[playlist_id] = status_widget
-        
-        # Add status widget at the top (multiple widgets will stack)
-        self.youtube_content_layout.insertWidget(len(self.youtube_status_widgets) - 1, status_widget)
-        
-        # Add stretch only if this is the first widget
-        if len(self.youtube_status_widgets) == 1:
-            self.youtube_content_layout.addStretch()  # Fill remaining space
     
     def open_youtube_download_modal(self, playlist_id):
         """Open the YouTube download modal when View Progress button is clicked"""
@@ -4193,7 +4425,7 @@ class SyncPage(QWidget):
                 self.playlist_layout.removeItem(item)
     
     def parse_youtube_playlist(self):
-        """Parse YouTube playlist URL and open the download missing tracks modal"""
+        """Parse YouTube playlist URL and create card immediately, then open discovery modal"""
         url = self.youtube_url_input.text().strip()
         
         if not url:
@@ -4205,7 +4437,26 @@ class SyncPage(QWidget):
             self.show_youtube_error("Please enter a valid YouTube Music playlist URL")
             return
         
-        # Check if this URL is already being processed
+        # Check if this URL already has a card/state
+        if url in self.youtube_playlist_states:
+            # Card already exists - check if we need to reopen existing modal or create new one
+            state = self.get_youtube_playlist_state(url)
+            if state and state.get('discovery_modal') and state['discovery_modal'].isVisible():
+                # Modal is already open, just bring it to front
+                state['discovery_modal'].activateWindow()
+                state['discovery_modal'].raise_()
+                return
+            elif state and state.get('playlist_data'):
+                # We have data but no visible modal - recreate modal with existing data
+                self.open_or_create_discovery_modal(url, state)
+                return
+            else:
+                # Card exists but no data yet - this means parsing was cancelled/failed
+                # Reset the card state and continue with new parsing
+                print(f"🔄 Resetting existing card state for URL: {url}")
+                self.reset_youtube_playlist_state(url)
+        
+        # Check if this URL is already being processed (legacy check)
         if url in self.active_youtube_processes:
             existing_modal = self.active_youtube_processes[url]
             if existing_modal and not existing_modal.isHidden():
@@ -4213,10 +4464,6 @@ class SyncPage(QWidget):
                 existing_modal.show()
                 existing_modal.raise_()
                 existing_modal.activateWindow()
-                
-                # Determine modal type for better error message
-                modal_type = "discovery" if isinstance(existing_modal, YouTubeDownloadMissingTracksModal) else "download"
-                self.show_youtube_error(f"This playlist is already being processed in the {modal_type} phase. The existing modal has been brought to the front.")
                 return
             elif existing_modal:
                 # Modal exists but is hidden - reopen it
@@ -4227,6 +4474,10 @@ class SyncPage(QWidget):
             else:
                 # Stale reference - clean it up
                 del self.active_youtube_processes[url]
+        
+        # Create YouTube playlist card immediately
+        card = self.create_youtube_playlist_card(url)
+        card.set_phase('discovering')
         
         # Show loading state
         self.parse_btn.setEnabled(False)
@@ -4277,6 +4528,10 @@ class SyncPage(QWidget):
         # Register this modal for the URL to prevent duplicates
         self.active_youtube_processes[url] = self.current_youtube_modal
         
+        # Link modal with card state system
+        if url in self.youtube_playlist_states:
+            self.youtube_playlist_states[url]['discovery_modal'] = self.current_youtube_modal
+        
         # Show a loading message in the modal
         self.current_youtube_modal.show_loading_state()
         self.current_youtube_modal.show()
@@ -4290,6 +4545,19 @@ class SyncPage(QWidget):
             # Reset button state
             self.parse_btn.setEnabled(True)
             self.parse_btn.setText("Parse Playlist")
+            
+            # Update the card with discovered playlist info
+            if hasattr(self, 'current_youtube_url'):
+                url = self.current_youtube_url
+                
+                # Update card state and playlist info
+                self.set_youtube_card_playlist_data(url, playlist)
+                self.update_youtube_card_playlist_info(url, playlist.name, len(playlist.tracks))
+                self.update_youtube_card_phase(url, 'discovery_complete')
+                
+                # Store modal reference in state
+                if url in self.youtube_playlist_states and hasattr(self, 'current_youtube_modal'):
+                    self.youtube_playlist_states[url]['discovery_modal'] = self.current_youtube_modal
             
             # Update the existing modal with the parsed playlist data
             print(f"🔍 Has current_youtube_modal: {hasattr(self, 'current_youtube_modal') and self.current_youtube_modal is not None}")
@@ -4331,6 +4599,11 @@ class SyncPage(QWidget):
         """Handle YouTube playlist parsing error"""
         print(f"❌ YouTube parsing error: {error_message}")
         
+        # Update card state on error (remove the card since parsing failed)
+        if hasattr(self, 'current_youtube_url'):
+            url = self.current_youtube_url
+            self.remove_youtube_playlist_card(url)
+        
         # Clean up URL tracking on error
         if hasattr(self, 'current_youtube_url') and self.current_youtube_url in self.active_youtube_processes:
             print(f"🧹 Cleaning up URL tracking on error for: {self.current_youtube_url}")
@@ -4356,6 +4629,280 @@ class SyncPage(QWidget):
             msg_box.setWindowTitle("YouTube Playlist Error")
             msg_box.setText(message)
             msg_box.exec()
+
+    # ===============================
+    # YouTube Playlist Card Hub System
+    # ===============================
+    
+    def create_youtube_playlist_card(self, url: str, playlist_name: str = "Loading...", track_count: int = 0):
+        """Create a new YouTube playlist card and add to the cards container"""
+        if url in self.youtube_cards:
+            return self.youtube_cards[url]  # Return existing card
+        
+        # Create new card
+        card = YouTubePlaylistCard(url, playlist_name, track_count, self)
+        card.card_clicked.connect(self.on_youtube_card_clicked)
+        
+        # Store card reference
+        self.youtube_cards[url] = card
+        
+        # Initialize state tracking
+        self.youtube_playlist_states[url] = {
+            'phase': 'discovering',
+            'playlist_data': None,
+            'discovered_tracks': [],
+            'card': card,
+            'discovery_modal': None,
+            'download_modal': None
+        }
+        
+        # Ensure cards container exists
+        if self.youtube_cards_container is None:
+            self.setup_youtube_cards_container()
+        
+        # Add card to container at the top (most recent first)
+        card_layout = self.youtube_cards_container.layout()
+        if card_layout:
+            # Insert at position 0 so newest cards appear at the top
+            card_layout.insertWidget(0, card)
+        
+        return card
+    
+    def setup_youtube_cards_container(self):
+        """Setup the container for YouTube playlist cards"""
+        # Clear existing placeholder content
+        for i in reversed(range(self.youtube_content_layout.count())):
+            child = self.youtube_content_layout.itemAt(i).widget()
+            if child:
+                child.setParent(None)
+        
+        # Create cards container
+        self.youtube_cards_container = QFrame()
+        self.youtube_cards_container.setStyleSheet("""
+            QFrame {
+                background: transparent;
+                border: none;
+            }
+        """)
+        
+        cards_layout = QVBoxLayout(self.youtube_cards_container)
+        cards_layout.setContentsMargins(0, 0, 0, 0)
+        cards_layout.setSpacing(10)
+        # Set alignment to ensure cards stick to the top
+        cards_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        cards_layout.addStretch()  # Stretch at bottom to align cards to top
+        
+        # Add container to main layout at the top
+        self.youtube_content_layout.insertWidget(0, self.youtube_cards_container)
+    
+    def update_youtube_card_phase(self, url: str, phase: str):
+        """Update the YouTube card's phase - cards are the single source of truth for state"""
+        if url not in self.youtube_cards or url not in self.youtube_playlist_states:
+            return
+
+        card = self.youtube_cards[url]
+        state = self.youtube_playlist_states[url]
+        
+        # Update the internal state - card handles its own visual appearance
+        card.set_phase(phase)
+        state['phase'] = phase
+        
+        # Clean up any existing status widgets for this playlist when changing phases
+        playlist_data = state.get('playlist_data')
+        if playlist_data and hasattr(playlist_data, 'id'):
+            if playlist_data.id in self.youtube_status_widgets:
+                status_widget = self.youtube_status_widgets.pop(playlist_data.id, None)
+                if status_widget:
+                    status_widget.setParent(None)
+                    status_widget.deleteLater()
+                    print(f"🧹 Cleaned up status widget for phase change to: {phase}")
+        
+        # Ensure card is always visible - it manages its own appearance
+        card.show()
+    
+    def update_youtube_card_progress(self, url: str, total=None, matched=None, failed=None):
+        """Update progress display on a YouTube playlist card"""
+        if url in self.youtube_cards:
+            card = self.youtube_cards[url]
+            card.update_progress(total=total, matched=matched, failed=failed)
+    
+    def update_youtube_card_playlist_info(self, url: str, name: str, track_count: int):
+        """Update playlist info on a YouTube playlist card"""
+        if url in self.youtube_cards:
+            card = self.youtube_cards[url]
+            card.update_playlist_info(name, track_count)
+    
+    def set_youtube_card_playlist_data(self, url: str, playlist_data):
+        """Store playlist data for a YouTube card"""
+        if url in self.youtube_playlist_states:
+            self.youtube_playlist_states[url]['playlist_data'] = playlist_data
+            if hasattr(playlist_data, 'tracks'):
+                self.youtube_playlist_states[url]['discovered_tracks'] = playlist_data.tracks
+            
+            # Update card with playlist info
+            if url in self.youtube_cards:
+                card = self.youtube_cards[url]
+                card.set_playlist_data(playlist_data)
+    
+    def get_youtube_playlist_state(self, url: str):
+        """Get the current state data for a YouTube playlist"""
+        return self.youtube_playlist_states.get(url, None)
+    
+    def reset_youtube_playlist_state(self, url: str):
+        """Reset YouTube playlist state (for cancel operations)"""
+        if url in self.youtube_playlist_states:
+            state = self.youtube_playlist_states[url]
+            state['phase'] = 'discovering'
+            state['playlist_data'] = None
+            state['discovered_tracks'] = []
+            state['discovery_modal'] = None
+            state['download_modal'] = None
+            
+            # Reset card to initial state
+            if url in self.youtube_cards:
+                card = self.youtube_cards[url]
+                card.set_phase('discovering')
+                card.update_playlist_info("Loading...", 0)
+                card.update_progress(0, 0, 0)
+    
+    def remove_youtube_playlist_card(self, url: str):
+        """Remove a YouTube playlist card (for full cleanup)"""
+        if url in self.youtube_cards:
+            card = self.youtube_cards[url]
+            card.setParent(None)
+            del self.youtube_cards[url]
+        
+        if url in self.youtube_playlist_states:
+            del self.youtube_playlist_states[url]
+    
+    def on_youtube_card_clicked(self, url: str, phase: str):
+        """Handle YouTube playlist card clicks - route to appropriate modal"""
+        print(f"🎬 YouTube card clicked: URL={url}, Phase={phase}")
+        
+        state = self.get_youtube_playlist_state(url)
+        if not state:
+            print(f"⚠️ No state found for URL: {url}")
+            return
+        
+        # Route to appropriate modal based on current phase
+        if phase in ['discovering', 'discovery_complete']:
+            self.open_or_create_discovery_modal(url, state)
+        elif phase in ['sync_complete', 'downloading', 'download_complete']:
+            # For downloading phase, check if download modal actually exists
+            # If not, route back to discovery modal (handles case where download modal was closed)
+            playlist_data = state.get('playlist_data')
+            if (playlist_data and hasattr(playlist_data, 'id') and 
+                playlist_data.id in self.active_youtube_download_modals):
+                self.open_or_create_download_modal(url, state)
+            else:
+                print(f"📍 Download modal not found, routing to discovery modal instead")
+                self.open_or_create_discovery_modal(url, state)
+        elif phase == 'syncing':
+            # Show sync progress - could be same as discovery modal or separate
+            self.open_or_create_discovery_modal(url, state)
+    
+    def open_or_create_discovery_modal(self, url: str, state: dict):
+        """Open or create the discovery modal for a YouTube playlist"""
+        # Check if modal already exists and is visible
+        if state.get('discovery_modal') and state['discovery_modal'].isVisible():
+            state['discovery_modal'].activateWindow()
+            state['discovery_modal'].raise_()
+            return
+        
+        # Check if modal exists but is hidden - reopen it
+        if state.get('discovery_modal') and not state['discovery_modal'].isVisible():
+            print(f"🔍 Reopening existing hidden discovery modal for URL: {url}")
+            state['discovery_modal'].show()
+            state['discovery_modal'].activateWindow()
+            state['discovery_modal'].raise_()
+            return
+        
+        # Check if we have playlist data already (discovery_complete state)
+        if state.get('playlist_data') and state['phase'] == 'discovery_complete':
+            print(f"🔍 Opening existing discovery modal with data for URL: {url}")
+            
+            # Create a new modal with the existing data
+            dummy_playlist_item = type('DummyPlaylistItem', (), {
+                'playlist_name': state['playlist_data'].name,
+                'track_count': len(state['playlist_data'].tracks),
+                'download_modal': None,
+                'show_operation_status': lambda self, status_text="View Progress": None,
+                'hide_operation_status': lambda self: None
+            })()
+            
+            modal = YouTubeDownloadMissingTracksModal(
+                state['playlist_data'], 
+                dummy_playlist_item,
+                self, 
+                self.downloads_page
+            )
+            
+            # Store URL and register modal
+            modal.youtube_url = url
+            state['discovery_modal'] = modal
+            self.active_youtube_processes[url] = modal
+            
+            modal.show()
+            modal.activateWindow()
+            modal.raise_()
+            
+        else:
+            # No existing data - start new discovery process
+            print(f"🔍 Starting new discovery for URL: {url}")
+            
+            # Store URL in input field 
+            self.youtube_url_input.setText(url)
+            
+            # Directly start the parsing worker instead of calling parse_youtube_playlist
+            # to avoid recursion loop
+            self.start_youtube_parsing_worker(url)
+    
+    def start_youtube_parsing_worker(self, url: str):
+        """Start YouTube parsing worker directly (used to avoid recursion)"""
+        # Show loading state
+        self.parse_btn.setEnabled(False)
+        self.parse_btn.setText("Parsing...")
+        
+        # Show modal immediately with loading state
+        self.show_youtube_modal_loading(url)
+        
+        # Store URL for later use in completion handlers
+        self.current_youtube_url = url
+        
+        # Start parsing in a separate thread to avoid blocking UI
+        self.youtube_worker = YouTubeParsingWorker(url)
+        self.youtube_worker.finished.connect(self.on_youtube_parsing_finished)
+        self.youtube_worker.error.connect(self.on_youtube_parsing_error)
+        self.youtube_worker.start()
+    
+    def open_or_create_download_modal(self, url: str, state: dict):
+        """Open or create the download modal for a YouTube playlist"""
+        playlist_data = state.get('playlist_data')
+        if not playlist_data:
+            print(f"⚠️ No playlist data available for URL: {url}")
+            return
+        
+        # Check if modal already exists
+        if state.get('download_modal') and state['download_modal'].isVisible():
+            state['download_modal'].activateWindow()
+            state['download_modal'].raise_()
+            return
+        
+        # Create new download modal
+        print(f"📥 Opening download modal for URL: {url}")
+        
+        # Check existing modal system first
+        if hasattr(playlist_data, 'id') and playlist_data.id in self.active_youtube_download_modals:
+            modal = self.active_youtube_download_modals[playlist_data.id]
+            modal.show()
+            modal.activateWindow()
+            modal.raise_()
+            state['download_modal'] = modal
+        else:
+            # Create new download modal using the existing modal creation pattern
+            # This would transition to the download missing tracks phase
+            # For now, route back to discovery modal (sync_complete means ready for download)
+            self.open_or_create_discovery_modal(url, state)
 
 
 class OptimizedSpotifyDiscoveryWorkerSignals(QObject):
@@ -6555,6 +7102,15 @@ class DownloadMissingTracksModal(QDialog):
             # Corrected the label update to use the incremented counter variable.
             self.downloaded_count_label.setText(str(self.downloaded_tracks_count))
             self.successful_downloads += 1
+            
+            # Update YouTube card progress if this is a YouTube workflow
+            if self.is_youtube_workflow and hasattr(self, 'youtube_url') and hasattr(self.parent_page, 'update_youtube_card_progress'):
+                self.parent_page.update_youtube_card_progress(
+                    self.youtube_url,
+                    total=len(self.missing_tracks),
+                    matched=self.successful_downloads,
+                    failed=len(self.permanently_failed_tracks)
+                )
         else:
             # Check if track was cancelled (don't overwrite cancelled status)
             table_index = track_info['table_index']
@@ -6568,6 +7124,15 @@ class DownloadMissingTracksModal(QDialog):
                     self.permanently_failed_tracks.append(track_info)
                 self.update_failed_matches_button()
             self.failed_downloads += 1
+            
+            # Update YouTube card progress if this is a YouTube workflow
+            if self.is_youtube_workflow and hasattr(self, 'youtube_url') and hasattr(self.parent_page, 'update_youtube_card_progress'):
+                self.parent_page.update_youtube_card_progress(
+                    self.youtube_url,
+                    total=len(self.missing_tracks),
+                    matched=self.successful_downloads,
+                    failed=len(self.permanently_failed_tracks)
+                )
         
         self.completed_downloads += 1
         self.active_parallel_downloads -= 1
@@ -6631,9 +7196,15 @@ class DownloadMissingTracksModal(QDialog):
             print("🎉 All downloads completed!")
             self.cancel_btn.hide()
             
-            # If this is a YouTube workflow, clean up status widget
-            if self.is_youtube_workflow and hasattr(self.parent_page, 'show_youtube_placeholder'):
-                self.parent_page.show_youtube_placeholder()
+            # If this is a YouTube workflow, update card and clean up
+            if self.is_youtube_workflow:
+                # Update card to download_complete phase
+                if hasattr(self, 'youtube_url') and hasattr(self.parent_page, 'update_youtube_card_phase'):
+                    self.parent_page.update_youtube_card_phase(self.youtube_url, 'download_complete')
+                
+                # Clean up status widget
+                if hasattr(self.parent_page, 'show_youtube_placeholder'):
+                    self.parent_page.show_youtube_placeholder()
                 if self.playlist.id in self.parent_page.active_youtube_download_modals:
                     del self.parent_page.active_youtube_download_modals[self.playlist.id]
             
@@ -6734,52 +7305,40 @@ class DownloadMissingTracksModal(QDialog):
             QMessageBox.information(self, "Downloads Complete", final_message)
 
     def on_cancel_clicked(self):
-        """Handle Cancel button - cancels operations, emits finished signal, and closes modal."""
+        """Handle Cancel button - cancels operations, resets state, and closes modal."""
         print("🛑 Cancel button clicked - cancelling all operations and cleaning up")
         
-        # Cancel all operations
         self.cancel_operations()
-        
-        # If this is a YouTube workflow, clean up status widget (user cancelled)
-        if self.is_youtube_workflow and hasattr(self.parent_page, 'show_youtube_placeholder'):
-            self.parent_page.show_youtube_placeholder()
+        self.download_in_progress = False  # CRITICAL: Reset the state flag.
+
+        if self.is_youtube_workflow:
+            # Revert the main card to the discovery phase.
+            if hasattr(self, 'youtube_url') and hasattr(self.parent_page, 'update_youtube_card_phase'):
+                print("🔄 Returning YouTube playlist to discovery_complete state")
+                self.parent_page.update_youtube_card_phase(self.youtube_url, 'discovery_complete')
+            
+            # Clean up this modal's reference.
             if self.playlist.id in self.parent_page.active_youtube_download_modals:
                 del self.parent_page.active_youtube_download_modals[self.playlist.id]
+
+            # --- THE FIX ---
+            # This block now correctly finds and removes the temporary "green card" (the status widget)
+            # without affecting the main playlist card. This prevents the card from disappearing
+            # on subsequent cancellations.
+            if (hasattr(self.parent_page, 'youtube_status_widgets') and
+                self.playlist.id in self.parent_page.youtube_status_widgets):
+                print(f"🧹 Cleaning up YouTube status widget on cancel for playlist: {self.playlist.id}")
+                status_widget = self.parent_page.youtube_status_widgets.pop(self.playlist.id, None)
+                if status_widget:
+                    status_widget.setParent(None)
+                    status_widget.deleteLater()
         
-        # Signal completion and close
-        self.process_finished.emit() # Signal the main page to clean up and reset the button.
-        self.reject() # Close the modal.
+        self.process_finished.emit()
+        self.reject()  # This properly closes and destroys the modal.
         
     def on_close_clicked(self):
-        """Handle close button click - same logic as closeEvent"""
-        print(f"🔍 DEBUG: Close button clicked - cancel_requested: {self.cancel_requested}, download_in_progress: {self.download_in_progress}")
-        print(f"🔍 DEBUG: analysis_complete: {self.analysis_complete}, active_workers: {len(self.active_workers)}")
-        print(f"🔍 DEBUG: is_youtube_workflow: {self.is_youtube_workflow}")
-        
-        if self.cancel_requested or not self.download_in_progress:
-            # If cancelled or finished, close for real and cancel operations
-            print("🔍 DEBUG: Closing modal and cancelling operations")
-            self.cancel_operations()
-            self.process_finished.emit()
-            self.reject()
-            
-            # If this was a YouTube workflow and modal is closing, clean up status widget
-            if self.is_youtube_workflow and hasattr(self.parent_page, 'show_youtube_placeholder'):
-                self.parent_page.show_youtube_placeholder()
-                if self.playlist.id in self.parent_page.active_youtube_download_modals:
-                    del self.parent_page.active_youtube_download_modals[self.playlist.id]
-        else:
-            # If downloads are running, just hide the window (don't cancel)
-            print("🔍 DEBUG: Hiding modal (downloads still active)")
-            self.hide()
-            
-            # If this is a YouTube workflow, show status widget
-            if self.is_youtube_workflow and hasattr(self.parent_page, 'show_youtube_download_status'):
-                self.parent_page.show_youtube_download_status(
-                    self.playlist.name,
-                    len(self.playlist.tracks),
-                    self.playlist.id
-                )
+        """Handle the 'Close' button by triggering the modal's unified close event."""
+        self.close()
         
     def cancel_operations(self):
         """Cancel any ongoing operations, including active slskd downloads."""
@@ -6834,41 +7393,23 @@ class DownloadMissingTracksModal(QDialog):
         print("🛑 Modal operations cancelled successfully.")
         
     def closeEvent(self, event):
-        """
-        Override close event. If the user clicks the 'X', we just hide the window.
-        The window is only truly closed (and destroyed) when the process is finished
-        or explicitly cancelled.
-        """
-        if self.cancel_requested or not self.download_in_progress:
-            # If cancelled or finished, let it close for real.
-            self.cancel_operations()
-            self.process_finished.emit()
-            event.accept()
-            
-            # If this was a YouTube workflow and modal is closing, clean up status widget and URL tracking
-            if self.is_youtube_workflow and hasattr(self.parent_page, 'show_youtube_placeholder'):
-                self.parent_page.show_youtube_placeholder()
-                
-                # Clean up YouTube URL tracking when download modal closes
-                if (hasattr(self, 'youtube_url') and 
-                    hasattr(self.parent_page, 'active_youtube_processes') and
-                    self.youtube_url in self.parent_page.active_youtube_processes):
-                    print(f"🧹 Cleaning up YouTube URL tracking from download modal: {self.youtube_url}")
-                    del self.parent_page.active_youtube_processes[self.youtube_url]
-                if self.playlist.id in self.parent_page.active_youtube_download_modals:
-                    del self.parent_page.active_youtube_download_modals[self.playlist.id]
-        else:
-            # If downloads are running, just hide the window.
+        """Override the window's close event to provide custom logic."""
+        if self.download_in_progress and not self.cancel_requested:
+            print("Download in progress. Hiding modal and updating card phase.")
             self.hide()
-            event.ignore()
+            event.ignore()  # Prevent the modal from being destroyed.
             
-            # If this is a YouTube workflow, show status widget
-            if self.is_youtube_workflow and hasattr(self.parent_page, 'show_youtube_download_status'):
-                self.parent_page.show_youtube_download_status(
-                    self.playlist.name,
-                    len(self.playlist.tracks),
-                    self.playlist.id
-                )
+            # --- THE FIX ---
+            # Instead of showing the status widget directly, this now tells the main
+            # page to transition the card to the 'downloading' phase.
+            if self.is_youtube_workflow and hasattr(self, 'youtube_url'):
+                if hasattr(self.parent_page, 'update_youtube_card_phase'):
+                    self.parent_page.update_youtube_card_phase(self.youtube_url, 'downloading')
+            return
+
+        print("No download in progress or cancel requested. Performing full cleanup.")
+        self.on_cancel_clicked()
+        # on_cancel_clicked() calls self.reject(), which will properly accept the close event.
 
     # Inner class for the search worker
     class ParallelSearchWorker(QRunnable):
@@ -7237,8 +7778,21 @@ class YouTubeDownloadMissingTracksModal(QDialog):
         self.cancel_btn = QPushButton("❌ Cancel")
         self.cancel_btn.clicked.connect(self.on_cancel_clicked)
         
+        # Close button - hides modal without clearing data
+        self.close_btn = QPushButton("🏠 Close")
+        self.close_btn.clicked.connect(self.on_close_clicked)
+        self.close_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #6c757d; color: #ffffff; border: none;
+                border-radius: 6px; font-size: 13px; font-weight: bold;
+                padding: 10px 20px; min-width: 100px;
+            }
+            QPushButton:hover { background-color: #5a6268; }
+        """)
+        
         layout.addWidget(self.sync_btn)
         layout.addWidget(self.begin_search_btn)
+        layout.addWidget(self.close_btn)
         layout.addWidget(self.cancel_btn)
         
         return button_frame
@@ -7525,21 +8079,15 @@ class YouTubeDownloadMissingTracksModal(QDialog):
             modal.youtube_url = self.youtube_url
             self.parent_page.active_youtube_processes[self.youtube_url] = modal
             print(f"🔄 Transferred URL tracking to download modal: {self.youtube_url}")
+            
+            # Update card to downloading phase
+            if hasattr(self.parent_page, 'update_youtube_card_phase'):
+                self.parent_page.update_youtube_card_phase(self.youtube_url, 'downloading')
         
         # Store the modal reference using the ID of the NEWLY created playlist object.
-        # This ensures the "View Progress" button can find it later.
         print(f"📝 Storing modal with CORRECT discovered_playlist.id: {discovered_playlist.id}")
-        
-        print(f"📝 Available modals before storing: {list(self.parent_page.active_youtube_download_modals.keys())}")
         self.parent_page.active_youtube_download_modals[discovered_playlist.id] = modal
-        print(f"📝 Available modals after storing: {list(self.parent_page.active_youtube_download_modals.keys())}")
-
-        # Also update the status widget on the main page to use the correct new ID
-        self.parent_page.show_youtube_download_status(
-            discovered_playlist.name,
-            len(discovered_playlist.tracks),
-            discovered_playlist.id  # Pass the correct ID here
-        )
+        
         modal.exec()
     
     def on_sync_clicked(self):
@@ -7564,9 +8112,8 @@ class YouTubeDownloadMissingTracksModal(QDialog):
                 QPushButton:disabled { background-color: #404040; color: #888888; }
             """)
             
-            # Hide status widget if it exists
-            if hasattr(self.parent_page, 'show_youtube_placeholder'):
-                self.parent_page.show_youtube_placeholder()
+            # Status widgets are no longer used for sync - cards handle their own state
+            print("🔄 Sync cancelled - card will update its own state")
         
         else:
             # Start sync using the parent page's sync infrastructure
@@ -7592,18 +8139,18 @@ class YouTubeDownloadMissingTracksModal(QDialog):
                     self.sync_status_widget.show()
                     self.update_sync_status(len(self.playlist.tracks), 0, 0)
                 
-                # Show progress in status widget if modal is hidden
-                if self.is_youtube_workflow and hasattr(self.parent_page, 'show_youtube_download_status'):
-                    self.update_youtube_status_for_sync()
+                # Update card to syncing phase
+                if hasattr(self, 'youtube_url') and hasattr(self.parent_page, 'update_youtube_card_phase'):
+                    print(f"🎬 Discovery modal: Setting card to syncing phase for URL: {self.youtube_url}")
+                    print(f"🎬 Discovery modal: Using playlist.id: {self.playlist.id}")
+                    self.parent_page.update_youtube_card_phase(self.youtube_url, 'syncing')
+                
+                # The card itself will show sync progress - no need for separate status widget
                     
             else:
                 print(f"❌ Failed to start sync for: {self.playlist.name}")
                 QMessageBox.warning(self, "Sync Failed", "Failed to start playlist sync. Please try again.")
     
-    def update_youtube_status_for_sync(self):
-        """Update YouTube status widget to show sync progress"""
-        if hasattr(self.parent_page, 'show_youtube_sync_status'):
-            self.parent_page.show_youtube_sync_status(self.playlist.name, len(self.playlist.tracks), self.playlist.id)
     
     def on_cancel_clicked(self):
         """Handle cancel button click - cancel sync or close modal"""
@@ -7634,9 +8181,8 @@ class YouTubeDownloadMissingTracksModal(QDialog):
                 QPushButton:disabled { background-color: #404040; color: #888888; }
             """)
             
-            # Hide status widget if it exists
-            if hasattr(self.parent_page, 'show_youtube_placeholder'):
-                self.parent_page.show_youtube_placeholder()
+            # Status widgets are no longer used for sync - cards handle their own state
+            print("🔄 Sync cancelled - card will update its own state")
         
         # Clean up URL tracking before closing (but not during download transition)
         if (hasattr(self, 'youtube_url') and hasattr(self.parent_page, 'active_youtube_processes') and
@@ -7647,7 +8193,32 @@ class YouTubeDownloadMissingTracksModal(QDialog):
         
         # Always close/hide the modal when cancel is clicked
         print("🛑 Closing modal")
+        
+        # Update card state - reset to initial discovering state for Cancel
+        if hasattr(self, 'youtube_url') and hasattr(self.parent_page, 'reset_youtube_playlist_state'):
+            self.parent_page.reset_youtube_playlist_state(self.youtube_url)
+        
         self.reject()
+    
+    def on_close_clicked(self):
+        """Handle Close button click - hide modal but preserve discovery data"""
+        print("🏠 Close button clicked - preserving discovery data")
+        
+        # Check if sync is currently in progress - if so, preserve the syncing state
+        if hasattr(self, 'youtube_url') and hasattr(self.parent_page, 'update_youtube_card_phase'):
+            if self.sync_in_progress:
+                # Sync is running - keep the card in syncing state
+                print("🔄 Sync in progress - preserving syncing state")
+                # Don't change the card phase - it should stay as 'syncing'
+            elif self.spotify_search_completed:
+                # No sync running, discovery complete - safe to set to discovery_complete
+                self.parent_page.update_youtube_card_phase(self.youtube_url, 'discovery_complete')
+            else:
+                # Discovery still running - keep as discovering but hide modal
+                print("🔄 Discovery still in progress - keeping discovering state")
+        
+        # Just hide the modal, don't reset any data
+        self.hide()
     
     def on_sync_progress(self, playlist_id, progress):
         """Handle sync progress updates (called from parent page)"""
@@ -7671,6 +8242,15 @@ class YouTubeDownloadMissingTracksModal(QDialog):
                             progress.failed_tracks
                         )
                         print(f"📊 ✅ Status widget updated successfully")
+                        
+                        # Update card progress as well
+                        if hasattr(self, 'youtube_url') and hasattr(self.parent_page, 'update_youtube_card_progress'):
+                            self.parent_page.update_youtube_card_progress(
+                                self.youtube_url,
+                                total=progress.total_tracks,
+                                matched=progress.matched_tracks,
+                                failed=progress.failed_tracks
+                            )
                     else:
                         print("❌ sync_status_widget is None!")
                 else:
@@ -7683,12 +8263,13 @@ class YouTubeDownloadMissingTracksModal(QDialog):
             import traceback
             print(f"💥 Traceback: {traceback.format_exc()}")
             
-            # Also update the status widget on the main page if this modal is hidden
-            if hasattr(self.parent_page, 'show_youtube_sync_status'):
-                self.parent_page.show_youtube_sync_status(
-                    self.playlist.name, 
-                    progress.total_tracks, 
-                    self.playlist.id
+            # Update the card progress display instead of creating status widgets
+            if hasattr(self, 'youtube_url') and hasattr(self.parent_page, 'update_youtube_card_progress'):
+                self.parent_page.update_youtube_card_progress(
+                    self.youtube_url,
+                    total=progress.total_tracks,
+                    matched=progress.matched_tracks,
+                    failed=progress.failed_tracks
                 )
 
     def on_sync_finished(self, playlist_id, result):
@@ -7714,6 +8295,10 @@ class YouTubeDownloadMissingTracksModal(QDialog):
                 QPushButton:hover { background-color: #ff5252; }
                 QPushButton:disabled { background-color: #404040; color: #888888; }
             """)
+            
+            # Update card to sync_complete phase
+            if hasattr(self, 'youtube_url') and hasattr(self.parent_page, 'update_youtube_card_phase'):
+                self.parent_page.update_youtube_card_phase(self.youtube_url, 'sync_complete')
     
     def on_sync_error(self, playlist_id, error_msg):
         """Handle sync error (called from parent page)"""
@@ -7740,13 +8325,16 @@ class YouTubeDownloadMissingTracksModal(QDialog):
             """)
     
     def create_discovered_playlist(self, spotify_tracks):
-        """Create a playlist object from discovered Spotify tracks"""
-        import time
+        """Create a playlist object from discovered Spotify tracks, reusing the original ID and name."""
+        playlist_id = self.playlist.id
         
-        # Create a playlist object compatible with existing system
+        print(f"🎵 Creating discovered playlist with consistent ID: {playlist_id}")
+
         discovered_playlist = type('Playlist', (), {
-            'id': f"youtube_discovered_{int(time.time())}",
-            'name': f"YouTube Discovered: {self.playlist.name}",
+            'id': playlist_id,
+            # --- THE FIX ---
+            # This now uses the original, clean playlist name without adding any prefixes.
+            'name': self.playlist.name,
             'description': f"Discovered from YouTube playlist with {len(spotify_tracks)} matched tracks",
             'owner': "YouTube Discovery",
             'public': False,
@@ -7784,14 +8372,14 @@ class YouTubeDownloadMissingTracksModal(QDialog):
         # Update modal properties
         self.playlist = playlist
         
-        # IMPORTANT: Re-store the modal with the correct playlist.id now that we have real data
-        if hasattr(self.parent_page, 'active_youtube_download_modals'):
-            print(f"📝 Re-storing modal with correct playlist.id: {playlist.id}")
-            # Also store with fallback hash ID to match status widget expectations
-            fallback_id = f"youtube_{hash(playlist.name)}"
-            print(f"📝 Also storing with fallback hash ID: {fallback_id}")
-            self.parent_page.active_youtube_download_modals[playlist.id] = self
-            self.parent_page.active_youtube_download_modals[fallback_id] = self
+        # --- THE FIX ---
+        # The block of code that was here was incorrectly adding this discovery modal
+        # to the parent page's tracking dictionary for DOWNLOAD modals, often with
+        # multiple, inconsistent IDs. This was the root cause of the state corruption
+        # and the "No modal found" error. By removing it, we ensure that only the
+        # correct modal (the DownloadMissingTracksModal) is ever added to that list,
+        # which resolves the entire issue.
+        
         self.total_tracks = len(playlist.tracks)
         self.spotify_discovered_tracks = [None] * self.total_tracks
         
