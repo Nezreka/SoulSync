@@ -170,6 +170,54 @@ docker run -d \
 
 Open the `config.json` file and fill in the details for Spotify, Plex, and Soulseek.
 
+#### 🔑 Obtaining Required API Credentials
+
+Before configuring SoulSync, you'll need to obtain API credentials from Spotify and Plex. Here's how:
+
+##### Spotify Client ID and Secret
+
+**Step 1: Create a Spotify App**
+1. Go to the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard)
+2. Log in with your Spotify account
+3. Click "Create App"
+4. Fill in the required information:
+   - **App name**: "SoulSync" (or any name you prefer)
+   - **App description**: "Music library sync application"
+   - **Redirect URI**: `http://localhost:8888/callback` (or leave blank)
+   - Check the boxes to agree to the Terms of Service
+5. Click "Save"
+
+**Step 2: Get Your Credentials**
+1. In your newly created app, click "Settings"
+2. Copy the **Client ID** - this is your `client_id`
+3. Click "View client secret" to reveal and copy the **Client Secret** - this is your `client_secret`
+
+##### Plex Token
+
+**Method 1: Through Plex Web Interface (Recommended)**
+1. Open Plex in your web browser and sign in
+2. Right-click anywhere on the page and select "Inspect" or press F12
+3. Go to the **Network** tab in Developer Tools
+4. Reload the page
+5. Look for requests to `plex.tv` or your Plex server
+6. In the request headers, find `X-Plex-Token` - copy this value
+
+**Method 2: Using Browser Console**
+1. Go to [plex.tv](https://plex.tv) and sign in
+2. Open Developer Tools (F12) and go to the **Console** tab
+3. Type: `localStorage.myPlexAccessToken` and press Enter
+4. Copy the returned token value (without quotes)
+
+**Method 3: Using Plex API**
+1. Make a POST request to `https://plex.tv/users/sign_in.xml`
+2. Include your Plex username and password in the request
+3. Extract the authentication token from the XML response
+
+**Finding Your Plex Server URL:**
+- Local network: `http://[YOUR_PLEX_SERVER_IP]:32400` (e.g., `http://192.168.1.100:32400`)
+- Same machine: `http://localhost:32400`
+- To find your server IP, check your Plex server settings or use your router's admin panel
+
 #### 📁 Important: Understanding Download vs Transfer Folders
 
 - **download_path**: This should be the exact same folder where slskd saves its downloads (e.g., the downloads folder you configured in slskd). SoulSync monitors this folder for completed downloads.
