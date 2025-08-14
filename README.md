@@ -17,54 +17,56 @@ Docker is unlikely since this is a fully GUI based app. The unique setup would b
 
 ## ✨ Core Features
 
-### 🤖 **Complete Automation Engine**
-SoulSync transforms music collection management into a fully automated, hands-off experience. The automation engine orchestrates **concurrent multi-playlist syncing**, allowing you to queue multiple Spotify and YouTube playlists for simultaneous processing without waiting for each to complete. **Intelligent download queue management** prioritizes FLAC files and reliable sources while automatically handling retries and failures. **Smart file organization** moves completed downloads from your slskd download directory to organized transfer folders with proper Artist/Album structure, while **automatic Plex library scanning** ensures new music appears in your library within minutes of download completion.
+### 🤖 **Automation Engine**
+SoulSync handles everything automatically once you set it up. You can sync multiple Spotify and YouTube playlists at the same time, and it'll prioritize FLAC files and reliable sources. When downloads finish, it organizes them into clean folder structures and updates your Plex library automatically.
 
-The system features **background wishlist processing** that runs every 60 minutes, automatically attempting to download up to 25 failed tracks without user intervention—making temporarily unavailable music self-acquiring when sources become available. **Auto-detection technology** scans your network to automatically discover and connect to Plex servers and slskd instances, eliminating manual IP configuration. **Automatic playlist backups** are created before any sync operations, protecting your curated playlists from accidental changes. The entire system maintains itself through **automatic service reconnection** with exponential backoff and **self-healing connections** when services restart, ensuring uninterrupted operation.
+The app runs a background process every 60 minutes to retry failed downloads - so if a track wasn't available earlier, it'll keep trying until it finds it. It also auto-detects your Plex server and slskd on your network, backs up your playlists before making changes, and reconnects to services if they go down.
 
-Once configured, SoulSync operates like a personal music librarian—monitoring your Spotify and YouTube playlists, downloading missing tracks, organizing files, enhancing metadata, and keeping your Plex library perfectly synchronized, all while you sleep.
+Once it's running, SoulSync basically acts like a personal music librarian that works in the background.
 
-### 🎬 **Advanced YouTube & Spotify Integration**
-SoulSync supports **Spotify and YouTube playlist management** with equal sophistication. The **YouTube-DL integration** uses yt-dlp to extract video titles, while **intelligent title cleaning** removes video noise like "(Official Music Video)", artist prefixes, and platform identifiers to find clean track names. For Spotify, the system provides **complete playlist analysis** with snapshot-based change detection to identify new or removed tracks without re-scanning entire playlists. Both platforms benefit from the same **confidence-scored track matching** with color-coded indicators and **one-click bulk operations** to download all missing tracks with detailed progress tracking.
+### 🎬 **Spotify & YouTube Integration**
+Works with both Spotify and YouTube playlists. For YouTube, it extracts clean track names by removing stuff like "(Official Music Video)" and other junk from titles. For Spotify, it tracks playlist changes so it only downloads new tracks instead of re-scanning everything.
 
-### 🎯 **Complete Artist Discovery & Discography Management**
-Transform how you discover and collect music with SoulSync's **comprehensive artist exploration system**. Search for any artist and instantly view their **complete discography** with real-time **ownership status indicators** showing which albums you own, which are missing, and completion percentages for partial collections. The **chronological release timeline** displays all albums and singles with Plex library overlay, making it easy to spot gaps in your collection. Execute **bulk download operations** to acquire an artist's entire missing discography with a single click, or perform **album-level operations** to download specific missing albums or individual tracks. The system **cross-references your library** against complete artist catalogs, ensuring you never miss releases from your favorite artists.
+Both get the same smart matching system with color-coded confidence scores, and you can bulk download all missing tracks with progress tracking.
 
-### 🔍 **Professional Search & Download Engine** 
-SoulSync's **manual search capabilities** rival professional music acquisition tools with **extensive filtering and sorting options**. The unified search interface switches between Albums and Singles modes while maintaining **persistent search history** across sessions. Every search result includes a **stream-before-download button** for instant preview, ensuring you get exactly the track you want. The **matched download system** provides artist/album selection modals for accurate metadata assignment, while **real-time progress tracking** shows download status, queue positions, and transfer speeds. Failed downloads are automatically captured in the **intelligent wishlist system** with retry mechanisms and failure analytics.
+### 🎯 **Artist Discovery**
+Search for any artist and see their complete discography with indicators showing what you already own vs what's missing. You can download entire missing discographies with one click, or just grab specific albums/tracks. It shows releases chronologically and highlights gaps in your collection.
 
-### 🧠 **Revolutionary Matching Engine**
-At the core of SoulSync is an advanced matching engine that goes far beyond simple text comparison. It features **version-aware scoring** that automatically prioritizes original versions over remixes, live recordings, or instrumentals. The system handles **complex text normalization** including Cyrillic characters (КоЯn → Korn), accents, and special symbols like A$AP Rocky. **Smart album detection** removes album names from track titles ("Track - Album" → "Track") for cleaner matching, while **multi-query generation** creates several optimized search variations per track to maximize success rates. **Intelligent YouTube title processing** strips video noise while preserving important version information. Every match includes **detailed confidence scoring** to help you make informed decisions about track quality and accuracy.
+### 🔍 **Search & Download**
+The search page lets you manually hunt for specific albums or singles. Every result has a preview button so you can stream before downloading. It keeps your search history and has detailed progress tracking for downloads. Failed downloads automatically go to a wishlist for retry later.
 
-### 🗄️ **Lightning-Fast Database Engine**
-SoulSync maintains a **complete local SQLite database** of your Plex library metadata, eliminating slow API calls and enabling instant matching operations. The database automatically synchronizes with your Plex server through **intelligent background updates** triggered by file changes, library scans, and download completions. Advanced features include **thread-safe operations with WAL mode**, connection pooling for concurrent access, **smart Plex scan management** with debounced library scanning, and a **built-in database health monitoring widget** showing sync status and performance metrics. This architecture enables **lightning-fast track matching** even with libraries containing tens of thousands of songs.
+### 🧠 **Smart Matching**
+The matching engine is pretty sophisticated - it prioritizes original versions over remixes, handles weird characters (like КоЯn → Korn), and removes album names from track titles for cleaner matching. It generates multiple search variations per track to find more results and scores each match so you know how confident it is.
 
-### 📁 **Intelligent File Organization & Metadata System**
-Every download goes through SoulSync's **sophisticated file organization pipeline** that **automatically determines folder structure** based on whether tracks are album tracks or singles. The system creates clean directory structures like `Transfer/Artist/Artist - Album/01 - Track.flac` for albums and `Transfer/Artist/Artist - Single/Single.flac` for singles. **Universal format support** handles MP3 (ID3v2.4), FLAC (Vorbis Comments), MP4/M4A (iTunes tags), and OGG (Vorbis) files with format-specific optimization. **Automatic metadata enhancement** enriches every file with accurate Spotify data including artist names, album titles, track numbers, release dates, and music genres. **High-quality album art embedding** downloads 640x640 images directly from Spotify's CDN and embeds them using appropriate format standards. **Plex-specific optimizations** ensure perfect recognition and organization in Plex libraries.
+### 🗄️ **Local Database**
+Keeps a complete SQLite database of your Plex library locally, so matching is instant instead of making slow API calls. Updates automatically when files change and handles thousands of songs without slowing down.
 
-### 🎵 **Integrated Media Player & Streaming**
-Experience music before downloading with SoulSync's **full-featured media player** integrated directly into the sidebar. **Stream tracks from Soulseek sources** for instant preview, with native support for FLAC, MP3, OGG, AAC, WMA, and WAV formats. The player features play/pause/stop controls, volume adjustment, **smart scrolling text** for long track names, loading animations, and **synchronized playback state** across all application pages. Preview any search result with a single click to ensure it's the right track before committing to a download, eliminating the guesswork from music acquisition.
+### 📁 **File Organization**
+Downloads get organized automatically based on whether they're album tracks or singles. Creates clean folder structures like `Transfer/Artist/Artist - Album/01 - Track.flac`. Supports all common audio formats and automatically tags everything with proper metadata and album art from Spotify.
 
-### 📋 **Advanced Wishlist & Failed Download Recovery**  
-Never lose track of music you couldn't find with SoulSync's **comprehensive wishlist system**. The application **automatically captures failed downloads** with preserved source context (which playlist, album, or search originated the request) along with detailed failure reasons. **Manual search tracking** ensures any tracks that remain failed after extensive searching are automatically added to the wishlist. The **automatic wishlist processor** runs every 60 minutes, searching for and downloading all tracks in the wishlist without user intervention. Advanced features include **one-click retry mechanisms** with updated search queries, **failure analytics** to identify patterns, **bulk operations** for mass retry/removal, and intelligent retry counting to prevent endless attempts.
+### 🎵 **Built-in Player**
+You can stream tracks directly from Soulseek before downloading to make sure they're the right ones. Supports all common audio formats and the player works across all pages in the app.
 
-### 📊 **Real-Time Dashboard & Monitoring**
-Stay informed with SoulSync's **comprehensive monitoring system** featuring live service status indicators for Spotify, Plex, and Soulseek connections with automatic reconnection capabilities. Track **real-time download statistics** including active downloads, queue status, completion rates, and transfer speeds. Monitor **system performance metrics** like database size, search history count, memory usage, and application uptime. The **chronological activity feed** provides a complete stream of all application activities with timestamps and context, while the **toast notification system** delivers non-intrusive success, warning, and error messages.
+### 📋 **Wishlist System**
+Failed downloads automatically get saved to a wishlist with context about where they came from. The app tries to download wishlist items every hour automatically. You can also manually retry or bulk manage failed downloads.
 
-### 🎯 **Five Specialized Pages & Professional Workflows**
+### 📊 **Dashboard & Monitoring**
+Real-time status for all your connections (Spotify, Plex, Soulseek), download statistics, and system performance. Activity feed shows everything that's happening with timestamps.
 
-**Downloads Page**: The heart of music acquisition featuring a **unified search interface** that switches between Albums and Singles modes while maintaining persistent search history. Every search result includes a stream button for instant preview, and the **matched download system** provides artist/album matching modals for accurate metadata assignment. Real-time progress bars show download status and queue position, with **direct wishlist integration** for failed download recovery and retry management.
+### 🎯 **Five Main Pages**
 
-**Sync Page**: Sophisticated playlist management supporting both **Spotify and YouTube playlists** with snapshot-based change detection to avoid unnecessary re-scanning. The **playlist analysis engine** provides confidence-based matching with color-coded scores for each track, **bulk "Download Missing Tracks" operations** with progress tracking, and **intelligent retry logic** that automatically improves search queries for previously failed downloads.
+**Downloads**: Search for music manually, preview before downloading, see progress in real-time.
 
-**Artists Page**: **Complete discography exploration** showing full artist catalogs with ownership status indicators for every album. Perform **album-level operations** to download entire missing albums or individual tracks, view releases in **chronological timeline format** with Plex ownership overlay, and execute **bulk operations** to download all missing content for an artist with a single click. The system cross-references against your existing library to highlight exactly what you're missing.
+**Sync**: Load Spotify/YouTube playlists, see what's missing with confidence scores, bulk download missing tracks.
 
-**Dashboard Page**: **Centralized control center** with a service connection matrix showing real-time status for all connected services, **performance overview** displaying database health and system resource usage, **live activity stream** of downloads and system events, and **quick action buttons** for common operations without page navigation.
+**Artists**: Browse complete artist catalogs, see what you own vs missing, bulk download entire discographies.
 
-**Settings Page**: **Comprehensive configuration hub** for Spotify/Plex/Soulseek credentials, download/transfer path management, **metadata enhancement controls** (enable/disable automatic tagging and album art embedding), database operations (update, rebuild, health check), **performance tuning options** (thread limits, cache settings), and **network auto-detection** for services.
+**Dashboard**: Overview of all connections and activity, quick access to common functions.
 
-### 🚀 **Performance & Reliability Architecture**
-Built on a **modern multi-threaded architecture**, SoulSync processes searches, downloads, and database operations in parallel for maximum performance. **Smart resource management** automatically cleans up temporary files and maintains an optimized search history of the 200 most recent queries. **Memory optimization** ensures efficient object lifecycle management, while **all intensive operations run in background threads** to maintain complete UI responsiveness. **Rate limiting and queue management** prevents Soulseek network bans while maximizing download throughput. The entire system is designed to feel fast and fluid even during heavy operations, with **professional-grade error handling** and **automatic service recovery** ensuring uninterrupted operation.
+**Settings**: Configure all your API keys and preferences, database management, performance tuning.
+
+### 🚀 **Performance**
+Multi-threaded so it stays responsive during heavy operations. Automatically manages resources, prevents Soulseek bans with rate limiting, and handles errors gracefully with automatic recovery.
 
 ## ⚙️ How It Works
 
