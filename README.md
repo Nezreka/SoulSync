@@ -84,6 +84,15 @@ The application follows a clear, automated workflow to enhance and expand your m
 
 Follow these steps to get SoulSync up and running on your system.
 
+### ⚠️ Important Soulseek Sharing Requirement
+
+**CRITICAL**: Before using SoulSync, you MUST set up a shared folder in slskd. Users who only download without sharing are typically banned by other Soulseek users, which will severely limit your ability to find and download music. 
+
+1. In your slskd web interface (`http://localhost:5030`), go to the **Shares** section
+2. Add at least one folder containing music files to share with the network
+3. The more you share, the better your reputation and download success rate will be
+4. Consider sharing your organized music collection from your Plex library
+
 ### Prerequisites
 
 Before you begin, ensure you have the following installed and configured:
