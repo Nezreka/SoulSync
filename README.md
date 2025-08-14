@@ -208,7 +208,14 @@ Before configuring SoulSync, you'll need to obtain API credentials from Spotify 
 3. Type: `localStorage.myPlexAccessToken` and press Enter
 4. Copy the returned token value (without quotes)
 
-**Method 3: Using Plex API**
+**Method 3: Through Media Item XML (Easy)**
+1. Open Plex in your web browser and navigate to any media item
+2. Click on the item to view its details
+3. Click "View XML" or right-click and select "View XML"
+4. In the URL bar, you'll see a URL like: `http://your-server:32400/library/metadata/12345?X-Plex-Token=YOUR_TOKEN_HERE`
+5. Copy the token from the `X-Plex-Token=` parameter in the URL
+
+**Method 4: Using Plex API**
 1. Make a POST request to `https://plex.tv/users/sign_in.xml`
 2. Include your Plex username and password in the request
 3. Extract the authentication token from the XML response
