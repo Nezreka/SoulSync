@@ -319,11 +319,15 @@ class CryptoDonationWidget(QWidget):
         
         layout.addLayout(header_layout)
         
-        # Container for crypto addresses (initially hidden)
+        # Container for donation options (initially hidden)
         self.addresses_container = QWidget()
         self.addresses_layout = QVBoxLayout(self.addresses_container)
         self.addresses_layout.setContentsMargins(0, 0, 0, 0)
         self.addresses_layout.setSpacing(8)
+        
+        # Ko-fi option (first item)
+        kofi_item = self.create_kofi_item()
+        self.addresses_layout.addWidget(kofi_item)
         
         # Crypto addresses
         crypto_addresses = [
@@ -406,6 +410,59 @@ class CryptoDonationWidget(QWidget):
         
         # Brief visual feedback (could add a tooltip or status message here)
         print(f"Copied {crypto_name} address to clipboard: {address}")
+    
+    def create_kofi_item(self):
+        """Create a clickable Ko-fi donation item styled like crypto items"""
+        item = QFrame()
+        item.setFixedHeight(32)
+        item.setCursor(Qt.CursorShape.PointingHandCursor)
+        item.setStyleSheet("""
+            QFrame {
+                background: transparent;
+                border-radius: 8px;
+                margin: 0 12px;
+            }
+            QFrame:hover {
+                background: rgba(255, 255, 255, 0.06);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+            }
+        """)
+        
+        layout = QHBoxLayout(item)
+        layout.setContentsMargins(12, 4, 12, 4)
+        layout.setSpacing(6)
+        
+        # Ko-fi name
+        name_label = QLabel("Ko-fi")
+        name_label.setFont(QFont("SF Pro Text", 9, QFont.Weight.Medium))
+        name_label.setStyleSheet("""
+            color: rgba(255, 255, 255, 0.8);
+            font-weight: 500;
+        """)
+        
+        # External link indicator (instead of address)
+        link_label = QLabel("Click to open")
+        link_label.setFont(QFont("SF Pro Text", 8))
+        link_label.setStyleSheet("""
+            color: rgba(255, 255, 255, 0.5);
+            font-style: italic;
+        """)
+        
+        layout.addWidget(name_label)
+        layout.addStretch()
+        layout.addWidget(link_label)
+        
+        # Connect click event to open Ko-fi link
+        item.mousePressEvent = lambda event: self.open_kofi_link()
+        
+        return item
+    
+    def open_kofi_link(self):
+        """Open Ko-fi link in the user's default web browser"""
+        import webbrowser
+        kofi_url = "https://ko-fi.com/boulderbadgedad"
+        webbrowser.open(kofi_url)
+        print(f"Opening Ko-fi link: {kofi_url}")
 
 class StatusIndicator(QWidget):
     def __init__(self, service_name: str, parent=None):
