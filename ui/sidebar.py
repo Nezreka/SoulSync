@@ -1131,7 +1131,11 @@ class ModernSidebar(QWidget):
         crypto_section = CryptoDonationWidget()
         layout.addWidget(crypto_section)
         
-        # Small spacer between crypto and status
+        # Version info section
+        version_section = self.create_version_section()
+        layout.addWidget(version_section)
+        
+        # Small spacer between version and status
         layout.addItem(QSpacerItem(20, 8, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed))
         
         # Status section
@@ -1214,6 +1218,38 @@ class ModernSidebar(QWidget):
         self.buttons["dashboard"].set_active(True)
         
         return nav_widget
+    
+    def create_version_section(self):
+        version_widget = QWidget()
+        version_widget.setFixedHeight(45)
+        version_widget.setStyleSheet("""
+            QWidget {
+                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                                          stop: 0 transparent,
+                                          stop: 0.3 rgba(255, 255, 255, 0.02),
+                                          stop: 1 rgba(255, 255, 255, 0.04)); 
+                border-top: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 8px;
+                margin: 0 10px;
+            }
+        """)
+        
+        layout = QVBoxLayout(version_widget)
+        layout.setContentsMargins(20, 12, 20, 12)
+        layout.setSpacing(0)
+        
+        # Version label
+        version_label = QLabel("v.0.5")
+        version_label.setFont(QFont("SF Pro Text", 10, QFont.Weight.Medium))
+        version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        version_label.setStyleSheet("""
+            color: rgba(255, 255, 255, 0.6); 
+            letter-spacing: 0.1px;
+            font-weight: 500;
+        """)
+        layout.addWidget(version_label)
+        
+        return version_widget
     
     def create_status_section(self):
         status_widget = QWidget()
