@@ -252,17 +252,35 @@ class SpotifyClient:
         playlists = []
         
         try:
-            # Only fetch first batch initially for faster loading
-            results = self.sp.current_user_playlists(limit=20)
+            # Fetch all playlists using pagination
+            limit = 50  # Maximum allowed by Spotify API
+            offset = 0
+            total_fetched = 0
             
-            if results and 'items' in results:
+            while True:
+                results = self.sp.current_user_playlists(limit=limit, offset=offset)
+                
+                if not results or 'items' not in results:
+                    break
+                
+                batch_count = 0
                 for playlist_data in results['items']:
                     if playlist_data['owner']['id'] == self.user_id or playlist_data['collaborative']:
                         # Create playlist with empty tracks list for now
                         playlist = Playlist.from_spotify_playlist(playlist_data, [])
                         playlists.append(playlist)
+                        batch_count += 1
+                
+                total_fetched += batch_count
+                logger.info(f"Retrieved {batch_count} playlists in batch (offset {offset}), total: {total_fetched}")
+                
+                # Check if we've fetched all playlists
+                if len(results['items']) < limit or not results.get('next'):
+                    break
+                    
+                offset += limit
             
-            logger.info(f"Retrieved {len(playlists)} playlist metadata (first batch)")
+            logger.info(f"Retrieved {len(playlists)} total playlist metadata")
             return playlists
             
         except Exception as e:
