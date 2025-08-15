@@ -9,6 +9,11 @@ SoulSync is a powerful desktop application designed to bridge the gap between yo
 
 The core philosophy of SoulSync is to let you enjoy music discovery on Spotify while it handles the tedious work of building and maintaining a pristine, locally-hosted music collection for you in Plex. Plex is not required for the app to function but slskd and Spotify API are required.
 
+## ☕ Support Development
+
+If you find SoulSync useful, consider supporting its development:
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/boulderbadgedad)
 
 ![A screenshot of my awesome app in action.](./assets/dashboard.png)
 
