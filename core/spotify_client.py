@@ -432,6 +432,7 @@ class SpotifyClient:
             logger.error(f"Error fetching track features: {e}")
             return None
     
+    @rate_limited
     def get_album(self, album_id: str) -> Optional[Dict[str, Any]]:
         """Get album information including tracks"""
         if not self.is_authenticated():
@@ -445,6 +446,7 @@ class SpotifyClient:
             logger.error(f"Error fetching album: {e}")
             return None
     
+    @rate_limited
     def get_album_tracks(self, album_id: str) -> Optional[Dict[str, Any]]:
         """Get album tracks"""
         if not self.is_authenticated():
