@@ -25,6 +25,7 @@ from core.matching_engine import MusicMatchingEngine
 from ui.components.database_updater_widget import DatabaseUpdaterWidget
 from core.database_update_worker import DatabaseUpdateWorker, DatabaseStatsWorker
 from core.wishlist_service import get_wishlist_service
+from core.watchlist_scanner import get_watchlist_scanner
 from utils.logging_config import get_logger
 
 from core.soulseek_client import TrackResult
@@ -62,6 +63,7 @@ from core.matching_engine import MusicMatchingEngine
 from ui.components.database_updater_widget import DatabaseUpdaterWidget
 from core.database_update_worker import DatabaseUpdateWorker, DatabaseStatsWorker
 from core.wishlist_service import get_wishlist_service
+from core.watchlist_scanner import get_watchlist_scanner
 from utils.logging_config import get_logger
 
 from core.soulseek_client import TrackResult
@@ -1098,8 +1100,8 @@ class DownloadMissingWishlistTracksModal(QDialog):
             final_message += "You can also manually correct failed downloads."
         else:
             final_message += "All tracks were downloaded successfully!"
-        logger.info("Wishlist processing complete. Scheduling next run in 60 minutes.")
-        self.parent_dashboard.wishlist_retry_timer.start(3600000) # 60 minutes
+        logger.info("Wishlist processing complete. Scheduling next run in 10 minutes.")
+        self.parent_dashboard.wishlist_retry_timer.start(600000) # 10 minutes
         # Removed success modal - users don't need to see completion notification
 
     def on_cancel_clicked(self):
@@ -1135,6 +1137,8 @@ class DownloadMissingWishlistTracksModal(QDialog):
                     
                     # Update dashboard wishlist button count
                     self.parent_dashboard.update_wishlist_button_count()
+                    # Update dashboard watchlist button count
+                    self.parent_dashboard.update_watchlist_button_count()
                     
                     # Show success message
                     QMessageBox.information(
@@ -2601,6 +2605,13 @@ class ActivityItem(QWidget):
 
 class DashboardPage(QWidget):
     database_updated_externally = pyqtSignal()
+    
+    # Watchlist scanning signals for live updates to open modal
+    watchlist_scan_started = pyqtSignal()
+    watchlist_artist_scan_started = pyqtSignal(str)  # artist_name
+    watchlist_artist_scan_completed = pyqtSignal(str, int, int, bool)  # artist_name, albums_checked, new_tracks, success
+    watchlist_scan_completed = pyqtSignal(int, int, int)  # total_artists, total_new_tracks, total_added_to_wishlist
+    
     def __init__(self, parent=None):
         super().__init__(parent)
         
@@ -2627,6 +2638,7 @@ class DashboardPage(QWidget):
         
         self.setup_ui()
         self.database_updated_externally.connect(self.refresh_database_statistics)
+        self.database_updated_externally.connect(self.update_watchlist_button_count)
 
         # Initialize list to track active stats workers
         self._active_stats_workers = []
@@ -2637,6 +2649,7 @@ class DashboardPage(QWidget):
         # Timer for updating wishlist button count
         self.wishlist_update_timer = QTimer()
         self.wishlist_update_timer.timeout.connect(self.update_wishlist_button_count)
+        self.wishlist_update_timer.timeout.connect(self.update_watchlist_button_count)
         self.wishlist_update_timer.start(30000)  # Update every 30 seconds
         
         # Timer for automatic wishlist retry processing
@@ -2648,10 +2661,21 @@ class DashboardPage(QWidget):
         # Track if automatic processing is currently running
         self.auto_processing_wishlist = False
         self.wishlist_download_modal = None
+        
+        # Watchlist scanning timer and state
+        self.watchlist_scan_timer = QTimer()
+        self.watchlist_scan_timer.setSingleShot(True)
+        self.watchlist_scan_timer.timeout.connect(self.process_watchlist_automatically)
+        self.watchlist_scan_timer.start(60000)  # Start first scan 1 minute after app launch
+        
+        self.auto_processing_watchlist = False
+        self.watchlist_status_modal = None
+        self.background_watchlist_worker = None
         # Load initial database statistics (with delay to avoid startup issues)
         QTimer.singleShot(1000, self.refresh_database_statistics)
         # Load initial wishlist count (with slight delay)
         QTimer.singleShot(1500, self.update_wishlist_button_count)
+        QTimer.singleShot(1500, self.update_watchlist_button_count)
     
 
     def _ensure_wishlist_modal_exists(self):
@@ -2901,6 +2925,10 @@ class DashboardPage(QWidget):
         # Spacer to align button with title
         right_layout.addStretch()
         
+        # Buttons layout
+        buttons_layout = QHBoxLayout()
+        buttons_layout.setSpacing(10)
+        
         # Wishlist button
         self.wishlist_button = QPushButton("🎵 Wishlist (0)")
         self.wishlist_button.setFixedHeight(45)
@@ -2928,7 +2956,37 @@ class DashboardPage(QWidget):
             }
         """)
         
-        right_layout.addWidget(self.wishlist_button)
+        # Watchlist button
+        self.watchlist_button = QPushButton("👁️ Watchlist (0)")
+        self.watchlist_button.setFixedHeight(45)
+        self.watchlist_button.setFixedWidth(150)
+        self.watchlist_button.clicked.connect(self.on_watchlist_button_clicked)
+        self.watchlist_button.setStyleSheet("""
+            QPushButton {
+                background: #ffc107;
+                border: none;
+                border-radius: 22px;
+                color: #000000;
+                font-size: 12px;
+                font-weight: bold;
+                padding: 8px 16px;
+            }
+            QPushButton:hover {
+                background: #ffca28;
+            }
+            QPushButton:pressed {
+                background: #ff8f00;
+            }
+            QPushButton:disabled {
+                background: #404040;
+                color: #666666;
+            }
+        """)
+        
+        buttons_layout.addWidget(self.watchlist_button)
+        buttons_layout.addWidget(self.wishlist_button)
+        
+        right_layout.addLayout(buttons_layout)
         right_layout.addStretch()
         
         # Add to main layout
@@ -3682,19 +3740,117 @@ class DashboardPage(QWidget):
         except Exception as e:
             logger.error(f"Error updating wishlist button count: {e}")
     
+    def on_watchlist_button_clicked(self):
+        """Show the watchlist status modal"""
+        try:
+            # Check if any artists are in watchlist
+            database = get_database()
+            watchlist_count = database.get_watchlist_count()
+            
+            if watchlist_count == 0:
+                QMessageBox.information(self, "Watchlist", "Your watchlist is empty!\n\nAdd artists to your watchlist from the Artists page to monitor them for new releases.")
+                return
+            
+            # Create and show watchlist status modal
+            from ui.components.watchlist_status_modal import WatchlistStatusModal
+            spotify_client = self.service_clients.get('spotify_client')
+            
+            # Always recreate the modal to ensure fresh state and signal connections
+            if hasattr(self, 'watchlist_status_modal') and self.watchlist_status_modal:
+                # Disconnect old signals to prevent duplicates
+                try:
+                    self.watchlist_scan_started.disconnect(self.watchlist_status_modal.on_background_scan_started)
+                    self.watchlist_scan_completed.disconnect(self.watchlist_status_modal.on_background_scan_completed)
+                except:
+                    pass  # Ignore if signals weren't connected
+                self.watchlist_status_modal.deleteLater()
+            
+            self.watchlist_status_modal = WatchlistStatusModal(self, spotify_client)
+            
+            # Connect dashboard signals to modal for live updates during background scans
+            self.watchlist_scan_started.connect(self.watchlist_status_modal.on_background_scan_started)
+            self.watchlist_scan_completed.connect(self.watchlist_status_modal.on_background_scan_completed)
+            
+            # If a background scan is currently running, connect the detailed progress signals
+            if hasattr(self, 'background_watchlist_worker') and self.background_watchlist_worker:
+                try:
+                    self.background_watchlist_worker.signals.scan_started.connect(self.watchlist_status_modal.on_scan_started)
+                    self.background_watchlist_worker.signals.artist_scan_started.connect(self.watchlist_status_modal.on_artist_scan_started)
+                    self.background_watchlist_worker.signals.artist_totals_discovered.connect(self.watchlist_status_modal.on_artist_totals_discovered)
+                    self.background_watchlist_worker.signals.album_scan_started.connect(self.watchlist_status_modal.on_album_scan_started)
+                    self.background_watchlist_worker.signals.track_check_started.connect(self.watchlist_status_modal.on_track_check_started)
+                    self.background_watchlist_worker.signals.release_completed.connect(self.watchlist_status_modal.on_release_completed)
+                    self.background_watchlist_worker.signals.artist_scan_completed.connect(self.watchlist_status_modal.on_artist_scan_completed)
+                except Exception as e:
+                    logger.debug(f"Background worker signals already connected or unavailable: {e}")
+            
+            # Always refresh data when showing the modal
+            self.watchlist_status_modal.load_watchlist_data()
+            
+            self.watchlist_status_modal.show()
+            self.watchlist_status_modal.activateWindow()
+            self.watchlist_status_modal.raise_()
+            
+        except Exception as e:
+            logger.error(f"Error opening watchlist status: {e}")
+            QMessageBox.critical(self, "Error", f"Failed to open watchlist status: {str(e)}")
+    
+    def update_watchlist_button_count(self):
+        """Update the watchlist button with current count"""
+        try:
+            database = get_database()
+            count = database.get_watchlist_count()
+            
+            if hasattr(self, 'watchlist_button'):
+                self.watchlist_button.setText(f"👁️ Watchlist ({count})")
+                
+                # Enable/disable button based on count
+                if count == 0:
+                    self.watchlist_button.setStyleSheet("""
+                        QPushButton {
+                            background: #404040;
+                            border: none;
+                            border-radius: 22px;
+                            color: #888888;
+                            font-size: 12px;
+                            font-weight: bold;
+                            padding: 8px 16px;
+                        }
+                    """)
+                else:
+                    self.watchlist_button.setStyleSheet("""
+                        QPushButton {
+                            background: #ffc107;
+                            border: none;
+                            border-radius: 22px;
+                            color: #000000;
+                            font-size: 12px;
+                            font-weight: bold;
+                            padding: 8px 16px;
+                        }
+                        QPushButton:hover {
+                            background: #ffca28;
+                        }
+                        QPushButton:pressed {
+                            background: #ff8f00;
+                        }
+                    """)
+        except Exception as e:
+            logger.error(f"Error updating watchlist button count: {e}")
+
     def process_wishlist_automatically(self):
         """Automatically process wishlist tracks in the background."""
         try:
             if self.auto_processing_wishlist:
                 logger.debug("Wishlist auto-processing already running, skipping.")
                 # Reschedule the next check
-                self.wishlist_retry_timer.start(3600000) # 60 minutes
+                self.wishlist_retry_timer.start(600000) # 10 minutes
                 return
 
             if self.wishlist_service.get_wishlist_count() == 0:
                 logger.debug("No tracks in wishlist for auto-processing.")
                 # Reschedule the next check
-                self.wishlist_retry_timer.start(3600000) # 60 minutes
+                self.wishlist_retry_timer.start(600000) # 10 minutes
                 return
 
             logger.info("Starting automatic wishlist processing...")
@@ -3707,7 +3863,7 @@ class DashboardPage(QWidget):
             logger.error(f"Error starting automatic wishlist processing: {e}")
             self.auto_processing_wishlist = False
             # Reschedule on error
-            self.wishlist_retry_timer.start(3600000) # 60 minutes
+            self.wishlist_retry_timer.start(600000) # 10 minutes
     
     def on_auto_wishlist_processing_complete(self, successful, failed, total):
         """Handle completion of automatic wishlist processing"""
@@ -3729,10 +3885,10 @@ class DashboardPage(QWidget):
                 message = f"Found {successful} wishlist track{'s' if successful != 1 else ''} automatically!"
                 self.toast_manager.success(message)
             
-            # Schedule next wishlist processing in 60 minutes
+            # Schedule next wishlist processing in 10 minutes
             if hasattr(self, 'wishlist_retry_timer') and self.wishlist_retry_timer:
-                logger.info("Scheduling next automatic wishlist processing in 60 minutes")
-                self.wishlist_retry_timer.start(3600000)  # 60 minutes (3600000 ms)
+                logger.info("Scheduling next automatic wishlist processing in 10 minutes")
+                self.wishlist_retry_timer.start(600000)  # 10 minutes (600000 ms)
             
         except Exception as e:
             logger.error(f"Error handling automatic wishlist processing completion: {e}")
@@ -3746,10 +3902,314 @@ class DashboardPage(QWidget):
             # Schedule next wishlist processing in 60 minutes even after error
             if hasattr(self, 'wishlist_retry_timer') and self.wishlist_retry_timer:
                 logger.info("Scheduling next automatic wishlist processing in 60 minutes (after error)")
-                self.wishlist_retry_timer.start(3600000)  # 60 minutes (3600000 ms)
+                self.wishlist_retry_timer.start(600000)  # 10 minutes (600000 ms)
                 
         except Exception as e:
             logger.error(f"Error handling automatic wishlist processing error: {e}")
+    
+    def process_watchlist_automatically(self):
+        """Automatically scan watchlist artists for new releases"""
+        try:
+            if self.auto_processing_watchlist:
+                logger.debug("Watchlist auto-scanning already running, skipping.")
+                # Reschedule the next check
+                self.watchlist_scan_timer.start(600000)  # 10 minutes
+                return
+            
+            # Check if there's an ongoing manual scan from the watchlist modal
+            from ui.components.watchlist_status_modal import WatchlistStatusModal
+            if (WatchlistStatusModal._shared_scan_worker 
+                and WatchlistStatusModal._shared_scan_worker.isRunning()):
+                logger.debug("Manual watchlist scan already running, skipping automatic scan.")
+                # Reschedule the next check
+                self.watchlist_scan_timer.start(600000)  # 10 minutes
+                return
+            
+            database = get_database()
+            watchlist_count = database.get_watchlist_count()
+            
+            if watchlist_count == 0:
+                logger.debug("No artists in watchlist for auto-scanning.")
+                # Reschedule the next check
+                self.watchlist_scan_timer.start(600000)  # 10 minutes
+                return
+            
+            spotify_client = self.service_clients.get('spotify_client')
+            if not spotify_client or not spotify_client.is_authenticated():
+                logger.warning("Spotify client not available for watchlist scanning")
+                # Reschedule the next check
+                self.watchlist_scan_timer.start(600000)  # 10 minutes
+                return
+            
+            logger.info(f"Starting automatic watchlist scanning for {watchlist_count} artists...")
+            self.auto_processing_watchlist = True
+            
+            # Emit signal to any open modal
+            self.watchlist_scan_started.emit()
+            
+            # Start background watchlist scan
+            self.background_watchlist_worker = AutoWatchlistScanWorker(spotify_client)
+            self.background_watchlist_worker.signals.scan_complete.connect(self.on_auto_watchlist_scan_complete)
+            self.background_watchlist_worker.signals.scan_error.connect(self.on_auto_watchlist_scan_error)
+            
+            # Connect detailed progress signals to modal if it's open
+            if hasattr(self, 'watchlist_status_modal') and self.watchlist_status_modal and self.watchlist_status_modal.isVisible():
+                self.background_watchlist_worker.signals.scan_started.connect(self.watchlist_status_modal.on_scan_started)
+                self.background_watchlist_worker.signals.artist_scan_started.connect(self.watchlist_status_modal.on_artist_scan_started)
+                self.background_watchlist_worker.signals.artist_totals_discovered.connect(self.watchlist_status_modal.on_artist_totals_discovered)
+                self.background_watchlist_worker.signals.album_scan_started.connect(self.watchlist_status_modal.on_album_scan_started)
+                self.background_watchlist_worker.signals.track_check_started.connect(self.watchlist_status_modal.on_track_check_started)
+                self.background_watchlist_worker.signals.release_completed.connect(self.watchlist_status_modal.on_release_completed)
+                self.background_watchlist_worker.signals.artist_scan_completed.connect(self.watchlist_status_modal.on_artist_scan_completed)
+            
+            QThreadPool.globalInstance().start(self.background_watchlist_worker)
+            
+        except Exception as e:
+            logger.error(f"Error starting automatic watchlist scanning: {e}")
+            self.auto_processing_watchlist = False
+            # Reschedule on error
+            self.watchlist_scan_timer.start(600000)  # 10 minutes
+    
+    def on_auto_watchlist_scan_complete(self, total_artists: int, total_new_tracks: int, total_added_to_wishlist: int):
+        """Handle completion of automatic watchlist scanning"""
+        try:
+            self.auto_processing_watchlist = False
+            
+            # Clear background worker reference
+            if hasattr(self, 'background_watchlist_worker'):
+                self.background_watchlist_worker = None
+            
+            logger.info(f"Automatic watchlist scan complete: {total_artists} artists, {total_new_tracks} new tracks found, {total_added_to_wishlist} added to wishlist")
+            
+            # Emit signal to any open modal
+            self.watchlist_scan_completed.emit(total_artists, total_new_tracks, total_added_to_wishlist)
+            
+            # Update button counts since watchlist and wishlist may have changed
+            self.update_watchlist_button_count()
+            self.update_wishlist_button_count()
+            
+            # Show toast notification if new tracks were found
+            if total_new_tracks > 0 and hasattr(self, 'toast_manager') and self.toast_manager:
+                message = f"Found {total_new_tracks} new track{'s' if total_new_tracks != 1 else ''} from watched artists!"
+                self.toast_manager.success(message)
+            
+            # Schedule next watchlist scan in 60 minutes
+            if hasattr(self, 'watchlist_scan_timer') and self.watchlist_scan_timer:
+                logger.info("Scheduling next automatic watchlist scan in 60 minutes")
+                self.watchlist_scan_timer.start(600000)  # 10 minutes
+            
+        except Exception as e:
+            logger.error(f"Error handling automatic watchlist scan completion: {e}")
+    
+    def on_auto_watchlist_scan_error(self, error_message: str):
+        """Handle error in automatic watchlist scanning"""
+        try:
+            self.auto_processing_watchlist = False
+            
+            # Clear background worker reference
+            if hasattr(self, 'background_watchlist_worker'):
+                self.background_watchlist_worker = None
+            logger.error(f"Automatic watchlist scanning failed: {error_message}")
+            
+            # Schedule next watchlist scan in 60 minutes even after error
+            if hasattr(self, 'watchlist_scan_timer') and self.watchlist_scan_timer:
+                logger.info("Scheduling next automatic watchlist scan in 60 minutes (after error)")
+                self.watchlist_scan_timer.start(600000)  # 10 minutes
+                
+        except Exception as e:
+            logger.error(f"Error handling automatic watchlist scan error: {e}")
+
+
+class AutoWatchlistScanWorker(QRunnable):
+    """Background worker for automatic watchlist scanning with detailed progress updates"""
+    
+    class Signals(QObject):
+        # Summary signals for dashboard
+        scan_complete = pyqtSignal(int, int, int)  # total_artists, total_new_tracks, total_added_to_wishlist
+        scan_error = pyqtSignal(str)  # error_message
+        
+        # Detailed progress signals for modal (same as WatchlistScanWorker)
+        scan_started = pyqtSignal()
+        artist_scan_started = pyqtSignal(str)  # artist_name
+        artist_totals_discovered = pyqtSignal(str, int, int)  # artist_name, total_singles_eps_releases, total_albums
+        album_scan_started = pyqtSignal(str, str, int)  # artist_name, album_name, total_tracks
+        track_check_started = pyqtSignal(str, str, str)  # artist_name, album_name, track_name
+        release_completed = pyqtSignal(str, str, int)  # artist_name, album_name, total_tracks
+        artist_scan_completed = pyqtSignal(str, int, int, bool)  # artist_name, albums_checked, new_tracks, success
+    
+    def __init__(self, spotify_client):
+        super().__init__()
+        self.spotify_client = spotify_client
+        self.signals = self.Signals()
+        self.should_stop = False
+    
+    def stop(self):
+        """Stop the scanning process"""
+        self.should_stop = True
+    
+    def run(self):
+        """Run the watchlist scan with detailed progress updates"""
+        try:
+            logger.info("Starting background watchlist scan...")
+            self.signals.scan_started.emit()
+            
+            # Get all watchlist artists
+            from database.music_database import get_database
+            database = get_database()
+            watchlist_artists = database.get_watchlist_artists()
+            
+            scan_results = []
+            
+            for artist in watchlist_artists:
+                if self.should_stop:
+                    break
+                
+                self.signals.artist_scan_started.emit(artist.artist_name)
+                
+                # Perform detailed scan with progress updates
+                result = self._scan_artist_with_progress(artist, database)
+                scan_results.append(result)
+                
+                self.signals.artist_scan_completed.emit(
+                    artist.artist_name,
+                    result.albums_checked,
+                    result.new_tracks_found,
+                    result.success
+                )
+            
+            # Calculate totals
+            successful_scans = [r for r in scan_results if r.success]
+            total_artists = len(successful_scans)
+            total_new_tracks = sum(r.new_tracks_found for r in successful_scans)
+            total_added_to_wishlist = sum(r.tracks_added_to_wishlist for r in successful_scans)
+            
+            self.signals.scan_complete.emit(total_artists, total_new_tracks, total_added_to_wishlist)
+            
+        except Exception as e:
+            logger.error(f"Error in background watchlist scan: {e}")
+            self.signals.scan_error.emit(str(e))
+    
+    def _scan_artist_with_progress(self, watchlist_artist, database):
+        """Scan artist with detailed progress emissions (same as WatchlistScanWorker)"""
+        try:
+            # Get watchlist scanner
+            from core.watchlist_scanner import get_watchlist_scanner, ScanResult
+            scanner = get_watchlist_scanner(self.spotify_client)
+            
+            # Get artist discography
+            albums = scanner.get_artist_discography(
+                watchlist_artist.spotify_artist_id, 
+                watchlist_artist.last_scan_timestamp
+            )
+            
+            if albums is None:
+                return ScanResult(
+                    artist_name=watchlist_artist.artist_name,
+                    spotify_artist_id=watchlist_artist.spotify_artist_id,
+                    albums_checked=0,
+                    new_tracks_found=0,
+                    tracks_added_to_wishlist=0,
+                    success=False,
+                    error_message="Failed to get artist discography from Spotify"
+                )
+            
+            # Analyze the albums list to get total counts upfront
+            total_singles_eps_releases = 0
+            total_albums = 0
+            
+            for album in albums:
+                try:
+                    # Get full album data to count tracks
+                    album_data = self.spotify_client.get_album(album.id)
+                    if not album_data or 'tracks' not in album_data:
+                        continue
+                    
+                    track_count = len(album_data['tracks'].get('items', []))
+                    
+                    # Categorize based on track count - COUNT RELEASES not tracks
+                    if track_count >= 4:
+                        total_albums += 1
+                    else:
+                        total_singles_eps_releases += 1  # Count the release, not the tracks
+                        
+                except Exception as e:
+                    logger.warning(f"Error analyzing album {album.name} for totals: {e}")
+                    continue
+            
+            # Emit the discovered totals
+            self.signals.artist_totals_discovered.emit(
+                watchlist_artist.artist_name, 
+                total_singles_eps_releases, 
+                total_albums
+            )
+            
+            new_tracks_found = 0
+            tracks_added_to_wishlist = 0
+            
+            for album in albums:
+                if self.should_stop:
+                    break
+                
+                try:
+                    # Get full album data with tracks first
+                    album_data = self.spotify_client.get_album(album.id)
+                    if not album_data or 'tracks' not in album_data or not album_data['tracks'].get('items'):
+                        continue
+                    
+                    tracks = album_data['tracks']['items']
+                    
+                    # Emit album progress with track count
+                    self.signals.album_scan_started.emit(watchlist_artist.artist_name, album.name, len(tracks))
+                    
+                    # Check each track
+                    for track in tracks:
+                        if self.should_stop:
+                            break
+                        
+                        # Emit track check progress
+                        self.signals.track_check_started.emit(
+                            watchlist_artist.artist_name, 
+                            album_data.get('name', 'Unknown'), 
+                            track.get('name', 'Unknown')
+                        )
+                        
+                        if scanner.is_track_missing_from_library(track):
+                            new_tracks_found += 1
+                            
+                            # Add to wishlist
+                            if scanner.add_track_to_wishlist(track, album_data, watchlist_artist):
+                                tracks_added_to_wishlist += 1
+                    
+                    # Emit release completion signal
+                    self.signals.release_completed.emit(watchlist_artist.artist_name, album.name, len(tracks))
+                
+                except Exception as e:
+                    logger.warning(f"Error checking album {album.name}: {e}")
+                    continue
+            
+            # Update last scan timestamp
+            scanner.update_artist_scan_timestamp(watchlist_artist.spotify_artist_id)
+            
+            return ScanResult(
+                artist_name=watchlist_artist.artist_name,
+                spotify_artist_id=watchlist_artist.spotify_artist_id,
+                albums_checked=len(albums),
+                new_tracks_found=new_tracks_found,
+                tracks_added_to_wishlist=tracks_added_to_wishlist,
+                success=True
+            )
+            
+        except Exception as e:
+            logger.error(f"Error scanning artist {watchlist_artist.artist_name}: {e}")
+            return ScanResult(
+                artist_name=watchlist_artist.artist_name,
+                spotify_artist_id=watchlist_artist.spotify_artist_id,
+                albums_checked=0,
+                new_tracks_found=0,
+                tracks_added_to_wishlist=0,
+                success=False,
+                error_message=str(e)
+            )
 
 
 class AutoWishlistProcessorWorker(QRunnable):
@@ -3775,8 +4235,8 @@ class AutoWishlistProcessorWorker(QRunnable):
             from config.settings import config_manager
             quality_preference = config_manager.get_quality_preference()
             
-            # Get wishlist tracks (limit to prevent overwhelming the system)
-            wishlist_tracks = self.wishlist_service.get_wishlist_tracks_for_download(limit=25)
+            # Get all wishlist tracks (no limit - process everything)
+            wishlist_tracks = self.wishlist_service.get_wishlist_tracks_for_download()
             
             if not wishlist_tracks:
                 self.signals.processing_complete.emit(0, 0, 0)

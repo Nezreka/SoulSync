@@ -3546,6 +3546,41 @@ class ArtistsPage(QWidget):
         artist_info_layout.addWidget(self.artist_name_label)
         artist_info_layout.addWidget(self.artist_stats_label)
         
+        # Watchlist button
+        self.watchlist_button = QPushButton("Add to Watchlist")
+        self.watchlist_button.setFixedHeight(36)
+        self.watchlist_button.setFixedWidth(140)
+        self.watchlist_button.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(29, 185, 84, 0.15),
+                    stop:1 rgba(20, 160, 70, 0.1));
+                border: 1px solid rgba(29, 185, 84, 0.6);
+                border-radius: 18px;
+                color: #1db954;
+                font-size: 12px;
+                font-weight: 600;
+                padding: 0 12px;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(29, 185, 84, 0.25),
+                    stop:1 rgba(20, 160, 70, 0.18));
+                border: 1px solid rgba(29, 185, 84, 0.8);
+            }
+            QPushButton:pressed {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(20, 160, 70, 0.3),
+                    stop:1 rgba(29, 185, 84, 0.25));
+            }
+            QPushButton:disabled {
+                background: rgba(80, 80, 85, 0.3);
+                border: 1px solid rgba(80, 80, 85, 0.5);
+                color: rgba(150, 150, 155, 0.7);
+            }
+        """)
+        self.watchlist_button.clicked.connect(self.toggle_watchlist)
+        
         # New search bar (smaller, in header)
         self.header_search_input = QLineEdit()
         self.header_search_input.setPlaceholderText("Search for another artist...")
@@ -3605,6 +3640,7 @@ class ArtistsPage(QWidget):
         back_btn.clicked.connect(self.return_to_search)
         
         header_layout.addLayout(artist_info_layout)
+        header_layout.addWidget(self.watchlist_button)
         header_layout.addStretch()
         header_layout.addWidget(self.header_search_input)
         header_layout.addWidget(back_btn)
@@ -3862,6 +3898,15 @@ class ArtistsPage(QWidget):
         # Update artist view
         self.artist_name_label.setText(artist.name)
         self.artist_stats_label.setText(f"{artist.followers:,} followers • {len(artist.genres)} genres")
+        
+        # Update watchlist button state
+        try:
+            database = get_database()
+            is_watching = database.is_artist_in_watchlist(artist.id)
+            self.update_watchlist_button(is_watching)
+        except Exception as e:
+            logger.error(f"Error checking watchlist status for artist {artist.name}: {e}")
+            self.update_watchlist_button(False)
         
         # Switch to artist view
         self.search_interface.hide()
@@ -5060,6 +5105,106 @@ class ArtistsPage(QWidget):
         self.artist_view.hide()
         self.search_interface.show()
     
+    def toggle_watchlist(self):
+        """Toggle artist in watchlist"""
+        if not hasattr(self, 'selected_artist') or not self.selected_artist:
+            return
+        
+        try:
+            database = get_database()
+            artist_id = self.selected_artist.id
+            artist_name = self.selected_artist.name
+            
+            if database.is_artist_in_watchlist(artist_id):
+                # Remove from watchlist
+                success = database.remove_artist_from_watchlist(artist_id)
+                if success:
+                    self.update_watchlist_button(False)
+                    # Emit signal to update dashboard button count
+                    self.database_updated_externally.emit()
+                    if hasattr(self, 'toast_manager') and self.toast_manager:
+                        self.toast_manager.success(f"Removed {artist_name} from watchlist")
+                else:
+                    if hasattr(self, 'toast_manager') and self.toast_manager:
+                        self.toast_manager.error(f"Failed to remove {artist_name} from watchlist")
+            else:
+                # Add to watchlist
+                success = database.add_artist_to_watchlist(artist_id, artist_name)
+                if success:
+                    self.update_watchlist_button(True)
+                    # Emit signal to update dashboard button count
+                    self.database_updated_externally.emit()
+                    if hasattr(self, 'toast_manager') and self.toast_manager:
+                        self.toast_manager.success(f"Added {artist_name} to watchlist")
+                else:
+                    if hasattr(self, 'toast_manager') and self.toast_manager:
+                        self.toast_manager.error(f"Failed to add {artist_name} to watchlist")
+        
+        except Exception as e:
+            logger.error(f"Error toggling watchlist for artist: {e}")
+            if hasattr(self, 'toast_manager') and self.toast_manager:
+                self.toast_manager.error("Error updating watchlist")
+    
+    def update_watchlist_button(self, is_watching):
+        """Update watchlist button appearance based on watching status"""
+        if is_watching:
+            self.watchlist_button.setText("Watching...")
+            self.watchlist_button.setStyleSheet("""
+                QPushButton {
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 rgba(255, 193, 7, 0.15),
+                        stop:1 rgba(255, 165, 0, 0.1));
+                    border: 1px solid rgba(255, 193, 7, 0.6);
+                    border-radius: 18px;
+                    color: #ffc107;
+                    font-size: 12px;
+                    font-weight: 600;
+                    padding: 0 12px;
+                }
+                QPushButton:hover {
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 rgba(255, 193, 7, 0.25),
+                        stop:1 rgba(255, 165, 0, 0.18));
+                    border: 1px solid rgba(255, 193, 7, 0.8);
+                }
+                QPushButton:pressed {
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 rgba(255, 165, 0, 0.3),
+                        stop:1 rgba(255, 193, 7, 0.25));
+                }
+            """)
+        else:
+            self.watchlist_button.setText("Add to Watchlist")
+            self.watchlist_button.setStyleSheet("""
+                QPushButton {
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 rgba(29, 185, 84, 0.15),
+                        stop:1 rgba(20, 160, 70, 0.1));
+                    border: 1px solid rgba(29, 185, 84, 0.6);
+                    border-radius: 18px;
+                    color: #1db954;
+                    font-size: 12px;
+                    font-weight: 600;
+                    padding: 0 12px;
+                }
+                QPushButton:hover {
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 rgba(29, 185, 84, 0.25),
+                        stop:1 rgba(20, 160, 70, 0.18));
+                    border: 1px solid rgba(29, 185, 84, 0.8);
+                }
+                QPushButton:pressed {
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 rgba(20, 160, 70, 0.3),
+                        stop:1 rgba(29, 185, 84, 0.25));
+                }
+                QPushButton:disabled {
+                    background: rgba(80, 80, 85, 0.3);
+                    border: 1px solid rgba(80, 80, 85, 0.5);
+                    color: rgba(150, 150, 155, 0.7);
+                }
+            """)
+
     def cleanup_download_tracking(self):
         """Clean up download tracking resources"""
         print("🧹 Starting album download tracking cleanup...")

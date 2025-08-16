@@ -2,6 +2,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                            QLabel, QFrame, QSizePolicy, QSpacerItem, QSlider, QProgressBar, QApplication)
 from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QRect, QTimer, pyqtProperty
 from PyQt6.QtGui import QFont, QPalette, QIcon, QPixmap, QPainter, QFontMetrics, QColor, QLinearGradient
+from utils.logging_config import get_logger
 
 class ScrollingLabel(QLabel):
     """A label that smoothly scrolls text horizontally when it's too long to fit"""
@@ -1238,16 +1239,31 @@ class ModernSidebar(QWidget):
         layout.setContentsMargins(20, 12, 20, 12)
         layout.setSpacing(0)
         
-        # Version label
-        version_label = QLabel("v.0.5")
-        version_label.setFont(QFont("SF Pro Text", 10, QFont.Weight.Medium))
-        version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        version_label.setStyleSheet("""
-            color: rgba(255, 255, 255, 0.6); 
-            letter-spacing: 0.1px;
-            font-weight: 500;
+        # Version button (clickable)
+        self.version_button = QPushButton("v.0.5")
+        self.version_button.setFont(QFont("SF Pro Text", 10, QFont.Weight.Medium))
+        self.version_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.version_button.setStyleSheet("""
+            QPushButton {
+                color: rgba(255, 255, 255, 0.6); 
+                letter-spacing: 0.1px;
+                font-weight: 500;
+                background: transparent;
+                border: none;
+                padding: 2px 8px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                color: #1ed760;
+                background: rgba(29, 185, 84, 0.1);
+                border: 1px solid rgba(29, 185, 84, 0.2);
+            }
+            QPushButton:pressed {
+                background: rgba(29, 185, 84, 0.15);
+            }
         """)
-        layout.addWidget(version_label)
+        self.version_button.clicked.connect(self.show_version_info)
+        layout.addWidget(self.version_button)
         
         return version_widget
     
@@ -1310,3 +1326,13 @@ class ModernSidebar(QWidget):
         
         if service in status_map:
             status_map[service].update_status(connected)
+    
+    def show_version_info(self):
+        """Show the version information modal"""
+        try:
+            from ui.components.version_info_modal import VersionInfoModal
+            modal = VersionInfoModal(self)
+            modal.exec()
+        except Exception as e:
+            logger = get_logger("sidebar")
+            logger.error(f"Error showing version info modal: {e}")
