@@ -74,6 +74,17 @@ class DatabaseTrackWithMetadata:
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
+@dataclass
+class WatchlistArtist:
+    """Artist being monitored for new releases"""
+    id: int
+    spotify_artist_id: str
+    artist_name: str
+    date_added: datetime
+    last_scan_timestamp: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
 class MusicDatabase:
     """SQLite database manager for SoulSync music library data"""
     
@@ -172,11 +183,25 @@ class MusicDatabase:
                 )
             """)
             
+            # Watchlist table for storing artists to monitor for new releases
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS watchlist_artists (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    spotify_artist_id TEXT UNIQUE NOT NULL,
+                    artist_name TEXT NOT NULL,
+                    date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_scan_timestamp TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
             # Create indexes for performance
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_artist_id ON albums (artist_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_album_id ON tracks (album_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_artist_id ON tracks (artist_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_wishlist_spotify_id ON wishlist_tracks (spotify_track_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_watchlist_spotify_id ON watchlist_artists (spotify_artist_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_wishlist_date_added ON wishlist_tracks (date_added)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_name ON artists (name)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_title ON albums (title)")
@@ -1673,6 +1698,115 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error clearing wishlist: {e}")
             return False
+
+    # Watchlist operations
+    def add_artist_to_watchlist(self, spotify_artist_id: str, artist_name: str) -> bool:
+        """Add an artist to the watchlist for monitoring new releases"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    INSERT OR REPLACE INTO watchlist_artists 
+                    (spotify_artist_id, artist_name, date_added, updated_at)
+                    VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """, (spotify_artist_id, artist_name))
+                
+                conn.commit()
+                logger.info(f"Added artist '{artist_name}' to watchlist (Spotify ID: {spotify_artist_id})")
+                return True
+                
+        except Exception as e:
+            logger.error(f"Error adding artist '{artist_name}' to watchlist: {e}")
+            return False
+
+    def remove_artist_from_watchlist(self, spotify_artist_id: str) -> bool:
+        """Remove an artist from the watchlist"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Get artist name for logging
+                cursor.execute("SELECT artist_name FROM watchlist_artists WHERE spotify_artist_id = ?", (spotify_artist_id,))
+                result = cursor.fetchone()
+                artist_name = result['artist_name'] if result else "Unknown"
+                
+                cursor.execute("DELETE FROM watchlist_artists WHERE spotify_artist_id = ?", (spotify_artist_id,))
+                
+                if cursor.rowcount > 0:
+                    conn.commit()
+                    logger.info(f"Removed artist '{artist_name}' from watchlist (Spotify ID: {spotify_artist_id})")
+                    return True
+                else:
+                    logger.warning(f"Artist with Spotify ID {spotify_artist_id} not found in watchlist")
+                    return False
+                
+        except Exception as e:
+            logger.error(f"Error removing artist from watchlist (Spotify ID: {spotify_artist_id}): {e}")
+            return False
+
+    def is_artist_in_watchlist(self, spotify_artist_id: str) -> bool:
+        """Check if an artist is currently in the watchlist"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute("SELECT 1 FROM watchlist_artists WHERE spotify_artist_id = ? LIMIT 1", (spotify_artist_id,))
+                result = cursor.fetchone()
+                
+                return result is not None
+                
+        except Exception as e:
+            logger.error(f"Error checking if artist is in watchlist (Spotify ID: {spotify_artist_id}): {e}")
+            return False
+
+    def get_watchlist_artists(self) -> List[WatchlistArtist]:
+        """Get all artists in the watchlist"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    SELECT id, spotify_artist_id, artist_name, date_added, 
+                           last_scan_timestamp, created_at, updated_at
+                    FROM watchlist_artists 
+                    ORDER BY date_added DESC
+                """)
+                
+                rows = cursor.fetchall()
+                
+                watchlist_artists = []
+                for row in rows:
+                    watchlist_artists.append(WatchlistArtist(
+                        id=row['id'],
+                        spotify_artist_id=row['spotify_artist_id'],
+                        artist_name=row['artist_name'],
+                        date_added=datetime.fromisoformat(row['date_added']),
+                        last_scan_timestamp=datetime.fromisoformat(row['last_scan_timestamp']) if row['last_scan_timestamp'] else None,
+                        created_at=datetime.fromisoformat(row['created_at']) if row['created_at'] else None,
+                        updated_at=datetime.fromisoformat(row['updated_at']) if row['updated_at'] else None
+                    ))
+                
+                return watchlist_artists
+                
+        except Exception as e:
+            logger.error(f"Error getting watchlist artists: {e}")
+            return []
+
+    def get_watchlist_count(self) -> int:
+        """Get the number of artists in the watchlist"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute("SELECT COUNT(*) as count FROM watchlist_artists")
+                result = cursor.fetchone()
+                
+                return result['count'] if result else 0
+                
+        except Exception as e:
+            logger.error(f"Error getting watchlist count: {e}")
+            return 0
 
     def get_database_info(self) -> Dict[str, Any]:
         """Get comprehensive database information"""
