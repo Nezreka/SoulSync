@@ -115,6 +115,10 @@ class WatchlistScanWorker(QThread):
                         total_albums += 1
                     else:
                         total_singles_eps_releases += 1  # Count the release, not the tracks
+                    
+                    # Rate limiting: small delay between album fetches to avoid hitting Spotify limits
+                    import time
+                    time.sleep(0.1)  # 100ms delay between albums
                         
                 except Exception as e:
                     logger.warning(f"Error analyzing album {album.name} for totals: {e}")
@@ -166,6 +170,10 @@ class WatchlistScanWorker(QThread):
                     
                     # Emit release completion signal
                     self.release_completed.emit(watchlist_artist.artist_name, album.name, len(tracks))
+                    
+                    # Rate limiting: small delay between album processing to avoid hitting Spotify limits
+                    import time
+                    time.sleep(0.1)  # 100ms delay between albums
                 
                 except Exception as e:
                     logger.warning(f"Error checking album {album.name}: {e}")
