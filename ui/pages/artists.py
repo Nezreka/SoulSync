@@ -1167,6 +1167,7 @@ class ArtistResultCard(QFrame):
         self.artist = artist_match.artist
         self.setup_ui()
         self.load_artist_image()
+        self.check_watchlist_status()
     
     def setup_ui(self):
         self.setFixedSize(200, 280)
@@ -1242,6 +1243,23 @@ class ArtistResultCard(QFrame):
         followers_label.setStyleSheet("color: #b3b3b3; padding: 2px;")
         followers_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
+        # Watchlist eye indicator (positioned absolutely in top-right corner)
+        self.watchlist_indicator = QLabel(self)
+        self.watchlist_indicator.setText("👁️")
+        self.watchlist_indicator.setFont(QFont("Arial", 14))
+        self.watchlist_indicator.setFixedSize(24, 24)
+        self.watchlist_indicator.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.watchlist_indicator.setStyleSheet("""
+            QLabel {
+                background: rgba(29, 185, 84, 0.9);
+                border-radius: 12px;
+                border: 1px solid rgba(29, 185, 84, 1);
+                color: white;
+            }
+        """)
+        self.watchlist_indicator.move(168, 8)  # Position in top-right corner
+        self.watchlist_indicator.hide()  # Hidden by default
+        
         layout.addWidget(self.image_container, 0, Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(name_label)
         layout.addWidget(confidence_label)
@@ -1289,6 +1307,25 @@ class ArtistResultCard(QFrame):
     def on_image_error(self, error):
         """Handle image load error"""
         print(f"Failed to load artist image: {error}")
+    
+    def check_watchlist_status(self):
+        """Check if this artist is in the watchlist and show eye indicator"""
+        try:
+            database = get_database()
+            is_watching = database.is_artist_in_watchlist(self.artist.id)
+            
+            if is_watching:
+                self.watchlist_indicator.show()
+            else:
+                self.watchlist_indicator.hide()
+                
+        except Exception as e:
+            logger.error(f"Error checking watchlist status for artist {self.artist.name}: {e}")
+            self.watchlist_indicator.hide()
+    
+    def refresh_watchlist_status(self):
+        """Refresh the watchlist indicator (call this when watchlist changes)"""
+        self.check_watchlist_status()
     
     def mousePressEvent(self, event):
         """Handle click to select artist"""
@@ -3455,6 +3492,21 @@ class ArtistsPage(QWidget):
         self.artist_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.artist_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.artist_scroll.setFixedHeight(320)  # Fixed height to accommodate artist cards
+        
+        # Enable horizontal scrolling with mouse wheel
+        def wheelEvent(event):
+            # Convert vertical wheel scrolling to horizontal scrolling
+            if event.angleDelta().y() != 0:
+                horizontal_scroll = self.artist_scroll.horizontalScrollBar()
+                current_value = horizontal_scroll.value()
+                # Scroll by artist card width (200px + spacing)
+                scroll_amount = -event.angleDelta().y() // 120 * 220  # Each wheel step scrolls ~1 card
+                horizontal_scroll.setValue(current_value + scroll_amount)
+                event.accept()
+            else:
+                QScrollArea.wheelEvent(self.artist_scroll, event)
+        
+        self.artist_scroll.wheelEvent = wheelEvent
         self.artist_scroll.setStyleSheet("""
             QScrollArea {
                 border: none;
@@ -5122,6 +5174,8 @@ class ArtistsPage(QWidget):
                     self.update_watchlist_button(False)
                     # Emit signal to update dashboard button count
                     self.database_updated_externally.emit()
+                    # Refresh all artist card watchlist indicators
+                    self.refresh_all_artist_card_watchlist_status()
                     if hasattr(self, 'toast_manager') and self.toast_manager:
                         self.toast_manager.success(f"Removed {artist_name} from watchlist")
                 else:
@@ -5134,6 +5188,8 @@ class ArtistsPage(QWidget):
                     self.update_watchlist_button(True)
                     # Emit signal to update dashboard button count
                     self.database_updated_externally.emit()
+                    # Refresh all artist card watchlist indicators
+                    self.refresh_all_artist_card_watchlist_status()
                     if hasattr(self, 'toast_manager') and self.toast_manager:
                         self.toast_manager.success(f"Added {artist_name} to watchlist")
                 else:
@@ -5144,6 +5200,19 @@ class ArtistsPage(QWidget):
             logger.error(f"Error toggling watchlist for artist: {e}")
             if hasattr(self, 'toast_manager') and self.toast_manager:
                 self.toast_manager.error("Error updating watchlist")
+    
+    def refresh_all_artist_card_watchlist_status(self):
+        """Refresh watchlist indicators on all visible artist cards"""
+        try:
+            # Find all artist cards in the search results layout
+            for i in range(self.artist_results_layout.count()):
+                item = self.artist_results_layout.itemAt(i)
+                if item and item.widget():
+                    widget = item.widget()
+                    if isinstance(widget, ArtistResultCard):
+                        widget.refresh_watchlist_status()
+        except Exception as e:
+            logger.error(f"Error refreshing artist card watchlist status: {e}")
     
     def update_watchlist_button(self, is_watching):
         """Update watchlist button appearance based on watching status"""
