@@ -13,7 +13,7 @@ logger = get_logger("spotify_client")
 # Global rate limiting variables
 _last_api_call_time = 0
 _api_call_lock = threading.Lock()
-MIN_API_INTERVAL = 0.1  # 100ms between API calls
+MIN_API_INTERVAL = 0.2  # 200ms between API calls (more conservative to avoid bans)
 
 # Request queuing for burst handling
 import queue
@@ -42,8 +42,12 @@ def rate_limited(func):
         except Exception as e:
             # Implement exponential backoff for API errors
             if "rate limit" in str(e).lower() or "429" in str(e):
-                logger.warning(f"Rate limit hit, backing off: {e}")
-                time.sleep(1.0)  # Wait 1 second before retrying
+                logger.warning(f"Rate limit hit, implementing backoff: {e}")
+                # Use longer backoff to avoid getting banned
+                time.sleep(3.0)  # Wait 3 seconds before retrying
+            elif "503" in str(e) or "502" in str(e):
+                logger.warning(f"Spotify service error, backing off: {e}")
+                time.sleep(2.0)  # Wait 2 seconds for service errors
             raise e
     return wrapper
 

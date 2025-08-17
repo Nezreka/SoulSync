@@ -3947,22 +3947,23 @@ class DashboardPage(QWidget):
             # Emit signal to any open modal
             self.watchlist_scan_started.emit()
             
-            # Start background watchlist scan
-            self.background_watchlist_worker = AutoWatchlistScanWorker(spotify_client)
-            self.background_watchlist_worker.signals.scan_complete.connect(self.on_auto_watchlist_scan_complete)
-            self.background_watchlist_worker.signals.scan_error.connect(self.on_auto_watchlist_scan_error)
+            # Start background watchlist scan using the same worker as manual scans for consistency
+            from ui.components.watchlist_status_modal import WatchlistScanWorker
+            self.background_watchlist_worker = WatchlistScanWorker(spotify_client)
+            self.background_watchlist_worker.scan_completed.connect(self.on_auto_watchlist_scan_complete_unified)
             
             # Connect detailed progress signals to modal if it's open
             if hasattr(self, 'watchlist_status_modal') and self.watchlist_status_modal and self.watchlist_status_modal.isVisible():
-                self.background_watchlist_worker.signals.scan_started.connect(self.watchlist_status_modal.on_scan_started)
-                self.background_watchlist_worker.signals.artist_scan_started.connect(self.watchlist_status_modal.on_artist_scan_started)
-                self.background_watchlist_worker.signals.artist_totals_discovered.connect(self.watchlist_status_modal.on_artist_totals_discovered)
-                self.background_watchlist_worker.signals.album_scan_started.connect(self.watchlist_status_modal.on_album_scan_started)
-                self.background_watchlist_worker.signals.track_check_started.connect(self.watchlist_status_modal.on_track_check_started)
-                self.background_watchlist_worker.signals.release_completed.connect(self.watchlist_status_modal.on_release_completed)
-                self.background_watchlist_worker.signals.artist_scan_completed.connect(self.watchlist_status_modal.on_artist_scan_completed)
+                self.background_watchlist_worker.scan_started.connect(self.watchlist_status_modal.on_scan_started)
+                self.background_watchlist_worker.artist_scan_started.connect(self.watchlist_status_modal.on_artist_scan_started)
+                self.background_watchlist_worker.artist_totals_discovered.connect(self.watchlist_status_modal.on_artist_totals_discovered)
+                self.background_watchlist_worker.album_scan_started.connect(self.watchlist_status_modal.on_album_scan_started)
+                self.background_watchlist_worker.track_check_started.connect(self.watchlist_status_modal.on_track_check_started)
+                self.background_watchlist_worker.release_completed.connect(self.watchlist_status_modal.on_release_completed)
+                self.background_watchlist_worker.artist_scan_completed.connect(self.watchlist_status_modal.on_artist_scan_completed)
             
-            QThreadPool.globalInstance().start(self.background_watchlist_worker)
+            # Start the thread (not QThreadPool since this is now a QThread)
+            self.background_watchlist_worker.start()
             
         except Exception as e:
             logger.error(f"Error starting automatic watchlist scanning: {e}")
@@ -3970,10 +3971,16 @@ class DashboardPage(QWidget):
             # Reschedule on error
             self.watchlist_scan_timer.start(600000)  # 10 minutes
     
-    def on_auto_watchlist_scan_complete(self, total_artists: int, total_new_tracks: int, total_added_to_wishlist: int):
-        """Handle completion of automatic watchlist scanning"""
+    def on_auto_watchlist_scan_complete_unified(self, scan_results):
+        """Handle completion of automatic watchlist scanning using unified WatchlistScanWorker"""
         try:
             self.auto_processing_watchlist = False
+            
+            # Calculate summary from scan results (same as modal does)
+            successful_scans = [r for r in scan_results if r.success]
+            total_artists = len(scan_results)
+            total_new_tracks = sum(r.new_tracks_found for r in successful_scans)
+            total_added_to_wishlist = sum(r.tracks_added_to_wishlist for r in successful_scans)
             
             # Clear background worker reference
             if hasattr(self, 'background_watchlist_worker'):
@@ -4000,216 +4007,10 @@ class DashboardPage(QWidget):
             
         except Exception as e:
             logger.error(f"Error handling automatic watchlist scan completion: {e}")
-    
-    def on_auto_watchlist_scan_error(self, error_message: str):
-        """Handle error in automatic watchlist scanning"""
-        try:
-            self.auto_processing_watchlist = False
-            
-            # Clear background worker reference
-            if hasattr(self, 'background_watchlist_worker'):
-                self.background_watchlist_worker = None
-            logger.error(f"Automatic watchlist scanning failed: {error_message}")
-            
-            # Schedule next watchlist scan in 60 minutes even after error
+            # Ensure we reschedule even on error
             if hasattr(self, 'watchlist_scan_timer') and self.watchlist_scan_timer:
-                logger.info("Scheduling next automatic watchlist scan in 60 minutes (after error)")
                 self.watchlist_scan_timer.start(600000)  # 10 minutes
-                
-        except Exception as e:
-            logger.error(f"Error handling automatic watchlist scan error: {e}")
 
-
-class AutoWatchlistScanWorker(QRunnable):
-    """Background worker for automatic watchlist scanning with detailed progress updates"""
-    
-    class Signals(QObject):
-        # Summary signals for dashboard
-        scan_complete = pyqtSignal(int, int, int)  # total_artists, total_new_tracks, total_added_to_wishlist
-        scan_error = pyqtSignal(str)  # error_message
-        
-        # Detailed progress signals for modal (same as WatchlistScanWorker)
-        scan_started = pyqtSignal()
-        artist_scan_started = pyqtSignal(str)  # artist_name
-        artist_totals_discovered = pyqtSignal(str, int, int)  # artist_name, total_singles_eps_releases, total_albums
-        album_scan_started = pyqtSignal(str, str, int)  # artist_name, album_name, total_tracks
-        track_check_started = pyqtSignal(str, str, str)  # artist_name, album_name, track_name
-        release_completed = pyqtSignal(str, str, int)  # artist_name, album_name, total_tracks
-        artist_scan_completed = pyqtSignal(str, int, int, bool)  # artist_name, albums_checked, new_tracks, success
-    
-    def __init__(self, spotify_client):
-        super().__init__()
-        self.spotify_client = spotify_client
-        self.signals = self.Signals()
-        self.should_stop = False
-    
-    def stop(self):
-        """Stop the scanning process"""
-        self.should_stop = True
-    
-    def run(self):
-        """Run the watchlist scan with detailed progress updates"""
-        try:
-            logger.info("Starting background watchlist scan...")
-            self.signals.scan_started.emit()
-            
-            # Get all watchlist artists
-            from database.music_database import get_database
-            database = get_database()
-            watchlist_artists = database.get_watchlist_artists()
-            
-            scan_results = []
-            
-            for artist in watchlist_artists:
-                if self.should_stop:
-                    break
-                
-                self.signals.artist_scan_started.emit(artist.artist_name)
-                
-                # Perform detailed scan with progress updates
-                result = self._scan_artist_with_progress(artist, database)
-                scan_results.append(result)
-                
-                self.signals.artist_scan_completed.emit(
-                    artist.artist_name,
-                    result.albums_checked,
-                    result.new_tracks_found,
-                    result.success
-                )
-            
-            # Calculate totals
-            successful_scans = [r for r in scan_results if r.success]
-            total_artists = len(successful_scans)
-            total_new_tracks = sum(r.new_tracks_found for r in successful_scans)
-            total_added_to_wishlist = sum(r.tracks_added_to_wishlist for r in successful_scans)
-            
-            self.signals.scan_complete.emit(total_artists, total_new_tracks, total_added_to_wishlist)
-            
-        except Exception as e:
-            logger.error(f"Error in background watchlist scan: {e}")
-            self.signals.scan_error.emit(str(e))
-    
-    def _scan_artist_with_progress(self, watchlist_artist, database):
-        """Scan artist with detailed progress emissions (same as WatchlistScanWorker)"""
-        try:
-            # Get watchlist scanner
-            from core.watchlist_scanner import get_watchlist_scanner, ScanResult
-            scanner = get_watchlist_scanner(self.spotify_client)
-            
-            # Get artist discography
-            albums = scanner.get_artist_discography(
-                watchlist_artist.spotify_artist_id, 
-                watchlist_artist.last_scan_timestamp
-            )
-            
-            if albums is None:
-                return ScanResult(
-                    artist_name=watchlist_artist.artist_name,
-                    spotify_artist_id=watchlist_artist.spotify_artist_id,
-                    albums_checked=0,
-                    new_tracks_found=0,
-                    tracks_added_to_wishlist=0,
-                    success=False,
-                    error_message="Failed to get artist discography from Spotify"
-                )
-            
-            # Analyze the albums list to get total counts upfront
-            total_singles_eps_releases = 0
-            total_albums = 0
-            
-            for album in albums:
-                try:
-                    # Get full album data to count tracks
-                    album_data = self.spotify_client.get_album(album.id)
-                    if not album_data or 'tracks' not in album_data:
-                        continue
-                    
-                    track_count = len(album_data['tracks'].get('items', []))
-                    
-                    # Categorize based on track count - COUNT RELEASES not tracks
-                    if track_count >= 4:
-                        total_albums += 1
-                    else:
-                        total_singles_eps_releases += 1  # Count the release, not the tracks
-                        
-                except Exception as e:
-                    logger.warning(f"Error analyzing album {album.name} for totals: {e}")
-                    continue
-            
-            # Emit the discovered totals
-            self.signals.artist_totals_discovered.emit(
-                watchlist_artist.artist_name, 
-                total_singles_eps_releases, 
-                total_albums
-            )
-            
-            new_tracks_found = 0
-            tracks_added_to_wishlist = 0
-            
-            for album in albums:
-                if self.should_stop:
-                    break
-                
-                try:
-                    # Get full album data with tracks first
-                    album_data = self.spotify_client.get_album(album.id)
-                    if not album_data or 'tracks' not in album_data or not album_data['tracks'].get('items'):
-                        continue
-                    
-                    tracks = album_data['tracks']['items']
-                    
-                    # Emit album progress with track count
-                    self.signals.album_scan_started.emit(watchlist_artist.artist_name, album.name, len(tracks))
-                    
-                    # Check each track
-                    for track in tracks:
-                        if self.should_stop:
-                            break
-                        
-                        # Emit track check progress
-                        self.signals.track_check_started.emit(
-                            watchlist_artist.artist_name, 
-                            album_data.get('name', 'Unknown'), 
-                            track.get('name', 'Unknown')
-                        )
-                        
-                        if scanner.is_track_missing_from_library(track):
-                            new_tracks_found += 1
-                            
-                            # Add to wishlist
-                            if scanner.add_track_to_wishlist(track, album_data, watchlist_artist):
-                                tracks_added_to_wishlist += 1
-                    
-                    # Emit release completion signal
-                    self.signals.release_completed.emit(watchlist_artist.artist_name, album.name, len(tracks))
-                
-                except Exception as e:
-                    logger.warning(f"Error checking album {album.name}: {e}")
-                    continue
-            
-            # Update last scan timestamp
-            scanner.update_artist_scan_timestamp(watchlist_artist.spotify_artist_id)
-            
-            return ScanResult(
-                artist_name=watchlist_artist.artist_name,
-                spotify_artist_id=watchlist_artist.spotify_artist_id,
-                albums_checked=len(albums),
-                new_tracks_found=new_tracks_found,
-                tracks_added_to_wishlist=tracks_added_to_wishlist,
-                success=True
-            )
-            
-        except Exception as e:
-            logger.error(f"Error scanning artist {watchlist_artist.artist_name}: {e}")
-            return ScanResult(
-                artist_name=watchlist_artist.artist_name,
-                spotify_artist_id=watchlist_artist.spotify_artist_id,
-                albums_checked=0,
-                new_tracks_found=0,
-                tracks_added_to_wishlist=0,
-                success=False,
-                error_message=str(e)
-            )
 
 
 class AutoWishlistProcessorWorker(QRunnable):

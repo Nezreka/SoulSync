@@ -35,31 +35,68 @@ class WatchlistScanWorker(QThread):
         super().__init__()
         self.spotify_client = spotify_client
         self.should_stop = False
+        
+        # Progress state for reconnection
+        self.current_scan_state = {
+            'total_artists': 0,
+            'completed_artists': 0,
+            'current_artist_name': '',
+            'current_artist_total_singles_eps': 0,
+            'current_artist_completed_singles_eps': 0,
+            'current_artist_total_albums': 0,
+            'current_artist_completed_albums': 0,
+            'scan_active': False,
+            'scan_completed': False
+        }
     
     def stop(self):
         """Stop the scanning process"""
         self.should_stop = True
+        self.current_scan_state['scan_active'] = False
+    
+    def get_current_progress(self):
+        """Get current progress state for reconnection"""
+        return self.current_scan_state.copy()
     
     def run(self):
         """Run the watchlist scan with detailed progress updates"""
         try:
-            self.scan_started.emit()
-            
-            # Get all watchlist artists
+            # Initialize progress state
             database = get_database()
             watchlist_artists = database.get_watchlist_artists()
             
+            self.current_scan_state.update({
+                'total_artists': len(watchlist_artists),
+                'completed_artists': 0,
+                'scan_active': True,
+                'scan_completed': False
+            })
+            
+            self.scan_started.emit()
+            
             scan_results = []
             
-            for artist in watchlist_artists:
+            for i, artist in enumerate(watchlist_artists):
                 if self.should_stop:
                     break
+                
+                # Update current artist progress state
+                self.current_scan_state.update({
+                    'current_artist_name': artist.artist_name,
+                    'current_artist_total_singles_eps': 0,
+                    'current_artist_completed_singles_eps': 0,
+                    'current_artist_total_albums': 0,
+                    'current_artist_completed_albums': 0
+                })
                 
                 self.artist_scan_started.emit(artist.artist_name)
                 
                 # Perform detailed scan with progress updates
                 result = self._scan_artist_with_progress(artist, database)
                 scan_results.append(result)
+                
+                # Update completed artists count
+                self.current_scan_state['completed_artists'] = i + 1
                 
                 self.artist_scan_completed.emit(
                     artist.artist_name,
@@ -68,10 +105,20 @@ class WatchlistScanWorker(QThread):
                     result.success
                 )
             
+            # Mark scan as completed
+            self.current_scan_state.update({
+                'scan_active': False,
+                'scan_completed': True
+            })
+            
             self.scan_completed.emit(scan_results)
             
         except Exception as e:
             logger.error(f"Error in watchlist scan worker: {e}")
+            self.current_scan_state.update({
+                'scan_active': False,
+                'scan_completed': True
+            })
             self.scan_completed.emit([])
     
     def _scan_artist_with_progress(self, watchlist_artist, database):
@@ -124,6 +171,12 @@ class WatchlistScanWorker(QThread):
                     logger.warning(f"Error analyzing album {album.name} for totals: {e}")
                     continue
             
+            # Update current artist totals in state
+            self.current_scan_state.update({
+                'current_artist_total_singles_eps': total_singles_eps_releases,
+                'current_artist_total_albums': total_albums
+            })
+            
             # Emit the discovered totals
             self.artist_totals_discovered.emit(
                 watchlist_artist.artist_name, 
@@ -170,6 +223,12 @@ class WatchlistScanWorker(QThread):
                     
                     # Emit release completion signal
                     self.release_completed.emit(watchlist_artist.artist_name, album.name, len(tracks))
+                    
+                    # Update progress state for this completed release
+                    if len(tracks) >= 4:  # Album
+                        self.current_scan_state['current_artist_completed_albums'] += 1
+                    else:  # Single/EP
+                        self.current_scan_state['current_artist_completed_singles_eps'] += 1
                     
                     # Rate limiting: small delay between album processing to avoid hitting Spotify limits
                     import time
@@ -219,6 +278,9 @@ class WatchlistStatusModal(QDialog):
         
         # Keep track of whether this modal started the scan (vs background scan)
         self.is_manual_scan_owner = False
+        
+        # Track when we're reconnecting to ongoing scan vs starting fresh
+        self.is_reconnecting_to_ongoing_scan = False
         
         # Simple progress tracking
         self.total_artists = 0
@@ -632,35 +694,43 @@ class WatchlistStatusModal(QDialog):
             return "✓", "#4caf50"  # Default to up to date
     
     def create_artist_card(self, artist: WatchlistArtist) -> QFrame:
-        """Create a clean artist card widget"""
+        """Create a professional artist card widget"""
         card = QFrame()
-        card.setFixedHeight(36)  # Reduced from 60 to 36
+        card.setFixedHeight(48)  # Increased height for better visual hierarchy
         card.setStyleSheet("""
             QFrame {
-                background: rgba(40, 40, 40, 0.6);
-                border-radius: 8px;
-                border: 1px solid rgba(80, 80, 80, 0.3);
+                background: rgba(40, 40, 40, 0.8);
+                border-radius: 10px;
+                border: 1px solid rgba(80, 80, 80, 0.4);
+            }
+            QFrame:hover {
+                background: rgba(45, 45, 45, 0.9);
+                border: 1px solid rgba(100, 100, 100, 0.6);
             }
         """)
         
         layout = QHBoxLayout(card)
-        layout.setContentsMargins(12, 6, 12, 6)  # Reduced vertical padding
-        layout.setSpacing(15)
+        layout.setContentsMargins(16, 8, 16, 8)
+        layout.setSpacing(16)
         
-        # Status indicator with icon (set based on scan history)
+        # Status indicator with icon 
         status_icon, status_color = self.get_artist_status_icon(artist)
         status_label = QLabel(status_icon)
-        status_label.setFont(QFont("Arial", 12))
+        status_label.setFont(QFont("Arial", 14))
         status_label.setStyleSheet(f"color: {status_color}; border: none; background: transparent;")
-        status_label.setFixedWidth(20)
+        status_label.setFixedWidth(24)
         status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
-        # Artist name
-        name_label = QLabel(artist.artist_name)
-        name_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-        name_label.setStyleSheet("color: #ffffff; border: none; background: transparent;")
+        # Left side: Artist info
+        info_layout = QVBoxLayout()
+        info_layout.setSpacing(2)
         
-        # Last scan info (compact format)
+        # Artist name with label
+        artist_label = QLabel(f"Artist: {artist.artist_name}")
+        artist_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        artist_label.setStyleSheet("color: #ffffff; border: none; background: transparent;")
+        
+        # Last scan info with professional formatting
         if artist.last_scan_timestamp:
             try:
                 from datetime import datetime, timezone
@@ -674,44 +744,48 @@ class WatchlistStatusModal(QDialog):
                 
                 time_diff = now - last_scan
                 if time_diff.days > 0:
-                    scan_info = f"{time_diff.days}d ago"
+                    scan_time = f"{time_diff.days} day{'s' if time_diff.days > 1 else ''} ago"
                 elif time_diff.seconds > 3600:
                     hours = time_diff.seconds // 3600
-                    scan_info = f"{hours}h ago"
+                    scan_time = f"{hours} hour{'s' if hours > 1 else ''} ago"
                 else:
                     minutes = max(1, time_diff.seconds // 60)
-                    scan_info = f"{minutes}m ago"
+                    scan_time = f"{minutes} minute{'s' if minutes > 1 else ''} ago"
             except Exception as e:
-                # Fallback to simple format if timezone calculation fails
-                scan_info = artist.last_scan_timestamp.strftime("%m-%d %H:%M")
+                # Fallback to formatted date
+                scan_time = last_scan.strftime("%m/%d/%Y at %I:%M %p")
         else:
-            scan_info = "Never"
+            scan_time = "never scanned"
         
-        scan_label = QLabel(scan_info)
-        scan_label.setFont(QFont("Arial", 10))
-        scan_label.setStyleSheet("color: #b3b3b3; border: none; background: transparent;")
-        scan_label.setFixedWidth(60)
-        scan_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        sync_label = QLabel(f"Last Sync: {scan_time}")
+        sync_label.setFont(QFont("Arial", 10))
+        sync_label.setStyleSheet("color: #b3b3b3; border: none; background: transparent;")
         
-        # Delete button
-        delete_button = QPushButton("×")
-        delete_button.setFixedSize(24, 24)
+        info_layout.addWidget(artist_label)
+        info_layout.addWidget(sync_label)
+        
+        # Delete button with modern styling
+        delete_button = QPushButton("✕")
+        delete_button.setFixedSize(28, 28)
         delete_button.setFont(QFont("Arial", 12, QFont.Weight.Bold))
         delete_button.setStyleSheet("""
             QPushButton {
-                background: rgba(244, 67, 54, 0.8);
-                color: white;
-                border: none;
-                border-radius: 12px;
+                background: rgba(244, 67, 54, 0.1);
+                color: #f44336;
+                border: 1px solid rgba(244, 67, 54, 0.3);
+                border-radius: 14px;
                 font-weight: bold;
             }
             QPushButton:hover {
-                background: rgba(244, 67, 54, 1.0);
+                background: rgba(244, 67, 54, 0.8);
+                color: white;
+                border: 1px solid #f44336;
             }
             QPushButton:pressed {
                 background: rgba(200, 50, 40, 1.0);
             }
         """)
+        delete_button.setToolTip(f"Remove {artist.artist_name} from watchlist")
         delete_button.clicked.connect(lambda: self.delete_artist(artist))
         
         # Store references for updates
@@ -719,9 +793,8 @@ class WatchlistStatusModal(QDialog):
         setattr(card, 'artist_id', artist.spotify_artist_id)
         
         layout.addWidget(status_label)
-        layout.addWidget(name_label)
+        layout.addLayout(info_layout)
         layout.addStretch()
-        layout.addWidget(scan_label)
         layout.addWidget(delete_button)
         
         return card
@@ -815,24 +888,29 @@ class WatchlistStatusModal(QDialog):
     
     def on_scan_started(self):
         """Handle scan start"""
-        self.current_action_label.setText("Starting watchlist scan...")
+        # Only reset progress if this is a fresh scan, not a reconnection
+        if not self.is_reconnecting_to_ongoing_scan:
+            self.current_action_label.setText("Starting watchlist scan...")
+            
+            # Reset overall counters
+            self.total_artists = len(self.current_artists)
+            self.completed_artists = 0
+            
+            # Reset current artist tracking
+            self.current_artist_name = ""
+            self.current_artist_total_singles_eps = 0
+            self.current_artist_completed_singles_eps = 0
+            self.current_artist_total_albums = 0
+            self.current_artist_completed_albums = 0
+            
+            # Reset progress bars
+            self.singles_progress_bar.setValue(0)
+            self.albums_progress_bar.setValue(0)
+            self.artists_progress_bar.setValue(0)
+            self.scan_summary_label.setText("Preparing to scan artists...")
         
-        # Reset overall counters
-        self.total_artists = len(self.current_artists)
-        self.completed_artists = 0
-        
-        # Reset current artist tracking
-        self.current_artist_name = ""
-        self.current_artist_total_singles_eps = 0
-        self.current_artist_completed_singles_eps = 0
-        self.current_artist_total_albums = 0
-        self.current_artist_completed_albums = 0
-        
-        # Reset progress bars
-        self.singles_progress_bar.setValue(0)
-        self.albums_progress_bar.setValue(0)
-        self.artists_progress_bar.setValue(0)
-        self.scan_summary_label.setText("Preparing to scan artists...")
+        # Clear the reconnection flag after handling
+        self.is_reconnecting_to_ongoing_scan = False
     
     def on_artist_scan_started(self, artist_name: str):
         """Handle individual artist scan start"""
@@ -949,9 +1027,12 @@ class WatchlistStatusModal(QDialog):
         self.scan_button.setText("Start Scan")
         self.scan_button.setEnabled(True)
         
-        # Clean up shared worker if this was a manual scan
-        if self.scan_worker == WatchlistStatusModal._shared_scan_worker:
-            WatchlistStatusModal._shared_scan_worker = None
+        # Keep shared worker around for a bit so other modals can see completed results
+        # Only clear it if this modal was the owner (manual scan starter)
+        if (self.scan_worker == WatchlistStatusModal._shared_scan_worker 
+            and WatchlistStatusModal._scan_owner_modal == self):
+            # Keep the worker alive for 30 seconds to allow other modals to see results
+            QTimer.singleShot(30000, self._cleanup_shared_worker_delayed)
             WatchlistStatusModal._scan_owner_modal = None
         
         # Calculate summary
@@ -1021,28 +1102,42 @@ class WatchlistStatusModal(QDialog):
         super().showEvent(event)
         self.load_watchlist_data()
         
-        # First check if there's an ongoing manual scan from this modal class
-        if (WatchlistStatusModal._shared_scan_worker 
-            and WatchlistStatusModal._shared_scan_worker.isRunning()):
+        # First check if there's a manual scan worker (running or recently completed)
+        if WatchlistStatusModal._shared_scan_worker:
             
-            logger.info("Found ongoing manual watchlist scan - reconnecting to it")
+            logger.info("Found manual watchlist scan worker - reconnecting to it")
             
             # Reconnect to the shared manual scan worker
             self.scan_worker = WatchlistStatusModal._shared_scan_worker
-            self.scan_in_progress = True
+            
+            # Check if scan is still active
+            progress_state = self.scan_worker.get_current_progress()
+            self.scan_in_progress = progress_state.get('scan_active', False) if progress_state else False
+            self.is_reconnecting_to_ongoing_scan = True
             
             try:
+                # Restore progress state BEFORE connecting signals to prevent reset conflicts
+                self._restore_progress_state(progress_state)
+                
+                # Now connect to future signals
                 self.scan_worker.scan_started.connect(self.on_scan_started)
                 self.scan_worker.artist_scan_started.connect(self.on_artist_scan_started)
+                self.scan_worker.artist_totals_discovered.connect(self.on_artist_totals_discovered)
                 self.scan_worker.album_scan_started.connect(self.on_album_scan_started)
                 self.scan_worker.track_check_started.connect(self.on_track_check_started)
+                self.scan_worker.release_completed.connect(self.on_release_completed)
                 self.scan_worker.artist_scan_completed.connect(self.on_artist_scan_completed)
                 self.scan_worker.scan_completed.connect(self.on_scan_completed)
                 
-                # Update UI to show scan in progress
-                self.current_action_label.setText("Manual scan in progress...")
-                self.scan_button.setText("Scanning...")
-                self.scan_button.setEnabled(False)
+                # Update UI to show reconnection status (will be overridden by _restore_progress_state if needed)
+                if self.scan_in_progress:
+                    self.current_action_label.setText("Reconnected to manual scan...")
+                    self.scan_button.setText("Scanning...")
+                    self.scan_button.setEnabled(False)
+                else:
+                    self.current_action_label.setText("Viewing completed manual scan results")
+                    self.scan_button.setText("Start Scan")
+                    self.scan_button.setEnabled(True)
                 
             except Exception as e:
                 logger.debug(f"Could not connect to manual scan signals (may already be connected): {e}")
@@ -1064,24 +1159,37 @@ class WatchlistStatusModal(QDialog):
                 # If we found the dashboard and there's an active background worker
                 if (dashboard and hasattr(dashboard, 'background_watchlist_worker') 
                 and dashboard.background_watchlist_worker 
+                and dashboard.background_watchlist_worker.isRunning()
                 and hasattr(dashboard, 'auto_processing_watchlist') 
                     and dashboard.auto_processing_watchlist):
                     
                     logger.info("Found active background watchlist scan - connecting modal to live updates")
                     
-                    # Connect to the background worker's signals for live updates
+                    # Set reconnection flag and restore progress before connecting signals
+                    self.is_reconnecting_to_ongoing_scan = True
+                    
+                    # Restore progress state BEFORE connecting signals
                     try:
-                        dashboard.background_watchlist_worker.signals.scan_started.connect(self.on_scan_started)
-                        dashboard.background_watchlist_worker.signals.artist_scan_started.connect(self.on_artist_scan_started)
-                        dashboard.background_watchlist_worker.signals.album_scan_started.connect(self.on_album_scan_started)
-                        dashboard.background_watchlist_worker.signals.track_check_started.connect(self.on_track_check_started)
-                        dashboard.background_watchlist_worker.signals.artist_scan_completed.connect(self.on_artist_scan_completed)
+                        progress_state = dashboard.background_watchlist_worker.get_current_progress()
+                        self._restore_progress_state(progress_state)
+                    except Exception as e:
+                        logger.debug(f"Could not restore background scan progress: {e}")
+                    
+                    # Connect to the background worker's signals for live updates
+                    # Now using the same WatchlistScanWorker signals (no .signals attribute needed)
+                    try:
+                        dashboard.background_watchlist_worker.scan_started.connect(self.on_scan_started)
+                        dashboard.background_watchlist_worker.artist_scan_started.connect(self.on_artist_scan_started)
+                        dashboard.background_watchlist_worker.artist_totals_discovered.connect(self.on_artist_totals_discovered)
+                        dashboard.background_watchlist_worker.album_scan_started.connect(self.on_album_scan_started)
+                        dashboard.background_watchlist_worker.track_check_started.connect(self.on_track_check_started)
+                        dashboard.background_watchlist_worker.release_completed.connect(self.on_release_completed)
+                        dashboard.background_watchlist_worker.artist_scan_completed.connect(self.on_artist_scan_completed)
                         
-                        # Update UI to show scan in progress
-                        self.current_action_label.setText("Background scan in progress...")
+                        # Update UI to show reconnection status
+                        self.current_action_label.setText("Reconnected to background scan...")
                         self.scan_button.setText("Background Scanning...")
                         self.scan_button.setEnabled(False)
-                        self.artists_progress_bar.setValue(0)  # Will be updated by signals
                         
                     except Exception as e:
                         logger.debug(f"Could not connect to background scan signals (may already be connected): {e}")
@@ -1089,6 +1197,78 @@ class WatchlistStatusModal(QDialog):
             except Exception as e:
                 logger.debug(f"Error checking for background scan: {e}")
                 # Not critical - just means we can't detect ongoing scans
+    
+    @staticmethod
+    def _cleanup_shared_worker_delayed():
+        """Clean up shared worker after delay to allow other modals to see results"""
+        try:
+            if WatchlistStatusModal._shared_scan_worker:
+                if not WatchlistStatusModal._shared_scan_worker.isRunning():
+                    WatchlistStatusModal._shared_scan_worker = None
+                    logger.debug("Cleaned up completed shared scan worker")
+        except Exception as e:
+            logger.debug(f"Error cleaning up shared worker: {e}")
+    
+    def _restore_progress_state(self, progress_state):
+        """Restore progress bars and UI state from worker's current progress"""
+        if not progress_state:
+            return
+        
+        # Handle both active and completed scans
+        is_active = progress_state.get('scan_active', False)
+        is_completed = progress_state.get('scan_completed', False)
+        
+        if not is_active and not is_completed:
+            return
+        
+        try:
+            # Fully sync modal state with worker state
+            self.total_artists = progress_state.get('total_artists', 0)
+            self.completed_artists = progress_state.get('completed_artists', 0)
+            self.current_artist_name = progress_state.get('current_artist_name', '')
+            self.current_artist_total_singles_eps = progress_state.get('current_artist_total_singles_eps', 0)
+            self.current_artist_completed_singles_eps = progress_state.get('current_artist_completed_singles_eps', 0)
+            self.current_artist_total_albums = progress_state.get('current_artist_total_albums', 0)
+            self.current_artist_completed_albums = progress_state.get('current_artist_completed_albums', 0)
+            
+            # Update UI elements
+            if self.total_artists > 0:
+                overall_progress = int((self.completed_artists / self.total_artists) * 100)
+                self.artists_progress_bar.setValue(overall_progress)
+            
+            if self.current_artist_name:
+                self.current_action_label.setText(f"Scanning: {self.current_artist_name}")
+                
+                # Update current artist progress bars
+                if self.current_artist_total_singles_eps > 0:
+                    singles_progress = int((self.current_artist_completed_singles_eps / self.current_artist_total_singles_eps) * 100)
+                    self.singles_progress_bar.setValue(singles_progress)
+                
+                if self.current_artist_total_albums > 0:
+                    albums_progress = int((self.current_artist_completed_albums / self.current_artist_total_albums) * 100)
+                    self.albums_progress_bar.setValue(albums_progress)
+            
+            # Update scan summary and UI state based on scan status
+            if is_completed:
+                self.scan_summary_label.setText("Scan completed - viewing final results")
+                self.scan_button.setText("Start Scan")
+                self.scan_button.setEnabled(True)
+                # Set progress bars to 100% for completed scans
+                self.artists_progress_bar.setValue(100)
+                if self.current_artist_total_singles_eps > 0:
+                    self.singles_progress_bar.setValue(100)
+                if self.current_artist_total_albums > 0:
+                    self.albums_progress_bar.setValue(100)
+            elif is_active:
+                remaining_artists = self.total_artists - self.completed_artists
+                self.scan_summary_label.setText(f"Reconnected to ongoing scan - {remaining_artists} artists remaining")
+                self.scan_button.setText("Scanning...")
+                self.scan_button.setEnabled(False)
+            
+            logger.info(f"Restored progress state: {self.completed_artists}/{self.total_artists} artists, current: {self.current_artist_name}")
+            
+        except Exception as e:
+            logger.error(f"Error restoring progress state: {e}")
     
     def closeEvent(self, event):
         """Handle modal close"""
@@ -1111,11 +1291,13 @@ class WatchlistStatusModal(QDialog):
                 if (parent_widget and hasattr(parent_widget, 'background_watchlist_worker') 
                     and parent_widget.background_watchlist_worker):
                     try:
-                        parent_widget.background_watchlist_worker.signals.scan_started.disconnect(self.on_scan_started)
-                        parent_widget.background_watchlist_worker.signals.artist_scan_started.disconnect(self.on_artist_scan_started)
-                        parent_widget.background_watchlist_worker.signals.album_scan_started.disconnect(self.on_album_scan_started)
-                        parent_widget.background_watchlist_worker.signals.track_check_started.disconnect(self.on_track_check_started)
-                        parent_widget.background_watchlist_worker.signals.artist_scan_completed.disconnect(self.on_artist_scan_completed)
+                        parent_widget.background_watchlist_worker.scan_started.disconnect(self.on_scan_started)
+                        parent_widget.background_watchlist_worker.artist_scan_started.disconnect(self.on_artist_scan_started)
+                        parent_widget.background_watchlist_worker.artist_totals_discovered.disconnect(self.on_artist_totals_discovered)
+                        parent_widget.background_watchlist_worker.album_scan_started.disconnect(self.on_album_scan_started)
+                        parent_widget.background_watchlist_worker.track_check_started.disconnect(self.on_track_check_started)
+                        parent_widget.background_watchlist_worker.release_completed.disconnect(self.on_release_completed)
+                        parent_widget.background_watchlist_worker.artist_scan_completed.disconnect(self.on_artist_scan_completed)
                     except:
                         pass  # Ignore if signals weren't connected
         except:
