@@ -13,7 +13,7 @@ class VersionInfoModal(QDialog):
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("What's New in SoulSync v0.5")
+        self.setWindowTitle("What's New in SoulSync v0.51")
         self.setModal(True)
         self.setFixedSize(600, 500)
         self.setup_ui()
@@ -68,7 +68,7 @@ class VersionInfoModal(QDialog):
         """)
         
         # Version subtitle
-        version_subtitle = QLabel("Version 0.5 - Latest Features & Improvements")
+        version_subtitle = QLabel("Version 0.51 - Latest Features & Improvements")
         version_subtitle.setFont(QFont("SF Pro Text", 11, QFont.Weight.Medium))
         version_subtitle.setStyleSheet("""
             color: rgba(255, 255, 255, 0.7);
@@ -112,63 +112,50 @@ class VersionInfoModal(QDialog):
         content_layout.setContentsMargins(30, 25, 30, 25)
         content_layout.setSpacing(25)
         
-        # New Watchlist Feature
-        watchlist_section = self.create_feature_section(
-            "🔍 New Watchlist Feature",
-            "Track your favorite artists and get notified when they release new music",
+        # Settings Page Improvements
+        settings_section = self.create_feature_section(
+            "⚙️ Settings Page Improvements",
+            "Enhanced settings interface for better usability and visual consistency",
             [
-                "• Automatically monitors your favorite artists for new releases",
-                "• Smart scanning that checks only for releases since last scan", 
-                "• Real-time progress tracking with detailed status indicators",
-                "• Seamless integration with your existing music library",
-                "• Configurable scan intervals (now every 10 minutes for faster updates)",
-                "• Search functionality for managing large artist lists (200+ artists)",
-                "• Visual status icons showing scan recency and completion status"
-            ],
-            "How to use: Go to the Artists page, click 'Add to Watchlist' on any artist card, then monitor progress in the new Watchlist Status modal accessible from the Dashboard."
+                "• Added vertical scrolling support for better usability on small screens",
+                "• Cleaned up text backgrounds throughout settings for better visual consistency",
+                "• Applied consistent green monospace styling to log file path display",
+                "• Added rounded corners to API configuration frames (Spotify, Plex, Soulseek)",
+                "• Enhanced label styling with transparent backgrounds and proper white text"
+            ]
+        )
+        content_layout.addWidget(settings_section)
+        
+        # Watchlist System Enhancements
+        watchlist_section = self.create_feature_section(
+            "👀 Watchlist System Enhancements",
+            "Improved reliability and user experience for artist monitoring",
+            [
+                "• Enhanced rate limiting with comprehensive multi-layer protection to prevent API bans",
+                "• Increased delays between artists (2.0s) and albums (0.5s) for safer scanning",
+                "• Enhanced Spotify API interval timing and error handling",
+                "• Unified scan implementation - manual and auto scans now use same worker for consistency",
+                "• Fixed progress bars resetting when reopening modal during active scans",
+                "• Professional artist cards with improved visual hierarchy and spacing",
+                "• Modern hover effects and enhanced delete button styling"
+            ]
         )
         content_layout.addWidget(watchlist_section)
         
-        # Enhanced Progress Tracking
-        progress_section = self.create_feature_section(
-            "📊 Enhanced Progress Tracking",
-            "Better visibility into your music scanning and download progress",
+        # Artist Search Enhancements  
+        artist_section = self.create_feature_section(
+            "🎵 Artist Search Enhancements",
+            "Better visual feedback and improved navigation for artist discovery",
             [
-                "• Three-progress-bar system for Singles/EPs, Albums, and Overall progress",
-                "• Per-artist progress tracking that resets for each new artist",
-                "• Real-time updates during scanning with detailed completion metrics",
-                "• Smart release categorization (≤3 tracks = Single/EP, ≥4 tracks = Album)",
-                "• Improved mathematical accuracy for progress calculations"
-            ]
+                "• Added watchlist eye indicators (👁️) to artist search results",
+                "• Green eye icon appears in top-right corner for artists already in watchlist",
+                "• Real-time updates when artists are added/removed from watchlist",
+                "• Enhanced horizontal scrolling with mouse wheel support for artist results",
+                "• Smooth navigation through search results without manual scrollbar dragging"
+            ],
+            "Look for the green eye icon (👁️) in artist search results to instantly see which artists you're already tracking!"
         )
-        content_layout.addWidget(progress_section)
-        
-        # Performance Improvements
-        performance_section = self.create_feature_section(
-            "⚡ Performance Improvements", 
-            "Faster scanning and better resource management",
-            [
-                "• Reduced scan intervals from 60 minutes to 10 minutes",
-                "• Removed artificial 25-track processing limits",
-                "• Optimized database queries for better responsiveness",
-                "• Improved memory management during large scans"
-            ]
-        )
-        content_layout.addWidget(performance_section)
-        
-        # UI/UX Enhancements
-        ui_section = self.create_feature_section(
-            "🎨 UI/UX Enhancements",
-            "Cleaner interface and better user experience",
-            [
-                "• Replaced confusing colored status circles with intuitive icons",
-                "• Added search functionality for large artist lists",
-                "• Smart display logic showing last 5 artists when no search active",
-                "• Removed unnecessary white borders for cleaner appearance",
-                "• Improved status indicators with meaningful visual feedback"
-            ]
-        )
-        content_layout.addWidget(ui_section)
+        content_layout.addWidget(artist_section)
         
         scroll_area.setWidget(content_widget)
         return scroll_area
