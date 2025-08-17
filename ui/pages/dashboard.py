@@ -36,43 +36,6 @@ from core.plex_scan_manager import PlexScanManager
 
 logger = get_logger("dashboard")
 
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-                           QFrame, QGridLayout, QScrollArea, QSizePolicy, QPushButton,
-                           QProgressBar, QTextEdit, QSpacerItem, QGroupBox, QFormLayout, QComboBox,
-                           QDialog, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QMessageBox, QApplication)
-from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, QObject, QRunnable, QThreadPool
-from PyQt6.QtGui import QFont, QPalette, QColor
-import time
-import re
-import asyncio
-import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
-try:
-    import resource
-    HAS_RESOURCE = True
-except ImportError:
-    HAS_RESOURCE = False
-import os
-from typing import Optional, Dict, Any, List
-from datetime import datetime
-from dataclasses import dataclass
-import requests
-from PIL import Image
-import io
-from core.matching_engine import MusicMatchingEngine
-from ui.components.database_updater_widget import DatabaseUpdaterWidget
-from core.database_update_worker import DatabaseUpdateWorker, DatabaseStatsWorker
-from core.wishlist_service import get_wishlist_service
-from core.watchlist_scanner import get_watchlist_scanner
-from utils.logging_config import get_logger
-
-from core.soulseek_client import TrackResult
-from database.music_database import get_database
-from core.plex_scan_manager import PlexScanManager
-
-# dashboard.py - Add these helper classes
-
-logger = get_logger("dashboard")
 
 @dataclass
 class TrackAnalysisResult:
