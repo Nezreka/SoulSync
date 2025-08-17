@@ -55,6 +55,9 @@ You can stream tracks directly from Soulseek before downloading to make sure the
 ### 📋 **Wishlist System**
 Failed downloads automatically get saved to a wishlist with context about where they came from. The app tries to download wishlist items every hour automatically. You can also manually retry or bulk manage failed downloads.
 
+### 👀 **Watchlist Monitoring**
+Track your favorite artists automatically by adding them to your watchlist. SoulSync monitors watched artists for new releases and automatically scans their latest albums and singles against your library. When new tracks are found missing, they're added to your wishlist for download. The system runs comprehensive scans with intelligent rate limiting to avoid API bans, and you can view real-time progress with detailed status updates for each artist being scanned.
+
 ### 📊 **Dashboard & Monitoring**
 Real-time status for all your connections (Spotify, Plex, Soulseek), download statistics, and system performance. Activity feed shows everything that's happening with timestamps.
 
