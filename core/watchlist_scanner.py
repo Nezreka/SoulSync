@@ -8,6 +8,7 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
 from dataclasses import dataclass
 import re
+import time
 from database.music_database import get_database, WatchlistArtist
 from core.spotify_client import SpotifyClient
 from core.wishlist_service import get_wishlist_service
@@ -15,6 +16,11 @@ from core.matching_engine import MusicMatchingEngine
 from utils.logging_config import get_logger
 
 logger = get_logger("watchlist_scanner")
+
+# Rate limiting constants for watchlist operations
+DELAY_BETWEEN_ARTISTS = 2.0      # 2 seconds between different artists
+DELAY_BETWEEN_ALBUMS = 0.5       # 500ms between albums for same artist  
+DELAY_BETWEEN_API_BATCHES = 1.0  # 1 second between API batch operations
 
 def clean_track_name_for_search(track_name):
     """
@@ -135,12 +141,11 @@ class WatchlistScanner:
                     else:
                         logger.warning(f"❌ Failed to scan {artist.artist_name}: {result.error_message}")
                     
-                    # Rate limiting: Add a small delay between artists to avoid hitting Spotify limits
-                    # Spotify allows ~100 requests per minute, so 1-2 second delay is safe
+                    # Rate limiting: Add delay between artists to avoid hitting Spotify API limits
+                    # This is critical to prevent getting banned for 6+ hours
                     if i < len(watchlist_artists) - 1:  # Don't delay after the last artist
-                        import time
-                        time.sleep(1.5)  # 1.5 second delay between artists
-                        logger.debug(f"Rate limiting: waited 1.5s before scanning next artist")
+                        logger.debug(f"Rate limiting: waiting {DELAY_BETWEEN_ARTISTS}s before scanning next artist")
+                        time.sleep(DELAY_BETWEEN_ARTISTS)
                 
                 except Exception as e:
                     logger.error(f"Error scanning artist {artist.artist_name}: {e}")
@@ -192,13 +197,20 @@ class WatchlistScanner:
             
             logger.info(f"Found {len(albums)} albums/singles to check for {watchlist_artist.artist_name}")
             
+            # Safety check: Limit number of albums to scan to prevent extremely long sessions
+            MAX_ALBUMS_PER_ARTIST = 50  # Reasonable limit to prevent API abuse
+            if len(albums) > MAX_ALBUMS_PER_ARTIST:
+                logger.warning(f"Artist {watchlist_artist.artist_name} has {len(albums)} albums, limiting to {MAX_ALBUMS_PER_ARTIST} most recent")
+                albums = albums[:MAX_ALBUMS_PER_ARTIST]  # Most recent albums are first
+            
             # Check each album/single for missing tracks
             new_tracks_found = 0
             tracks_added_to_wishlist = 0
             
-            for album in albums:
+            for album_index, album in enumerate(albums):
                 try:
                     # Get full album data with tracks
+                    logger.info(f"Checking album {album_index + 1}/{len(albums)}: {album.name}")
                     album_data = self.spotify_client.get_album(album.id)
                     if not album_data or 'tracks' not in album_data or not album_data['tracks'].get('items'):
                         continue
@@ -214,6 +226,12 @@ class WatchlistScanner:
                             # Add to wishlist
                             if self.add_track_to_wishlist(track, album_data, watchlist_artist):
                                 tracks_added_to_wishlist += 1
+                    
+                    # Rate limiting: Add delay between albums to prevent API abuse
+                    # This is especially important for artists with many albums
+                    if album_index < len(albums) - 1:  # Don't delay after the last album
+                        logger.debug(f"Rate limiting: waiting {DELAY_BETWEEN_ALBUMS}s before next album")
+                        time.sleep(DELAY_BETWEEN_ALBUMS)
                             
                 except Exception as e:
                     logger.warning(f"Error checking album {album.name}: {e}")
@@ -252,12 +270,16 @@ class WatchlistScanner:
             last_scan_timestamp: Only return releases after this date (for incremental scans)
         """
         try:
-            # Get all artist albums (albums + singles)
+            # Get all artist albums (albums + singles) - this is rate limited in spotify_client
+            logger.debug(f"Fetching discography for artist {spotify_artist_id}")
             albums = self.spotify_client.get_artist_albums(spotify_artist_id, album_type='album,single', limit=50)
             
             if not albums:
                 logger.warning(f"No albums found for artist {spotify_artist_id}")
                 return []
+            
+            # Add small delay after fetching artist discography to be extra safe
+            time.sleep(0.3)  # 300ms breathing room
             
             # Filter by release date if we have a last scan timestamp
             if last_scan_timestamp:

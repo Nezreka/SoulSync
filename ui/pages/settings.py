@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                            QFrame, QPushButton, QLineEdit, QComboBox,
-                           QCheckBox, QSpinBox, QTextEdit, QGroupBox, QFormLayout, QMessageBox, QSizePolicy)
+                           QCheckBox, QSpinBox, QTextEdit, QGroupBox, QFormLayout, QMessageBox, QSizePolicy, QScrollArea)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QFont
 from config.settings import config_manager
@@ -679,28 +679,61 @@ class SettingsPage(QWidget):
             }
         """)
         
+        # Main container layout
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(20, 16, 20, 20)
-        main_layout.setSpacing(16)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        
+        # Create scroll area
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll_area.setStyleSheet("""
+            QScrollArea {
+                background: #191414;
+                border: none;
+            }
+            QScrollBar:vertical {
+                background: #282828;
+                width: 12px;
+                border-radius: 6px;
+            }
+            QScrollBar::handle:vertical {
+                background: #535353;
+                min-height: 20px;
+                border-radius: 6px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #727272;
+            }
+        """)
+        
+        # Create scrollable content widget
+        scroll_content = QWidget()
+        scroll_content.setStyleSheet("background: #191414;")
+        content_layout = QVBoxLayout(scroll_content)
+        content_layout.setContentsMargins(20, 16, 20, 20)
+        content_layout.setSpacing(16)
         
         # Header
         header = self.create_header()
-        main_layout.addWidget(header)
+        content_layout.addWidget(header)
         
         # Settings content
-        content_layout = QHBoxLayout()
-        content_layout.setSpacing(24)
+        settings_layout = QHBoxLayout()
+        settings_layout.setSpacing(24)
         
         # Left column
         left_column = self.create_left_column()
-        content_layout.addWidget(left_column)
+        settings_layout.addWidget(left_column)
         
         # Right column
         right_column = self.create_right_column()
-        content_layout.addWidget(right_column)
+        settings_layout.addWidget(right_column)
         
-        main_layout.addLayout(content_layout)
-        main_layout.addStretch()
+        content_layout.addLayout(settings_layout)
+        content_layout.addStretch()
         
         # Save button
         self.save_btn = QPushButton("💾 Save Settings")
@@ -720,7 +753,11 @@ class SettingsPage(QWidget):
             }
         """)
         
-        main_layout.addWidget(self.save_btn)
+        content_layout.addWidget(self.save_btn)
+        
+        # Set scroll area content and add to main layout
+        scroll_area.setWidget(scroll_content)
+        main_layout.addWidget(scroll_area)
     
     def load_config_values(self):
         """Load current configuration values into form inputs"""
@@ -957,7 +994,7 @@ class SettingsPage(QWidget):
         # Status label
         self.status_label = QLabel("Checking local machine...")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.status_label.setStyleSheet("color: #b3b3b3; font-size: 12px;")
+        self.status_label.setStyleSheet("color: #ffffff; font-size: 12px; background: transparent;")
         layout.addWidget(self.status_label)
         
         # Animated loading bar container
@@ -1061,7 +1098,7 @@ class SettingsPage(QWidget):
         # Status label
         self.status_label = QLabel("Checking local machine...")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.status_label.setStyleSheet("color: #b3b3b3; font-size: 12px;")
+        self.status_label.setStyleSheet("color: #ffffff; font-size: 12px; background: transparent;")
         layout.addWidget(self.status_label)
         
         # Animated loading bar container
@@ -1301,7 +1338,7 @@ class SettingsPage(QWidget):
         
         # Info text
         info_label = QLabel("URL automatically filled in settings above.")
-        info_label.setStyleSheet("color: #b3b3b3; font-size: 9px; font-style: italic;")
+        info_label.setStyleSheet("color: #ffffff; font-size: 9px; font-style: italic; background: transparent;")
         info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(info_label)
         
@@ -1412,7 +1449,7 @@ class SettingsPage(QWidget):
         
         # Info text
         info_label = QLabel("URL automatically filled in settings above.")
-        info_label.setStyleSheet("color: #b3b3b3; font-size: 9px; font-style: italic;")
+        info_label.setStyleSheet("color: #ffffff; font-size: 9px; font-style: italic; background: transparent;")
         info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(info_label)
         
@@ -1494,12 +1531,12 @@ class SettingsPage(QWidget):
         # Title
         title_label = QLabel("Settings")
         title_label.setFont(QFont("Arial", 28, QFont.Weight.Bold))
-        title_label.setStyleSheet("color: #ffffff;")
+        title_label.setStyleSheet("color: #ffffff; background: transparent;")
         
         # Subtitle
         subtitle_label = QLabel("Configure your music sync and download preferences")
         subtitle_label.setFont(QFont("Arial", 14))
-        subtitle_label.setStyleSheet("color: #b3b3b3;")
+        subtitle_label.setStyleSheet("color: #ffffff; background: transparent;")
         
         layout.addWidget(title_label)
         layout.addWidget(subtitle_label)
@@ -1519,6 +1556,14 @@ class SettingsPage(QWidget):
         
         # Spotify settings
         spotify_frame = QFrame()
+        spotify_frame.setStyleSheet("""
+            QFrame {
+                background: #333333;
+                border: 1px solid #444444;
+                border-radius: 8px;
+                padding: 8px;
+            }
+        """)
         spotify_layout = QVBoxLayout(spotify_frame)
         spotify_layout.setSpacing(8)
         
@@ -1529,7 +1574,7 @@ class SettingsPage(QWidget):
         
         # Client ID
         client_id_label = QLabel("Client ID:")
-        client_id_label.setStyleSheet("color: #ffffff; font-size: 11px;")
+        client_id_label.setStyleSheet(self.get_label_style(11))
         spotify_layout.addWidget(client_id_label)
         
         self.client_id_input = QLineEdit()
@@ -1540,7 +1585,7 @@ class SettingsPage(QWidget):
         
         # Client Secret
         client_secret_label = QLabel("Client Secret:")
-        client_secret_label.setStyleSheet("color: #ffffff; font-size: 11px;")
+        client_secret_label.setStyleSheet(self.get_label_style(11))
         spotify_layout.addWidget(client_secret_label)
         
         self.client_secret_input = QLineEdit()
@@ -1552,7 +1597,7 @@ class SettingsPage(QWidget):
         
         # Callback URL info
         callback_info_label = QLabel("Required Redirect URI:")
-        callback_info_label.setStyleSheet("color: #b3b3b3; font-size: 11px; margin-top: 8px;")
+        callback_info_label.setStyleSheet("color: #ffffff; font-size: 11px; margin-top: 8px; background: transparent;")
         spotify_layout.addWidget(callback_info_label)
         
         callback_url_label = QLabel("http://127.0.0.1:8888/callback")
@@ -1571,12 +1616,20 @@ class SettingsPage(QWidget):
         
         # Helper text
         helper_text = QLabel("Add this URL to your Spotify app's 'Redirect URIs' in the Spotify Developer Dashboard")
-        helper_text.setStyleSheet("color: #888888; font-size: 10px; font-style: italic;")
+        helper_text.setStyleSheet("color: #ffffff; font-size: 10px; font-style: italic; background: transparent;")
         helper_text.setWordWrap(True)
         spotify_layout.addWidget(helper_text)
         
         # Plex settings
         plex_frame = QFrame()
+        plex_frame.setStyleSheet("""
+            QFrame {
+                background: #333333;
+                border: 1px solid #444444;
+                border-radius: 8px;
+                padding: 8px;
+            }
+        """)
         plex_layout = QVBoxLayout(plex_frame)
         plex_layout.setSpacing(8)
         
@@ -1587,7 +1640,7 @@ class SettingsPage(QWidget):
         
         # Server URL
         plex_url_label = QLabel("Server URL:")
-        plex_url_label.setStyleSheet("color: #ffffff; font-size: 11px;")
+        plex_url_label.setStyleSheet(self.get_label_style(11))
         plex_layout.addWidget(plex_url_label)
         
         plex_url_input_layout = QHBoxLayout()
@@ -1607,7 +1660,7 @@ class SettingsPage(QWidget):
         
         # Token
         plex_token_label = QLabel("Token:")
-        plex_token_label.setStyleSheet("color: #ffffff; font-size: 11px;")
+        plex_token_label.setStyleSheet(self.get_label_style(11))
         plex_layout.addWidget(plex_token_label)
         
         self.plex_token_input = QLineEdit()
@@ -1619,6 +1672,14 @@ class SettingsPage(QWidget):
         
         # Soulseek settings
         soulseek_frame = QFrame()
+        soulseek_frame.setStyleSheet("""
+            QFrame {
+                background: #333333;
+                border: 1px solid #444444;
+                border-radius: 8px;
+                padding: 8px;
+            }
+        """)
         soulseek_layout = QVBoxLayout(soulseek_frame)
         soulseek_layout.setSpacing(8)
         
@@ -1629,7 +1690,7 @@ class SettingsPage(QWidget):
         
         # slskd URL
         slskd_url_label = QLabel("slskd URL:")
-        slskd_url_label.setStyleSheet("color: #ffffff; font-size: 11px;")
+        slskd_url_label.setStyleSheet(self.get_label_style(11))
         soulseek_layout.addWidget(slskd_url_label)
         
         url_input_layout = QHBoxLayout()
@@ -1649,7 +1710,7 @@ class SettingsPage(QWidget):
         
         # API Key
         api_key_label = QLabel("API Key:")
-        api_key_label.setStyleSheet("color: #ffffff; font-size: 11px;")
+        api_key_label.setStyleSheet(self.get_label_style(11))
         soulseek_layout.addWidget(api_key_label)
         
         self.api_key_input = QLineEdit()
@@ -1701,16 +1762,14 @@ class SettingsPage(QWidget):
         # Log level (read-only)
         log_level_layout = QHBoxLayout()
         log_level_label = QLabel("Log Level:")
-        log_level_label.setStyleSheet("color: #ffffff; font-size: 12px;")
+        log_level_label.setStyleSheet(self.get_label_style(12))
         
         self.log_level_display = QLabel("DEBUG")
         self.log_level_display.setStyleSheet("""
-            color: #b3b3b3; 
+            color: #ffffff; 
             font-size: 11px; 
-            background-color: #404040;
-            border: 1px solid #606060;
-            border-radius: 4px;
-            padding: 8px;
+            background: transparent;
+            border: none;
         """)
         self.log_level_display.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         
@@ -1720,18 +1779,18 @@ class SettingsPage(QWidget):
         # Log file path (read-only)
         log_path_container = QVBoxLayout()
         log_path_label = QLabel("Log File Path:")
-        log_path_label.setStyleSheet("color: #ffffff; font-size: 12px;")
+        log_path_label.setStyleSheet(self.get_label_style(12))
         log_path_container.addWidget(log_path_label)
         
         self.log_path_display = QLabel("logs/app.log")
         self.log_path_display.setStyleSheet("""
-            color: #b3b3b3; 
+            color: #1db954; 
             font-size: 11px; 
-            background-color: #404040;
-            border: 1px solid #606060;
-            border-radius: 4px;
-            padding: 8px;
             font-family: 'Courier New', monospace;
+            background-color: rgba(29, 185, 84, 0.1);
+            border: 1px solid rgba(29, 185, 84, 0.3);
+            border-radius: 4px;
+            padding: 6px 8px;
         """)
         self.log_path_display.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         log_path_container.addWidget(self.log_path_display)
@@ -1759,7 +1818,7 @@ class SettingsPage(QWidget):
         # Quality preference
         quality_layout = QHBoxLayout()
         quality_label = QLabel("Preferred Quality:")
-        quality_label.setStyleSheet("color: #ffffff; font-size: 12px;")
+        quality_label.setStyleSheet(self.get_label_style(12))
         
         self.quality_combo = QComboBox()
         self.quality_combo.addItems(["FLAC", "320 kbps MP3", "256 kbps MP3", "192 kbps MP3", "Any"])
@@ -1774,7 +1833,7 @@ class SettingsPage(QWidget):
         # Download path
         path_container = QVBoxLayout()
         path_label = QLabel("Slskd Download Dir:")
-        path_label.setStyleSheet("color: #ffffff; font-size: 12px;")
+        path_label.setStyleSheet(self.get_label_style(12))
         path_container.addWidget(path_label)
         
         path_input_layout = QHBoxLayout()
@@ -1794,7 +1853,7 @@ class SettingsPage(QWidget):
         # Transfer folder path
         transfer_path_container = QVBoxLayout()
         transfer_path_label = QLabel("Matched Transfer Dir (Plex Music Dir?):")
-        transfer_path_label.setStyleSheet("color: #ffffff; font-size: 12px;")
+        transfer_path_label.setStyleSheet(self.get_label_style(12))
         transfer_path_container.addWidget(transfer_path_label)
         
         transfer_input_layout = QHBoxLayout()
@@ -1824,7 +1883,7 @@ class SettingsPage(QWidget):
         # Max Workers
         workers_layout = QHBoxLayout()
         workers_label = QLabel("Concurrent Workers:")
-        workers_label.setStyleSheet("color: #ffffff; font-size: 12px;")
+        workers_label.setStyleSheet(self.get_label_style(12))
         
         self.max_workers_combo = QComboBox()
         self.max_workers_combo.addItems(["3", "4", "5", "6", "7", "8", "9", "10"])
@@ -1837,7 +1896,7 @@ class SettingsPage(QWidget):
         
         # Help text for workers
         workers_help = QLabel("Number of parallel threads for database updates. Higher values = faster updates but more server load.")
-        workers_help.setStyleSheet("color: #888888; font-size: 10px; font-style: italic;")
+        workers_help.setStyleSheet("color: #ffffff; font-size: 10px; font-style: italic; background: transparent;")
         workers_help.setWordWrap(True)
         
         database_layout.addLayout(workers_layout)
@@ -1857,6 +1916,7 @@ class SettingsPage(QWidget):
                 color: #ffffff;
                 font-size: 12px;
                 spacing: 8px;
+                background: transparent;
             }
             QCheckBox::indicator {
                 width: 16px;
@@ -1886,16 +1946,14 @@ class SettingsPage(QWidget):
         # Supported formats display
         supported_formats_layout = QHBoxLayout()
         formats_label = QLabel("Supported Formats:")
-        formats_label.setStyleSheet("color: #ffffff; font-size: 12px;")
+        formats_label.setStyleSheet(self.get_label_style(12))
         
         formats_display = QLabel("MP3, FLAC, MP4/M4A, OGG")
         formats_display.setStyleSheet("""
-            color: #b3b3b3; 
+            color: #ffffff; 
             font-size: 11px; 
-            background-color: #404040;
-            border: 1px solid #606060;
-            border-radius: 4px;
-            padding: 6px;
+            background: transparent;
+            border: none;
         """)
         
         supported_formats_layout.addWidget(formats_label)
@@ -1903,7 +1961,7 @@ class SettingsPage(QWidget):
         
         # Help text
         help_text = QLabel("Automatically enhances downloaded tracks with accurate Spotify metadata including artist, album, track numbers, genres, and release dates. Perfect for Plex libraries!")
-        help_text.setStyleSheet("color: #888888; font-size: 10px; font-style: italic;")
+        help_text.setStyleSheet("color: #ffffff; font-size: 10px; font-style: italic; background: transparent;")
         help_text.setWordWrap(True)
         
         metadata_layout.addWidget(self.metadata_enabled_checkbox)
@@ -1925,6 +1983,7 @@ class SettingsPage(QWidget):
                 color: #ffffff;
                 font-size: 12px;
                 spacing: 8px;
+                background: transparent;
             }
             QCheckBox::indicator {
                 width: 16px;
@@ -1945,7 +2004,7 @@ class SettingsPage(QWidget):
         
         # Help text for playlist sync
         playlist_help_text = QLabel("When enabled, existing Plex playlists will be backed up as '[Playlist Name] Backup' before being overwritten during sync. Only one backup per playlist is maintained.")
-        playlist_help_text.setStyleSheet("color: #888888; font-size: 10px; font-style: italic;")
+        playlist_help_text.setStyleSheet("color: #ffffff; font-size: 10px; font-style: italic; background: transparent;")
         playlist_help_text.setWordWrap(True)
         
         playlist_sync_layout.addWidget(self.create_backup_checkbox)
@@ -2044,4 +2103,15 @@ class SettingsPage(QWidget):
             QPushButton:hover {
                 background: rgba(29, 185, 84, 0.1);
             }
+        """
+    
+    def get_label_style(self, font_size=12):
+        """Get consistent label style without background"""
+        return f"""
+            QLabel {{
+                color: #ffffff;
+                font-size: {font_size}px;
+                background: transparent;
+                border: none;
+            }}
         """
