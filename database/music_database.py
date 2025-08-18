@@ -1137,7 +1137,7 @@ class MusicDatabase:
             tracks.append(track)
         return tracks
     
-    def search_albums(self, title: str = "", artist: str = "", limit: int = 50) -> List[DatabaseAlbum]:
+    def search_albums(self, title: str = "", artist: str = "", limit: int = 50, server_source: Optional[str] = None) -> List[DatabaseAlbum]:
         """Search albums by title and/or artist name with fuzzy matching"""
         try:
             conn = self._get_connection()
@@ -1154,6 +1154,10 @@ class MusicDatabase:
             if artist:
                 where_conditions.append("artists.name LIKE ?")
                 params.append(f"%{artist}%")
+            
+            if server_source:
+                where_conditions.append("albums.server_source = ?")
+                params.append(server_source)
             
             if not where_conditions:
                 # If no search criteria, return empty list
@@ -1389,7 +1393,7 @@ class MusicDatabase:
             logger.error(f"Error checking album completeness for album_id {album_id}: {e}")
             return 0, 0, False
     
-    def check_album_exists_with_completeness(self, title: str, artist: str, expected_track_count: Optional[int] = None, confidence_threshold: float = 0.8) -> Tuple[Optional[DatabaseAlbum], float, int, int, bool]:
+    def check_album_exists_with_completeness(self, title: str, artist: str, expected_track_count: Optional[int] = None, confidence_threshold: float = 0.8, server_source: Optional[str] = None) -> Tuple[Optional[DatabaseAlbum], float, int, int, bool]:
         """
         Check if an album exists in the database with completeness information.
         Enhanced to handle edition matching (standard <-> deluxe variants).
@@ -1397,7 +1401,7 @@ class MusicDatabase:
         """
         try:
             # Try enhanced edition-aware matching first with expected track count for Smart Edition Matching
-            album, confidence = self.check_album_exists_with_editions(title, artist, confidence_threshold, expected_track_count)
+            album, confidence = self.check_album_exists_with_editions(title, artist, confidence_threshold, expected_track_count, server_source)
             
             if not album:
                 return None, 0.0, 0, 0, False
@@ -1411,7 +1415,7 @@ class MusicDatabase:
             logger.error(f"Error checking album existence with completeness for '{title}' by '{artist}': {e}")
             return None, 0.0, 0, 0, False
     
-    def check_album_exists_with_editions(self, title: str, artist: str, confidence_threshold: float = 0.8, expected_track_count: Optional[int] = None) -> Tuple[Optional[DatabaseAlbum], float]:
+    def check_album_exists_with_editions(self, title: str, artist: str, confidence_threshold: float = 0.8, expected_track_count: Optional[int] = None, server_source: Optional[str] = None) -> Tuple[Optional[DatabaseAlbum], float]:
         """
         Enhanced album existence check that handles edition variants.
         Matches standard albums with deluxe/platinum/special editions and vice versa.
@@ -1429,7 +1433,7 @@ class MusicDatabase:
             
             for variation in title_variations:
                 # Search for this variation
-                albums = self.search_albums(title=variation, artist=artist, limit=10)
+                albums = self.search_albums(title=variation, artist=artist, limit=10, server_source=server_source)
                 
                 if albums:
                     logger.debug(f"📀 Found {len(albums)} albums for variation '{variation}'")
