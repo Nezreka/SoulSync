@@ -2716,12 +2716,16 @@ class SyncPage(QWidget):
         self.youtube_cards = {}  # url -> YouTubePlaylistCard instance
         self.youtube_cards_container = None  # Container for all YouTube cards
         
-        # Initialize Plex scan manager
+        # Initialize unified media scan manager
         self.scan_manager = None
-        if self.plex_client:
-            self.scan_manager = PlexScanManager(self.plex_client, delay_seconds=60)
-            # Add automatic incremental database update after Plex scan completion
-            self.scan_manager.add_scan_completion_callback(self._on_plex_scan_completed)
+        try:
+            from core.media_scan_manager import MediaScanManager
+            self.scan_manager = MediaScanManager(delay_seconds=60)
+            # Add automatic incremental database update after scan completion
+            self.scan_manager.add_scan_completion_callback(self._on_media_scan_completed)
+            logger.info("✅ MediaScanManager initialized for SyncPage")
+        except Exception as e:
+            logger.error(f"Failed to initialize MediaScanManager: {e}")
         
         self.setup_ui()
         
@@ -2733,16 +2737,24 @@ class SyncPage(QWidget):
         """Set the toast manager for showing notifications"""
         self.toast_manager = toast_manager
     
-    def _on_plex_scan_completed(self):
-        """Callback triggered when Plex scan completes - start automatic incremental database update"""
+    def _on_media_scan_completed(self):
+        """Callback triggered when media scan completes - start automatic incremental database update"""
         try:
             # Import here to avoid circular imports
             from database import get_database
             from core.database_update_worker import DatabaseUpdateWorker
+            from config.settings import config_manager
+            
+            # Get the active media client
+            active_server = config_manager.get_active_media_server()
+            if active_server == "jellyfin":
+                media_client = getattr(self, 'jellyfin_client', None)
+            else:
+                media_client = getattr(self, 'plex_client', None)
             
             # Check if we should run incremental update
-            if not self.plex_client or not self.plex_client.is_connected():
-                logger.debug("Plex not connected - skipping automatic database update")
+            if not media_client or not media_client.is_connected():
+                logger.debug(f"{active_server.upper()} not connected - skipping automatic database update")
                 return
             
             # Check if database has a previous full refresh
@@ -2765,11 +2777,11 @@ class SyncPage(QWidget):
                 return
             
             # All conditions met - start incremental update
-            logger.info("🎵 Starting automatic incremental database update after Plex scan")
+            logger.info(f"🎵 Starting automatic incremental database update after {active_server.upper()} scan")
             self._start_automatic_incremental_update()
             
         except Exception as e:
-            logger.error(f"Error in Plex scan completion callback: {e}")
+            logger.error(f"Error in media scan completion callback: {e}")
     
     def _start_automatic_incremental_update(self):
         """Start the automatic incremental database update"""
