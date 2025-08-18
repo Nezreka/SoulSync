@@ -624,8 +624,10 @@ class PlaylistTrackAnalysisWorker(QRunnable):
                 for query_title in unique_title_variations:
                     if self._cancelled: return None, 0.0
 
-                    # Use database check_track_exists method with consistent thresholds
-                    db_track, confidence = db.check_track_exists(query_title, artist_name, confidence_threshold=0.7)
+                    # Use database check_track_exists method with consistent thresholds and active server filter
+                    from config.settings import config_manager
+                    active_server = config_manager.get_active_media_server()
+                    db_track, confidence = db.check_track_exists(query_title, artist_name, confidence_threshold=0.7, server_source=active_server)
                     
                     if db_track and confidence >= 0.7:
                         print(f"✔️ Database match found for '{original_title}' by '{artist_name}': '{db_track.title}' with confidence {confidence:.2f}")
@@ -1633,7 +1635,8 @@ class PlaylistDetailsModal(QDialog):
             self.parent_page.sync_service = PlaylistSyncService(
                 self.parent_page.spotify_client,
                 self.parent_page.plex_client,
-                self.parent_page.soulseek_client
+                self.parent_page.soulseek_client,
+                getattr(self.parent_page, 'jellyfin_client', None)
             )
         
         # Start sync
@@ -2673,10 +2676,11 @@ class SyncPage(QWidget):
     sync_activity = pyqtSignal(str, str, str, str)  # icon, title, subtitle, time
     database_updated_externally = pyqtSignal()
     
-    def __init__(self, spotify_client=None, plex_client=None, soulseek_client=None, downloads_page=None, parent=None):
+    def __init__(self, spotify_client=None, plex_client=None, soulseek_client=None, downloads_page=None, jellyfin_client=None, parent=None):
         super().__init__(parent)
         self.spotify_client = spotify_client
         self.plex_client = plex_client
+        self.jellyfin_client = jellyfin_client
         self.soulseek_client = soulseek_client
         self.downloads_page = downloads_page
         self.sync_statuses = load_sync_status()
@@ -2866,7 +2870,8 @@ class SyncPage(QWidget):
             self.sync_service = PlaylistSyncService(
                 self.spotify_client,
                 self.plex_client,
-                self.soulseek_client
+                self.soulseek_client,
+                getattr(self, 'jellyfin_client', None)
             )
         
         # Create sync worker
@@ -2919,7 +2924,8 @@ class SyncPage(QWidget):
             self.sync_service = PlaylistSyncService(
                 self.spotify_client,
                 self.plex_client,
-                self.soulseek_client
+                self.soulseek_client,
+                getattr(self, 'jellyfin_client', None)
             )
         
         # Create sync worker for sequential sync

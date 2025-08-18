@@ -544,8 +544,10 @@ class SinglesEPsLibraryWorker(QThread):
             
             print(f"   🔍 Searching for single track: '{track_name}' by '{artist_name}'")
             
-            # Search for the track anywhere in the library
-            db_track, confidence = db.check_track_exists(track_name, artist_name, confidence_threshold=0.7)
+            # Search for the track anywhere in the library (active server only)
+            from config.settings import config_manager
+            active_server = config_manager.get_active_media_server()
+            db_track, confidence = db.check_track_exists(track_name, artist_name, confidence_threshold=0.7, server_source=active_server)
             
             if db_track and confidence >= 0.7:
                 print(f"   ✅ Single found: '{track_name}' in album '{db_track.album_title}' (confidence: {confidence:.2f})")
@@ -645,8 +647,10 @@ class SinglesEPsLibraryWorker(QThread):
                 track_name = track['name']
                 artist_name = track['artists'][0]['name'] if track['artists'] else (ep_release.artists[0] if ep_release.artists else "")
                 
-                # Search for this track
-                db_track, confidence = db.check_track_exists(track_name, artist_name, confidence_threshold=0.7)
+                # Search for this track (active server only)
+                from config.settings import config_manager
+                active_server = config_manager.get_active_media_server()
+                db_track, confidence = db.check_track_exists(track_name, artist_name, confidence_threshold=0.7, server_source=active_server)
                 
                 if db_track and confidence >= 0.7:
                     owned_tracks += 1
