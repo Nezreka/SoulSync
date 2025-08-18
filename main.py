@@ -33,6 +33,10 @@ class ServiceStatusThread(QThread):
         self.plex_client = plex_client
         self.soulseek_client = soulseek_client
         self.running = True
+        
+        # Import here to avoid circular imports
+        from config.settings import config_manager
+        self.config_manager = config_manager
     
     def run(self):
         while self.running:
@@ -41,9 +45,27 @@ class ServiceStatusThread(QThread):
                 spotify_status = self.spotify_client.sp is not None
                 self.status_updated.emit("spotify", spotify_status)
                 
-                # Check Plex connection
-                plex_status = self.plex_client.is_connected()
-                self.status_updated.emit("plex", plex_status)
+                # Check active media server connection
+                active_server = self.config_manager.get_active_media_server()
+                if active_server == "plex":
+                    server_status = self.plex_client.is_connected()
+                    self.status_updated.emit("plex", server_status)
+                elif active_server == "jellyfin":
+                    # For now, do a basic config check for Jellyfin until JellyfinClient is implemented
+                    jellyfin_config = self.config_manager.get_jellyfin_config()
+                    jellyfin_status = bool(jellyfin_config.get('base_url')) and bool(jellyfin_config.get('api_key'))
+                    if jellyfin_status:
+                        # Do a quick HTTP test to verify connection
+                        try:
+                            import requests
+                            base_url = jellyfin_config.get('base_url', '').rstrip('/')
+                            api_key = jellyfin_config.get('api_key', '')
+                            headers = {'X-Emby-Token': api_key} if api_key else {}
+                            response = requests.get(f"{base_url}/System/Info", headers=headers, timeout=3)
+                            jellyfin_status = response.status_code == 200
+                        except:
+                            jellyfin_status = False
+                    self.status_updated.emit("jellyfin", jellyfin_status)
                 
                 # Check Soulseek connection (simplified check to avoid event loop issues)
                 soulseek_status = self.soulseek_client.is_configured()

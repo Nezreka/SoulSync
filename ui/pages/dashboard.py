@@ -1917,6 +1917,7 @@ class DashboardDataProvider(QObject):
         self.service_status = {
             'spotify': ServiceStatus('Spotify', False, datetime.now()),
             'plex': ServiceStatus('Plex', False, datetime.now()),
+            'jellyfin': ServiceStatus('Jellyfin', False, datetime.now()),
             'soulseek': ServiceStatus('Soulseek', False, datetime.now())
         }
         self.download_stats = DownloadStats()
@@ -2066,22 +2067,25 @@ class DashboardDataProvider(QObject):
     
     def test_service_connection(self, service: str):
         """Test connection to a specific service"""
-        print(f"DEBUG: Testing {service} connection")
-        print(f"DEBUG: Available service clients: {list(self.service_clients.keys())}")
         
         # Map service names to client keys
         service_key_map = {
             'spotify': 'spotify_client',
-            'plex': 'plex_client', 
+            'plex': 'plex_client',
+            'jellyfin': None,  # Jellyfin doesn't need a client, tests via config
             'soulseek': 'soulseek_client'
         }
         
         client_key = service_key_map.get(service, service)
-        if client_key not in self.service_clients:
+        
+        # Handle Jellyfin special case (no client needed)
+        if service == 'jellyfin':
+            client = None  # Jellyfin test uses config directly
+        elif client_key not in self.service_clients:
             print(f"DEBUG: Service {service} (key: {client_key}) not found in service_clients")
             return
-        
-        print(f"DEBUG: Service client for {service}: {self.service_clients[client_key]}")
+        else:
+            client = self.service_clients[client_key]
         
         # Clean up any existing test thread for this service
         if hasattr(self, '_test_threads') and service in self._test_threads:
@@ -2096,11 +2100,10 @@ class DashboardDataProvider(QObject):
             self._test_threads = {}
         
         # Run connection test in background thread
-        test_thread = ServiceTestThread(service, self.service_clients[client_key])
+        test_thread = ServiceTestThread(service, client)
         test_thread.test_completed.connect(self.on_service_test_completed)
         test_thread.finished.connect(lambda: self._cleanup_test_thread(service))
         self._test_threads[service] = test_thread
-        print(f"DEBUG: Starting test thread for {service}")
         test_thread.start()
     
     def _cleanup_test_thread(self, service: str):
@@ -2134,6 +2137,25 @@ class ServiceTestThread(QThread):
                 connected = self.client.is_authenticated()
             elif self.service == 'plex':
                 connected = self.client.is_connected()
+            elif self.service == 'jellyfin':
+                # Test Jellyfin connection using HTTP request
+                try:
+                    from config.settings import config_manager
+                    jellyfin_config = config_manager.get_jellyfin_config()
+                    base_url = jellyfin_config.get('base_url', '').rstrip('/')
+                    api_key = jellyfin_config.get('api_key', '')
+                    
+                    if base_url and api_key:
+                        import requests
+                        headers = {'X-Emby-Token': api_key}
+                        response = requests.get(f"{base_url}/System/Info", headers=headers, timeout=5)
+                        connected = response.status_code == 200
+                    else:
+                        connected = False
+                        error = "Missing Jellyfin configuration (base_url or api_key)"
+                except Exception as e:
+                    connected = False
+                    error = str(e)
             elif self.service == 'soulseek':
                 # Run async method in new event loop
                 loop = asyncio.new_event_loop()
@@ -2973,8 +2995,11 @@ class DashboardPage(QWidget):
         cards_layout = QHBoxLayout()
         cards_layout.setSpacing(20)
         
-        # Create service status cards
-        services = ['Spotify', 'Plex', 'Soulseek']
+        # Create service status cards with dynamic media server
+        from config.settings import config_manager
+        active_server = config_manager.get_active_media_server()
+        server_name = "Plex" if active_server == "plex" else "Jellyfin"
+        services = ['Spotify', server_name, 'Soulseek']
         for service in services:
             card = ServiceStatusCard(service)
             card.test_button.clicked.connect(lambda checked, s=service.lower(): self.test_service_connection(s))
