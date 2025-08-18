@@ -1076,3 +1076,83 @@ class JellyfinClient:
         except Exception as e:
             logger.error(f"Error updating Jellyfin playlist '{playlist_name}': {e}")
             return False
+    
+    def trigger_library_scan(self, library_name: str = "Music") -> bool:
+        """Trigger Jellyfin library scan for the specified library"""
+        if not self.ensure_connection():
+            return False
+            
+        try:
+            # Get library info to find the correct library ID
+            libraries_response = self._make_request(f'/Users/{self.user_id}/Views')
+            if not libraries_response:
+                logger.error("Failed to get library list for scan")
+                return False
+                
+            target_library_id = None
+            for library in libraries_response.get('Items', []):
+                if (library.get('CollectionType') == 'music' and 
+                    library_name.lower() in library.get('Name', '').lower()):
+                    target_library_id = library['Id']
+                    break
+            
+            # Default to music_library_id if no specific library found
+            if not target_library_id:
+                target_library_id = self.music_library_id
+                
+            if not target_library_id:
+                logger.error(f"No library found matching '{library_name}'")
+                return False
+                
+            # Trigger the scan using POST request
+            import requests
+            url = f"{self.base_url}/Items/{target_library_id}/Refresh"
+            headers = {
+                'X-Emby-Token': self.api_key,
+                'Content-Type': 'application/json'
+            }
+            params = {
+                'Recursive': True,
+                'ImageRefreshMode': 'ValidationOnly',  # Don't refresh images, just metadata
+                'MetadataRefreshMode': 'ValidationOnly'
+            }
+            
+            response = requests.post(url, headers=headers, params=params, timeout=10)
+            response.raise_for_status()
+            
+            logger.info(f"🎵 Triggered Jellyfin library scan for '{library_name}'")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to trigger Jellyfin library scan for '{library_name}': {e}")
+            return False
+    
+    def is_library_scanning(self, library_name: str = "Music") -> bool:
+        """Check if Jellyfin library is currently scanning"""
+        if not self.ensure_connection():
+            logger.debug("🔍 DEBUG: Not connected to Jellyfin, cannot check scan status")
+            return False
+            
+        try:
+            # Check scheduled tasks for library scan activities
+            response = self._make_request('/ScheduledTasks')
+            if not response:
+                logger.debug("🔍 DEBUG: Could not get scheduled tasks")
+                return False
+                
+            for task in response:
+                task_name = task.get('Name', '').lower()
+                task_state = task.get('State', 'Idle')
+                
+                # Look for library scan related tasks that are running
+                if ('scan' in task_name or 'refresh' in task_name or 'library' in task_name):
+                    if task_state in ['Running', 'Cancelling']:
+                        logger.debug(f"🔍 DEBUG: Found running scan task: {task.get('Name')} (State: {task_state})")
+                        return True
+                        
+            logger.debug("🔍 DEBUG: No active scan tasks detected")
+            return False
+            
+        except Exception as e:
+            logger.debug(f"Error checking if Jellyfin library is scanning: {e}")
+            return False

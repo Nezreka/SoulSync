@@ -311,12 +311,18 @@ class PlaylistSyncService:
                                 return actual_track, confidence
                             else:
                                 # For Plex, use the original fetchItem approach
-                                actual_plex_track = media_client.server.fetchItem(db_track.id)
-                                if actual_plex_track and hasattr(actual_plex_track, 'ratingKey'):
-                                    logger.debug(f"✔️ Successfully fetched actual Plex track for '{db_track.title}' (ratingKey: {actual_plex_track.ratingKey})")
-                                    return actual_plex_track, confidence
-                                else:
-                                    logger.warning(f"❌ Fetched Plex track for '{db_track.title}' lacks ratingKey attribute")
+                                # Validate that the track ID is numeric (Plex requirement)
+                                try:
+                                    track_id = int(db_track.id)
+                                    actual_plex_track = media_client.server.fetchItem(track_id)
+                                    if actual_plex_track and hasattr(actual_plex_track, 'ratingKey'):
+                                        logger.debug(f"✔️ Successfully fetched actual Plex track for '{db_track.title}' (ratingKey: {actual_plex_track.ratingKey})")
+                                        return actual_plex_track, confidence
+                                    else:
+                                        logger.warning(f"❌ Fetched Plex track for '{db_track.title}' lacks ratingKey attribute")
+                                except ValueError:
+                                    logger.warning(f"❌ Invalid Plex track ID format for '{db_track.title}' (ID: {db_track.id}) - skipping this track")
+                                    continue
                                 
                         except Exception as fetch_error:
                             logger.error(f"❌ Failed to fetch actual {server_type} track for '{db_track.title}' (ID: {db_track.id}): {fetch_error}")

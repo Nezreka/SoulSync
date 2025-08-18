@@ -33,8 +33,15 @@ class DatabaseUpdaterWidget(QFrame):
         header_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
         header_label.setStyleSheet("color: #ffffff;")
         
-        # Info label
-        info_label = QLabel("Syncs your Plex music library into the local database for faster searches and analytics")
+        # Info label - dynamic based on active server
+        try:
+            from config.settings import config_manager
+            active_server = config_manager.get_active_media_server()
+            server_name = "Jellyfin" if active_server == "jellyfin" else "Plex"
+        except:
+            server_name = "Plex"  # Fallback
+        
+        info_label = QLabel(f"Syncs your {server_name} music library into the local database for faster searches and analytics")
         info_label.setFont(QFont("Arial", 9))
         info_label.setStyleSheet("color: #b3b3b3; margin-bottom: 5px;")
         info_label.setWordWrap(True)

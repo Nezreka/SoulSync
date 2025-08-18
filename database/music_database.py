@@ -557,7 +557,26 @@ class MusicDatabase:
                 artist_id = str(artist_obj.ratingKey)
                 name = artist_obj.title
                 thumb_url = getattr(artist_obj, 'thumb', None)
-                summary = getattr(artist_obj, 'summary', None)
+                
+                # Only preserve timestamps and flags from summary, not full biography
+                full_summary = getattr(artist_obj, 'summary', None) or ''
+                summary = None
+                if full_summary:
+                    # Extract only our tracking markers (timestamps and ignore flags)
+                    import re
+                    markers = []
+                    
+                    # Extract timestamp marker
+                    timestamp_match = re.search(r'-updatedAt\d{4}-\d{2}-\d{2}', full_summary)
+                    if timestamp_match:
+                        markers.append(timestamp_match.group(0))
+                    
+                    # Extract ignore flag
+                    if '-IgnoreUpdate' in full_summary:
+                        markers.append('-IgnoreUpdate')
+                    
+                    # Only store markers, not full biography
+                    summary = '\n\n'.join(markers) if markers else None
                 
                 # Get genres (handle both Plex and Jellyfin formats)
                 genres = []
