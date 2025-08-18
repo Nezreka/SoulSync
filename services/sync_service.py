@@ -5,6 +5,7 @@ from datetime import datetime
 from utils.logging_config import get_logger
 from core.spotify_client import SpotifyClient, Playlist as SpotifyPlaylist, Track as SpotifyTrack
 from core.plex_client import PlexClient, PlexTrackInfo
+from core.jellyfin_client import JellyfinClient
 from core.soulseek_client import SoulseekClient
 from core.matching_engine import MusicMatchingEngine, MatchResult
 
@@ -40,14 +41,32 @@ class SyncProgress:
     failed_tracks: int = 0
 
 class PlaylistSyncService:
-    def __init__(self, spotify_client: SpotifyClient, plex_client: PlexClient, soulseek_client: SoulseekClient):
+    def __init__(self, spotify_client: SpotifyClient, plex_client: PlexClient, soulseek_client: SoulseekClient, jellyfin_client: JellyfinClient = None):
         self.spotify_client = spotify_client
         self.plex_client = plex_client
+        self.jellyfin_client = jellyfin_client
         self.soulseek_client = soulseek_client
         self.progress_callbacks = {}  # Playlist-specific progress callbacks
         self.syncing_playlists = set()  # Track multiple syncing playlists
         self._cancelled = False
         self.matching_engine = MusicMatchingEngine()
+    
+    def _get_active_media_client(self):
+        """Get the active media client based on config settings"""
+        try:
+            from config.settings import config_manager
+            active_server = config_manager.get_active_media_server()
+            
+            if active_server == "jellyfin":
+                if not self.jellyfin_client:
+                    logger.error("Jellyfin client not provided to sync service")
+                    return None, "jellyfin"
+                return self.jellyfin_client, "jellyfin"
+            else:  # Default to Plex
+                return self.plex_client, "plex"
+        except Exception as e:
+            logger.error(f"Error determining active media server: {e}")
+            return self.plex_client, "plex"  # Fallback to Plex
     
     @property
     def is_syncing(self):
@@ -145,7 +164,7 @@ class PlaylistSyncService:
                                     failed_tracks=len([r for r in match_results if not r.is_match]))
                 
                 # Use the robust search approach
-                plex_match, confidence = await self._find_track_in_plex(track)
+                plex_match, confidence = await self._find_track_in_media_server(track)
                 
                 match_result = MatchResult(
                     spotify_track=track,
@@ -204,7 +223,14 @@ class PlaylistSyncService:
             logger.info(f"Playlist validation: {len(valid_tracks)}/{len(plex_tracks)} tracks are valid Plex objects with ratingKeys")
             plex_tracks = valid_tracks
             
-            sync_success = self.plex_client.update_playlist(playlist.name, plex_tracks)
+            # Use active media server for playlist sync
+            media_client, server_type = self._get_active_media_client()
+            if not media_client:
+                logger.error(f"No active media client available for playlist sync")
+                sync_success = False
+            else:
+                logger.info(f"Syncing playlist '{playlist.name}' to {server_type.upper()} server")
+                sync_success = media_client.update_playlist(playlist.name, plex_tracks)
             
             synced_tracks = len(plex_tracks) if sync_success else 0
             failed_tracks = len(playlist.tracks) - synced_tracks - downloaded_tracks
@@ -239,11 +265,13 @@ class PlaylistSyncService:
             self.clear_progress_callback(playlist.name)
             self._cancelled = False
     
-    async def _find_track_in_plex(self, spotify_track: SpotifyTrack) -> Tuple[Optional[PlexTrackInfo], float]:
+    async def _find_track_in_media_server(self, spotify_track: SpotifyTrack) -> Tuple[Optional[PlexTrackInfo], float]:
         """Find a track using the same improved database matching as Download Missing Tracks modal"""
         try:
-            if not self.plex_client or not self.plex_client.is_connected():
-                logger.warning("Plex client not connected")
+            # Check active media server connection
+            media_client, server_type = self._get_active_media_client()
+            if not media_client or not media_client.is_connected():
+                logger.warning(f"{server_type.upper()} client not connected")
                 return None, 0.0
             
             # Use the SAME improved database matching as PlaylistTrackAnalysisWorker
@@ -258,25 +286,40 @@ class PlaylistSyncService:
                 
                 artist_name = artist if isinstance(artist, str) else artist
                 
-                # Use the improved database check_track_exists method
+                # Use the improved database check_track_exists method with server awareness
                 try:
+                    from config.settings import config_manager
+                    active_server = config_manager.get_active_media_server()
                     db = MusicDatabase()
-                    db_track, confidence = db.check_track_exists(original_title, artist_name, confidence_threshold=0.7)
+                    db_track, confidence = db.check_track_exists(original_title, artist_name, confidence_threshold=0.7, server_source=active_server)
                     
                     if db_track and confidence >= 0.7:
                         logger.debug(f"✔️ Database match found for '{original_title}' by '{artist_name}': '{db_track.title}' with confidence {confidence:.2f}")
                         
-                        # Fetch the actual Plex track object using the database track ID
+                        # Fetch the actual track object from active media server using the database track ID
                         try:
-                            actual_plex_track = self.plex_client.server.fetchItem(db_track.id)
-                            if actual_plex_track and hasattr(actual_plex_track, 'ratingKey'):
-                                logger.debug(f"✔️ Successfully fetched actual Plex track for '{db_track.title}' (ratingKey: {actual_plex_track.ratingKey})")
-                                return actual_plex_track, confidence
+                            if server_type == "jellyfin":
+                                # For Jellyfin, create a track object from database info (Jellyfin doesn't have fetchItem)
+                                class JellyfinTrackFromDB:
+                                    def __init__(self, db_track):
+                                        self.ratingKey = db_track.id
+                                        self.title = db_track.title
+                                        self.id = db_track.id
+                                
+                                actual_track = JellyfinTrackFromDB(db_track)
+                                logger.debug(f"✔️ Created Jellyfin track object for '{db_track.title}' (ID: {actual_track.ratingKey})")
+                                return actual_track, confidence
                             else:
-                                logger.warning(f"❌ Fetched Plex track for '{db_track.title}' lacks ratingKey attribute")
+                                # For Plex, use the original fetchItem approach
+                                actual_plex_track = media_client.server.fetchItem(db_track.id)
+                                if actual_plex_track and hasattr(actual_plex_track, 'ratingKey'):
+                                    logger.debug(f"✔️ Successfully fetched actual Plex track for '{db_track.title}' (ratingKey: {actual_plex_track.ratingKey})")
+                                    return actual_plex_track, confidence
+                                else:
+                                    logger.warning(f"❌ Fetched Plex track for '{db_track.title}' lacks ratingKey attribute")
                                 
                         except Exception as fetch_error:
-                            logger.error(f"❌ Failed to fetch actual Plex track for '{db_track.title}' (ID: {db_track.id}): {fetch_error}")
+                            logger.error(f"❌ Failed to fetch actual {server_type} track for '{db_track.title}' (ID: {db_track.id}): {fetch_error}")
                             # Continue to try other artists rather than fail completely
                             continue
                         

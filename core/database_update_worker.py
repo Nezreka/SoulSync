@@ -14,7 +14,7 @@ from config.settings import config_manager
 logger = get_logger("database_update_worker")
 
 class DatabaseUpdateWorker(QThread):
-    """Worker thread for updating SoulSync database with Plex library data"""
+    """Worker thread for updating SoulSync database with media server library data (Plex or Jellyfin)"""
     
     # Signals for progress reporting
     progress_updated = pyqtSignal(str, int, int, float)  # current_item, processed, total, percentage
@@ -23,9 +23,20 @@ class DatabaseUpdateWorker(QThread):
     error = pyqtSignal(str)  # error_message
     phase_changed = pyqtSignal(str)  # current_phase (artists, albums, tracks)
     
-    def __init__(self, plex_client, database_path: str = "database/music_library.db", full_refresh: bool = False):
+    def __init__(self, media_client, database_path: str = "database/music_library.db", full_refresh: bool = False, server_type: str = "plex"):
         super().__init__()
-        self.plex_client = plex_client
+        # Support both old plex_client parameter and new media_client parameter for backward compatibility
+        if hasattr(media_client, '__class__') and 'plex' in media_client.__class__.__name__.lower():
+            self.media_client = media_client
+            self.server_type = "plex"
+            # Keep old attribute for backward compatibility
+            self.plex_client = media_client
+        else:
+            self.media_client = media_client
+            self.server_type = server_type
+            # Keep old attribute for backward compatibility with existing code that expects it
+            self.plex_client = media_client if server_type == "plex" else None
+        
         self.database_path = database_path
         self.full_refresh = full_refresh
         self.should_stop = False
@@ -39,8 +50,19 @@ class DatabaseUpdateWorker(QThread):
         
         # Threading control - get from config or default to 5
         database_config = config_manager.get('database', {})
-        self.max_workers = database_config.get('max_workers', 5)
-        logger.info(f"Using {self.max_workers} worker threads for database update")
+        base_max_workers = database_config.get('max_workers', 5)
+        
+        # Optimize worker count - reduce for database concurrency safety  
+        if self.server_type == "jellyfin":
+            # Reduce workers to prevent database lock issues with bulk inserts
+            self.max_workers = min(base_max_workers, 3)  # Max 3 workers for database safety
+            if base_max_workers > 3:
+                logger.info(f"Reducing worker count from {base_max_workers} to {self.max_workers} for Jellyfin database safety")
+        else:
+            # Plex uses standard worker count
+            self.max_workers = base_max_workers
+            
+        logger.info(f"Using {self.max_workers} worker threads for {self.server_type} database update")
         self.thread_lock = threading.Lock()
         
         # Database instance
@@ -49,6 +71,15 @@ class DatabaseUpdateWorker(QThread):
     def stop(self):
         """Stop the database update process"""
         self.should_stop = True
+        
+        # Clear Jellyfin cache when user stops scan to free memory
+        if self.server_type == "jellyfin" and hasattr(self, 'media_client'):
+            try:
+                cache_stats = self.media_client.get_cache_stats()
+                self.media_client.clear_cache()
+                logger.info(f"🧹 Cleared Jellyfin cache after user stop - freed ~{cache_stats.get('bulk_albums_cached', 0) + cache_stats.get('bulk_tracks_cached', 0)} items from memory")
+            except Exception as e:
+                logger.warning(f"Could not clear Jellyfin cache on stop: {e}")
     
     def run(self):
         """Main worker thread execution"""
@@ -57,14 +88,22 @@ class DatabaseUpdateWorker(QThread):
             self.database = get_database(self.database_path)
             
             if self.full_refresh:
-                logger.info("Performing full database refresh - clearing existing data")
-                self.database.clear_all_data()
-                # For full refresh, use the old method (all artists)
+                logger.info(f"Performing full database refresh for {self.server_type} - clearing existing {self.server_type} data")
+                self.database.clear_server_data(self.server_type)
+                
+                # Show cache preparation phase for Jellyfin and set up progress callback
+                if self.server_type == "jellyfin":
+                    self.phase_changed.emit("Preparing Jellyfin cache for fast processing...")
+                    # Connect Jellyfin client progress to UI
+                    if hasattr(self.media_client, 'set_progress_callback'):
+                        self.media_client.set_progress_callback(lambda msg: self.phase_changed.emit(msg))
+                
+                # For full refresh, get all artists
                 artists_to_process = self._get_all_artists()
                 if not artists_to_process:
-                    self.error.emit("No artists found in Plex library or connection failed")
+                    self.error.emit(f"No artists found in {self.server_type} library or connection failed")
                     return
-                logger.info(f"Full refresh: Found {len(artists_to_process)} artists in Plex library")
+                logger.info(f"Full refresh: Found {len(artists_to_process)} artists in {self.server_type} library")
             else:
                 logger.info("Performing smart incremental update - checking recently added content")
                 # For incremental, use smart recent-first approach
@@ -78,7 +117,13 @@ class DatabaseUpdateWorker(QThread):
             
             # Phase 2: Process artists and their albums/tracks
             self.phase_changed.emit("Processing artists, albums, and tracks...")
-            self._process_all_artists(artists_to_process)
+            
+            # FAST PATH: For Jellyfin track-based incremental, process new tracks directly
+            if self.server_type == "jellyfin" and hasattr(self, '_jellyfin_new_tracks'):
+                self._process_jellyfin_new_tracks_directly(artists_to_process)
+            else:
+                # Standard artist processing for Plex or full refresh
+                self._process_all_artists(artists_to_process)
             
             # Record full refresh completion for tracking purposes
             if self.full_refresh and self.database:
@@ -87,6 +132,15 @@ class DatabaseUpdateWorker(QThread):
                     logger.info("Full refresh completion recorded in database")
                 except Exception as e:
                     logger.warning(f"Could not record full refresh completion: {e}")
+            
+            # Clear Jellyfin cache after full refresh to free memory
+            if self.full_refresh and self.server_type == "jellyfin":
+                try:
+                    cache_stats = self.media_client.get_cache_stats()
+                    self.media_client.clear_cache()
+                    logger.info(f"🧹 Cleared Jellyfin cache after full refresh - freed ~{cache_stats.get('bulk_albums_cached', 0) + cache_stats.get('bulk_tracks_cached', 0)} items from memory")
+                except Exception as e:
+                    logger.warning(f"Could not clear Jellyfin cache: {e}")
             
             # Cleanup orphaned records after incremental updates (catches fixed matches)
             if not self.full_refresh and self.database:
@@ -121,33 +175,38 @@ class DatabaseUpdateWorker(QThread):
             self.error.emit(f"Database update failed: {str(e)}")
     
     def _get_all_artists(self) -> List:
-        """Get all artists from Plex library"""
+        """Get all artists from media server library"""
         try:
-            if not self.plex_client.ensure_connection():
-                logger.error("Could not connect to Plex server")
+            if not self.media_client.ensure_connection():
+                logger.error(f"Could not connect to {self.server_type} server")
                 return []
             
-            artists = self.plex_client.get_all_artists()
+            artists = self.media_client.get_all_artists()
             return artists
             
         except Exception as e:
-            logger.error(f"Error getting artists from Plex: {e}")
+            logger.error(f"Error getting artists from {self.server_type}: {e}")
             return []
     
     def _get_artists_for_incremental_update(self) -> List:
         """Get artists that need processing for incremental update using smart early-stopping logic"""
         try:
-            if not self.plex_client.ensure_connection():
-                logger.error("Could not connect to Plex server")
+            if not self.media_client.ensure_connection():
+                logger.error(f"Could not connect to {self.server_type} server")
                 return []
             
-            if not self.plex_client.music_library:
+            # Check for music library (Plex-specific check)
+            if self.server_type == "plex" and not self.media_client.music_library:
                 logger.error("No music library found in Plex")
                 return []
             
-            # Check if database has enough content for incremental updates
+            # Check if database has enough content for incremental updates (server-specific)
             try:
-                stats = self.database.get_database_info()
+                # Get stats for the specific server we're updating
+                if hasattr(self.database, 'get_database_info_for_server'):
+                    stats = self.database.get_database_info_for_server(self.server_type)
+                else:
+                    stats = self.database.get_database_info()
                 track_count = stats.get('tracks', 0)
                 
                 if track_count < 100:  # Minimum threshold for meaningful incremental updates
@@ -165,105 +224,34 @@ class DatabaseUpdateWorker(QThread):
                 return self._get_all_artists()
             
             # Enhanced Strategy: Get both recently added AND recently updated content
-            # This catches both new content and metadata corrections done in Plex
+            # This catches both new content and metadata corrections done on the server
             
-            logger.info("Getting recently added and recently updated content...")
+            logger.info(f"Getting recently added and recently updated content from {self.server_type}...")
             
-            # Get both recently added and recently updated albums
-            all_recent_content = []
+            # For Jellyfin, we need to set up progress callback for potential cache population during incremental
+            if self.server_type == "jellyfin":
+                if hasattr(self.media_client, 'set_progress_callback'):
+                    self.media_client.set_progress_callback(lambda msg: self.phase_changed.emit(f"Incremental: {msg}"))
             
-            try:
-                # Get recently added albums (up to 400 to catch more recent content)  
-                try:
-                    recently_added = self.plex_client.music_library.recentlyAdded(libtype='album', maxresults=400)
-                    all_recent_content.extend(recently_added)
-                    logger.info(f"Found {len(recently_added)} recently added albums")
-                except:
-                    # Fallback to general recently added
-                    recently_added = self.plex_client.music_library.recentlyAdded(maxresults=400)
-                    all_recent_content.extend(recently_added)
-                    logger.info(f"Found {len(recently_added)} recently added items (mixed types)")
-                
-                # Get recently updated albums (catches metadata corrections) - increased limit
-                try:
-                    recently_updated = self.plex_client.music_library.search(sort='updatedAt:desc', libtype='album', limit=400)
-                    # Remove duplicates (items that are both recently added and updated)
-                    added_keys = {getattr(item, 'ratingKey', None) for item in all_recent_content}
-                    unique_updated = [item for item in recently_updated if getattr(item, 'ratingKey', None) not in added_keys]
-                    all_recent_content.extend(unique_updated)
-                    logger.info(f"Found {len(unique_updated)} additional recently updated albums (after deduplication)")
-                except Exception as e:
-                    logger.warning(f"Could not get recently updated content: {e}")
-                
-                recent_content = all_recent_content
-                logger.info(f"Combined total: {len(recent_content)} recent albums (added + updated)")
-                
-                # Filter to only get Album objects and convert Artist objects to their albums
-                recent_albums = []
-                artist_count = 0
-                album_count = 0
-                
-                for item in recent_content:
-                    try:
-                        item_type = type(item).__name__
-                        logger.info(f"Processing recently added item: {item_type} - '{getattr(item, 'title', 'Unknown')}'")
-                        
-                        if hasattr(item, 'tracks') and hasattr(item, 'artist'):
-                            # This is an Album - add directly
-                            recent_albums.append(item)
-                            album_count += 1
-                            logger.info(f"✅ Added album directly: '{item.title}'")
-                        elif hasattr(item, 'albums'):
-                            # This is an Artist - get their albums
-                            try:
-                                artist_albums = list(item.albums())
-                                if artist_albums:
-                                    recent_albums.extend(artist_albums)
-                                    artist_count += 1
-                                    logger.info(f"✅ Added {len(artist_albums)} albums from artist '{item.title}'")
-                                else:
-                                    logger.info(f"⚠️ Artist '{item.title}' has no albums")
-                            except Exception as albums_error:
-                                logger.warning(f"Error getting albums from artist '{getattr(item, 'title', 'Unknown')}': {albums_error}")
-                        else:
-                            # Unknown type - skip
-                            logger.info(f"❌ Skipping unsupported type: {item_type} (has tracks: {hasattr(item, 'tracks')}, has albums: {hasattr(item, 'albums')}, has artist: {hasattr(item, 'artist')})")
-                    except Exception as e:
-                        logger.warning(f"Error processing recently added item: {e}")
-                        continue
-                
-                logger.info(f"Processed recently added content: {artist_count} artists → albums, {album_count} direct albums")
-                
-                logger.info(f"Extracted {len(recent_albums)} albums from recently added content")
-            except Exception as e:
-                logger.warning(f"Could not get recently added albums: {e}")
-                # Fallback: get recently added tracks instead
-                try:
-                    recent_tracks = self.plex_client.music_library.recentlyAdded(libtype='track', maxresults=1000)
-                    logger.info(f"Fallback: Found {len(recent_tracks)} recently added tracks")
-                    # Extract albums from tracks
-                    recent_albums = []
-                    seen_albums = set()
-                    for track in recent_tracks:
-                        try:
-                            album = track.album()
-                            if album and album.ratingKey not in seen_albums:
-                                recent_albums.append(album)
-                                seen_albums.add(album.ratingKey)
-                        except:
-                            continue
-                    logger.info(f"Extracted {len(recent_albums)} unique albums from tracks")
-                except Exception as e2:
-                    logger.error(f"Could not get recently added content: {e2}")
-                    return []
+            # PERFORMANCE BREAKTHROUGH: For Jellyfin, use track-based incremental (much faster)
+            if self.server_type == "jellyfin":
+                return self._get_artists_for_jellyfin_track_incremental_update()
             
+            # Plex uses album-based approach (established and working)
+            recent_albums = self._get_recent_albums_for_server()
             if not recent_albums:
                 logger.info("No recently added albums found")
                 return []
             
-            # Sort albums by added date (newest first)
+            # Sort albums by added date (newest first) - handle None dates properly
             try:
-                recent_albums.sort(key=lambda x: getattr(x, 'addedAt', 0), reverse=True)
+                def get_sort_date(album):
+                    date_val = getattr(album, 'addedAt', None)
+                    if date_val is None:
+                        return 0  # Fallback for albums with no date
+                    return date_val
+                
+                recent_albums.sort(key=get_sort_date, reverse=True)
                 logger.info("Sorted albums by recently added date (newest first)")
             except Exception as e:
                 logger.warning(f"Could not sort albums by date: {e}")
@@ -315,10 +303,18 @@ class DatabaseUpdateWorker(QThread):
                         for track in tracks:
                             total_tracks_checked += 1
                             try:
-                                track_id = int(track.ratingKey)
+                                # Handle both Plex (integer) and Jellyfin (string GUID) IDs
+                                track_id = str(track.ratingKey)
                                 track_title = getattr(track, 'title', 'Unknown Track')
                                 
-                                if not self.database.track_exists(track_id):
+                                # Use server-aware track existence check
+                                if hasattr(self.database, 'track_exists_by_server'):
+                                    track_exists = self.database.track_exists_by_server(track_id, self.server_type)
+                                else:
+                                    # Fallback to generic check (works for string IDs)
+                                    track_exists = self.database.track_exists(track_id)
+                                
+                                if not track_exists:
                                     missing_tracks_count += 1
                                     album_has_new_tracks = True
                                     logger.debug(f"📀 Track '{track_title}' is new - album needs processing")
@@ -366,7 +362,8 @@ class DatabaseUpdateWorker(QThread):
                         try:
                             album_artist = album.artist()
                             if album_artist:
-                                artist_id = int(album_artist.ratingKey)
+                                # Handle both Plex (integer) and Jellyfin (string GUID) artist IDs
+                                artist_id = str(album_artist.ratingKey)
                                 
                                 # Skip if we've already queued this artist
                                 if artist_id not in processed_artist_ids:
@@ -398,16 +395,208 @@ class DatabaseUpdateWorker(QThread):
             # Fallback to empty list - user can try full refresh
             return []
     
-    def _check_for_metadata_changes(self, plex_tracks) -> bool:
+    def _get_artists_for_jellyfin_track_incremental_update(self) -> List:
+        """FAST Jellyfin incremental update using recent tracks directly (no caching needed)"""
+        try:
+            logger.info("🚀 FAST Jellyfin incremental: getting recent tracks directly...")
+            
+            # Get recent tracks directly from Jellyfin (FAST - 2 API calls)
+            recent_added_tracks = self.media_client.get_recently_added_tracks(5000)
+            recent_updated_tracks = self.media_client.get_recently_updated_tracks(5000)
+            
+            # Combine and deduplicate
+            all_recent_tracks = recent_added_tracks[:]
+            added_ids = {track.ratingKey for track in recent_added_tracks}
+            unique_updated = [track for track in recent_updated_tracks if track.ratingKey not in added_ids]
+            all_recent_tracks.extend(unique_updated)
+            
+            logger.info(f"Found {len(recent_added_tracks)} recent + {len(unique_updated)} updated = {len(all_recent_tracks)} tracks to check")
+            
+            if not all_recent_tracks:
+                logger.info("No recent tracks found")
+                return []
+            
+            # Check which tracks are actually new (FAST - database lookups only)
+            new_tracks = []
+            consecutive_existing_tracks = 0
+            processed_artists = set()
+            
+            for i, track in enumerate(all_recent_tracks):
+                try:
+                    track_id = str(track.ratingKey)
+                    
+                    # Check if track exists in database
+                    if hasattr(self.database, 'track_exists_by_server'):
+                        track_exists = self.database.track_exists_by_server(track_id, self.server_type)
+                    else:
+                        track_exists = self.database.track_exists(track_id)
+                    
+                    if not track_exists:
+                        new_tracks.append(track)
+                        consecutive_existing_tracks = 0  # Reset counter
+                        logger.debug(f"🎵 New track: {track.title}")
+                    else:
+                        consecutive_existing_tracks += 1
+                        logger.debug(f"✅ Track exists: {track.title}")
+                    
+                    # Early stopping: if we find 100 consecutive existing tracks, we're done
+                    if consecutive_existing_tracks >= 100:
+                        logger.info(f"🛑 Found 100 consecutive existing tracks - stopping after checking {i+1} tracks")
+                        break
+                        
+                except Exception as e:
+                    logger.debug(f"Error checking track {getattr(track, 'title', 'Unknown')}: {e}")
+                    continue
+            
+            logger.info(f"Found {len(new_tracks)} genuinely new tracks (early stopped after {consecutive_existing_tracks} consecutive existing)")
+            
+            if not new_tracks:
+                logger.info("All recent tracks already exist - database is up to date")
+                return []
+            
+            # Store new tracks for direct processing (avoid slow artist->album->track lookups)
+            self._jellyfin_new_tracks = new_tracks
+            
+            # Extract unique artists from new tracks (FAST - no additional API calls needed)
+            artists_to_process = []
+            for track in new_tracks:
+                try:
+                    # Track already has artist info from the API call
+                    track_artist = track.artist()  # This will make an API call, but only for new tracks
+                    if track_artist:
+                        artist_id = str(track_artist.ratingKey)
+                        if artist_id not in processed_artists:
+                            processed_artists.add(artist_id) 
+                            artists_to_process.append(track_artist)
+                            logger.info(f"✅ Added artist '{track_artist.title}' (from new track '{track.title}')")
+                except Exception as e:
+                    logger.debug(f"Error getting artist for track {getattr(track, 'title', 'Unknown')}: {e}")
+                    continue
+            
+            logger.info(f"🚀 FAST incremental complete: {len(artists_to_process)} artists need processing (from {len(new_tracks)} new tracks)")
+            return artists_to_process
+            
+        except Exception as e:
+            logger.error(f"Error in fast Jellyfin incremental update: {e}")
+            return []
+    
+    def _process_jellyfin_new_tracks_directly(self, artists_to_process):
+        """Process new Jellyfin tracks directly without slow artist->album->track lookups"""
+        try:
+            new_tracks = getattr(self, '_jellyfin_new_tracks', [])
+            if not new_tracks:
+                logger.warning("No new tracks to process directly")
+                return
+                
+            logger.info(f"🚀 FAST PROCESSING: Directly processing {len(new_tracks)} new tracks...")
+            
+            # Group tracks by album and artist for efficient processing
+            tracks_by_album = {}
+            albums_by_artist = {}
+            
+            for track in new_tracks:
+                try:
+                    # Track already has album and artist IDs from API response
+                    album_id = str(track._album_id) if track._album_id else "unknown"
+                    artist_id = str(track._artist_ids[0]) if track._artist_ids else "unknown"
+                    
+                    if album_id not in tracks_by_album:
+                        tracks_by_album[album_id] = []
+                    tracks_by_album[album_id].append(track)
+                    
+                    if artist_id not in albums_by_artist:
+                        albums_by_artist[artist_id] = set()
+                    albums_by_artist[artist_id].add(album_id)
+                    
+                except Exception as e:
+                    logger.debug(f"Error grouping track {getattr(track, 'title', 'Unknown')}: {e}")
+                    continue
+            
+            total_processed_tracks = 0
+            total_processed_albums = 0
+            total_processed_artists = 0
+            
+            # Process each artist
+            for artist in artists_to_process:
+                if self.should_stop:
+                    break
+                    
+                try:
+                    artist_id = str(artist.ratingKey)
+                    artist_name = getattr(artist, 'title', 'Unknown Artist')
+                    
+                    # Insert/update the artist
+                    artist_success = self.database.insert_or_update_media_artist(artist, server_source=self.server_type)
+                    if artist_success:
+                        total_processed_artists += 1
+                    
+                    # Process albums for this artist  
+                    artist_album_ids = albums_by_artist.get(artist_id, set())
+                    for album_id in artist_album_ids:
+                        if self.should_stop:
+                            break
+                            
+                        try:
+                            # Get album from the first track (they all have the same album)
+                            album_tracks = tracks_by_album[album_id]
+                            if album_tracks:
+                                album = album_tracks[0].album()  # Get album object
+                                if album:
+                                    # Insert/update album
+                                    album_success = self.database.insert_or_update_media_album(album, artist_id, server_source=self.server_type)
+                                    if album_success:
+                                        total_processed_albums += 1
+                                    
+                                    # Process all tracks in this album
+                                    for track in album_tracks:
+                                        if self.should_stop:
+                                            break
+                                            
+                                        try:
+                                            track_success = self.database.insert_or_update_media_track(track, album_id, artist_id, server_source=self.server_type)
+                                            if track_success:
+                                                total_processed_tracks += 1
+                                                logger.debug(f"✅ Processed new track: {track.title}")
+                                        except Exception as e:
+                                            logger.warning(f"Failed to process track '{getattr(track, 'title', 'Unknown')}': {e}")
+                        except Exception as e:
+                            logger.warning(f"Failed to process album {album_id}: {e}")
+                    
+                    # Emit progress for this artist
+                    artist_albums = len(artist_album_ids)
+                    artist_tracks = sum(len(tracks_by_album[aid]) for aid in artist_album_ids if aid in tracks_by_album)
+                    self.artist_processed.emit(artist_name, True, f"Processed {artist_albums} albums, {artist_tracks} tracks", artist_albums, artist_tracks)
+                    
+                except Exception as e:
+                    logger.error(f"Error processing artist '{getattr(artist, 'title', 'Unknown')}': {e}")
+                    self.artist_processed.emit(getattr(artist, 'title', 'Unknown'), False, f"Error: {str(e)}", 0, 0)
+            
+            # Update totals
+            with self.thread_lock:
+                self.processed_artists += total_processed_artists
+                self.processed_albums += total_processed_albums  
+                self.processed_tracks += total_processed_tracks
+                self.successful_operations += total_processed_artists  # Count successful artists
+                
+            logger.info(f"🚀 FAST PROCESSING COMPLETE: {total_processed_artists} artists, {total_processed_albums} albums, {total_processed_tracks} tracks")
+            
+            # Clean up
+            delattr(self, '_jellyfin_new_tracks')
+            
+        except Exception as e:
+            logger.error(f"Error in fast Jellyfin track processing: {e}")
+    
+    def _check_for_metadata_changes(self, media_tracks) -> bool:
         """Check if any tracks in the list have metadata changes compared to database"""
         try:
-            if not self.database or not plex_tracks:
+            if not self.database or not media_tracks:
                 return False
             
             changes_detected = 0
-            for track in plex_tracks:
+            for track in media_tracks:
                 try:
-                    track_id = int(track.ratingKey)
+                    # Handle both Plex (integer) and Jellyfin (string GUID) IDs
+                    track_id = str(track.ratingKey)
                     
                     # Get current data from database
                     db_track = self.database.get_track_by_id(track_id)
@@ -441,6 +630,102 @@ class DatabaseUpdateWorker(QThread):
         except Exception as e:
             logger.debug(f"Error checking for metadata changes: {e}")
             return False  # Assume no changes if we can't check
+    
+    def _get_recent_albums_for_server(self) -> List:
+        """Get recently added albums using server-specific methods"""
+        try:
+            if self.server_type == "plex":
+                return self._get_recent_albums_plex()
+            elif self.server_type == "jellyfin":
+                return self._get_recent_albums_jellyfin()
+            else:
+                logger.error(f"Unknown server type: {self.server_type}")
+                return []
+        except Exception as e:
+            logger.error(f"Error getting recent albums for {self.server_type}: {e}")
+            return []
+    
+    def _get_recent_albums_plex(self) -> List:
+        """Get recently added and updated albums from Plex"""
+        all_recent_content = []
+        
+        try:
+            # Get recently added albums (up to 400 to catch more recent content)  
+            try:
+                recently_added = self.media_client.music_library.recentlyAdded(libtype='album', maxresults=400)
+                all_recent_content.extend(recently_added)
+                logger.info(f"Found {len(recently_added)} recently added albums")
+            except:
+                # Fallback to general recently added
+                recently_added = self.media_client.music_library.recentlyAdded(maxresults=400)
+                all_recent_content.extend(recently_added)
+                logger.info(f"Found {len(recently_added)} recently added items (mixed types)")
+            
+            # Get recently updated albums (catches metadata corrections)
+            try:
+                recently_updated = self.media_client.music_library.search(sort='updatedAt:desc', libtype='album', limit=400)
+                # Remove duplicates (items that are both recently added and updated)
+                added_keys = {getattr(item, 'ratingKey', None) for item in all_recent_content}
+                unique_updated = [item for item in recently_updated if getattr(item, 'ratingKey', None) not in added_keys]
+                all_recent_content.extend(unique_updated)
+                logger.info(f"Found {len(unique_updated)} additional recently updated albums (after deduplication)")
+            except Exception as e:
+                logger.warning(f"Could not get recently updated content: {e}")
+            
+            # Filter to only get Album objects and convert Artist objects to their albums
+            recent_albums = []
+            artist_count = 0
+            album_count = 0
+            
+            for item in all_recent_content:
+                try:
+                    if hasattr(item, 'tracks') and hasattr(item, 'artist'):
+                        # This is an Album - add directly
+                        recent_albums.append(item)
+                        album_count += 1
+                    elif hasattr(item, 'albums'):
+                        # This is an Artist - get their albums
+                        try:
+                            artist_albums = list(item.albums())
+                            if artist_albums:
+                                recent_albums.extend(artist_albums)
+                                artist_count += 1
+                        except Exception as albums_error:
+                            logger.warning(f"Error getting albums from artist '{getattr(item, 'title', 'Unknown')}': {albums_error}")
+                except Exception as e:
+                    logger.warning(f"Error processing recently added item: {e}")
+                    continue
+            
+            logger.info(f"Processed {artist_count} artists → albums, {album_count} direct albums")
+            return recent_albums
+            
+        except Exception as e:
+            logger.error(f"Error getting recent Plex albums: {e}")
+            return []
+    
+    def _get_recent_albums_jellyfin(self) -> List:
+        """Get recently added and updated albums from Jellyfin"""
+        try:
+            all_recent_albums = []
+            
+            # Get recently added albums
+            recently_added = self.media_client.get_recently_added_albums(400)
+            all_recent_albums.extend(recently_added)
+            logger.info(f"Found {len(recently_added)} recently added albums")
+            
+            # Get recently updated albums
+            recently_updated = self.media_client.get_recently_updated_albums(400)
+            # Remove duplicates
+            added_ids = {album.ratingKey for album in all_recent_albums}
+            unique_updated = [album for album in recently_updated if album.ratingKey not in added_ids]
+            all_recent_albums.extend(unique_updated)
+            logger.info(f"Found {len(unique_updated)} additional recently updated albums (after deduplication)")
+            
+            return all_recent_albums
+            
+        except Exception as e:
+            logger.error(f"Error getting recent Jellyfin albums: {e}")
+            return []
     
     def _process_all_artists(self, artists: List):
         """Process all artists and their albums/tracks using thread pool"""
@@ -505,21 +790,21 @@ class DatabaseUpdateWorker(QThread):
                 # Emit progress signal
                 self.artist_processed.emit(artist_name, success, details, album_count, track_count)
     
-    def _process_artist_with_content(self, plex_artist) -> tuple[bool, str, int, int]:
-        """Process an artist and all their albums and tracks"""
+    def _process_artist_with_content(self, media_artist) -> tuple[bool, str, int, int]:
+        """Process an artist and all their albums and tracks with optimized API usage"""
         try:
-            artist_name = getattr(plex_artist, 'title', 'Unknown Artist')
+            artist_name = getattr(media_artist, 'title', 'Unknown Artist')
             
-            # 1. Insert/update the artist
-            artist_success = self.database.insert_or_update_artist(plex_artist)
+            # 1. Insert/update the artist using server-agnostic method
+            artist_success = self.database.insert_or_update_media_artist(media_artist, server_source=self.server_type)
             if not artist_success:
                 return False, "Failed to update artist data", 0, 0
             
-            artist_id = int(plex_artist.ratingKey)
+            artist_id = str(media_artist.ratingKey)
             
-            # 2. Get all albums for this artist
+            # 2. Get all albums for this artist (cached from aggressive pre-population)
             try:
-                albums = list(plex_artist.albums())
+                albums = list(media_artist.albums())
             except Exception as e:
                 logger.warning(f"Could not get albums for artist '{artist_name}': {e}")
                 return True, "Artist updated (no albums accessible)", 0, 0
@@ -527,44 +812,56 @@ class DatabaseUpdateWorker(QThread):
             album_count = 0
             track_count = 0
             
-            # 3. Process each album
-            for album in albums:
+            # 3. Process albums in smaller batches to reduce memory usage
+            batch_size = 10  # Process 10 albums at a time
+            for i in range(0, len(albums), batch_size):
                 if self.should_stop:
                     break
-                
-                try:
-                    # Insert/update album
-                    album_success = self.database.insert_or_update_album(album, artist_id)
-                    if album_success:
-                        album_count += 1
-                        album_id = int(album.ratingKey)
-                        
-                        # 4. Process tracks in this album
-                        try:
-                            tracks = list(album.tracks())
-                            
-                            for track in tracks:
-                                if self.should_stop:
-                                    break
-                                
-                                try:
-                                    track_success = self.database.insert_or_update_track(track, album_id, artist_id)
-                                    if track_success:
-                                        track_count += 1
-                                except Exception as e:
-                                    logger.warning(f"Failed to process track '{getattr(track, 'title', 'Unknown')}': {e}")
-                                    
-                        except Exception as e:
-                            logger.warning(f"Could not get tracks for album '{getattr(album, 'title', 'Unknown')}': {e}")
                     
-                except Exception as e:
-                    logger.warning(f"Failed to process album '{getattr(album, 'title', 'Unknown')}': {e}")
+                album_batch = albums[i:i + batch_size]
+                
+                for album in album_batch:
+                    if self.should_stop:
+                        break
+                    
+                    try:
+                        # Insert/update album using server-agnostic method
+                        album_success = self.database.insert_or_update_media_album(album, artist_id, server_source=self.server_type)
+                        if album_success:
+                            album_count += 1
+                            album_id = str(album.ratingKey)
+                            
+                            # 4. Process tracks in this album (cached from aggressive pre-population)
+                            try:
+                                tracks = list(album.tracks())
+                                
+                                # Batch insert tracks for better database performance
+                                track_batch = []
+                                for track in tracks:
+                                    if self.should_stop:
+                                        break
+                                    track_batch.append((track, album_id, artist_id))
+                                
+                                # Process track batch
+                                for track, alb_id, art_id in track_batch:
+                                    try:
+                                        track_success = self.database.insert_or_update_media_track(track, alb_id, art_id, server_source=self.server_type)
+                                        if track_success:
+                                            track_count += 1
+                                    except Exception as e:
+                                        logger.warning(f"Failed to process track '{getattr(track, 'title', 'Unknown')}': {e}")
+                                        
+                            except Exception as e:
+                                logger.warning(f"Could not get tracks for album '{getattr(album, 'title', 'Unknown')}': {e}")
+                        
+                    except Exception as e:
+                        logger.warning(f"Failed to process album '{getattr(album, 'title', 'Unknown')}': {e}")
             
             details = f"Updated with {album_count} albums, {track_count} tracks"
             return True, details, album_count, track_count
             
         except Exception as e:
-            logger.error(f"Error processing artist '{getattr(plex_artist, 'title', 'Unknown')}': {e}")
+            logger.error(f"Error processing artist '{getattr(media_artist, 'title', 'Unknown')}': {e}")
             return False, f"Processing error: {str(e)}", 0, 0
 
 class DatabaseStatsWorker(QThread):
@@ -591,18 +888,23 @@ class DatabaseStatsWorker(QThread):
             if self.should_stop:
                 return
                 
-            # Get full database info (includes last_full_refresh)
-            info = database.get_database_info()
+            # Get database info for active server (server-aware statistics)
+            info = database.get_database_info_for_server()
             if not self.should_stop:
                 self.stats_updated.emit(info)
         except Exception as e:
             logger.error(f"Error getting database stats: {e}")
             if not self.should_stop:
+                # Import here to avoid circular imports
+                from config.settings import config_manager
+                active_server = config_manager.get_active_media_server()
+                
                 self.stats_updated.emit({
                     'artists': 0,
                     'albums': 0, 
                     'tracks': 0,
                     'database_size_mb': 0.0,
                     'last_update': None,
-                    'last_full_refresh': None
+                    'last_full_refresh': None,
+                    'server_source': active_server
                 })

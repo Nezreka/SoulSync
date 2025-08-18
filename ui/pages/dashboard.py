@@ -119,7 +119,10 @@ class PlaylistTrackAnalysisWorker(QRunnable):
                 for query_title in unique_title_variations:
                     if self._cancelled: return None, 0.0
 
-                    db_track, confidence = db.check_track_exists(query_title, artist_name, confidence_threshold=0.7)
+                    # Use server-aware database query to check only active server
+                    from config.settings import config_manager
+                    active_server = config_manager.get_active_media_server()
+                    db_track, confidence = db.check_track_exists(query_title, artist_name, confidence_threshold=0.7, server_source=active_server)
                     
                     if db_track and confidence >= 0.7:
                         class MockPlexTrack:
@@ -1935,10 +1938,11 @@ class DashboardDataProvider(QObject):
         self.system_stats_timer.timeout.connect(self.update_system_stats)
         self.system_stats_timer.start(10000)  # Update every 10 seconds
     
-    def set_service_clients(self, spotify_client, plex_client, soulseek_client):
+    def set_service_clients(self, spotify_client, plex_client, jellyfin_client, soulseek_client):
         self.service_clients = {
             'spotify_client': spotify_client,
-            'plex_client': plex_client, 
+            'plex_client': plex_client,
+            'jellyfin_client': jellyfin_client,
             'soulseek_client': soulseek_client
         }
     
@@ -2344,8 +2348,11 @@ class MetadataUpdaterWidget(QFrame):
         layout.setContentsMargins(20, 15, 20, 15)
         layout.setSpacing(12)
         
-        # Header
-        header_label = QLabel("Plex Metadata Updater")
+        # Header - Make it dynamic based on active server
+        from config.settings import config_manager
+        active_server = config_manager.get_active_media_server()
+        server_display = active_server.title()
+        header_label = QLabel(f"{server_display} Metadata Updater")
         header_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
         header_label.setStyleSheet("color: #ffffff;")
         
@@ -2683,14 +2690,15 @@ class DashboardPage(QWidget):
             self.wishlist_download_modal.process_finished.connect(self.on_wishlist_modal_finished)
         return True
 
-    def set_service_clients(self, spotify_client, plex_client, soulseek_client, downloads_page=None):
+    def set_service_clients(self, spotify_client, plex_client, jellyfin_client, soulseek_client, downloads_page=None):
         """Called from main window to provide service client references"""
-        self.data_provider.set_service_clients(spotify_client, plex_client, soulseek_client)
+        self.data_provider.set_service_clients(spotify_client, plex_client, jellyfin_client, soulseek_client)
         
         # Store service clients for wishlist modal
         self.service_clients = {
             'spotify_client': spotify_client,
             'plex_client': plex_client,
+            'jellyfin_client': jellyfin_client,
             'soulseek_client': soulseek_client,
             'downloads_page': downloads_page
         }
@@ -2767,11 +2775,24 @@ class DashboardPage(QWidget):
                 return
             
             # Create worker for incremental update only
-            plex_client = self.service_clients.get('plex_client')
+            from config.settings import config_manager
+            active_server = config_manager.get_active_media_server()
+            
+            # Get the appropriate client
+            if active_server == "plex":
+                media_client = self.service_clients.get('plex_client')
+            elif active_server == "jellyfin":
+                from core.jellyfin_client import JellyfinClient
+                media_client = JellyfinClient()
+            else:
+                logger.error(f"Unknown active server for auto-update: {active_server}")
+                return
+            
             self._auto_database_worker = DatabaseUpdateWorker(
-                plex_client,
+                media_client,
                 "database/music_library.db",
-                full_refresh=False  # Always incremental for automatic updates
+                full_refresh=False,  # Always incremental for automatic updates
+                server_type=active_server
             )
             
             # Connect completion signal to log result
@@ -3147,9 +3168,24 @@ class DashboardPage(QWidget):
             logger.debug(f"Service clients available: {list(self.data_provider.service_clients.keys())}")
             logger.debug(f"Plex client: {self.data_provider.service_clients.get('plex')}")
         
-        if not hasattr(self, 'data_provider') or not self.data_provider.service_clients.get('plex_client'):
+        # Check that we have a data provider
+        if not hasattr(self, 'data_provider'):
+            self.add_activity_item("❌", "Database Update", "Service clients not available", "Now")
+            return
+        
+        # Get the active media server and check if client is available
+        from config.settings import config_manager
+        active_server = config_manager.get_active_media_server()
+        
+        if active_server == "plex" and not self.data_provider.service_clients.get('plex_client'):
             self.add_activity_item("❌", "Database Update", "Plex client not available", "Now")
             return
+        elif active_server == "jellyfin":
+            # Jellyfin client will be created on-demand, just verify config exists
+            jellyfin_config = config_manager.get_jellyfin_config()
+            if not jellyfin_config.get('base_url') or not jellyfin_config.get('api_key'):
+                self.add_activity_item("❌", "Database Update", "Jellyfin not configured", "Now")
+                return
         
         try:
             # Get update type from dropdown
@@ -3172,11 +3208,28 @@ class DashboardPage(QWidget):
                     logger.debug("Full refresh cancelled by user")
                     return  # Cancel the operation
             
+            # Get the active media server
+            from config.settings import config_manager
+            active_server = config_manager.get_active_media_server()
+            
+            # Get the appropriate client
+            if active_server == "plex":
+                media_client = self.data_provider.service_clients['plex_client']
+            elif active_server == "jellyfin":
+                # Import and get Jellyfin client
+                from core.jellyfin_client import JellyfinClient
+                media_client = JellyfinClient()
+            else:
+                logger.error(f"Unknown active server: {active_server}")
+                self.add_activity_item("❌", "Database Update", f"Unknown server type: {active_server}", "Now")
+                return
+            
             # Start the database update worker
             self.database_worker = DatabaseUpdateWorker(
-                self.data_provider.service_clients['plex_client'],
+                media_client,
                 "database/music_library.db",
-                full_refresh
+                full_refresh,
+                server_type=active_server
             )
             
             # Connect signals
@@ -3189,7 +3242,8 @@ class DashboardPage(QWidget):
             # Update UI and start
             self.database_widget.update_progress(True, "Initializing...", 0, 0, 0.0)
             update_type = "Full refresh" if full_refresh else "Incremental update"
-            self.add_activity_item("🗄️", "Database Update", f"Starting {update_type.lower()}...", "Now")
+            server_display = active_server.title()  # "Plex" or "Jellyfin"
+            self.add_activity_item("🗄️", "Database Update", f"Starting {update_type.lower()} from {server_display}...", "Now")
             
             self.database_worker.start()
             
@@ -3348,6 +3402,15 @@ class DashboardPage(QWidget):
         logger.debug(f"Starting metadata update - data_provider exists: {hasattr(self, 'data_provider')}")
         if hasattr(self, 'data_provider') and hasattr(self.data_provider, 'service_clients'):
             logger.debug(f"Service clients available: {list(self.data_provider.service_clients.keys())}")
+        
+        # Check active server and client availability
+        from config.settings import config_manager
+        active_server = config_manager.get_active_media_server()
+        
+        # Currently metadata updater only supports Plex
+        if active_server != "plex":
+            self.add_activity_item("❌", "Metadata Update", f"Metadata updater only supports Plex (active: {active_server.title()})", "Now")
+            return
         
         if not hasattr(self, 'data_provider') or not self.data_provider.service_clients.get('plex_client'):
             self.add_activity_item("❌", "Metadata Update", "Plex client not available", "Now")

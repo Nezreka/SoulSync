@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import threading
+import time
 from datetime import datetime
 from typing import List, Optional, Dict, Any, Tuple
 from dataclasses import dataclass
@@ -207,6 +208,12 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_title ON albums (title)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_title ON tracks (title)")
             
+            # Add server_source columns for multi-server support (migration)
+            self._add_server_source_columns(cursor)
+            
+            # Migrate ID columns to support both integer (Plex) and string (Jellyfin) IDs
+            self._migrate_id_columns_to_text(cursor)
+            
             conn.commit()
             logger.info("Database initialized successfully")
             
@@ -214,13 +221,168 @@ class MusicDatabase:
             logger.error(f"Error initializing database: {e}")
             raise
     
+    def _add_server_source_columns(self, cursor):
+        """Add server_source columns to existing tables for multi-server support"""
+        try:
+            # Check if server_source column exists in artists table
+            cursor.execute("PRAGMA table_info(artists)")
+            artists_columns = [column[1] for column in cursor.fetchall()]
+            
+            if 'server_source' not in artists_columns:
+                cursor.execute("ALTER TABLE artists ADD COLUMN server_source TEXT DEFAULT 'plex'")
+                logger.info("Added server_source column to artists table")
+            
+            # Check if server_source column exists in albums table
+            cursor.execute("PRAGMA table_info(albums)")
+            albums_columns = [column[1] for column in cursor.fetchall()]
+            
+            if 'server_source' not in albums_columns:
+                cursor.execute("ALTER TABLE albums ADD COLUMN server_source TEXT DEFAULT 'plex'")
+                logger.info("Added server_source column to albums table")
+            
+            # Check if server_source column exists in tracks table
+            cursor.execute("PRAGMA table_info(tracks)")
+            tracks_columns = [column[1] for column in cursor.fetchall()]
+            
+            if 'server_source' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN server_source TEXT DEFAULT 'plex'")
+                logger.info("Added server_source column to tracks table")
+                
+            # Create indexes for server_source columns for performance
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_server_source ON artists (server_source)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_server_source ON albums (server_source)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_server_source ON tracks (server_source)")
+            
+        except Exception as e:
+            logger.error(f"Error adding server_source columns: {e}")
+            # Don't raise - this is a migration, database can still function without it
+    
+    def _migrate_id_columns_to_text(self, cursor):
+        """Migrate ID columns from INTEGER to TEXT to support both Plex (int) and Jellyfin (GUID) IDs"""
+        try:
+            # Check if migration has already been applied by looking for a specific marker
+            cursor.execute("SELECT value FROM metadata WHERE key = 'id_columns_migrated' LIMIT 1")
+            migration_done = cursor.fetchone()
+            
+            if migration_done:
+                logger.debug("ID columns migration already applied")
+                return
+            
+            logger.info("Migrating ID columns to support both integer and string IDs...")
+            
+            # SQLite doesn't support changing column types directly, so we need to recreate tables
+            # This is a complex migration - let's do it safely
+            
+            # Step 1: Create new tables with TEXT IDs
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS artists_new (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    thumb_url TEXT,
+                    genres TEXT,
+                    summary TEXT,
+                    server_source TEXT DEFAULT 'plex',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS albums_new (
+                    id TEXT PRIMARY KEY,
+                    artist_id TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    year INTEGER,
+                    thumb_url TEXT,
+                    genres TEXT,
+                    track_count INTEGER,
+                    duration INTEGER,
+                    server_source TEXT DEFAULT 'plex',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (artist_id) REFERENCES artists_new (id) ON DELETE CASCADE
+                )
+            """)
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS tracks_new (
+                    id TEXT PRIMARY KEY,
+                    album_id TEXT NOT NULL,
+                    artist_id TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    track_number INTEGER,
+                    duration INTEGER,
+                    file_path TEXT,
+                    bitrate INTEGER,
+                    server_source TEXT DEFAULT 'plex',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (album_id) REFERENCES albums_new (id) ON DELETE CASCADE,
+                    FOREIGN KEY (artist_id) REFERENCES artists_new (id) ON DELETE CASCADE
+                )
+            """)
+            
+            # Step 2: Copy existing data (converting INTEGER IDs to TEXT)
+            cursor.execute("""
+                INSERT INTO artists_new (id, name, thumb_url, genres, summary, server_source, created_at, updated_at)
+                SELECT CAST(id AS TEXT), name, thumb_url, genres, summary, 
+                       COALESCE(server_source, 'plex'), created_at, updated_at 
+                FROM artists
+            """)
+            
+            cursor.execute("""
+                INSERT INTO albums_new (id, artist_id, title, year, thumb_url, genres, track_count, duration, server_source, created_at, updated_at)
+                SELECT CAST(id AS TEXT), CAST(artist_id AS TEXT), title, year, thumb_url, genres, track_count, duration,
+                       COALESCE(server_source, 'plex'), created_at, updated_at
+                FROM albums
+            """)
+            
+            cursor.execute("""
+                INSERT INTO tracks_new (id, album_id, artist_id, title, track_number, duration, file_path, bitrate, server_source, created_at, updated_at)
+                SELECT CAST(id AS TEXT), CAST(album_id AS TEXT), CAST(artist_id AS TEXT), title, track_number, duration, file_path, bitrate,
+                       COALESCE(server_source, 'plex'), created_at, updated_at
+                FROM tracks
+            """)
+            
+            # Step 3: Drop old tables and rename new ones
+            cursor.execute("DROP TABLE IF EXISTS tracks")
+            cursor.execute("DROP TABLE IF EXISTS albums") 
+            cursor.execute("DROP TABLE IF EXISTS artists")
+            
+            cursor.execute("ALTER TABLE artists_new RENAME TO artists")
+            cursor.execute("ALTER TABLE albums_new RENAME TO albums")
+            cursor.execute("ALTER TABLE tracks_new RENAME TO tracks")
+            
+            # Step 4: Recreate indexes
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_artist_id ON albums (artist_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_album_id ON tracks (album_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_artist_id ON tracks (artist_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_server_source ON artists (server_source)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_server_source ON albums (server_source)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_server_source ON tracks (server_source)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_name ON artists (name)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_title ON albums (title)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_title ON tracks (title)")
+            
+            # Step 5: Mark migration as complete
+            cursor.execute("""
+                INSERT OR REPLACE INTO metadata (key, value, updated_at) 
+                VALUES ('id_columns_migrated', 'true', CURRENT_TIMESTAMP)
+            """)
+            
+            logger.info("ID columns migration completed successfully")
+            
+        except Exception as e:
+            logger.error(f"Error migrating ID columns: {e}")
+            # Don't raise - this is a migration, database can still function
+    
     def close(self):
         """Close database connection (no-op since we create connections per operation)"""
         # Each operation creates and closes its own connection, so nothing to do here
         pass
     
     def get_statistics(self) -> Dict[str, int]:
-        """Get database statistics"""
+        """Get database statistics for all servers (legacy method)"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -243,8 +405,44 @@ class MusicDatabase:
             logger.error(f"Error getting database statistics: {e}")
             return {'artists': 0, 'albums': 0, 'tracks': 0}
     
+    def get_statistics_for_server(self, server_source: str = None) -> Dict[str, int]:
+        """Get database statistics filtered by server source"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                
+                if server_source:
+                    # Get counts for specific server
+                    cursor.execute("SELECT COUNT(*) FROM artists WHERE server_source = ?", (server_source,))
+                    artist_count = cursor.fetchone()[0]
+                    
+                    cursor.execute("SELECT COUNT(*) FROM albums WHERE server_source = ?", (server_source,))
+                    album_count = cursor.fetchone()[0]
+                    
+                    cursor.execute("SELECT COUNT(*) FROM tracks WHERE server_source = ?", (server_source,))
+                    track_count = cursor.fetchone()[0]
+                else:
+                    # Get total counts (all servers)
+                    cursor.execute("SELECT COUNT(*) FROM artists")
+                    artist_count = cursor.fetchone()[0]
+                    
+                    cursor.execute("SELECT COUNT(*) FROM albums")
+                    album_count = cursor.fetchone()[0]
+                    
+                    cursor.execute("SELECT COUNT(*) FROM tracks")
+                    track_count = cursor.fetchone()[0]
+                
+                return {
+                    'artists': artist_count,
+                    'albums': album_count,
+                    'tracks': track_count
+                }
+        except Exception as e:
+            logger.error(f"Error getting database statistics for {server_source}: {e}")
+            return {'artists': 0, 'albums': 0, 'tracks': 0}
+    
     def clear_all_data(self):
-        """Clear all data from database (for full refresh)"""
+        """Clear all data from database (for full refresh) - DEPRECATED: Use clear_server_data instead"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -263,6 +461,38 @@ class MusicDatabase:
                 
         except Exception as e:
             logger.error(f"Error clearing database: {e}")
+            raise
+    
+    def clear_server_data(self, server_source: str):
+        """Clear data for specific server only (server-aware full refresh)"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Delete only data from the specified server
+                # Order matters: tracks -> albums -> artists (foreign key constraints)
+                cursor.execute("DELETE FROM tracks WHERE server_source = ?", (server_source,))
+                tracks_deleted = cursor.rowcount
+                
+                cursor.execute("DELETE FROM albums WHERE server_source = ?", (server_source,))
+                albums_deleted = cursor.rowcount
+                
+                cursor.execute("DELETE FROM artists WHERE server_source = ?", (server_source,))
+                artists_deleted = cursor.rowcount
+                
+                conn.commit()
+                
+                # Only VACUUM if we deleted a significant amount of data
+                if tracks_deleted > 1000 or albums_deleted > 100:
+                    logger.info("Vacuuming database to reclaim disk space...")
+                    cursor.execute("VACUUM")
+                
+                logger.info(f"Cleared {server_source} data: {artists_deleted} artists, {albums_deleted} albums, {tracks_deleted} tracks")
+                
+                # Note: Watchlist and wishlist are preserved as they are server-agnostic
+                
+        except Exception as e:
+            logger.error(f"Error clearing {server_source} database data: {e}")
             raise
     
     def cleanup_orphaned_records(self) -> Dict[str, int]:
@@ -314,26 +544,31 @@ class MusicDatabase:
     
     # Artist operations
     def insert_or_update_artist(self, plex_artist) -> bool:
-        """Insert or update artist from Plex artist object"""
+        """Insert or update artist from Plex artist object - DEPRECATED: Use insert_or_update_media_artist instead"""
+        return self.insert_or_update_media_artist(plex_artist, server_source='plex')
+    
+    def insert_or_update_media_artist(self, artist_obj, server_source: str = 'plex') -> bool:
+        """Insert or update artist from media server artist object (Plex or Jellyfin)"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 
-                artist_id = int(plex_artist.ratingKey)
-                name = plex_artist.title
-                thumb_url = getattr(plex_artist, 'thumb', None)
-                summary = getattr(plex_artist, 'summary', None)
+                # Convert artist ID to string (handles both Plex integer IDs and Jellyfin GUIDs)
+                artist_id = str(artist_obj.ratingKey)
+                name = artist_obj.title
+                thumb_url = getattr(artist_obj, 'thumb', None)
+                summary = getattr(artist_obj, 'summary', None)
                 
-                # Get genres
+                # Get genres (handle both Plex and Jellyfin formats)
                 genres = []
-                if hasattr(plex_artist, 'genres') and plex_artist.genres:
+                if hasattr(artist_obj, 'genres') and artist_obj.genres:
                     genres = [genre.tag if hasattr(genre, 'tag') else str(genre) 
-                             for genre in plex_artist.genres]
+                             for genre in artist_obj.genres]
                 
                 genres_json = json.dumps(genres) if genres else None
                 
-                # Check if artist exists
-                cursor.execute("SELECT id FROM artists WHERE id = ?", (artist_id,))
+                # Check if artist exists with this ID and server source
+                cursor.execute("SELECT id FROM artists WHERE id = ? AND server_source = ?", (artist_id, server_source))
                 exists = cursor.fetchone()
                 
                 if exists:
@@ -341,20 +576,20 @@ class MusicDatabase:
                     cursor.execute("""
                         UPDATE artists 
                         SET name = ?, thumb_url = ?, genres = ?, summary = ?, updated_at = CURRENT_TIMESTAMP
-                        WHERE id = ?
-                    """, (name, thumb_url, genres_json, summary, artist_id))
+                        WHERE id = ? AND server_source = ?
+                    """, (name, thumb_url, genres_json, summary, artist_id, server_source))
                 else:
                     # Insert new artist
                     cursor.execute("""
-                        INSERT INTO artists (id, name, thumb_url, genres, summary)
-                        VALUES (?, ?, ?, ?, ?)
-                    """, (artist_id, name, thumb_url, genres_json, summary))
+                        INSERT INTO artists (id, name, thumb_url, genres, summary, server_source)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """, (artist_id, name, thumb_url, genres_json, summary, server_source))
                 
                 conn.commit()
                 return True
                 
         except Exception as e:
-            logger.error(f"Error inserting/updating artist {getattr(plex_artist, 'title', 'Unknown')}: {e}")
+            logger.error(f"Error inserting/updating {server_source} artist {getattr(artist_obj, 'title', 'Unknown')}: {e}")
             return False
     
     def get_artist(self, artist_id: int) -> Optional[DatabaseArtist]:
@@ -385,30 +620,35 @@ class MusicDatabase:
     
     # Album operations
     def insert_or_update_album(self, plex_album, artist_id: int) -> bool:
-        """Insert or update album from Plex album object"""
+        """Insert or update album from Plex album object - DEPRECATED: Use insert_or_update_media_album instead"""
+        return self.insert_or_update_media_album(plex_album, artist_id, server_source='plex')
+    
+    def insert_or_update_media_album(self, album_obj, artist_id: str, server_source: str = 'plex') -> bool:
+        """Insert or update album from media server album object (Plex or Jellyfin)"""
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
             
-            album_id = int(plex_album.ratingKey)
-            title = plex_album.title
-            year = getattr(plex_album, 'year', None)
-            thumb_url = getattr(plex_album, 'thumb', None)
+            # Convert album ID to string (handles both Plex integer IDs and Jellyfin GUIDs)
+            album_id = str(album_obj.ratingKey)
+            title = album_obj.title
+            year = getattr(album_obj, 'year', None)
+            thumb_url = getattr(album_obj, 'thumb', None)
             
-            # Get track count and duration
-            track_count = getattr(plex_album, 'leafCount', None)
-            duration = getattr(plex_album, 'duration', None)
+            # Get track count and duration (handle different server attributes)
+            track_count = getattr(album_obj, 'leafCount', None) or getattr(album_obj, 'childCount', None)
+            duration = getattr(album_obj, 'duration', None)
             
-            # Get genres
+            # Get genres (handle both Plex and Jellyfin formats)
             genres = []
-            if hasattr(plex_album, 'genres') and plex_album.genres:
+            if hasattr(album_obj, 'genres') and album_obj.genres:
                 genres = [genre.tag if hasattr(genre, 'tag') else str(genre) 
-                         for genre in plex_album.genres]
+                         for genre in album_obj.genres]
             
             genres_json = json.dumps(genres) if genres else None
             
-            # Check if album exists
-            cursor.execute("SELECT id FROM albums WHERE id = ?", (album_id,))
+            # Check if album exists with this ID and server source
+            cursor.execute("SELECT id FROM albums WHERE id = ? AND server_source = ?", (album_id, server_source))
             exists = cursor.fetchone()
             
             if exists:
@@ -417,20 +657,20 @@ class MusicDatabase:
                     UPDATE albums 
                     SET artist_id = ?, title = ?, year = ?, thumb_url = ?, genres = ?, 
                         track_count = ?, duration = ?, updated_at = CURRENT_TIMESTAMP
-                    WHERE id = ?
-                """, (artist_id, title, year, thumb_url, genres_json, track_count, duration, album_id))
+                    WHERE id = ? AND server_source = ?
+                """, (artist_id, title, year, thumb_url, genres_json, track_count, duration, album_id, server_source))
             else:
                 # Insert new album
                 cursor.execute("""
-                    INSERT INTO albums (id, artist_id, title, year, thumb_url, genres, track_count, duration)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (album_id, artist_id, title, year, thumb_url, genres_json, track_count, duration))
+                    INSERT INTO albums (id, artist_id, title, year, thumb_url, genres, track_count, duration, server_source)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (album_id, artist_id, title, year, thumb_url, genres_json, track_count, duration, server_source))
             
             conn.commit()
             return True
             
         except Exception as e:
-            logger.error(f"Error inserting/updating album {getattr(plex_album, 'title', 'Unknown')}: {e}")
+            logger.error(f"Error inserting/updating {server_source} album {getattr(album_obj, 'title', 'Unknown')}: {e}")
             return False
     
     def get_albums_by_artist(self, artist_id: int) -> List[DatabaseAlbum]:
@@ -466,60 +706,70 @@ class MusicDatabase:
     
     # Track operations
     def insert_or_update_track(self, plex_track, album_id: int, artist_id: int) -> bool:
-        """Insert or update track from Plex track object"""
-        try:
-            conn = self._get_connection()
-            cursor = conn.cursor()
-            
-            track_id = int(plex_track.ratingKey)
-            title = plex_track.title
-            track_number = getattr(plex_track, 'trackNumber', None)
-            duration = getattr(plex_track, 'duration', None)
-            
-            # Get file path and media info
-            file_path = None
-            bitrate = None
-            if hasattr(plex_track, 'media') and plex_track.media:
-                media = plex_track.media[0] if plex_track.media else None
-                if media:
-                    if hasattr(media, 'parts') and media.parts:
-                        part = media.parts[0]
-                        file_path = getattr(part, 'file', None)
-                    bitrate = getattr(media, 'bitrate', None)
-            
-            # Check if track exists
-            cursor.execute("SELECT id FROM tracks WHERE id = ?", (track_id,))
-            exists = cursor.fetchone()
-            
-            if exists:
-                # Update existing track
-                cursor.execute("""
-                    UPDATE tracks 
-                    SET album_id = ?, artist_id = ?, title = ?, track_number = ?, 
-                        duration = ?, file_path = ?, bitrate = ?, updated_at = CURRENT_TIMESTAMP
-                    WHERE id = ?
-                """, (album_id, artist_id, title, track_number, duration, file_path, bitrate, track_id))
-            else:
-                # Insert new track
-                cursor.execute("""
-                    INSERT INTO tracks (id, album_id, artist_id, title, track_number, duration, file_path, bitrate)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (track_id, album_id, artist_id, title, track_number, duration, file_path, bitrate))
-            
-            conn.commit()
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error inserting/updating track {getattr(plex_track, 'title', 'Unknown')}: {e}")
-            return False
+        """Insert or update track from Plex track object - DEPRECATED: Use insert_or_update_media_track instead"""
+        return self.insert_or_update_media_track(plex_track, album_id, artist_id, server_source='plex')
     
-    def track_exists(self, track_id: int) -> bool:
-        """Check if a track exists in the database by Plex ID"""
+    def insert_or_update_media_track(self, track_obj, album_id: str, artist_id: str, server_source: str = 'plex') -> bool:
+        """Insert or update track from media server track object (Plex or Jellyfin) with retry logic"""
+        max_retries = 3
+        retry_count = 0
+        
+        while retry_count < max_retries:
+            try:
+                conn = self._get_connection()
+                cursor = conn.cursor()
+                
+                # Set shorter timeout to prevent long locks
+                cursor.execute("PRAGMA busy_timeout = 10000")  # 10 second timeout
+                
+                # Convert track ID to string (handles both Plex integer IDs and Jellyfin GUIDs)
+                track_id = str(track_obj.ratingKey)
+                title = track_obj.title
+                track_number = getattr(track_obj, 'trackNumber', None)
+                duration = getattr(track_obj, 'duration', None)
+                
+                # Get file path and media info (Plex-specific, Jellyfin may not have these)
+                file_path = None
+                bitrate = None
+                if hasattr(track_obj, 'media') and track_obj.media:
+                    media = track_obj.media[0] if track_obj.media else None
+                    if media:
+                        if hasattr(media, 'parts') and media.parts:
+                            part = media.parts[0]
+                            file_path = getattr(part, 'file', None)
+                        bitrate = getattr(media, 'bitrate', None)
+                
+                # Use INSERT OR REPLACE to handle duplicate IDs gracefully
+                cursor.execute("""
+                    INSERT OR REPLACE INTO tracks 
+                    (id, album_id, artist_id, title, track_number, duration, file_path, bitrate, server_source, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """, (track_id, album_id, artist_id, title, track_number, duration, file_path, bitrate, server_source))
+                
+                conn.commit()
+                return True
+                
+            except Exception as e:
+                retry_count += 1
+                if "database is locked" in str(e).lower() and retry_count < max_retries:
+                    logger.warning(f"Database locked on track '{getattr(track_obj, 'title', 'Unknown')}', retrying {retry_count}/{max_retries}...")
+                    time.sleep(0.1 * retry_count)  # Exponential backoff
+                    continue
+                else:
+                    logger.error(f"Error inserting/updating {server_source} track {getattr(track_obj, 'title', 'Unknown')}: {e}")
+                    return False
+        
+        return False
+    
+    def track_exists(self, track_id) -> bool:
+        """Check if a track exists in the database by ID (supports both int and string IDs)"""
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
             
-            cursor.execute("SELECT 1 FROM tracks WHERE id = ? LIMIT 1", (track_id,))
+            # Convert to string to handle both Plex integers and Jellyfin GUIDs
+            track_id_str = str(track_id)
+            cursor.execute("SELECT 1 FROM tracks WHERE id = ? LIMIT 1", (track_id_str,))
             result = cursor.fetchone()
             
             return result is not None
@@ -528,12 +778,31 @@ class MusicDatabase:
             logger.error(f"Error checking if track {track_id} exists: {e}")
             return False
     
-    def get_track_by_id(self, track_id: int) -> Optional[DatabaseTrackWithMetadata]:
-        """Get a track with artist and album names by Plex ID"""
+    def track_exists_by_server(self, track_id, server_source: str) -> bool:
+        """Check if a track exists in the database by ID and server source"""
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
             
+            # Convert to string to handle both Plex integers and Jellyfin GUIDs
+            track_id_str = str(track_id)
+            cursor.execute("SELECT 1 FROM tracks WHERE id = ? AND server_source = ? LIMIT 1", (track_id_str, server_source))
+            result = cursor.fetchone()
+            
+            return result is not None
+            
+        except Exception as e:
+            logger.error(f"Error checking if track {track_id} exists for server {server_source}: {e}")
+            return False
+    
+    def get_track_by_id(self, track_id) -> Optional[DatabaseTrackWithMetadata]:
+        """Get a track with artist and album names by ID (supports both int and string IDs)"""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            # Convert to string to handle both Plex integers and Jellyfin GUIDs
+            track_id_str = str(track_id)
             cursor.execute("""
                 SELECT t.id, t.album_id, t.artist_id, t.title, t.track_number, 
                        t.duration, t.created_at, t.updated_at,
@@ -542,7 +811,7 @@ class MusicDatabase:
                 JOIN artists a ON t.artist_id = a.id
                 JOIN albums al ON t.album_id = al.id
                 WHERE t.id = ?
-            """, (track_id,))
+            """, (track_id_str,))
             
             row = cursor.fetchone()
             if row:
@@ -628,7 +897,7 @@ class MusicDatabase:
             logger.error(f"Error searching artists with query '{query}': {e}")
             return []
     
-    def search_tracks(self, title: str = "", artist: str = "", limit: int = 50) -> List[DatabaseTrack]:
+    def search_tracks(self, title: str = "", artist: str = "", limit: int = 50, server_source: str = None) -> List[DatabaseTrack]:
         """Search tracks by title and/or artist name with Unicode-aware fuzzy matching"""
         try:
             if not title and not artist:
@@ -638,7 +907,7 @@ class MusicDatabase:
             cursor = conn.cursor()
             
             # STRATEGY 1: Try basic SQL LIKE search first (fastest)
-            basic_results = self._search_tracks_basic(cursor, title, artist, limit)
+            basic_results = self._search_tracks_basic(cursor, title, artist, limit, server_source)
             
             if basic_results:
                 logger.debug(f"🔍 Basic search found {len(basic_results)} results")
@@ -652,7 +921,7 @@ class MusicDatabase:
                 unicode_support = False
             
             if unicode_support:
-                normalized_results = self._search_tracks_unicode_fallback(cursor, title, artist, limit)
+                normalized_results = self._search_tracks_unicode_fallback(cursor, title, artist, limit, server_source)
                 if normalized_results:
                     logger.debug(f"🔍 Unicode fallback search found {len(normalized_results)} results")
                     return normalized_results
@@ -668,7 +937,7 @@ class MusicDatabase:
             logger.error(f"Error searching tracks with title='{title}', artist='{artist}': {e}")
             return []
     
-    def _search_tracks_basic(self, cursor, title: str, artist: str, limit: int) -> List[DatabaseTrack]:
+    def _search_tracks_basic(self, cursor, title: str, artist: str, limit: int, server_source: str = None) -> List[DatabaseTrack]:
         """Basic SQL LIKE search - fastest method"""
         where_conditions = []
         params = []
@@ -680,6 +949,11 @@ class MusicDatabase:
         if artist:
             where_conditions.append("artists.name LIKE ?")
             params.append(f"%{artist}%")
+        
+        # Add server filter if specified
+        if server_source:
+            where_conditions.append("tracks.server_source = ?")
+            params.append(server_source)
         
         if not where_conditions:
             return []
@@ -699,7 +973,7 @@ class MusicDatabase:
         
         return self._rows_to_tracks(cursor.fetchall())
     
-    def _search_tracks_unicode_fallback(self, cursor, title: str, artist: str, limit: int) -> List[DatabaseTrack]:
+    def _search_tracks_unicode_fallback(self, cursor, title: str, artist: str, limit: int, server_source: str = None) -> List[DatabaseTrack]:
         """Unicode-aware fallback search - tries normalized versions"""
         from unidecode import unidecode
         
@@ -718,6 +992,11 @@ class MusicDatabase:
         if artist:
             where_conditions.append("LOWER(artists.name) LIKE ?")
             params.append(f"%{artist_norm}%")
+        
+        # Add server filter if specified
+        if server_source:
+            where_conditions.append("tracks.server_source = ?")
+            params.append(server_source)
         
         if not where_conditions:
             return []
@@ -918,7 +1197,7 @@ class MusicDatabase:
             return list(set(variations))
 
     
-    def check_track_exists(self, title: str, artist: str, confidence_threshold: float = 0.8) -> Tuple[Optional[DatabaseTrack], float]:
+    def check_track_exists(self, title: str, artist: str, confidence_threshold: float = 0.8, server_source: str = None) -> Tuple[Optional[DatabaseTrack], float]:
         """
         Check if a track exists in the database with enhanced fuzzy matching and confidence scoring.
         Now uses the same sophisticated matching approach as album checking for consistency.
@@ -941,7 +1220,7 @@ class MusicDatabase:
                 potential_matches = []
                 artist_variations = self._get_artist_variations(artist)
                 for artist_variation in artist_variations:
-                    potential_matches.extend(self.search_tracks(title=title_variation, artist=artist_variation, limit=20))
+                    potential_matches.extend(self.search_tracks(title=title_variation, artist=artist_variation, limit=20, server_source=server_source))
                 
                 if not potential_matches:
                     continue
@@ -1809,7 +2088,7 @@ class MusicDatabase:
             return 0
 
     def get_database_info(self) -> Dict[str, Any]:
-        """Get comprehensive database information"""
+        """Get comprehensive database information for all servers (legacy method)"""
         try:
             stats = self.get_statistics()
             
@@ -1856,6 +2135,65 @@ class MusicDatabase:
                 'database_path': str(self.database_path),
                 'last_update': None,
                 'last_full_refresh': None
+            }
+    
+    def get_database_info_for_server(self, server_source: str = None) -> Dict[str, Any]:
+        """Get comprehensive database information filtered by server source"""
+        try:
+            # Import here to avoid circular imports
+            from config.settings import config_manager
+            
+            # If no server specified, use active server
+            if server_source is None:
+                server_source = config_manager.get_active_media_server()
+            
+            stats = self.get_statistics_for_server(server_source)
+            
+            # Get database file size (always total, not server-specific)
+            db_size = self.database_path.stat().st_size if self.database_path.exists() else 0
+            db_size_mb = db_size / (1024 * 1024)
+            
+            # Get last update time for this server
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT MAX(updated_at) as last_update 
+                FROM (
+                    SELECT updated_at FROM artists WHERE server_source = ?
+                    UNION ALL
+                    SELECT updated_at FROM albums WHERE server_source = ?
+                    UNION ALL
+                    SELECT updated_at FROM tracks WHERE server_source = ?
+                )
+            """, (server_source, server_source, server_source))
+            
+            result = cursor.fetchone()
+            last_update = result['last_update'] if result and result['last_update'] else None
+            
+            # Get last full refresh (global setting, not server-specific)
+            last_full_refresh = self.get_last_full_refresh()
+            
+            return {
+                **stats,
+                'database_size_mb': round(db_size_mb, 2),
+                'database_path': str(self.database_path),
+                'last_update': last_update,
+                'last_full_refresh': last_full_refresh,
+                'server_source': server_source
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting database info for {server_source}: {e}")
+            return {
+                'artists': 0,
+                'albums': 0,
+                'tracks': 0,
+                'database_size_mb': 0.0,
+                'database_path': str(self.database_path),
+                'last_update': None,
+                'last_full_refresh': None,
+                'server_source': server_source
             }
 
 # Thread-safe singleton pattern for database access

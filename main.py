@@ -12,6 +12,7 @@ from config.settings import config_manager
 from utils.logging_config import setup_logging, get_logger
 from core.spotify_client import SpotifyClient
 from core.plex_client import PlexClient
+from core.jellyfin_client import JellyfinClient
 from core.soulseek_client import SoulseekClient
 
 from ui.sidebar import ModernSidebar
@@ -27,10 +28,11 @@ logger = get_logger("main")
 class ServiceStatusThread(QThread):
     status_updated = pyqtSignal(str, bool)
     
-    def __init__(self, spotify_client, plex_client, soulseek_client):
+    def __init__(self, spotify_client, plex_client, jellyfin_client, soulseek_client):
         super().__init__()
         self.spotify_client = spotify_client
         self.plex_client = plex_client
+        self.jellyfin_client = jellyfin_client
         self.soulseek_client = soulseek_client
         self.running = True
         
@@ -51,20 +53,8 @@ class ServiceStatusThread(QThread):
                     server_status = self.plex_client.is_connected()
                     self.status_updated.emit("plex", server_status)
                 elif active_server == "jellyfin":
-                    # For now, do a basic config check for Jellyfin until JellyfinClient is implemented
-                    jellyfin_config = self.config_manager.get_jellyfin_config()
-                    jellyfin_status = bool(jellyfin_config.get('base_url')) and bool(jellyfin_config.get('api_key'))
-                    if jellyfin_status:
-                        # Do a quick HTTP test to verify connection
-                        try:
-                            import requests
-                            base_url = jellyfin_config.get('base_url', '').rstrip('/')
-                            api_key = jellyfin_config.get('api_key', '')
-                            headers = {'X-Emby-Token': api_key} if api_key else {}
-                            response = requests.get(f"{base_url}/System/Info", headers=headers, timeout=3)
-                            jellyfin_status = response.status_code == 200
-                        except:
-                            jellyfin_status = False
+                    # Use the JellyfinClient for status checking
+                    jellyfin_status = self.jellyfin_client.is_connected()
                     self.status_updated.emit("jellyfin", jellyfin_status)
                 
                 # Check Soulseek connection (simplified check to avoid event loop issues)
@@ -91,6 +81,7 @@ class MainWindow(QMainWindow):
         
         self.spotify_client = SpotifyClient()
         self.plex_client = PlexClient()
+        self.jellyfin_client = JellyfinClient()
         self.soulseek_client = SoulseekClient()
         
         self.status_thread = None
@@ -183,7 +174,13 @@ class MainWindow(QMainWindow):
         # Create and add pages
         self.dashboard_page = DashboardPage()
         self.downloads_page = DownloadsPage(self.soulseek_client)
-        self.sync_page = SyncPage(self.spotify_client, self.plex_client, self.soulseek_client, self.downloads_page)
+        self.sync_page = SyncPage(
+            spotify_client=self.spotify_client, 
+            plex_client=self.plex_client, 
+            soulseek_client=self.soulseek_client, 
+            downloads_page=self.downloads_page, 
+            jellyfin_client=self.jellyfin_client
+        )
         self.artists_page = ArtistsPage(downloads_page=self.downloads_page)
         self.settings_page = SettingsPage()
         
@@ -194,7 +191,7 @@ class MainWindow(QMainWindow):
         self.settings_page.set_toast_manager(self.toast_manager)
         
         # Configure dashboard with service clients and page references
-        self.dashboard_page.set_service_clients(self.spotify_client, self.plex_client, self.soulseek_client)
+        self.dashboard_page.set_service_clients(self.spotify_client, self.plex_client, self.jellyfin_client, self.soulseek_client)
         self.dashboard_page.set_page_references(self.downloads_page, self.sync_page)
         self.dashboard_page.set_app_start_time(self.app_start_time)
         self.dashboard_page.set_toast_manager(self.toast_manager)
@@ -241,6 +238,7 @@ class MainWindow(QMainWindow):
         self.status_thread = ServiceStatusThread(
             self.spotify_client,
             self.plex_client,
+            self.jellyfin_client,
             self.soulseek_client
         )
         self.status_thread.status_updated.connect(self.update_service_status)
