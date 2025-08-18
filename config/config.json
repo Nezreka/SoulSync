@@ -1,17 +1,24 @@
 {
+  "active_media_server": "plex",
   "spotify": {
-    "client_id": "YOUR CLIENT ID",
-    "client_secret": "YOUR CLIENT SECRET"
+    "client_id": "CLIENT ID",
+    "client_secret": "CLIENT SECRET"
   },
   "plex": {
     "base_url": "http://192.168.86.36:32400",
-    "token": "YOUR PLEX TOKEN"
+    "token": "PLEX TOKEN",
+    "auto_detect": true
+  },
+  "jellyfin": {
+    "base_url": "http://localhost:8096",
+    "api_key": "JELLYFIN TOKEN",
+    "auto_detect": true
   },
   "soulseek": {
     "slskd_url": "http://localhost:5030",
-    "api_key": "1234567891234567",
-    "download_path": "./Downloads",
-    "transfer_path": "./Music"
+    "api_key": "SOULSEEK TOKEN",
+    "download_path": "E:/Broque Projects/newMusic/downloads",
+    "transfer_path": "H:/Music"
   },
   "logging": {
     "path": "logs/app.log",
