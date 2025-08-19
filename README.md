@@ -15,7 +15,7 @@ If you find SoulSync useful, consider supporting its development:
 
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/boulderbadgedad)
 
-![A screenshot of my awesome app in action.](./assets/dashboard.png)
+![A screenshot of SoulSync](./assets/dashboard.png)
 
 ## ⚠️ Docker Support
 Docker is unlikely since this is a fully GUI based app. The unique setup would be difficult for most users and my knowledge of docker is sad.
