@@ -544,8 +544,10 @@ class SinglesEPsLibraryWorker(QThread):
             
             print(f"   🔍 Searching for single track: '{track_name}' by '{artist_name}'")
             
-            # Search for the track anywhere in the library
-            db_track, confidence = db.check_track_exists(track_name, artist_name, confidence_threshold=0.7)
+            # Search for the track anywhere in the library (active server only)
+            from config.settings import config_manager
+            active_server = config_manager.get_active_media_server()
+            db_track, confidence = db.check_track_exists(track_name, artist_name, confidence_threshold=0.7, server_source=active_server)
             
             if db_track and confidence >= 0.7:
                 print(f"   ✅ Single found: '{track_name}' in album '{db_track.album_title}' (confidence: {confidence:.2f})")
@@ -645,8 +647,10 @@ class SinglesEPsLibraryWorker(QThread):
                 track_name = track['name']
                 artist_name = track['artists'][0]['name'] if track['artists'] else (ep_release.artists[0] if ep_release.artists else "")
                 
-                # Search for this track
-                db_track, confidence = db.check_track_exists(track_name, artist_name, confidence_threshold=0.7)
+                # Search for this track (active server only)
+                from config.settings import config_manager
+                active_server = config_manager.get_active_media_server()
+                db_track, confidence = db.check_track_exists(track_name, artist_name, confidence_threshold=0.7, server_source=active_server)
                 
                 if db_track and confidence >= 0.7:
                     owned_tracks += 1
@@ -707,6 +711,15 @@ class DatabaseLibraryWorker(QThread):
             # Get database instance
             db = get_database()
             
+            # Get active server for filtering
+            try:
+                from config.settings import config_manager
+                active_server = config_manager.get_active_media_server()
+                print(f"🔍 Checking albums against {active_server.upper()} library only")
+            except Exception as e:
+                print(f"⚠️ Could not get active server, defaulting to 'plex': {e}")
+                active_server = 'plex'
+            
             if self._stop_requested:
                 return
             
@@ -757,7 +770,7 @@ class DatabaseLibraryWorker(QThread):
                         # Search database for this combination with completeness info
                         print(f"   🔍 Searching database: album='{album_name}', artist='{artist_clean}'")
                         db_album, confidence, owned_tracks, expected_tracks, is_complete = db.check_album_exists_with_completeness(
-                            album_name, artist_clean, expected_track_count, confidence_threshold=0.7
+                            album_name, artist_clean, expected_track_count, confidence_threshold=0.7, server_source=active_server
                         )
                         
                         if db_album and confidence > best_confidence:
@@ -776,7 +789,7 @@ class DatabaseLibraryWorker(QThread):
                         if not db_album and artist and artist != artist_clean:
                             print(f"   🔄 Backup search with original artist: album='{album_name}', artist='{artist}'")
                             db_album_backup, confidence_backup, owned_backup, expected_backup, complete_backup = db.check_album_exists_with_completeness(
-                                album_name, artist, expected_track_count, confidence_threshold=0.7
+                                album_name, artist, expected_track_count, confidence_threshold=0.7, server_source=active_server
                             )
                             
                             if db_album_backup and confidence_backup > best_confidence:
@@ -793,7 +806,7 @@ class DatabaseLibraryWorker(QThread):
                                 artist_no_comma = ' '.join(artist_no_comma.split())
                                 print(f"   🔄 Comma-removal fallback: album='{album_name}', artist='{artist_no_comma}'")
                                 db_album_comma, confidence_comma, owned_comma, expected_comma, complete_comma = db.check_album_exists_with_completeness(
-                                    album_name, artist_no_comma, expected_track_count, confidence_threshold=0.7
+                                    album_name, artist_no_comma, expected_track_count, confidence_threshold=0.7, server_source=active_server
                                 )
                                 
                                 if db_album_comma and confidence_comma > best_confidence:
@@ -1803,14 +1816,15 @@ class DownloadMissingAlbumTracksModal(QDialog):
     """Enhanced modal for downloading missing album tracks with live progress tracking"""
     process_finished = pyqtSignal()
     
-    def __init__(self, album, album_card, parent_page, downloads_page, plex_client):
+    def __init__(self, album, album_card, parent_page, downloads_page, media_client, server_type):
         super().__init__(parent_page)
         self.album = album
         self.album_card = album_card
         self.parent_page = parent_page
         self.parent_artists_page = parent_page  # Reference to artists page for scan manager
         self.downloads_page = downloads_page
-        self.plex_client = plex_client
+        self.media_client = media_client
+        self.server_type = server_type
         self.matching_engine = MusicMatchingEngine()
         self.wishlist_service = get_wishlist_service()
         
@@ -2382,9 +2396,9 @@ class DownloadMissingAlbumTracksModal(QDialog):
         self.start_plex_analysis()
 
     def start_plex_analysis(self):
-        """Start database analysis for album tracks (previously Plex analysis)"""
+        """Start database analysis for album tracks (server-aware)"""
         from ui.pages.sync import PlaylistTrackAnalysisWorker
-        worker = PlaylistTrackAnalysisWorker(self.album.tracks, self.plex_client)
+        worker = PlaylistTrackAnalysisWorker(self.album.tracks, self.media_client)
         worker.signals.analysis_started.connect(self.on_analysis_started)
         worker.signals.track_analyzed.connect(self.on_track_analyzed)
         worker.signals.analysis_completed.connect(self.on_analysis_completed)
@@ -3204,7 +3218,7 @@ class ArtistsPage(QWidget):
         self.download_status_timer.start(2000)  # Poll every 2 seconds (consistent with sync.py)
         self.download_status_pool = QThreadPool()
         
-        # Initialize Plex scan manager (will be set when clients are connected)
+        # Initialize unified media scan manager (will be set when clients are connected)
         self.scan_manager = None
         self.download_status_pool.setMaxThreadCount(1)  # One worker at a time to avoid conflicts
         self._is_status_update_running = False
@@ -3220,16 +3234,24 @@ class ArtistsPage(QWidget):
         """Set the toast manager for showing notifications"""
         self.toast_manager = toast_manager
     
-    def _on_plex_scan_completed(self):
-        """Callback triggered when Plex scan completes - start automatic incremental database update"""
+    def _on_media_scan_completed(self):
+        """Callback triggered when media scan completes - start automatic incremental database update"""
         try:
             # Import here to avoid circular imports
             from database import get_database
             from core.database_update_worker import DatabaseUpdateWorker
+            from config.settings import config_manager
+            
+            # Get the active media client
+            active_server = config_manager.get_active_media_server()
+            if active_server == "jellyfin":
+                media_client = getattr(self, 'jellyfin_client', None)
+            else:
+                media_client = getattr(self, 'plex_client', None)
             
             # Check if we should run incremental update
-            if not self.plex_client or not self.plex_client.is_connected():
-                logger.debug("Plex not connected - skipping automatic database update")
+            if not media_client or not media_client.is_connected():
+                logger.debug(f"{active_server.upper()} not connected - skipping automatic database update")
                 return
             
             # Check if database has a previous full refresh
@@ -3252,11 +3274,11 @@ class ArtistsPage(QWidget):
                 return
             
             # All conditions met - start incremental update
-            logger.info("🎵 Starting automatic incremental database update after Plex scan")
+            logger.info(f"🎵 Starting automatic incremental database update after {active_server.upper()} scan")
             self._start_automatic_incremental_update()
             
         except Exception as e:
-            logger.error(f"Error in Plex scan completion callback: {e}")
+            logger.error(f"Error in media scan completion callback: {e}")
     
     def _start_automatic_incremental_update(self):
         """Start the automatic incremental database update"""
@@ -3270,7 +3292,7 @@ class ArtistsPage(QWidget):
             
             # Create worker for incremental update only
             self._auto_database_worker = DatabaseUpdateWorker(
-                self.plex_client,
+                self.media_client,
                 "database/music_library.db",
                 full_refresh=False  # Always incremental for automatic updates
             )
@@ -3317,24 +3339,42 @@ class ArtistsPage(QWidget):
     def setup_clients(self):
         """Initialize client connections"""
         try:
+            from config.settings import config_manager
+            
             self.spotify_client = SpotifyClient()
             self.plex_client = PlexClient()
+            
+            # Add Jellyfin client for multi-server support
+            from core.jellyfin_client import JellyfinClient
+            self.jellyfin_client = JellyfinClient()
+            
+            # Set up unified media client based on active server
+            active_server = config_manager.get_active_media_server()
+            if active_server == "plex":
+                self.media_client = self.plex_client
+                self.server_type = "plex"
+            else:  # jellyfin
+                self.media_client = self.jellyfin_client
+                self.server_type = "jellyfin"
+            
             self.soulseek_client = SoulseekClient()
 
             # --- FIX: Ensure the soulseek_client uses the download path from config ---
-            from config.settings import config_manager
             download_path = config_manager.get('soulseek.download_path')
             if download_path and hasattr(self.soulseek_client, 'download_path'):
                 self.soulseek_client.download_path = download_path
                 print(f"✅ Set soulseek_client download path for ArtistsPage to: {download_path}")
             # --- END FIX ---
             
-            # Initialize Plex scan manager now that clients are available
-            if self.plex_client:
-                self.scan_manager = PlexScanManager(self.plex_client, delay_seconds=60)
-                # Add automatic incremental database update after Plex scan completion
-                self.scan_manager.add_scan_completion_callback(self._on_plex_scan_completed)
-                print("✅ PlexScanManager initialized for ArtistsPage")
+            # Initialize unified media scan manager now that clients are available
+            try:
+                from core.media_scan_manager import MediaScanManager
+                self.scan_manager = MediaScanManager(delay_seconds=60)
+                # Add automatic incremental database update after scan completion
+                self.scan_manager.add_scan_completion_callback(self._on_media_scan_completed)
+                print("✅ MediaScanManager initialized for ArtistsPage")
+            except Exception as e:
+                print(f"Failed to initialize MediaScanManager: {e}")
 
         except Exception as e:
             print(f"Failed to initialize clients: {e}")
@@ -4084,10 +4124,18 @@ class ArtistsPage(QWidget):
         self.singles_eps_worker.start()
 
     def start_plex_library_check(self, albums):
-        """Start Plex library check in background"""
-        # Show toast for Plex check start
+        """Start database library check in background"""
+        # Get active server for dynamic toast message
+        try:
+            from config.settings import config_manager
+            active_server = config_manager.get_active_media_server()
+            server_name = "Jellyfin" if active_server == "jellyfin" else "Plex"
+        except:
+            server_name = "Plex"  # Fallback
+            
+        # Show toast for library check start
         if hasattr(self, 'toast_manager') and self.toast_manager:
-            self.toast_manager.info("Checking your Plex library for owned albums...")
+            self.toast_manager.info(f"Checking your {server_name} library for owned albums...")
         
         # Stop any existing Plex worker
         if self.plex_library_worker:
@@ -4188,12 +4236,20 @@ class ArtistsPage(QWidget):
         """Handle Plex library check failure"""
         print(f"Plex library check failed: {error}")
         
+        # Get active server for dynamic error message
+        try:
+            from config.settings import config_manager
+            active_server = config_manager.get_active_media_server()
+            server_name = "Jellyfin" if active_server == "jellyfin" else "Plex"
+        except:
+            server_name = "Plex"  # Fallback
+            
         # Show error toast
         if hasattr(self, 'toast_manager') and self.toast_manager:
-            self.toast_manager.error("Plex connection failed - cannot check owned albums")
+            self.toast_manager.error(f"{server_name} connection failed - cannot check owned albums")
         
         if self.current_albums:
-            self.albums_status.setText(f"Found {len(self.current_albums)} albums • Plex check failed")
+            self.albums_status.setText(f"Found {len(self.current_albums)} albums • {server_name} check failed")
             # Display albums without ownership info
             self.display_albums(self.current_albums, set())
     
@@ -4292,7 +4348,7 @@ class ArtistsPage(QWidget):
             QMessageBox.critical(self, "Error", "Downloads page is not connected. Cannot start download.")
             return
             
-        if not self.plex_client:
+        if not self.media_client:
             QMessageBox.critical(self, "Error", "Music database is not available. Cannot verify existing tracks.")
             return
         
@@ -4374,12 +4430,28 @@ class ArtistsPage(QWidget):
             album_with_tracks.tracks = tracks  # Add tracks attribute dynamically
             
             # Create and show the new sophisticated modal
+            # Get active server and media client
+            from config.settings import config_manager
+            active_server = config_manager.get_active_media_server()
+            
+            if active_server == "jellyfin":
+                media_client = getattr(self, 'jellyfin_client', None)
+                if not media_client:
+                    QMessageBox.critical(self, "Error", "Jellyfin client not available")
+                    return
+            else:
+                media_client = self.plex_client
+                if not media_client:
+                    QMessageBox.critical(self, "Error", "Plex client not available")
+                    return
+            
             modal = DownloadMissingAlbumTracksModal(
                 album=album_with_tracks,  # Use the album with tracks
                 album_card=album_card,
                 parent_page=self,
                 downloads_page=self.downloads_page,
-                plex_client=self.plex_client
+                media_client=media_client,
+                server_type=active_server
             )
             
             # Store the session for resumption

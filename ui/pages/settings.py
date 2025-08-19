@@ -4,6 +4,9 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QFont
 from config.settings import config_manager
+from utils.logging_config import get_logger
+
+logger = get_logger("settings")
 
 class PlexDetectionThread(QThread):
     progress_updated = pyqtSignal(int, str)  # progress value, current url
@@ -447,6 +450,8 @@ class ServiceTestThread(QThread):
                 success, message = self._test_spotify()
             elif self.service_type == "plex":
                 success, message = self._test_plex()
+            elif self.service_type == "jellyfin":
+                success, message = self._test_jellyfin()
             elif self.service_type == "soulseek":
                 success, message = self._test_soulseek()
             else:
@@ -547,6 +552,48 @@ class ServiceTestThread(QThread):
         except Exception as e:
             return False, f"✗ Plex test failed:\n{str(e)}"
     
+    def _test_jellyfin(self):
+        """Test Jellyfin connection"""
+        try:
+            import requests
+            
+            base_url = self.test_config['base_url']
+            api_key = self.test_config['api_key']
+            
+            if not base_url:
+                return False, "Please enter Jellyfin server URL"
+            
+            if not api_key:
+                return False, "Please enter Jellyfin API key"
+            
+            # Clean URL - remove trailing slash
+            if base_url.endswith('/'):
+                base_url = base_url[:-1]
+            
+            # Test connection with system info endpoint
+            headers = {'X-Emby-Token': api_key} if api_key else {}
+            test_url = f"{base_url}/System/Info"
+            
+            response = requests.get(test_url, headers=headers, timeout=5)
+            
+            if response.status_code == 200:
+                data = response.json()
+                server_name = data.get('ServerName', 'Unknown')
+                version = data.get('Version', 'Unknown')
+                message = f"✓ Jellyfin connection successful!\nServer: {server_name}\nVersion: {version}"
+                return True, message
+            elif response.status_code == 401:
+                return False, "✗ Jellyfin authentication failed.\nCheck your API key."
+            else:
+                return False, f"✗ Jellyfin connection failed.\nHTTP {response.status_code}: {response.text}"
+                
+        except requests.exceptions.Timeout:
+            return False, "✗ Jellyfin connection timeout.\nCheck your server URL."
+        except requests.exceptions.ConnectionError:
+            return False, "✗ Cannot connect to Jellyfin server.\nCheck your server URL and network."
+        except Exception as e:
+            return False, f"✗ Jellyfin test failed:\n{str(e)}"
+    
     def _test_soulseek(self):
         """Test Soulseek connection"""
         try:
@@ -593,6 +640,151 @@ class ServiceTestThread(QThread):
             return False, f"✗ Request failed:\n{str(e)}"
         except Exception as e:
             return False, f"✗ Unexpected error:\n{str(e)}"
+
+class JellyfinDetectionThread(QThread):
+    progress_updated = pyqtSignal(int, str)  # progress value, current url
+    detection_completed = pyqtSignal(str)  # found_url (empty if not found)
+    
+    def __init__(self):
+        super().__init__()
+        self.cancelled = False
+    
+    def cancel(self):
+        self.cancelled = True
+    
+    def run(self):
+        import requests
+        import socket
+        import ipaddress
+        import subprocess
+        import platform
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        
+        def get_network_info():
+            """Get comprehensive network information with subnet detection"""
+            try:
+                # Get local IP using socket method
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.connect(("8.8.8.8", 80))
+                local_ip = s.getsockname()[0]
+                s.close()
+                
+                # Parse network info
+                network = ipaddress.ip_network(f"{local_ip}/24", strict=False)
+                return {
+                    'local_ip': local_ip,
+                    'network': network,
+                    'subnet': str(network.network_address) + "/24"
+                }
+            except Exception as e:
+                print(f"Error getting network info: {e}")
+                return {'local_ip': '127.0.0.1', 'network': None, 'subnet': '127.0.0.1/32'}
+        
+        try:
+            # Test common Jellyfin URLs first
+            common_urls = [
+                "http://localhost:8096",
+                "http://127.0.0.1:8096", 
+                "http://jellyfin:8096"
+            ]
+            
+            network_info = get_network_info()
+            local_ip = network_info['local_ip']
+            
+            # Add local IP variations
+            if local_ip != '127.0.0.1':
+                common_urls.extend([
+                    f"http://{local_ip}:8096",
+                    f"https://{local_ip}:8920"  # HTTPS port
+                ])
+            
+            # Test common URLs first
+            for i, url in enumerate(common_urls):
+                if self.cancelled:
+                    break
+                    
+                progress = int((i / len(common_urls)) * 50)  # First 50% for common URLs
+                self.progress_updated.emit(progress, url)
+                
+                if self.test_jellyfin_url(url):
+                    self.detection_completed.emit(url)
+                    return
+            
+            # If common URLs fail, scan network subnet
+            if network_info['network'] and not self.cancelled:
+                network = network_info['network']
+                hosts_to_scan = list(network.hosts())[:50]  # Limit to first 50 hosts
+                
+                def test_host(host_ip):
+                    if self.cancelled:
+                        return None
+                    
+                    test_urls = [
+                        f"http://{host_ip}:8096",
+                        f"https://{host_ip}:8920"
+                    ]
+                    
+                    for url in test_urls:
+                        if self.cancelled:
+                            break
+                        if self.test_jellyfin_url(url, timeout=2):  # Shorter timeout for network scan
+                            return url
+                    return None
+                
+                # Test hosts in parallel
+                with ThreadPoolExecutor(max_workers=10) as executor:
+                    future_to_host = {executor.submit(test_host, str(host)): host for host in hosts_to_scan}
+                    
+                    for i, future in enumerate(as_completed(future_to_host)):
+                        if self.cancelled:
+                            break
+                            
+                        progress = 50 + int((i / len(hosts_to_scan)) * 50)  # Remaining 50%
+                        host = future_to_host[future]
+                        self.progress_updated.emit(progress, f"Scanning {host}...")
+                        
+                        result = future.result()
+                        if result:
+                            self.detection_completed.emit(result)
+                            return
+            
+            # Nothing found
+            self.detection_completed.emit("")
+            
+        except Exception as e:
+            print(f"Jellyfin detection error: {e}")
+            self.detection_completed.emit("")  # Empty string = not found
+    
+    def test_jellyfin_url(self, url, timeout=5):
+        """Test if a URL hosts a Jellyfin server"""
+        try:
+            import requests
+            
+            # Test the system/info endpoint which is available without auth
+            response = requests.get(f"{url}/System/Info", timeout=timeout, verify=False)
+            
+            if response.status_code == 200:
+                data = response.json()
+                # Check if it's actually Jellyfin
+                if 'ServerName' in data or 'Version' in data:
+                    return True
+                    
+        except Exception:
+            pass
+        
+        # Fallback: try to get the web interface
+        try:
+            import requests
+            response = requests.get(url, timeout=timeout, verify=False)
+            if response.status_code == 200:
+                content = response.text.lower()
+                # Look for Jellyfin-specific content
+                if 'jellyfin' in content or 'emby' in content:
+                    return True
+        except Exception:
+            pass
+            
+        return False
 
 class SettingsGroup(QGroupBox):
     def __init__(self, title: str, parent=None):
@@ -772,6 +964,24 @@ class SettingsPage(QWidget):
             self.plex_url_input.setText(plex_config.get('base_url', ''))
             self.plex_token_input.setText(plex_config.get('token', ''))
             
+            # Load Jellyfin config
+            jellyfin_config = config_manager.get_jellyfin_config()
+            self.jellyfin_url_input.setText(jellyfin_config.get('base_url', ''))
+            self.jellyfin_api_key_input.setText(jellyfin_config.get('api_key', ''))
+            
+            # Initialize server selection
+            active_server = config_manager.get_active_media_server()
+            self.pending_server_change = None
+            self.update_server_toggle_styles(active_server)
+            
+            # Show/hide appropriate containers based on active server
+            if active_server == 'plex':
+                self.plex_container.show()
+                self.jellyfin_container.hide()
+            else:
+                self.plex_container.hide()
+                self.jellyfin_container.show()
+            
             # Load Soulseek config
             soulseek_config = config_manager.get_soulseek_config()
             self.slskd_url_input.setText(soulseek_config.get('slskd_url', ''))
@@ -837,6 +1047,15 @@ class SettingsPage(QWidget):
             # Save Plex settings
             config_manager.set('plex.base_url', self.plex_url_input.text())
             config_manager.set('plex.token', self.plex_token_input.text())
+            
+            # Save Jellyfin settings
+            config_manager.set('jellyfin.base_url', self.jellyfin_url_input.text())
+            config_manager.set('jellyfin.api_key', self.jellyfin_api_key_input.text())
+            
+            # Save pending server change if any
+            if hasattr(self, 'pending_server_change') and self.pending_server_change:
+                config_manager.set_active_media_server(self.pending_server_change)
+                logger.info(f"Server changed to {self.pending_server_change} - restart required")
             
             # Save Soulseek settings
             config_manager.set('soulseek.slskd_url', self.slskd_url_input.text())
@@ -923,6 +1142,26 @@ class SettingsPage(QWidget):
             'client_secret': self.client_secret_input.text()
         }
         self.start_service_test('spotify', test_config)
+    
+    def test_active_server_connection(self):
+        """Test the currently active (or pending) media server connection"""
+        # Determine which server to test (pending change takes priority)
+        active_server = getattr(self, 'pending_server_change', None) or config_manager.get_active_media_server()
+        
+        if active_server == 'plex':
+            test_config = {
+                'base_url': self.plex_url_input.text(),
+                'token': self.plex_token_input.text()
+            }
+            self.start_service_test('plex', test_config)
+        elif active_server == 'jellyfin':
+            test_config = {
+                'base_url': self.jellyfin_url_input.text(),
+                'api_key': self.jellyfin_api_key_input.text()
+            }
+            self.start_service_test('jellyfin', test_config)
+        else:
+            logger.warning(f"Unknown active server type: {active_server}")
     
     def test_plex_connection(self):
         """Test Plex server connection in background thread"""
@@ -1356,6 +1595,117 @@ class SettingsPage(QWidget):
         
         dialog.exec()
     
+    def show_jellyfin_success_dialog(self, found_url):
+        """Show custom Jellyfin success dialog with copy functionality"""
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit
+        from PyQt6.QtCore import Qt
+        from PyQt6.QtGui import QClipboard
+        
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Jellyfin Auto-detect Success")
+        dialog.setModal(True)
+        dialog.setFixedSize(380, 160)
+        dialog.setWindowFlags(dialog.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        
+        # Apply dark theme styling
+        dialog.setStyleSheet("""
+            QDialog {
+                background-color: #282828;
+                color: #ffffff;
+                border: 1px solid #404040;
+                border-radius: 8px;
+            }
+            QLabel {
+                color: #ffffff;
+                font-size: 12px;
+            }
+            QTextEdit {
+                background-color: #404040;
+                border: 1px solid #606060;
+                border-radius: 4px;
+                color: #ffffff;
+                font-size: 11px;
+                font-family: 'Courier New', monospace;
+                padding: 8px;
+            }
+            QPushButton {
+                background-color: #404040;
+                border: 1px solid #606060;
+                border-radius: 4px;
+                color: #ffffff;
+                padding: 6px 12px;
+                font-size: 11px;
+                min-width: 50px;
+                min-height: 28px;
+            }
+            QPushButton:hover {
+                background-color: #505050;
+            }
+            #copyButton {
+                background-color: #aa5cc3;
+                border: 1px solid #aa5cc3;
+                color: #ffffff;
+                font-weight: bold;
+                min-height: 28px;
+            }
+            #copyButton:hover {
+                background-color: #ba6cd3;
+            }
+        """)
+        
+        layout = QVBoxLayout(dialog)
+        layout.setSpacing(8)
+        layout.setContentsMargins(15, 15, 15, 15)
+        
+        # Success message
+        location_type = "locally" if "localhost" in found_url or "127.0.0.1" in found_url else "on network"
+        success_label = QLabel(f"✓ Found Jellyfin server running {location_type}!")
+        success_label.setStyleSheet("color: #aa5cc3; font-size: 13px; font-weight: bold;")
+        success_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(success_label)
+        
+        # URL display with copy functionality
+        url_label = QLabel("Detected URL:")
+        layout.addWidget(url_label)
+        
+        url_container = QHBoxLayout()
+        url_container.setSpacing(5)
+        
+        url_display = QTextEdit()
+        url_display.setPlainText(found_url)
+        url_display.setReadOnly(True)
+        url_display.setFixedHeight(30)
+        url_display.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        url_container.addWidget(url_display)
+        
+        copy_btn = QPushButton("Copy")
+        copy_btn.setObjectName("copyButton")
+        copy_btn.setFixedSize(55, 30)
+        copy_btn.clicked.connect(lambda: self.copy_to_clipboard(found_url, copy_btn))
+        url_container.addWidget(copy_btn)
+        
+        layout.addLayout(url_container)
+        
+        # Info text
+        info_label = QLabel("URL automatically filled in settings above.")
+        info_label.setStyleSheet("color: #ffffff; font-size: 9px; font-style: italic; background: transparent;")
+        info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(info_label)
+        
+        # OK button
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        
+        ok_btn = QPushButton("OK")
+        ok_btn.setFixedSize(60, 28)
+        ok_btn.clicked.connect(dialog.accept)
+        ok_btn.setDefault(True)
+        button_layout.addWidget(ok_btn)
+        
+        layout.addLayout(button_layout)
+        
+        dialog.exec()
+    
     def show_success_dialog(self, found_url):
         """Show custom slskd success dialog with copy functionality"""
         from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit
@@ -1620,6 +1970,59 @@ class SettingsPage(QWidget):
         helper_text.setWordWrap(True)
         spotify_layout.addWidget(helper_text)
         
+        # Server Selection Toggle Buttons
+        server_selection_container = QWidget()
+        server_selection_container.setStyleSheet("background: transparent;")
+        server_selection_layout = QVBoxLayout(server_selection_container)
+        server_selection_layout.setContentsMargins(0, 12, 0, 12)
+        server_selection_layout.setSpacing(8)
+        
+        # Server selection title
+        server_title = QLabel("Media Server Source")
+        server_title.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        server_title.setStyleSheet("color: #ffffff; background: transparent;")
+        server_selection_layout.addWidget(server_title)
+        
+        # Toggle buttons container
+        toggle_container = QHBoxLayout()
+        toggle_container.setSpacing(8)
+        
+        # Plex toggle button
+        self.plex_toggle_button = QPushButton()
+        self.plex_toggle_button.setFixedHeight(40)
+        self.plex_toggle_button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.plex_toggle_button.clicked.connect(lambda: self.select_media_server('plex'))
+        
+        # Jellyfin toggle button
+        self.jellyfin_toggle_button = QPushButton()
+        self.jellyfin_toggle_button.setFixedHeight(40)
+        self.jellyfin_toggle_button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.jellyfin_toggle_button.clicked.connect(lambda: self.select_media_server('jellyfin'))
+        
+        toggle_container.addWidget(self.plex_toggle_button)
+        toggle_container.addWidget(self.jellyfin_toggle_button)
+        server_selection_layout.addLayout(toggle_container)
+        
+        # Restart warning (initially hidden)
+        self.restart_warning_frame = QLabel("⚠️ Server change requires restart - Save settings then restart SoulSync")
+        self.restart_warning_frame.setStyleSheet("""
+            color: #ffc107; 
+            font-size: 11px; 
+            font-weight: bold; 
+            background: transparent;
+            margin: 8px 0px 4px 0px;
+        """)
+        self.restart_warning_frame.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.restart_warning_frame.hide()
+        server_selection_layout.addWidget(self.restart_warning_frame)
+        
+        # Media Server Settings Container
+        self.plex_container = QWidget()
+        self.plex_container.setStyleSheet("background: transparent;")
+        plex_container_layout = QVBoxLayout(self.plex_container)
+        plex_container_layout.setContentsMargins(0, 0, 0, 0)
+        plex_container_layout.setSpacing(0)
+        
         # Plex settings
         plex_frame = QFrame()
         plex_frame.setStyleSheet("""
@@ -1669,6 +2072,69 @@ class SettingsPage(QWidget):
         self.plex_token_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.form_inputs['plex.token'] = self.plex_token_input
         plex_layout.addWidget(self.plex_token_input)
+        
+        # Add Plex frame to its container
+        plex_container_layout.addWidget(plex_frame)
+        
+        # Jellyfin Settings Container
+        self.jellyfin_container = QWidget()
+        self.jellyfin_container.setStyleSheet("background: transparent;")
+        jellyfin_container_layout = QVBoxLayout(self.jellyfin_container)
+        jellyfin_container_layout.setContentsMargins(0, 0, 0, 0)
+        jellyfin_container_layout.setSpacing(0)
+        
+        # Jellyfin settings
+        jellyfin_frame = QFrame()
+        jellyfin_frame.setStyleSheet("""
+            QFrame {
+                background: #333333;
+                border: 1px solid #444444;
+                border-radius: 8px;
+                padding: 8px;
+            }
+        """)
+        jellyfin_layout = QVBoxLayout(jellyfin_frame)
+        jellyfin_layout.setSpacing(8)
+        
+        jellyfin_title = QLabel("Jellyfin")
+        jellyfin_title.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        jellyfin_title.setStyleSheet("color: #aa5cc3;")  # Jellyfin purple color
+        jellyfin_layout.addWidget(jellyfin_title)
+        
+        # Server URL
+        jellyfin_url_label = QLabel("Server URL:")
+        jellyfin_url_label.setStyleSheet(self.get_label_style(11))
+        jellyfin_layout.addWidget(jellyfin_url_label)
+        
+        jellyfin_url_input_layout = QHBoxLayout()
+        self.jellyfin_url_input = QLineEdit()
+        self.jellyfin_url_input.setStyleSheet(self.get_input_style())
+        self.jellyfin_url_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.form_inputs['jellyfin.base_url'] = self.jellyfin_url_input
+        
+        jellyfin_detect_btn = QPushButton("Auto-detect")
+        jellyfin_detect_btn.setFixedSize(80, 30)
+        jellyfin_detect_btn.clicked.connect(self.auto_detect_jellyfin)
+        jellyfin_detect_btn.setStyleSheet(self.get_test_button_style())
+        
+        jellyfin_url_input_layout.addWidget(self.jellyfin_url_input)
+        jellyfin_url_input_layout.addWidget(jellyfin_detect_btn)
+        jellyfin_layout.addLayout(jellyfin_url_input_layout)
+        
+        # API Key
+        jellyfin_api_key_label = QLabel("API Key:")
+        jellyfin_api_key_label.setStyleSheet(self.get_label_style(11))
+        jellyfin_layout.addWidget(jellyfin_api_key_label)
+        
+        self.jellyfin_api_key_input = QLineEdit()
+        self.jellyfin_api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.jellyfin_api_key_input.setStyleSheet(self.get_input_style())
+        self.jellyfin_api_key_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.form_inputs['jellyfin.api_key'] = self.jellyfin_api_key_input
+        jellyfin_layout.addWidget(self.jellyfin_api_key_input)
+        
+        # Add Jellyfin frame to its container
+        jellyfin_container_layout.addWidget(jellyfin_frame)
         
         # Soulseek settings
         soulseek_frame = QFrame()
@@ -1722,7 +2188,9 @@ class SettingsPage(QWidget):
         soulseek_layout.addWidget(self.api_key_input)
         
         api_layout.addWidget(spotify_frame)
-        api_layout.addWidget(plex_frame)
+        api_layout.addWidget(server_selection_container)
+        api_layout.addWidget(self.plex_container)
+        api_layout.addWidget(self.jellyfin_container)
         api_layout.addWidget(soulseek_frame)
         
         # Test connections
@@ -1735,11 +2203,11 @@ class SettingsPage(QWidget):
         self.test_buttons['spotify'].clicked.connect(self.test_spotify_connection)
         self.test_buttons['spotify'].setStyleSheet(self.get_test_button_style())
         
-        self.test_buttons['plex'] = QPushButton("Test Plex")
-        self.test_buttons['plex'].setFixedHeight(30)
-        self.test_buttons['plex'].setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.test_buttons['plex'].clicked.connect(self.test_plex_connection)
-        self.test_buttons['plex'].setStyleSheet(self.get_test_button_style())
+        self.test_buttons['server'] = QPushButton("Test Server")
+        self.test_buttons['server'].setFixedHeight(30)
+        self.test_buttons['server'].setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.test_buttons['server'].clicked.connect(self.test_active_server_connection)
+        self.test_buttons['server'].setStyleSheet(self.get_test_button_style())
         
         self.test_buttons['soulseek'] = QPushButton("Test Soulseek")
         self.test_buttons['soulseek'].setFixedHeight(30)
@@ -1748,58 +2216,13 @@ class SettingsPage(QWidget):
         self.test_buttons['soulseek'].setStyleSheet(self.get_test_button_style())
         
         test_layout.addWidget(self.test_buttons['spotify'])
-        test_layout.addWidget(self.test_buttons['plex'])
+        test_layout.addWidget(self.test_buttons['server'])
         test_layout.addWidget(self.test_buttons['soulseek'])
         
         api_layout.addLayout(test_layout)
         
-        # Logging Settings
-        logging_group = SettingsGroup("Logging Settings")
-        logging_layout = QVBoxLayout(logging_group)
-        logging_layout.setContentsMargins(16, 20, 16, 16)
-        logging_layout.setSpacing(12)
-        
-        # Log level (read-only)
-        log_level_layout = QHBoxLayout()
-        log_level_label = QLabel("Log Level:")
-        log_level_label.setStyleSheet(self.get_label_style(12))
-        
-        self.log_level_display = QLabel("DEBUG")
-        self.log_level_display.setStyleSheet("""
-            color: #ffffff; 
-            font-size: 11px; 
-            background: transparent;
-            border: none;
-        """)
-        self.log_level_display.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        
-        log_level_layout.addWidget(log_level_label)
-        log_level_layout.addWidget(self.log_level_display)
-        
-        # Log file path (read-only)
-        log_path_container = QVBoxLayout()
-        log_path_label = QLabel("Log File Path:")
-        log_path_label.setStyleSheet(self.get_label_style(12))
-        log_path_container.addWidget(log_path_label)
-        
-        self.log_path_display = QLabel("logs/app.log")
-        self.log_path_display.setStyleSheet("""
-            color: #1db954; 
-            font-size: 11px; 
-            font-family: 'Courier New', monospace;
-            background-color: rgba(29, 185, 84, 0.1);
-            border: 1px solid rgba(29, 185, 84, 0.3);
-            border-radius: 4px;
-            padding: 6px 8px;
-        """)
-        self.log_path_display.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        log_path_container.addWidget(self.log_path_display)
-        
-        logging_layout.addLayout(log_level_layout)
-        logging_layout.addLayout(log_path_container)
         
         layout.addWidget(api_group)
-        layout.addWidget(logging_group)
         layout.addStretch()
         
         return column
@@ -2013,10 +2436,56 @@ class SettingsPage(QWidget):
         # Add to form inputs for saving
         self.form_inputs['playlist_sync.create_backup'] = self.create_backup_checkbox
 
+        # Logging Settings
+        logging_group = SettingsGroup("Logging Settings")
+        logging_layout = QVBoxLayout(logging_group)
+        logging_layout.setContentsMargins(16, 20, 16, 16)
+        logging_layout.setSpacing(12)
+        
+        # Log level (read-only)
+        log_level_layout = QHBoxLayout()
+        log_level_label = QLabel("Log Level:")
+        log_level_label.setStyleSheet(self.get_label_style(12))
+        
+        self.log_level_display = QLabel("DEBUG")
+        self.log_level_display.setStyleSheet("""
+            color: #ffffff; 
+            font-size: 11px; 
+            background: transparent;
+            border: none;
+        """)
+        self.log_level_display.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        
+        log_level_layout.addWidget(log_level_label)
+        log_level_layout.addWidget(self.log_level_display)
+        
+        # Log file path (read-only)
+        log_path_container = QVBoxLayout()
+        log_path_label = QLabel("Log File Path:")
+        log_path_label.setStyleSheet(self.get_label_style(12))
+        log_path_container.addWidget(log_path_label)
+        
+        self.log_path_display = QLabel("logs/app.log")
+        self.log_path_display.setStyleSheet("""
+            color: #1db954; 
+            font-size: 11px; 
+            font-family: 'Courier New', monospace;
+            background-color: rgba(29, 185, 84, 0.1);
+            border: 1px solid rgba(29, 185, 84, 0.3);
+            border-radius: 4px;
+            padding: 6px 8px;
+        """)
+        self.log_path_display.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        log_path_container.addWidget(self.log_path_display)
+        
+        logging_layout.addLayout(log_level_layout)
+        logging_layout.addLayout(log_path_container)
+
         layout.addWidget(download_group)
         layout.addWidget(database_group)
         layout.addWidget(metadata_group)
         layout.addWidget(playlist_sync_group)
+        layout.addWidget(logging_group)
         layout.addStretch()  # Push content to top, prevent stretching
         
         return column
@@ -2035,6 +2504,298 @@ class SettingsPage(QWidget):
                 border: 1px solid #1db954;
             }
         """
+    
+    def select_media_server(self, server_type: str):
+        """Handle media server selection toggle"""
+        try:
+            current_server = config_manager.get_active_media_server()
+            
+            if server_type != current_server:
+                # Show restart warning
+                self.restart_warning_frame.show()
+                
+                # Update the pending server change (but don't make it active yet)
+                self.pending_server_change = server_type
+            else:
+                # Hide restart warning if selecting the current server
+                self.restart_warning_frame.hide()
+                self.pending_server_change = None
+            
+            # Update toggle button styles
+            self.update_server_toggle_styles(server_type)
+            
+            # Show/hide appropriate containers
+            if server_type == 'plex':
+                self.plex_container.show()
+                self.jellyfin_container.hide()
+            else:
+                self.plex_container.hide()
+                self.jellyfin_container.show()
+                
+        except Exception as e:
+            logger.error(f"Error selecting media server: {e}")
+    
+    def update_server_toggle_styles(self, active_server=None):
+        """Update the visual styles of server toggle buttons"""
+        if active_server is None:
+            active_server = getattr(self, 'pending_server_change', None) or config_manager.get_active_media_server()
+        
+        from PyQt6.QtGui import QIcon, QPixmap
+        from PyQt6.QtCore import QSize, Qt
+        import requests
+        import os
+        from pathlib import Path
+        
+        def download_and_cache_logo(url, cache_filename, size=32):
+            """Download logo and cache it locally, return QIcon"""
+            cache_dir = Path("ui/assets")
+            cache_dir.mkdir(exist_ok=True)
+            cache_path = cache_dir / cache_filename
+            
+            # Download if not cached
+            if not cache_path.exists():
+                try:
+                    logger.info(f"Downloading logo from {url}")
+                    response = requests.get(url, timeout=10)
+                    if response.status_code == 200:
+                        with open(cache_path, 'wb') as f:
+                            f.write(response.content)
+                        logger.info(f"Logo cached at {cache_path}")
+                    else:
+                        logger.warning(f"Failed to download logo: HTTP {response.status_code}")
+                        return QIcon()
+                except Exception as e:
+                    logger.warning(f"Error downloading logo from {url}: {e}")
+                    return QIcon()
+            
+            # Load from cache
+            try:
+                pixmap = QPixmap(str(cache_path))
+                if not pixmap.isNull():
+                    # Scale to desired size while maintaining aspect ratio
+                    scaled_pixmap = pixmap.scaled(
+                        size, size, 
+                        Qt.AspectRatioMode.KeepAspectRatio, 
+                        Qt.TransformationMode.SmoothTransformation
+                    )
+                    return QIcon(scaled_pixmap)
+                else:
+                    logger.warning(f"Could not load cached logo from {cache_path}")
+                    return QIcon()
+            except Exception as e:
+                logger.warning(f"Error loading cached logo: {e}")
+                return QIcon()
+        
+        # Cache and load the exact logos you provided
+        if not hasattr(self, '_cached_plex_icon'):
+            self._cached_plex_icon = download_and_cache_logo(
+                "https://wiki.mrmc.tv/images/c/cf/Plex_icon.png",
+                "plex_icon.png",
+                32
+            )
+        
+        if not hasattr(self, '_cached_jellyfin_icon'):
+            self._cached_jellyfin_icon = download_and_cache_logo(
+                "https://upload.wikimedia.org/wikipedia/commons/thumb/4/41/Jellyfin_-_icon-transparent.svg/2048px-Jellyfin_-_icon-transparent.svg.png",
+                "jellyfin_icon.png",
+                32
+            )
+        
+        plex_icon = self._cached_plex_icon
+        jellyfin_icon = self._cached_jellyfin_icon
+        
+        # Active button styles with appropriate colors
+        active_plex_style = """
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(229, 160, 13, 0.8),
+                    stop:1 rgba(199, 140, 11, 0.9));
+                border: 2px solid rgba(229, 160, 13, 1);
+                border-radius: 8px;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(229, 160, 13, 0.9),
+                    stop:1 rgba(199, 140, 11, 1.0));
+            }
+        """
+        
+        active_jellyfin_style = """
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(170, 92, 195, 0.8),
+                    stop:1 rgba(150, 82, 175, 0.9));
+                border: 2px solid rgba(170, 92, 195, 1);
+                border-radius: 8px;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(170, 92, 195, 0.9),
+                    stop:1 rgba(150, 82, 175, 1.0));
+            }
+        """
+        
+        # Inactive button style
+        inactive_style = """
+            QPushButton {
+                background: transparent;
+                border: 1px solid rgba(255, 255, 255, 0.3);
+                border-radius: 8px;
+            }
+            QPushButton:hover {
+                background: rgba(255, 255, 255, 0.1);
+                border: 1px solid rgba(255, 255, 255, 0.5);
+            }
+        """
+        
+        # Set icons and styles
+        self.plex_toggle_button.setIcon(plex_icon)
+        self.plex_toggle_button.setIconSize(QSize(28, 28))
+        self.jellyfin_toggle_button.setIcon(jellyfin_icon)
+        self.jellyfin_toggle_button.setIconSize(QSize(28, 28))
+        
+        if active_server == 'plex':
+            self.plex_toggle_button.setStyleSheet(active_plex_style)
+            self.jellyfin_toggle_button.setStyleSheet(inactive_style)
+        else:
+            self.plex_toggle_button.setStyleSheet(inactive_style)
+            self.jellyfin_toggle_button.setStyleSheet(active_jellyfin_style)
+    
+    def auto_detect_jellyfin(self):
+        """Auto-detect Jellyfin server URL using background thread"""
+        # Don't start new detection if one is already running
+        if self.detection_thread and self.detection_thread.isRunning():
+            return
+        
+        # Create animated loading dialog
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
+        from PyQt6.QtCore import QTimer, QPropertyAnimation, QRect
+        from PyQt6.QtGui import QPainter, QColor
+        
+        self.detection_dialog = QDialog(self)
+        self.detection_dialog.setWindowTitle("Auto-detecting Jellyfin Server")
+        self.detection_dialog.setModal(True)
+        self.detection_dialog.setFixedSize(400, 180)
+        self.detection_dialog.setWindowFlags(self.detection_dialog.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        
+        # Apply dark theme styling
+        self.detection_dialog.setStyleSheet("""
+            QDialog {
+                background-color: #282828;
+                color: #ffffff;
+                border: 1px solid #404040;
+                border-radius: 8px;
+            }
+            QLabel {
+                color: #ffffff;
+                font-size: 14px;
+            }
+            QPushButton {
+                background-color: #404040;
+                border: 1px solid #606060;
+                border-radius: 4px;
+                color: #ffffff;
+                padding: 8px 16px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #505050;
+            }
+        """)
+        
+        layout = QVBoxLayout(self.detection_dialog)
+        layout.setSpacing(20)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Title label
+        title_label = QLabel("Searching for Jellyfin servers...")
+        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(title_label)
+        
+        # Status label
+        self.status_label = QLabel("Checking local machine...")
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.status_label.setStyleSheet("color: #ffffff; font-size: 12px; background: transparent;")
+        layout.addWidget(self.status_label)
+        
+        # Animated loading bar container
+        loading_container = QLabel()
+        loading_container.setFixedHeight(8)
+        loading_container.setStyleSheet("""
+            QLabel {
+                background-color: #404040;
+                border: 1px solid #606060;
+                border-radius: 4px;
+            }
+        """)
+        layout.addWidget(loading_container)
+        
+        # Animated purple bar for Jellyfin
+        self.loading_bar = QLabel(loading_container)
+        self.loading_bar.setFixedHeight(6)
+        self.loading_bar.setStyleSheet("""
+            background-color: #aa5cc3;
+            border-radius: 3px;
+            border: none;
+        """)
+        
+        # Start animation
+        self.loading_animation = QPropertyAnimation(self.loading_bar, b"geometry")
+        self.loading_animation.setDuration(1500)  # 1.5 seconds
+        self.loading_animation.setStartValue(QRect(1, 1, 0, 6))
+        self.loading_animation.setEndValue(QRect(1, 1, loading_container.width() - 2, 6))
+        self.loading_animation.setLoopCount(-1)  # Infinite loop
+        self.loading_animation.start()
+        
+        # Cancel button
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.cancel_detection)
+        button_layout.addWidget(cancel_btn)
+        
+        layout.addLayout(button_layout)
+        
+        # Start Jellyfin detection thread
+        self.detection_thread = JellyfinDetectionThread()
+        self.detection_thread.progress_updated.connect(self.on_detection_progress, Qt.ConnectionType.QueuedConnection)
+        self.detection_thread.detection_completed.connect(self.on_jellyfin_detection_completed, Qt.ConnectionType.QueuedConnection)
+        self.detection_thread.start()
+        
+        self.detection_dialog.show()
+    
+    def on_jellyfin_detection_completed(self, found_url):
+        """Handle Jellyfin detection completion"""
+        # Stop animation and close dialog
+        if hasattr(self, 'loading_animation'):
+            self.loading_animation.stop()
+        
+        if hasattr(self, 'detection_dialog') and self.detection_dialog:
+            self.detection_dialog.close()
+            self.detection_dialog = None
+        
+        # Properly cleanup thread
+        if self.detection_thread:
+            if self.detection_thread.isRunning():
+                self.detection_thread.quit()
+                self.detection_thread.wait(1000)  # Wait up to 1 second for thread to finish
+            self.detection_thread.deleteLater()
+            self.detection_thread = None
+        
+        if found_url:
+            self.jellyfin_url_input.setText(found_url)
+            self.show_jellyfin_success_dialog(found_url)
+            logger.info(f"Jellyfin auto-detection successful: {found_url}")
+        else:
+            from PyQt6.QtWidgets import QMessageBox
+            msg = QMessageBox(self)
+            msg.setWindowTitle("No Jellyfin Server Found")
+            msg.setText("Could not find a Jellyfin server on your network.\n\nPlease enter your server URL manually (e.g., http://localhost:8096)")
+            msg.setIcon(QMessageBox.Icon.Information)
+            msg.exec()
+            logger.info("Jellyfin auto-detection failed - no server found")
+    
     
     def get_combo_style(self):
         return """

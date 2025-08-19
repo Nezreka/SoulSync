@@ -521,12 +521,13 @@ class PlaylistTrackAnalysisWorkerSignals(QObject):
     analysis_failed = pyqtSignal(str)  # error_message
 
 class PlaylistTrackAnalysisWorker(QRunnable):
-    """Background worker to analyze playlist tracks against Plex library"""
+    """Background worker to analyze playlist tracks against media library"""
     
-    def __init__(self, playlist_tracks, plex_client):
+    def __init__(self, playlist_tracks, media_client, server_type="plex"):
         super().__init__()
         self.playlist_tracks = playlist_tracks
-        self.plex_client = plex_client
+        self.media_client = media_client  # Can be plex_client or jellyfin_client
+        self.server_type = server_type
         self.signals = PlaylistTrackAnalysisWorkerSignals()
         self._cancelled = False
         # Instantiate the matching engine once per worker for efficiency
@@ -545,14 +546,14 @@ class PlaylistTrackAnalysisWorker(QRunnable):
             self.signals.analysis_started.emit(len(self.playlist_tracks))
             results = []
             
-            # Check if Plex is connected
-            plex_connected = False
+            # Check if media server is connected
+            server_connected = False
             try:
-                if self.plex_client:
-                    plex_connected = self.plex_client.is_connected()
+                if self.media_client:
+                    server_connected = self.media_client.is_connected()
             except Exception as e:
-                print(f"Plex connection check failed: {e}")
-                plex_connected = False
+                print(f"{self.server_type.title()} connection check failed: {e}")
+                server_connected = False
             
             for i, track in enumerate(self.playlist_tracks):
                 if self._cancelled:
@@ -563,17 +564,17 @@ class PlaylistTrackAnalysisWorker(QRunnable):
                     exists_in_plex=False
                 )
                 
-                if plex_connected:
-                    # Check if track exists in Plex
+                if server_connected:
+                    # Check if track exists in media server
                     try:
-                        plex_match, confidence = self._check_track_in_plex(track)
+                        match, confidence = self._check_track_in_library(track)
                         # Use the 0.8 confidence threshold
-                        if plex_match and confidence >= 0.8:
-                            result.exists_in_plex = True
-                            result.plex_match = plex_match
+                        if match and confidence >= 0.8:
+                            result.exists_in_plex = True  # Keep existing field name for compatibility
+                            result.plex_match = match      # Keep existing field name for compatibility
                             result.confidence = confidence
                     except Exception as e:
-                        result.error_message = f"Plex check failed: {str(e)}"
+                        result.error_message = f"{self.server_type.title()} check failed: {str(e)}"
                 
                 results.append(result)
                 self.signals.track_analyzed.emit(i + 1, result)
@@ -587,11 +588,11 @@ class PlaylistTrackAnalysisWorker(QRunnable):
                 traceback.print_exc()
                 self.signals.analysis_failed.emit(str(e))
     
-    def _check_track_in_plex(self, spotify_track):
+    def _check_track_in_library(self, spotify_track):
         """
         Check if a Spotify track exists in the database by searching for each artist and
         stopping as soon as a confident match is found.
-        Now uses local database instead of Plex API for much faster performance.
+        Now uses local database instead of media server API for much faster performance.
         """
         try:
             original_title = spotify_track.name
@@ -624,8 +625,10 @@ class PlaylistTrackAnalysisWorker(QRunnable):
                 for query_title in unique_title_variations:
                     if self._cancelled: return None, 0.0
 
-                    # Use database check_track_exists method with consistent thresholds
-                    db_track, confidence = db.check_track_exists(query_title, artist_name, confidence_threshold=0.7)
+                    # Use database check_track_exists method with consistent thresholds and active server filter
+                    from config.settings import config_manager
+                    active_server = config_manager.get_active_media_server()
+                    db_track, confidence = db.check_track_exists(query_title, artist_name, confidence_threshold=0.7, server_source=active_server)
                     
                     if db_track and confidence >= 0.7:
                         print(f"✔️ Database match found for '{original_title}' by '{artist_name}': '{db_track.title}' with confidence {confidence:.2f}")
@@ -1633,7 +1636,8 @@ class PlaylistDetailsModal(QDialog):
             self.parent_page.sync_service = PlaylistSyncService(
                 self.parent_page.spotify_client,
                 self.parent_page.plex_client,
-                self.parent_page.soulseek_client
+                self.parent_page.soulseek_client,
+                getattr(self.parent_page, 'jellyfin_client', None)
             )
         
         # Start sync
@@ -1712,14 +1716,24 @@ class PlaylistDetailsModal(QDialog):
         self.start_track_analysis()
         
         # Show analysis started message
+        from config.settings import config_manager
+        active_server = config_manager.get_active_media_server()
+        server_name = active_server.title()
         QMessageBox.information(self, "Analysis Started", 
-                              f"Starting analysis of {track_count} tracks.\nChecking Plex library for existing tracks...")
+                              f"Starting analysis of {track_count} tracks.\nChecking {server_name} library for existing tracks...")
     
     def start_track_analysis(self):
-        """Start background track analysis against Plex library"""
+        """Start background track analysis against media library"""
         # Create analysis worker
-        plex_client = getattr(self.parent_page, 'plex_client', None)
-        worker = PlaylistTrackAnalysisWorker(self.playlist.tracks, plex_client)
+        from config.settings import config_manager
+        active_server = config_manager.get_active_media_server()
+        
+        if active_server == "plex":
+            media_client = getattr(self.parent_page, 'plex_client', None)
+        else:  # jellyfin
+            media_client = getattr(self.parent_page, 'jellyfin_client', None)
+            
+        worker = PlaylistTrackAnalysisWorker(self.playlist.tracks, media_client, active_server)
         
         # Connect signals
         worker.signals.analysis_started.connect(self.on_analysis_started)
@@ -2673,10 +2687,11 @@ class SyncPage(QWidget):
     sync_activity = pyqtSignal(str, str, str, str)  # icon, title, subtitle, time
     database_updated_externally = pyqtSignal()
     
-    def __init__(self, spotify_client=None, plex_client=None, soulseek_client=None, downloads_page=None, parent=None):
+    def __init__(self, spotify_client=None, plex_client=None, soulseek_client=None, downloads_page=None, jellyfin_client=None, parent=None):
         super().__init__(parent)
         self.spotify_client = spotify_client
         self.plex_client = plex_client
+        self.jellyfin_client = jellyfin_client
         self.soulseek_client = soulseek_client
         self.downloads_page = downloads_page
         self.sync_statuses = load_sync_status()
@@ -2712,12 +2727,16 @@ class SyncPage(QWidget):
         self.youtube_cards = {}  # url -> YouTubePlaylistCard instance
         self.youtube_cards_container = None  # Container for all YouTube cards
         
-        # Initialize Plex scan manager
+        # Initialize unified media scan manager
         self.scan_manager = None
-        if self.plex_client:
-            self.scan_manager = PlexScanManager(self.plex_client, delay_seconds=60)
-            # Add automatic incremental database update after Plex scan completion
-            self.scan_manager.add_scan_completion_callback(self._on_plex_scan_completed)
+        try:
+            from core.media_scan_manager import MediaScanManager
+            self.scan_manager = MediaScanManager(delay_seconds=60)
+            # Add automatic incremental database update after scan completion
+            self.scan_manager.add_scan_completion_callback(self._on_media_scan_completed)
+            logger.info("✅ MediaScanManager initialized for SyncPage")
+        except Exception as e:
+            logger.error(f"Failed to initialize MediaScanManager: {e}")
         
         self.setup_ui()
         
@@ -2729,16 +2748,24 @@ class SyncPage(QWidget):
         """Set the toast manager for showing notifications"""
         self.toast_manager = toast_manager
     
-    def _on_plex_scan_completed(self):
-        """Callback triggered when Plex scan completes - start automatic incremental database update"""
+    def _on_media_scan_completed(self):
+        """Callback triggered when media scan completes - start automatic incremental database update"""
         try:
             # Import here to avoid circular imports
             from database import get_database
             from core.database_update_worker import DatabaseUpdateWorker
+            from config.settings import config_manager
+            
+            # Get the active media client
+            active_server = config_manager.get_active_media_server()
+            if active_server == "jellyfin":
+                media_client = getattr(self, 'jellyfin_client', None)
+            else:
+                media_client = getattr(self, 'plex_client', None)
             
             # Check if we should run incremental update
-            if not self.plex_client or not self.plex_client.is_connected():
-                logger.debug("Plex not connected - skipping automatic database update")
+            if not media_client or not media_client.is_connected():
+                logger.debug(f"{active_server.upper()} not connected - skipping automatic database update")
                 return
             
             # Check if database has a previous full refresh
@@ -2761,11 +2788,11 @@ class SyncPage(QWidget):
                 return
             
             # All conditions met - start incremental update
-            logger.info("🎵 Starting automatic incremental database update after Plex scan")
+            logger.info(f"🎵 Starting automatic incremental database update after {active_server.upper()} scan")
             self._start_automatic_incremental_update()
             
         except Exception as e:
-            logger.error(f"Error in Plex scan completion callback: {e}")
+            logger.error(f"Error in media scan completion callback: {e}")
     
     def _start_automatic_incremental_update(self):
         """Start the automatic incremental database update"""
@@ -2866,7 +2893,8 @@ class SyncPage(QWidget):
             self.sync_service = PlaylistSyncService(
                 self.spotify_client,
                 self.plex_client,
-                self.soulseek_client
+                self.soulseek_client,
+                getattr(self, 'jellyfin_client', None)
             )
         
         # Create sync worker
@@ -2919,7 +2947,8 @@ class SyncPage(QWidget):
             self.sync_service = PlaylistSyncService(
                 self.spotify_client,
                 self.plex_client,
-                self.soulseek_client
+                self.soulseek_client,
+                getattr(self, 'jellyfin_client', None)
             )
         
         # Create sync worker for sequential sync
@@ -6681,9 +6710,16 @@ class DownloadMissingTracksModal(QDialog):
 
         
     def start_plex_analysis(self):
-        """Start Plex analysis using existing worker"""
-        plex_client = getattr(self.parent_page, 'plex_client', None)
-        worker = PlaylistTrackAnalysisWorker(self.playlist.tracks, plex_client)
+        """Start media server analysis using existing worker"""
+        from config.settings import config_manager
+        active_server = config_manager.get_active_media_server()
+        
+        if active_server == "plex":
+            media_client = getattr(self.parent_page, 'plex_client', None)
+        else:  # jellyfin
+            media_client = getattr(self.parent_page, 'jellyfin_client', None)
+            
+        worker = PlaylistTrackAnalysisWorker(self.playlist.tracks, media_client, active_server)
         worker.signals.analysis_started.connect(self.on_analysis_started)
         worker.signals.track_analyzed.connect(self.on_track_analyzed)
         worker.signals.analysis_completed.connect(self.on_analysis_completed)

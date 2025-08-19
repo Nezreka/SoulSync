@@ -5,9 +5,9 @@
 
 # 🎵 SoulSync - Automated Music Discovery and Collection Manager
 
-SoulSync is a powerful desktop application designed to bridge the gap between your music streaming habits on Spotify and your personal, high-quality music library in Plex. It automates the process of discovering new music, finding missing tracks from your favorite playlists, and sourcing them from the Soulseek network via slskd.
+SoulSync is a powerful desktop application designed to bridge the gap between your music streaming habits on Spotify and your personal, high-quality music library in Plex or Jellyfin. It automates the process of discovering new music, finding missing tracks from your favorite playlists, and sourcing them from the Soulseek network via slskd.
 
-The core philosophy of SoulSync is to let you enjoy music discovery on Spotify while it handles the tedious work of building and maintaining a pristine, locally-hosted music collection for you in Plex. Plex is not required for the app to function but slskd and Spotify API are required.
+The core philosophy of SoulSync is to let you enjoy music discovery on Spotify while it handles the tedious work of building and maintaining a pristine, locally-hosted music collection for you in your media server. Both Plex and Jellyfin are supported as media servers (though neither is required for the app to function), while slskd and Spotify API are required.
 
 ## ☕ Support Development
 
@@ -15,7 +15,7 @@ If you find SoulSync useful, consider supporting its development:
 
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/boulderbadgedad)
 
-![A screenshot of my awesome app in action.](./assets/dashboard.png)
+![A screenshot of SoulSync](./assets/dashboard.png)
 
 ## ⚠️ Docker Support
 Docker is unlikely since this is a fully GUI based app. The unique setup would be difficult for most users and my knowledge of docker is sad.
@@ -25,7 +25,7 @@ Docker is unlikely since this is a fully GUI based app. The unique setup would b
 ### 🤖 **Automation Engine**
 SoulSync handles everything automatically once you set it up. You can sync multiple Spotify and YouTube playlists at the same time, and it'll prioritize FLAC files and reliable sources. When downloads finish, it organizes them into clean folder structures and updates your Plex library automatically.
 
-The app runs a background process every 60 minutes to retry failed downloads - so if a track wasn't available earlier, it'll keep trying until it finds it. It also auto-detects your Plex server and slskd on your network, backs up your playlists before making changes, and reconnects to services if they go down.
+The app runs a background process every 60 minutes to retry failed downloads - so if a track wasn't available earlier, it'll keep trying until it finds it. It also auto-detects your Plex or Jellyfin server and slskd on your network, backs up your playlists before making changes, and reconnects to services if they go down.
 
 Once it's running, SoulSync basically acts like a personal music librarian that works in the background.
 
@@ -44,7 +44,7 @@ The search page lets you manually hunt for specific albums or singles. Every res
 The matching engine is pretty sophisticated - it prioritizes original versions over remixes, handles weird characters (like КоЯn → Korn), and removes album names from track titles for cleaner matching. It generates multiple search variations per track to find more results and scores each match so you know how confident it is.
 
 ### 🗄️ **Local Database**
-Keeps a complete SQLite database of your Plex library locally, so matching is instant instead of making slow API calls. Updates automatically when files change and handles thousands of songs without slowing down.
+Keeps a complete SQLite database of your media server library (Plex or Jellyfin) locally, so matching is instant instead of making slow API calls. Updates automatically when files change and handles thousands of songs without slowing down.
 
 ### 📁 **File Organization**
 Downloads get organized automatically based on whether they're album tracks or singles. Creates clean folder structures like `Transfer/Artist/Artist - Album/01 - Track.flac`. Supports all common audio formats and automatically tags everything with proper metadata and album art from Spotify.
@@ -59,7 +59,7 @@ Failed downloads automatically get saved to a wishlist with context about where 
 Track your favorite artists automatically by adding them to your watchlist. SoulSync monitors watched artists for new releases and automatically scans their latest albums and singles against your library. When new tracks are found missing, they're added to your wishlist for download. The system runs comprehensive scans with intelligent rate limiting to avoid API bans, and you can view real-time progress with detailed status updates for each artist being scanned.
 
 ### 📊 **Dashboard & Monitoring**
-Real-time status for all your connections (Spotify, Plex, Soulseek), download statistics, and system performance. Activity feed shows everything that's happening with timestamps.
+Real-time status for all your connections (Spotify, Plex/Jellyfin, Soulseek), download statistics, and system performance. Activity feed shows everything that's happening with timestamps.
 
 ### 🎯 **Five Main Pages**
 
@@ -80,15 +80,15 @@ Multi-threaded so it stays responsive during heavy operations. Automatically man
 
 The application follows a clear, automated workflow to enhance and expand your music library:
 
-1. **Connect Services**: First, you authenticate with your Spotify and Plex accounts and connect to your running slskd instance through the settings panel. This gives SoulSync the access it needs to work its magic.
+1. **Connect Services**: First, you authenticate with your Spotify account, connect to your media server (Plex or Jellyfin), and connect to your running slskd instance through the settings panel. This gives SoulSync the access it needs to work its magic.
 
-2. **Analyze**: Navigate to the Sync page and select a Spotify playlist. SoulSync fetches all tracks and compares them against your Plex library. This comparison uses a sophisticated matching engine that looks at track title, artist, album, and duration to make an accurate assessment.
+2. **Analyze**: Navigate to the Sync page and select a Spotify playlist. SoulSync fetches all tracks and compares them against your media server library. This comparison uses a sophisticated matching engine that looks at track title, artist, album, and duration to make an accurate assessment.
 
-3. **Identify Missing**: After the analysis, the application generates a clear, actionable list of tracks that are present in the Spotify playlist but are not found in your Plex library.
+3. **Identify Missing**: After the analysis, the application generates a clear, actionable list of tracks that are present in the Spotify playlist but are not found in your media server library.
 
 4. **Search & Download**: For each missing track, SoulSync generates multiple optimized search queries to increase the likelihood of finding a high-quality match. It then uses the slskd API to search the Soulseek network, prioritizing FLAC files and reliable users, and automatically queues them for download.
 
-5. **Organize & Enhance**: Once a download is complete, SoulSync automatically organizes the file from the download directory into the transfer directory, creating a clean folder structure based on the artist and album (`/Transfer/Artist Name/Artist Name - Album Name/Track.flac`). Immediately after organization, the metadata enhancement system enriches the file with accurate Spotify data including proper artist/album names, track numbers, release dates, genres, and high-quality embedded album art. This ensures every file emerges perfectly tagged and ready for Plex, requiring no manual metadata editing.
+5. **Organize & Enhance**: Once a download is complete, SoulSync automatically organizes the file from the download directory into the transfer directory, creating a clean folder structure based on the artist and album (`/Transfer/Artist Name/Artist Name - Album Name/Track.flac`). Immediately after organization, the metadata enhancement system enriches the file with accurate Spotify data including proper artist/album names, track numbers, release dates, genres, and high-quality embedded album art. This ensures every file emerges perfectly tagged and ready for your media server, requiring no manual metadata editing.
 
 ## 🚀 Getting Started
 
@@ -108,7 +108,7 @@ Follow these steps to get SoulSync up and running on your system.
 Before you begin, ensure you have the following installed and configured:
 
 - **Python 3.8+**: The core runtime for the application.
-- **Plex Media Server (OPTIONAL)**: Optional but recommended. If connected, SoulSync will scan your existing music library to identify missing tracks. Without Plex, all tracks will be considered "missing" and automatically downloaded.
+- **Media Server (OPTIONAL)**: Either Plex Media Server or Jellyfin is optional but recommended. If connected, SoulSync will scan your existing music library to identify missing tracks. Without a media server, all tracks will be considered "missing" and automatically downloaded.
 - **slskd**: A headless Soulseek client. This is the engine that powers the downloading feature. See detailed setup instructions below.
 - **Spotify Account**: A regular or premium Spotify account is required to access your playlists and artist data.
 
@@ -176,7 +176,7 @@ docker run -d \
 
 1. Launch the application (`python main.py`).
 2. The very first thing you should do is navigate to the **Settings** page using the sidebar.
-3. Fill in the required fields for Spotify and Soulseek. Plex configuration is optional but recommended.
+3. Fill in the required fields for Spotify and Soulseek. Media server configuration (Plex or Jellyfin) is optional but recommended.
 4. Click "Save Settings". The app is now ready to use.
 5. Restart the app for good luck.
 
@@ -187,11 +187,11 @@ docker run -d \
 
 ### Configuration Details
 
-Open the `config.json` file and fill in the details for Spotify, Plex, and Soulseek.
+Open the `config.json` file and fill in the details for Spotify, your media server (Plex or Jellyfin), and Soulseek.
 
 #### 🔑 Obtaining Required API Credentials
 
-Before configuring SoulSync, you'll need to obtain API credentials from Spotify and Plex. Here's how:
+Before configuring SoulSync, you'll need to obtain API credentials from Spotify and your media server. Here's how:
 
 ##### Spotify Client ID and Secret
 
@@ -244,10 +244,33 @@ Before configuring SoulSync, you'll need to obtain API credentials from Spotify 
 - Same machine: `http://localhost:32400`
 - To find your server IP, check your Plex server settings or use your router's admin panel
 
+##### Jellyfin API Key
+
+**Method 1: Through Jellyfin Dashboard (Recommended)**
+1. Open your Jellyfin web interface and sign in as an administrator
+2. Go to **Dashboard** → **API Keys**
+3. Click **New API Key**
+4. Enter an **App Name** (e.g., "SoulSync") 
+5. Click **Create**
+6. Copy the generated API key immediately (it won't be shown again)
+
+**Method 2: Through User Settings**
+1. Go to **Dashboard** → **Users**
+2. Click on your user account
+3. Go to the **API Keys** tab
+4. Create a new API key as described above
+
+**Finding Your Jellyfin Server URL:**
+- Local network: `http://[YOUR_JELLYFIN_SERVER_IP]:8096` (e.g., `http://192.168.1.100:8096`)
+- Same machine: `http://localhost:8096`
+- HTTPS: `https://[YOUR_JELLYFIN_SERVER_IP]:8920` (if configured)
+
+**Note**: SoulSync uses Jellyfin's REST API for library access. Make sure your Jellyfin user has permissions to access the music library.
+
 #### 📁 Important: Understanding Download vs Transfer Folders
 
 - **download_path**: This should be the exact same folder where slskd saves its downloads (e.g., the downloads folder you configured in slskd). SoulSync monitors this folder for completed downloads.
-- **transfer_path**: This is where SoulSync moves and organizes the processed files. Typically, this should be your main Plex music library folder, so the files are immediately available to Plex after processing.
+- **transfer_path**: This is where SoulSync moves and organizes the processed files. Typically, this should be your main media server music library folder, so the files are immediately available to your media server after processing.
 
 #### ❗ Important: slskd API Key Setup
 
@@ -275,11 +298,19 @@ Alternatively, you can paste this key directly into the API Key field in the Set
     "base_url": "<YOUR_PLEX_SERVER_URL>",
     "token": "<YOUR_PLEX_TOKEN>"
   },
+  "jellyfin": {
+    "base_url": "<YOUR_JELLYFIN_SERVER_URL>",
+    "api_key": "<YOUR_JELLYFIN_API_KEY>",
+    "user_id": "<YOUR_JELLYFIN_USER_ID>"
+  },
   "soulseek": {
     "slskd_url": "<YOUR_SLSKD_URL>",
     "api_key": "<YOUR_SLSKD_API_KEY>",
     "download_path": "./path/to/slskd/download/folder",
     "transfer_path": "./path/to/music/folder"
+  },
+  "server": {
+    "active_media_server": "plex"
   },
   "logging": {
     "path": "logs/app.log",
@@ -302,6 +333,8 @@ Alternatively, you can paste this key directly into the API Key field in the Set
 }
 ```
 
+**Note**: Set `"active_media_server"` to either `"plex"` or `"jellyfin"` depending on which media server you want to use. You only need to configure the server you plan to use.
+
 ## 🖥️ Usage
 
 Run the main application file to launch the GUI:
@@ -316,15 +349,15 @@ python3 main.py
 
 ### Application Pages
 
-- **Dashboard**: Real-time system overview with service connection matrix (Spotify/Plex/Soulseek status), live download statistics (active transfers, speeds, queue status), database health metrics (size, sync status, last update), chronological activity feed of all application events, and quick action buttons for common operations.
+- **Dashboard**: Real-time system overview with service connection matrix (Spotify/Plex/Jellyfin/Soulseek status), live download statistics (active transfers, speeds, queue status), database health metrics (size, sync status, last update), chronological activity feed of all application events, and quick action buttons for common operations.
 
-- **Sync**: Advanced playlist management featuring Spotify playlist loading with snapshot-based change detection, confidence-scored track matching with color-coded indicators, bulk "Download Missing Tracks" with progress tracking, intelligent retry logic for failed downloads, and detailed match analysis showing why tracks were or weren't found in your Plex library.
+- **Sync**: Advanced playlist management featuring Spotify playlist loading with snapshot-based change detection, confidence-scored track matching with color-coded indicators, bulk "Download Missing Tracks" with progress tracking, intelligent retry logic for failed downloads, and detailed match analysis showing why tracks were or weren't found in your media server library.
 
 - **Downloads**: Comprehensive download management with unified Albums/Singles search interface, stream-before-download capability for every result, matched download system with artist/album selection modals, real-time progress monitoring with queue positions, failed download recovery via integrated wishlist access, and persistent search history across sessions.
 
-- **Artists**: Complete discography explorer with full artist catalog browsing, ownership status indicators for every album, chronological release timeline with Plex library overlay, bulk download operations for entire discographies, album-level missing track downloads, and integration with matched download system for accurate metadata assignment.
+- **Artists**: Complete discography explorer with full artist catalog browsing, ownership status indicators for every album, chronological release timeline with media server library overlay, bulk download operations for entire discographies, album-level missing track downloads, and integration with matched download system for accurate metadata assignment.
 
-- **Settings**: Service configuration hub for Spotify/Plex/Soulseek credentials, download/transfer path management, metadata enhancement controls (enable/disable automatic tagging and album art embedding), database operations (update, rebuild, health check), performance tuning options (thread limits, cache settings), notification preferences, and application logging controls.
+- **Settings**: Service configuration hub for Spotify/Plex/Jellyfin/Soulseek credentials, media server selection, download/transfer path management, metadata enhancement controls (enable/disable automatic tagging and album art embedding), database operations (update, rebuild, health check), performance tuning options (thread limits, cache settings), notification preferences, and application logging controls.
 
 ## 🐍 Key Components
 
@@ -335,14 +368,15 @@ The application is built on a modern, layered architecture with distinct separat
 - **core/**: Business logic and service integration layer
   - `spotify_client.py`: Spotify Web API integration with OAuth2 authentication, playlist/artist data retrieval, and metadata normalization.
   - `plex_client.py`: Plex Media Server API client with library scanning, metadata retrieval, and server status monitoring.
+  - `jellyfin_client.py`: Jellyfin Media Server API client with library scanning, metadata retrieval, and server status monitoring.
   - `soulseek_client.py`: slskd API communication handling search operations, download management, and queue monitoring.
   - `matching_engine.py`: Advanced metadata comparison engine with version-aware scoring, text normalization, and confidence calculation.
   - `wishlist_service.py`: Failed download management with retry mechanisms and source context preservation.
-  - `plex_scan_manager.py`: Intelligent Plex library scan coordination with debouncing and periodic updates.
+  - `media_scan_manager.py`: Intelligent media server library scan coordination with debouncing and periodic updates.
 
 - **database/**: Data persistence and management layer
   - `music_database.py`: SQLite database operations with thread-safe connections, WAL mode, and metadata synchronization.
-  - `music_library.db`: Local database storing complete Plex library metadata for instant access.
+  - `music_library.db`: Local database storing complete media server library metadata for instant access.
 
 - **ui/**: Modern PyQt6 user interface with responsive design
   - `sidebar.py`: Navigation sidebar with integrated media player, service status indicators, and scrolling track info.
