@@ -119,7 +119,10 @@ class PlaylistTrackAnalysisWorker(QRunnable):
                 for query_title in unique_title_variations:
                     if self._cancelled: return None, 0.0
 
-                    db_track, confidence = db.check_track_exists(query_title, artist_name, confidence_threshold=0.7)
+                    # Use server-aware database query to check only active server
+                    from config.settings import config_manager
+                    active_server = config_manager.get_active_media_server()
+                    db_track, confidence = db.check_track_exists(query_title, artist_name, confidence_threshold=0.7, server_source=active_server)
                     
                     if db_track and confidence >= 0.7:
                         class MockPlexTrack:
@@ -1401,18 +1404,19 @@ class SimpleWishlistDownloadWorker(QRunnable):
 
 
 class MetadataUpdateWorker(QThread):
-    """Worker thread for updating Plex artist metadata using Spotify data"""
+    """Worker thread for updating artist metadata using Spotify data (supports both Plex and Jellyfin)"""
     progress_updated = pyqtSignal(str, int, int, float)  # current_artist, processed, total, percentage
     artist_updated = pyqtSignal(str, bool, str)  # artist_name, success, details
     finished = pyqtSignal(int, int, int)  # total_processed, successful, failed
     error = pyqtSignal(str)  # error_message
     artists_loaded = pyqtSignal(int, int)  # total_artists, artists_to_process
     
-    def __init__(self, artists, plex_client, spotify_client, refresh_interval_days=30):
+    def __init__(self, artists, media_client, spotify_client, server_type, refresh_interval_days=30):
         super().__init__()
         self.artists = artists
-        self.plex_client = plex_client
+        self.media_client = media_client  # Can be plex_client or jellyfin_client
         self.spotify_client = spotify_client
+        self.server_type = server_type  # "plex" or "jellyfin"
         self.matching_engine = MusicMatchingEngine()
         self.refresh_interval_days = refresh_interval_days
         self.should_stop = False
@@ -1425,14 +1429,23 @@ class MetadataUpdateWorker(QThread):
     def stop(self):
         self.should_stop = True
     
+    def get_artist_name(self, artist):
+        """Get artist name consistently across Plex and Jellyfin"""
+        # Both Plex and Jellyfin wrapper objects have .title attribute
+        return getattr(artist, 'title', 'Unknown Artist')
+    
     def run(self):
         """Process all artists one by one"""
         try:
             # Load artists in background if not provided
             if self.artists is None:
-                all_artists = self.plex_client.get_all_artists()
+                # Enable lightweight mode for Jellyfin to skip track caching
+                if self.server_type == "jellyfin":
+                    self.media_client.set_metadata_only_mode(True)
+                
+                all_artists = self.media_client.get_all_artists()
                 if not all_artists:
-                    self.error.emit("No artists found in Plex library")
+                    self.error.emit(f"No artists found in {self.server_type.title()} library")
                     return
                 
                 # Filter artists that need processing
@@ -1457,7 +1470,7 @@ class MetadataUpdateWorker(QThread):
                 artist_name = getattr(artist, 'title', 'Unknown Artist')
                 
                 # Double-check ignore flag right before processing (in case it was added after loading)
-                if self.plex_client.is_artist_ignored(artist):
+                if self.media_client.is_artist_ignored(artist):
                     return (artist_name, True, "Skipped (ignored)")
                 
                 try:
@@ -1502,9 +1515,12 @@ class MetadataUpdateWorker(QThread):
     def artist_needs_processing(self, artist):
         """Check if an artist needs metadata processing using age-based detection"""
         try:
-            # Use PlexClient's age-based checking with configured interval
-            # This also handles the ignore flag check internally
-            return self.plex_client.needs_update_by_age(artist, self.refresh_interval_days)
+            # Check if artist is manually ignored
+            if self.media_client.is_artist_ignored(artist):
+                return False
+            
+            # Use media client's age-based checking with configured interval
+            return self.media_client.needs_update_by_age(artist, self.refresh_interval_days)
             
         except Exception as e:
             print(f"Error checking artist {getattr(artist, 'title', 'Unknown')}: {e}")
@@ -1554,14 +1570,18 @@ class MetadataUpdateWorker(QThread):
             if genres_updated:
                 changes_made.append("genres")
             
-            # Update album artwork
-            albums_updated = self.update_album_artwork(artist, spotify_artist)
-            if albums_updated > 0:
-                changes_made.append(f"{albums_updated} album art")
+            # Update album artwork (only for Plex, skip for Jellyfin due to API issues)
+            if self.server_type == "plex":
+                albums_updated = self.update_album_artwork(artist, spotify_artist)
+                if albums_updated > 0:
+                    changes_made.append(f"{albums_updated} album art")
+            else:
+                # Skip album artwork for Jellyfin until API issues are resolved
+                logger.debug(f"Skipping album artwork updates for Jellyfin artist: {artist.title}")
             
             if changes_made:
                 # Update artist biography with timestamp to track last update
-                biography_updated = self.plex_client.update_artist_biography(artist)
+                biography_updated = self.media_client.update_artist_biography(artist)
                 if biography_updated:
                     changes_made.append("timestamp")
                 
@@ -1569,7 +1589,7 @@ class MetadataUpdateWorker(QThread):
                 return True, details
             else:
                 # Even if no metadata changes, update biography to record we checked this artist
-                self.plex_client.update_artist_biography(artist)
+                self.media_client.update_artist_biography(artist)
                 return True, "Already up to date"
                 
         except Exception as e:
@@ -1639,8 +1659,8 @@ class MetadataUpdateWorker(QThread):
                 
                 print(f"[DEBUG] Updating genres for '{artist.title}' to: {genre_list}")
                 
-                # Use Plex API to update genres
-                success = self.plex_client.update_artist_genres(artist, genre_list)
+                # Use media client API to update genres
+                success = self.media_client.update_artist_genres(artist, genre_list)
                 if success:
                     print(f"[DEBUG] Successfully updated genres for '{artist.title}'")
                     return True
@@ -1798,8 +1818,8 @@ class MetadataUpdateWorker(QThread):
                 print(f"Invalid image data for album '{album_title}'")
                 return False
             
-            # Upload to Plex using our new method
-            success = self.plex_client.update_album_poster(album, image_data)
+            # Upload using media client
+            success = self.media_client.update_album_poster(album, image_data)
             if success:
                 print(f"✅ Updated artwork for album '{album_title}'")
             else:
@@ -1849,26 +1869,31 @@ class MetadataUpdateWorker(QThread):
             return None
     
     def upload_artist_poster(self, artist, image_data):
-        """Upload poster to Plex"""
+        """Upload poster using media client"""
         try:
-            # Use Plex client's update method if available
-            if hasattr(self.plex_client, 'update_artist_poster'):
-                return self.plex_client.update_artist_poster(artist, image_data)
+            # Use media client's update method if available
+            if hasattr(self.media_client, 'update_artist_poster'):
+                return self.media_client.update_artist_poster(artist, image_data)
             
-            # Fallback: direct Plex API call
-            server = self.plex_client.server
-            upload_url = f"{server._baseurl}/library/metadata/{artist.ratingKey}/posters"
-            headers = {
-                'X-Plex-Token': server._token,
-                'Content-Type': 'image/jpeg'
-            }
-            
-            response = requests.post(upload_url, data=image_data, headers=headers)
-            response.raise_for_status()
-            
-            # Refresh artist to see changes
-            artist.refresh()
-            return True
+            # Fallback for Plex: direct API call
+            if self.server_type == "plex":
+                import requests
+                server = self.media_client.server
+                upload_url = f"{server._baseurl}/library/metadata/{artist.ratingKey}/posters"
+                headers = {
+                    'X-Plex-Token': server._token,
+                    'Content-Type': 'image/jpeg'
+                }
+                
+                response = requests.post(upload_url, data=image_data, headers=headers)
+                response.raise_for_status()
+                
+                # Refresh artist to see changes
+                artist.refresh()
+                return True
+            else:
+                # For other server types, return False since we only have fallback for Plex
+                return False
             
         except Exception as e:
             print(f"Error uploading poster: {e}")
@@ -1917,6 +1942,7 @@ class DashboardDataProvider(QObject):
         self.service_status = {
             'spotify': ServiceStatus('Spotify', False, datetime.now()),
             'plex': ServiceStatus('Plex', False, datetime.now()),
+            'jellyfin': ServiceStatus('Jellyfin', False, datetime.now()),
             'soulseek': ServiceStatus('Soulseek', False, datetime.now())
         }
         self.download_stats = DownloadStats()
@@ -1934,10 +1960,11 @@ class DashboardDataProvider(QObject):
         self.system_stats_timer.timeout.connect(self.update_system_stats)
         self.system_stats_timer.start(10000)  # Update every 10 seconds
     
-    def set_service_clients(self, spotify_client, plex_client, soulseek_client):
+    def set_service_clients(self, spotify_client, plex_client, jellyfin_client, soulseek_client):
         self.service_clients = {
             'spotify_client': spotify_client,
-            'plex_client': plex_client, 
+            'plex_client': plex_client,
+            'jellyfin_client': jellyfin_client,
             'soulseek_client': soulseek_client
         }
     
@@ -2066,22 +2093,25 @@ class DashboardDataProvider(QObject):
     
     def test_service_connection(self, service: str):
         """Test connection to a specific service"""
-        print(f"DEBUG: Testing {service} connection")
-        print(f"DEBUG: Available service clients: {list(self.service_clients.keys())}")
         
         # Map service names to client keys
         service_key_map = {
             'spotify': 'spotify_client',
-            'plex': 'plex_client', 
+            'plex': 'plex_client',
+            'jellyfin': None,  # Jellyfin doesn't need a client, tests via config
             'soulseek': 'soulseek_client'
         }
         
         client_key = service_key_map.get(service, service)
-        if client_key not in self.service_clients:
+        
+        # Handle Jellyfin special case (no client needed)
+        if service == 'jellyfin':
+            client = None  # Jellyfin test uses config directly
+        elif client_key not in self.service_clients:
             print(f"DEBUG: Service {service} (key: {client_key}) not found in service_clients")
             return
-        
-        print(f"DEBUG: Service client for {service}: {self.service_clients[client_key]}")
+        else:
+            client = self.service_clients[client_key]
         
         # Clean up any existing test thread for this service
         if hasattr(self, '_test_threads') and service in self._test_threads:
@@ -2096,11 +2126,10 @@ class DashboardDataProvider(QObject):
             self._test_threads = {}
         
         # Run connection test in background thread
-        test_thread = ServiceTestThread(service, self.service_clients[client_key])
+        test_thread = ServiceTestThread(service, client)
         test_thread.test_completed.connect(self.on_service_test_completed)
         test_thread.finished.connect(lambda: self._cleanup_test_thread(service))
         self._test_threads[service] = test_thread
-        print(f"DEBUG: Starting test thread for {service}")
         test_thread.start()
     
     def _cleanup_test_thread(self, service: str):
@@ -2134,6 +2163,25 @@ class ServiceTestThread(QThread):
                 connected = self.client.is_authenticated()
             elif self.service == 'plex':
                 connected = self.client.is_connected()
+            elif self.service == 'jellyfin':
+                # Test Jellyfin connection using HTTP request
+                try:
+                    from config.settings import config_manager
+                    jellyfin_config = config_manager.get_jellyfin_config()
+                    base_url = jellyfin_config.get('base_url', '').rstrip('/')
+                    api_key = jellyfin_config.get('api_key', '')
+                    
+                    if base_url and api_key:
+                        import requests
+                        headers = {'X-Emby-Token': api_key}
+                        response = requests.get(f"{base_url}/System/Info", headers=headers, timeout=5)
+                        connected = response.status_code == 200
+                    else:
+                        connected = False
+                        error = "Missing Jellyfin configuration (base_url or api_key)"
+                except Exception as e:
+                    connected = False
+                    error = str(e)
             elif self.service == 'soulseek':
                 # Run async method in new event loop
                 loop = asyncio.new_event_loop()
@@ -2322,8 +2370,11 @@ class MetadataUpdaterWidget(QFrame):
         layout.setContentsMargins(20, 15, 20, 15)
         layout.setSpacing(12)
         
-        # Header
-        header_label = QLabel("Plex Metadata Updater")
+        # Header - Make it dynamic based on active server
+        from config.settings import config_manager
+        active_server = config_manager.get_active_media_server()
+        server_display = active_server.title()
+        header_label = QLabel(f"{server_display} Metadata Updater")
         header_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
         header_label.setStyleSheet("color: #ffffff;")
         
@@ -2661,25 +2712,29 @@ class DashboardPage(QWidget):
             self.wishlist_download_modal.process_finished.connect(self.on_wishlist_modal_finished)
         return True
 
-    def set_service_clients(self, spotify_client, plex_client, soulseek_client, downloads_page=None):
+    def set_service_clients(self, spotify_client, plex_client, jellyfin_client, soulseek_client, downloads_page=None):
         """Called from main window to provide service client references"""
-        self.data_provider.set_service_clients(spotify_client, plex_client, soulseek_client)
+        self.data_provider.set_service_clients(spotify_client, plex_client, jellyfin_client, soulseek_client)
         
         # Store service clients for wishlist modal
         self.service_clients = {
             'spotify_client': spotify_client,
             'plex_client': plex_client,
+            'jellyfin_client': jellyfin_client,
             'soulseek_client': soulseek_client,
             'downloads_page': downloads_page
         }
         
-        # Initialize Plex scan manager for wishlist modal integration
+        # Initialize unified media scan manager for wishlist modal integration
         self.scan_manager = None
-        if plex_client:
-            self.scan_manager = PlexScanManager(plex_client, delay_seconds=60)
-            # Add automatic incremental database update after Plex scan completion
-            self.scan_manager.add_scan_completion_callback(self._on_plex_scan_completed)
-            logger.info("✅ PlexScanManager initialized for Dashboard wishlist modal")
+        try:
+            from core.media_scan_manager import MediaScanManager
+            self.scan_manager = MediaScanManager(delay_seconds=60)
+            # Add automatic incremental database update after scan completion
+            self.scan_manager.add_scan_completion_callback(self._on_media_scan_completed)
+            logger.info("✅ MediaScanManager initialized for Dashboard wishlist modal")
+        except Exception as e:
+            logger.error(f"Failed to initialize MediaScanManager: {e}")
     
     def set_page_references(self, downloads_page, sync_page):
         """Called from main window to provide page references for live data"""
@@ -2695,17 +2750,24 @@ class DashboardPage(QWidget):
         """Set the toast manager for showing notifications"""
         self.toast_manager = toast_manager
     
-    def _on_plex_scan_completed(self):
-        """Callback triggered when Plex scan completes - start automatic incremental database update"""
+    def _on_media_scan_completed(self):
+        """Callback triggered when media scan completes - start automatic incremental database update"""
         try:
             # Import here to avoid circular imports
             from database import get_database
             from core.database_update_worker import DatabaseUpdateWorker
+            from config.settings import config_manager
+            
+            # Get the active media client
+            active_server = config_manager.get_active_media_server()
+            if active_server == "jellyfin":
+                media_client = self.service_clients.get('jellyfin_client')
+            else:
+                media_client = self.service_clients.get('plex_client')
             
             # Check if we should run incremental update
-            plex_client = self.service_clients.get('plex_client')
-            if not plex_client or not plex_client.is_connected():
-                logger.debug("Plex not connected - skipping automatic database update")
+            if not media_client or not media_client.is_connected():
+                logger.debug(f"{active_server.upper()} not connected - skipping automatic database update")
                 return
             
             # Check if database has a previous full refresh
@@ -2728,11 +2790,11 @@ class DashboardPage(QWidget):
                 return
             
             # All conditions met - start incremental update
-            logger.info("🎵 Starting automatic incremental database update after Plex scan")
+            logger.info(f"🎵 Starting automatic incremental database update after {active_server.upper()} scan")
             self._start_automatic_incremental_update()
             
         except Exception as e:
-            logger.error(f"Error in Plex scan completion callback: {e}")
+            logger.error(f"Error in media scan completion callback: {e}")
     
     def _start_automatic_incremental_update(self):
         """Start the automatic incremental database update"""
@@ -2745,11 +2807,24 @@ class DashboardPage(QWidget):
                 return
             
             # Create worker for incremental update only
-            plex_client = self.service_clients.get('plex_client')
+            from config.settings import config_manager
+            active_server = config_manager.get_active_media_server()
+            
+            # Get the appropriate client
+            if active_server == "plex":
+                media_client = self.service_clients.get('plex_client')
+            elif active_server == "jellyfin":
+                from core.jellyfin_client import JellyfinClient
+                media_client = JellyfinClient()
+            else:
+                logger.error(f"Unknown active server for auto-update: {active_server}")
+                return
+            
             self._auto_database_worker = DatabaseUpdateWorker(
-                plex_client,
+                media_client,
                 "database/music_library.db",
-                full_refresh=False  # Always incremental for automatic updates
+                full_refresh=False,  # Always incremental for automatic updates
+                server_type=active_server
             )
             
             # Connect completion signal to log result
@@ -2973,8 +3048,11 @@ class DashboardPage(QWidget):
         cards_layout = QHBoxLayout()
         cards_layout.setSpacing(20)
         
-        # Create service status cards
-        services = ['Spotify', 'Plex', 'Soulseek']
+        # Create service status cards with dynamic media server
+        from config.settings import config_manager
+        active_server = config_manager.get_active_media_server()
+        server_name = "Plex" if active_server == "plex" else "Jellyfin"
+        services = ['Spotify', server_name, 'Soulseek']
         for service in services:
             card = ServiceStatusCard(service)
             card.test_button.clicked.connect(lambda checked, s=service.lower(): self.test_service_connection(s))
@@ -3036,13 +3114,20 @@ class DashboardPage(QWidget):
         self.database_widget = DatabaseUpdaterWidget()
         self.database_widget.start_button.clicked.connect(self.toggle_database_update)
         
-        # Metadata updater widget (SECOND)
-        self.metadata_widget = MetadataUpdaterWidget()
-        self.metadata_widget.start_button.clicked.connect(self.toggle_metadata_update)
+        # Metadata updater widget (SECOND) - only show for Plex
+        from config.settings import config_manager
+        active_server = config_manager.get_active_media_server()
+        
+        if active_server == "plex":
+            self.metadata_widget = MetadataUpdaterWidget()
+            self.metadata_widget.start_button.clicked.connect(self.toggle_metadata_update)
+        else:
+            self.metadata_widget = None  # Hide for Jellyfin
         
         layout.addWidget(header_label)
         layout.addWidget(self.database_widget)
-        layout.addWidget(self.metadata_widget)
+        if self.metadata_widget:  # Only add if it exists
+            layout.addWidget(self.metadata_widget)
         
         return section
     
@@ -3122,9 +3207,24 @@ class DashboardPage(QWidget):
             logger.debug(f"Service clients available: {list(self.data_provider.service_clients.keys())}")
             logger.debug(f"Plex client: {self.data_provider.service_clients.get('plex')}")
         
-        if not hasattr(self, 'data_provider') or not self.data_provider.service_clients.get('plex_client'):
+        # Check that we have a data provider
+        if not hasattr(self, 'data_provider'):
+            self.add_activity_item("❌", "Database Update", "Service clients not available", "Now")
+            return
+        
+        # Get the active media server and check if client is available
+        from config.settings import config_manager
+        active_server = config_manager.get_active_media_server()
+        
+        if active_server == "plex" and not self.data_provider.service_clients.get('plex_client'):
             self.add_activity_item("❌", "Database Update", "Plex client not available", "Now")
             return
+        elif active_server == "jellyfin":
+            # Jellyfin client will be created on-demand, just verify config exists
+            jellyfin_config = config_manager.get_jellyfin_config()
+            if not jellyfin_config.get('base_url') or not jellyfin_config.get('api_key'):
+                self.add_activity_item("❌", "Database Update", "Jellyfin not configured", "Now")
+                return
         
         try:
             # Get update type from dropdown
@@ -3147,11 +3247,28 @@ class DashboardPage(QWidget):
                     logger.debug("Full refresh cancelled by user")
                     return  # Cancel the operation
             
+            # Get the active media server
+            from config.settings import config_manager
+            active_server = config_manager.get_active_media_server()
+            
+            # Get the appropriate client
+            if active_server == "plex":
+                media_client = self.data_provider.service_clients['plex_client']
+            elif active_server == "jellyfin":
+                # Import and get Jellyfin client
+                from core.jellyfin_client import JellyfinClient
+                media_client = JellyfinClient()
+            else:
+                logger.error(f"Unknown active server: {active_server}")
+                self.add_activity_item("❌", "Database Update", f"Unknown server type: {active_server}", "Now")
+                return
+            
             # Start the database update worker
             self.database_worker = DatabaseUpdateWorker(
-                self.data_provider.service_clients['plex_client'],
+                media_client,
                 "database/music_library.db",
-                full_refresh
+                full_refresh,
+                server_type=active_server
             )
             
             # Connect signals
@@ -3164,7 +3281,8 @@ class DashboardPage(QWidget):
             # Update UI and start
             self.database_widget.update_progress(True, "Initializing...", 0, 0, 0.0)
             update_type = "Full refresh" if full_refresh else "Incremental update"
-            self.add_activity_item("🗄️", "Database Update", f"Starting {update_type.lower()}...", "Now")
+            server_display = active_server.title()  # "Plex" or "Jellyfin"
+            self.add_activity_item("🗄️", "Database Update", f"Starting {update_type.lower()} from {server_display}...", "Now")
             
             self.database_worker.start()
             
@@ -3310,6 +3428,9 @@ class DashboardPage(QWidget):
     
     def toggle_metadata_update(self):
         """Toggle metadata update process"""
+        if not self.metadata_widget:
+            return  # Metadata widget not available (Jellyfin server)
+            
         current_text = self.metadata_widget.start_button.text()
         if "Begin" in current_text:
             # Start metadata update
@@ -3324,9 +3445,22 @@ class DashboardPage(QWidget):
         if hasattr(self, 'data_provider') and hasattr(self.data_provider, 'service_clients'):
             logger.debug(f"Service clients available: {list(self.data_provider.service_clients.keys())}")
         
-        if not hasattr(self, 'data_provider') or not self.data_provider.service_clients.get('plex_client'):
-            self.add_activity_item("❌", "Metadata Update", "Plex client not available", "Now")
-            return
+        # Check active server and client availability
+        from config.settings import config_manager
+        active_server = config_manager.get_active_media_server()
+        
+        # Currently metadata updater only supports Plex
+        # Check if we have the active media server client
+        if active_server == "jellyfin":
+            media_client = self.data_provider.service_clients.get('jellyfin_client')
+            if not media_client:
+                self.add_activity_item("❌", "Metadata Update", "Jellyfin client not available", "Now")
+                return
+        else:
+            media_client = self.data_provider.service_clients.get('plex_client')
+            if not media_client:
+                self.add_activity_item("❌", "Metadata Update", "Plex client not available", "Now")
+                return
             
         if not self.data_provider.service_clients.get('spotify_client'):
             self.add_activity_item("❌", "Metadata Update", "Spotify client not available", "Now")
@@ -3334,13 +3468,14 @@ class DashboardPage(QWidget):
         
         try:
             # Get refresh interval from dropdown
-            refresh_interval_days = self.metadata_widget.get_refresh_interval_days()
+            refresh_interval_days = self.metadata_widget.get_refresh_interval_days() if self.metadata_widget else 30
             
             # Start the metadata update worker (it will handle artist retrieval in background)
             self.metadata_worker = MetadataUpdateWorker(
                 None,  # Artists will be loaded in the worker thread
-                self.data_provider.service_clients['plex_client'],
+                media_client,
                 self.data_provider.service_clients['spotify_client'],
+                active_server,
                 refresh_interval_days
             )
             
@@ -3352,8 +3487,9 @@ class DashboardPage(QWidget):
             self.metadata_worker.artists_loaded.connect(self.on_artists_loaded)
             
             # Update UI and start
-            self.metadata_widget.update_progress(True, "Loading artists...", 0, 0, 0.0)
-            self.add_activity_item("🎵", "Metadata Update", "Loading artists from Plex library...", "Now")
+            if self.metadata_widget:
+                self.metadata_widget.update_progress(True, "Loading artists...", 0, 0, 0.0)
+            self.add_activity_item("🎵", "Metadata Update", "Loading artists from library...", "Now")
             
             self.metadata_worker.start()
             
@@ -3375,7 +3511,8 @@ class DashboardPage(QWidget):
             if self.metadata_worker.isRunning():
                 self.metadata_worker.terminate()
         
-        self.metadata_widget.update_progress(False, "", 0, 0, 0.0)
+        if self.metadata_widget:
+            self.metadata_widget.update_progress(False, "", 0, 0, 0.0)
         self.add_activity_item("⏹️", "Metadata Update", "Stopped metadata update process", "Now")
     
     def artist_needs_processing(self, artist):
@@ -3414,7 +3551,8 @@ class DashboardPage(QWidget):
     
     def on_metadata_progress(self, current_artist, processed, total, percentage):
         """Handle metadata update progress"""
-        self.metadata_widget.update_progress(True, current_artist, processed, total, percentage)
+        if self.metadata_widget:
+            self.metadata_widget.update_progress(True, current_artist, processed, total, percentage)
     
     def on_artist_updated(self, artist_name, success, details):
         """Handle individual artist update completion"""
@@ -3425,13 +3563,15 @@ class DashboardPage(QWidget):
     
     def on_metadata_finished(self, total_processed, successful, failed):
         """Handle metadata update completion"""
-        self.metadata_widget.update_progress(False, "", 0, 0, 0.0)
+        if self.metadata_widget:
+            self.metadata_widget.update_progress(False, "", 0, 0, 0.0)
         summary = f"Processed {total_processed} artists: {successful} updated, {failed} failed"
         self.add_activity_item("🎵", "Metadata Complete", summary, "Now")
     
     def on_metadata_error(self, error_message):
         """Handle metadata update error"""
-        self.metadata_widget.update_progress(False, "", 0, 0, 0.0)
+        if self.metadata_widget:
+            self.metadata_widget.update_progress(False, "", 0, 0, 0.0)
         self.add_activity_item("❌", "Metadata Error", error_message, "Now")
     
     def on_service_status_updated(self, service: str, connected: bool, response_time: float, error: str):
@@ -3471,7 +3611,8 @@ class DashboardPage(QWidget):
     
     def on_metadata_progress_updated(self, is_running: bool, current_artist: str, processed: int, total: int, percentage: float):
         """Handle metadata update progress"""
-        self.metadata_widget.update_progress(is_running, current_artist, processed, total, percentage)
+        if self.metadata_widget:
+            self.metadata_widget.update_progress(is_running, current_artist, processed, total, percentage)
     
     def on_sync_progress_updated(self, current_playlist: str, active_syncs: int):
         """Handle sync progress updates"""

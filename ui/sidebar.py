@@ -540,6 +540,11 @@ class StatusIndicator(QWidget):
                 font-weight: 400;
                 letter-spacing: 0.1px;
             """)
+    
+    def update_name(self, new_name: str):
+        """Update the service name displayed in the status indicator"""
+        self.service_name = new_name
+        self.service_label.setText(new_name)
 
 class LoadingAnimation(QWidget):
     """Thin horizontal loading animation for media player with dual-mode capability"""
@@ -1240,7 +1245,7 @@ class ModernSidebar(QWidget):
         layout.setSpacing(0)
         
         # Version button (clickable)
-        self.version_button = QPushButton("v.0.51")
+        self.version_button = QPushButton("v.0.6")
         self.version_button.setFont(QFont("SF Pro Text", 10, QFont.Weight.Medium))
         self.version_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.version_button.setStyleSheet("""
@@ -1299,11 +1304,17 @@ class ModernSidebar(QWidget):
         
         # Status indicators
         self.spotify_status = StatusIndicator("Spotify")
-        self.plex_status = StatusIndicator("Plex")
+        
+        # Dynamic media server status - determine which server is active
+        from config.settings import config_manager
+        active_server = config_manager.get_active_media_server()
+        server_name = "Plex" if active_server == "plex" else "Jellyfin"
+        self.media_server_status = StatusIndicator(server_name)
+        
         self.soulseek_status = StatusIndicator("Soulseek")
         
         layout.addWidget(self.spotify_status)
-        layout.addWidget(self.plex_status)
+        layout.addWidget(self.media_server_status)
         layout.addWidget(self.soulseek_status)
         
         return status_widget
@@ -1320,12 +1331,19 @@ class ModernSidebar(QWidget):
     def update_service_status(self, service: str, connected: bool):
         status_map = {
             "spotify": self.spotify_status,
-            "plex": self.plex_status,
+            "plex": self.media_server_status,
+            "jellyfin": self.media_server_status,
             "soulseek": self.soulseek_status
         }
         
         if service in status_map:
             status_map[service].update_status(connected)
+    
+    def update_media_server_name(self, server_type: str):
+        """Update the media server status indicator name"""
+        server_name = "Plex" if server_type == "plex" else "Jellyfin"
+        if hasattr(self, 'media_server_status'):
+            self.media_server_status.update_name(server_name)
     
     def show_version_info(self):
         """Show the version information modal"""

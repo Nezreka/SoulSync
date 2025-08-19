@@ -13,7 +13,7 @@ class VersionInfoModal(QDialog):
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("What's New in SoulSync v0.51")
+        self.setWindowTitle("What's New in SoulSync v0.6")
         self.setModal(True)
         self.setFixedSize(600, 500)
         self.setup_ui()
@@ -68,7 +68,7 @@ class VersionInfoModal(QDialog):
         """)
         
         # Version subtitle
-        version_subtitle = QLabel("Version 0.51 - Latest Features & Improvements")
+        version_subtitle = QLabel("Version 0.6 - Complete Multi-Server Support")
         version_subtitle.setFont(QFont("SF Pro Text", 11, QFont.Weight.Medium))
         version_subtitle.setStyleSheet("""
             color: rgba(255, 255, 255, 0.7);
@@ -112,50 +112,52 @@ class VersionInfoModal(QDialog):
         content_layout.setContentsMargins(30, 25, 30, 25)
         content_layout.setSpacing(25)
         
-        # Settings Page Improvements
-        settings_section = self.create_feature_section(
-            "⚙️ Settings Page Improvements",
-            "Enhanced settings interface for better usability and visual consistency",
+        # Multi-Server Support
+        multiserver_section = self.create_feature_section(
+            "🔀 Complete Multi-Server Support",
+            "Full Plex and Jellyfin compatibility across all features and workflows",
             [
-                "• Added vertical scrolling support for better usability on small screens",
-                "• Cleaned up text backgrounds throughout settings for better visual consistency",
-                "• Applied consistent green monospace styling to log file path display",
-                "• Added rounded corners to API configuration frames (Spotify, Plex, Soulseek)",
-                "• Enhanced label styling with transparent backgrounds and proper white text"
-            ]
-        )
-        content_layout.addWidget(settings_section)
-        
-        # Watchlist System Enhancements
-        watchlist_section = self.create_feature_section(
-            "👀 Watchlist System Enhancements",
-            "Improved reliability and user experience for artist monitoring",
-            [
-                "• Enhanced rate limiting with comprehensive multi-layer protection to prevent API bans",
-                "• Increased delays between artists (2.0s) and albums (0.5s) for safer scanning",
-                "• Enhanced Spotify API interval timing and error handling",
-                "• Unified scan implementation - manual and auto scans now use same worker for consistency",
-                "• Fixed progress bars resetting when reopening modal during active scans",
-                "• Professional artist cards with improved visual hierarchy and spacing",
-                "• Modern hover effects and enhanced delete button styling"
-            ]
-        )
-        content_layout.addWidget(watchlist_section)
-        
-        # Artist Search Enhancements  
-        artist_section = self.create_feature_section(
-            "🎵 Artist Search Enhancements",
-            "Better visual feedback and improved navigation for artist discovery",
-            [
-                "• Added watchlist eye indicators (👁️) to artist search results",
-                "• Green eye icon appears in top-right corner for artists already in watchlist",
-                "• Real-time updates when artists are added/removed from watchlist",
-                "• Enhanced horizontal scrolling with mouse wheel support for artist results",
-                "• Smooth navigation through search results without manual scrollbar dragging"
+                "• Added native Jellyfin client with full API integration for artists, albums, and tracks",
+                "• Automatic server detection and dynamic client switching throughout the application",
+                "• All sync tools now work seamlessly with both Plex and Jellyfin servers",
+                "• Database filtering by server source ensures clean separation of library data",
+                "• Updated all download and analysis workers for multi-server compatibility",
+                "• Server-specific UI adaptations (e.g., metadata updater hidden for Jellyfin)",
+                "• Unified media client architecture for consistent cross-server functionality"
             ],
-            "Look for the green eye icon (👁️) in artist search results to instantly see which artists you're already tracking!"
+            "Switch between Plex and Jellyfin in Settings → Server Configuration - all features automatically adapt!"
         )
-        content_layout.addWidget(artist_section)
+        content_layout.addWidget(multiserver_section)
+        
+        # Enhanced Compatibility
+        compatibility_section = self.create_feature_section(
+            "⚙️ Enhanced Cross-Server Features",
+            "All major workflows updated for seamless multi-server operation",
+            [
+                "• Playlist sync (Spotify & YouTube) now supports both Plex and Jellyfin",
+                "• Download Missing Tracks modals work with active server automatically",
+                "• Artist browsing and album analysis adapt to your selected media server",
+                "• Database updates and library scans respect server-specific configurations",
+                "• Playlist track analysis workers dynamically use the correct server API",
+                "• All toast notifications and UI feedback are server-aware"
+            ]
+        )
+        content_layout.addWidget(compatibility_section)
+        
+        # Technical Improvements  
+        technical_section = self.create_feature_section(
+            "🔧 Technical Architecture Updates",
+            "Robust foundation for reliable multi-server operation",
+            [
+                "• Implemented server-agnostic database schema with source tracking",
+                "• Added unified configuration management for multiple media servers",
+                "• Created wrapper classes for consistent API interfaces across servers",
+                "• Enhanced error handling with server-specific messaging",
+                "• Optimized performance with intelligent client caching and connection pooling",
+                "• Future-ready architecture for additional media server integrations"
+            ]
+        )
+        content_layout.addWidget(technical_section)
         
         scroll_area.setWidget(content_widget)
         return scroll_area
