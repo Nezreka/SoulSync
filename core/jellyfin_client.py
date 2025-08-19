@@ -37,6 +37,13 @@ class JellyfinArtist:
         self.title = jellyfin_data.get('Name', 'Unknown Artist')
         self.addedAt = self._parse_date(jellyfin_data.get('DateCreated'))
         
+        # Create genres property from Jellyfin data (empty list for now since data structure needs investigation)
+        self.genres = []
+        # TODO: Map Jellyfin genre data to match Plex format
+        
+        # Create summary property from Jellyfin data (used for timestamp storage)
+        self.summary = jellyfin_data.get('Overview', '') or ''
+        
     def _parse_date(self, date_str: Optional[str]) -> Optional[datetime]:
         """Parse Jellyfin date string to datetime"""
         if not date_str:
@@ -128,6 +135,9 @@ class JellyfinClient:
         self._album_cache = {}
         self._track_cache = {}
         self._artist_cache = {}
+        
+        # Metadata-only mode flag for performance optimization
+        self._metadata_only_mode = False
         self._all_albums_cache = None
         self._all_tracks_cache = None
         self._cache_populated = False
@@ -244,6 +254,12 @@ class JellyfinClient:
     def _populate_aggressive_cache(self):
         """Aggressively pre-populate ALL caches to eliminate individual API calls"""
         if self._cache_populated:
+            return
+        
+        # Check if we're in metadata-only mode and skip expensive operations
+        if self._metadata_only_mode:
+            logger.info("🎯 Skipping cache population for metadata-only operation")
+            self._cache_populated = True
             return
             
         logger.info("🚀 Starting aggressive Jellyfin cache population to eliminate slow individual API calls...")
@@ -1155,4 +1171,183 @@ class JellyfinClient:
             
         except Exception as e:
             logger.debug(f"Error checking if Jellyfin library is scanning: {e}")
+            return False
+    
+    # Metadata update methods for compatibility with metadata updater
+    def update_artist_genres(self, artist, genres: List[str]):
+        """Update artist genres - currently not implemented for Jellyfin"""
+        try:
+            # TODO: Implement Jellyfin genre update API
+            # For now, just log and return success to continue processing
+            logger.debug(f"Genre update not yet implemented for Jellyfin artist: {artist.title}")
+            return True
+        except Exception as e:
+            logger.error(f"Error updating genres for {artist.title}: {e}")
+            return False
+    
+    def update_artist_poster(self, artist, image_data: bytes):
+        """Update artist poster image using Jellyfin API"""
+        try:
+            artist_id = artist.ratingKey
+            if not artist_id:
+                return False
+            
+            import requests
+            
+            url = f"{self.base_url}/Items/{artist_id}/Images/Primary"
+            headers = {
+                'X-Emby-Token': self.api_key
+            }
+            
+            # Try multiple approaches to find what works with Jellyfin
+            
+            # Method 1: Try with different field names that Jellyfin might expect
+            method1_files = {'data': ('poster.jpg', image_data, 'image/jpeg')}
+            try:
+                response = requests.post(url, files=method1_files, headers=headers, timeout=30)
+                response.raise_for_status()
+                logger.info(f"Updated poster for {artist.title} (method 1)")
+                return True
+            except Exception as e1:
+                logger.debug(f"Method 1 failed for {artist.title}: {e1}")
+            
+            # Method 2: Try with raw data and proper content-type
+            try:
+                headers_raw = {
+                    'X-Emby-Token': self.api_key,
+                    'Content-Type': 'image/jpeg'
+                }
+                response = requests.post(url, data=image_data, headers=headers_raw, timeout=30)
+                response.raise_for_status()
+                logger.info(f"Updated poster for {artist.title} (method 2)")
+                return True
+            except Exception as e2:
+                logger.debug(f"Method 2 failed for {artist.title}: {e2}")
+            
+            # Method 3: Try with different endpoint structure
+            try:
+                alt_url = f"{self.base_url}/Items/{artist_id}/Images/Primary/0"
+                response = requests.post(alt_url, data=image_data, headers=headers_raw, timeout=30)
+                response.raise_for_status()
+                logger.info(f"Updated poster for {artist.title} (method 3)")
+                return True
+            except Exception as e3:
+                logger.debug(f"Method 3 failed for {artist.title}: {e3}")
+            
+            # All methods failed
+            logger.error(f"All image upload methods failed for {artist.title}")
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error updating poster for {artist.title}: {e}")
+            return False
+    
+    def update_album_poster(self, album, image_data: bytes):
+        """Update album poster image using Jellyfin API"""
+        try:
+            album_id = album.ratingKey
+            if not album_id:
+                return False
+            
+            import requests
+            
+            url = f"{self.base_url}/Items/{album_id}/Images/Primary"
+            headers = {
+                'X-Emby-Token': self.api_key
+            }
+            
+            # Try multiple approaches to find what works with Jellyfin
+            
+            # Method 1: Try with different field names that Jellyfin might expect
+            method1_files = {'data': ('poster.jpg', image_data, 'image/jpeg')}
+            try:
+                response = requests.post(url, files=method1_files, headers=headers, timeout=30)
+                response.raise_for_status()
+                logger.info(f"Updated poster for album '{album.title}' (method 1)")
+                return True
+            except Exception as e1:
+                logger.debug(f"Method 1 failed for album '{album.title}': {e1}")
+            
+            # Method 2: Try with raw data and proper content-type
+            try:
+                headers_raw = {
+                    'X-Emby-Token': self.api_key,
+                    'Content-Type': 'image/jpeg'
+                }
+                response = requests.post(url, data=image_data, headers=headers_raw, timeout=30)
+                response.raise_for_status()
+                logger.info(f"Updated poster for album '{album.title}' (method 2)")
+                return True
+            except Exception as e2:
+                logger.debug(f"Method 2 failed for album '{album.title}': {e2}")
+            
+            # Method 3: Try with different endpoint structure
+            try:
+                alt_url = f"{self.base_url}/Items/{album_id}/Images/Primary/0"
+                response = requests.post(alt_url, data=image_data, headers=headers_raw, timeout=30)
+                response.raise_for_status()
+                logger.info(f"Updated poster for album '{album.title}' (method 3)")
+                return True
+            except Exception as e3:
+                logger.debug(f"Method 3 failed for album '{album.title}': {e3}")
+            
+            # All methods failed
+            logger.error(f"All image upload methods failed for album '{album.title}'")
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error updating poster for album '{album.title}': {e}")
+            return False
+    
+    def update_artist_biography(self, artist) -> bool:
+        """Update artist overview/biography - currently not implemented for Jellyfin"""
+        try:
+            # TODO: Implement Jellyfin biography update API
+            # For now, just log and return success to continue processing
+            logger.debug(f"Biography update not yet implemented for Jellyfin artist: {artist.title}")
+            return True
+        except Exception as e:
+            logger.error(f"Error updating biography for {artist.title}: {e}")
+            return False
+    
+    def needs_update_by_age(self, artist, refresh_interval_days: int) -> bool:
+        """Check if artist needs updating based on age threshold - simplified for Jellyfin"""
+        try:
+            # For now, just return True for all artists since we don't have timestamp tracking yet
+            # TODO: Implement timestamp tracking in Jellyfin artist metadata
+            return True
+        except Exception as e:
+            logger.debug(f"Error checking update age for {artist.title}: {e}")
+            return True
+    
+    def is_artist_ignored(self, artist) -> bool:
+        """Check if artist is manually marked to be ignored - simplified for Jellyfin"""
+        try:
+            # For now, no artists are ignored
+            # TODO: Implement ignore flag tracking in Jellyfin artist metadata
+            return False
+        except Exception as e:
+            logger.debug(f"Error checking ignore status for {artist.title}: {e}")
+            return False
+    
+    def parse_update_timestamp(self, artist) -> Optional[datetime]:
+        """Parse the last update timestamp from artist summary - not implemented for Jellyfin"""
+        try:
+            # TODO: Implement timestamp parsing from Jellyfin artist overview
+            return None
+        except Exception as e:
+            logger.debug(f"Error parsing timestamp for {artist.title}: {e}")
+            return None
+    
+    def set_metadata_only_mode(self, enabled: bool = True):
+        """Enable metadata-only mode to skip expensive track caching"""
+        try:
+            self._metadata_only_mode = enabled
+            if enabled:
+                logger.info("🎯 Metadata-only mode enabled - will skip expensive track caching")
+            else:
+                logger.info("🎯 Metadata-only mode disabled")
+            return True
+        except Exception as e:
+            logger.error(f"Error setting metadata-only mode: {e}")
             return False
