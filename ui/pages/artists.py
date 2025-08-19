@@ -1816,14 +1816,15 @@ class DownloadMissingAlbumTracksModal(QDialog):
     """Enhanced modal for downloading missing album tracks with live progress tracking"""
     process_finished = pyqtSignal()
     
-    def __init__(self, album, album_card, parent_page, downloads_page, plex_client):
+    def __init__(self, album, album_card, parent_page, downloads_page, media_client, server_type):
         super().__init__(parent_page)
         self.album = album
         self.album_card = album_card
         self.parent_page = parent_page
         self.parent_artists_page = parent_page  # Reference to artists page for scan manager
         self.downloads_page = downloads_page
-        self.plex_client = plex_client
+        self.media_client = media_client
+        self.server_type = server_type
         self.matching_engine = MusicMatchingEngine()
         self.wishlist_service = get_wishlist_service()
         
@@ -2395,9 +2396,9 @@ class DownloadMissingAlbumTracksModal(QDialog):
         self.start_plex_analysis()
 
     def start_plex_analysis(self):
-        """Start database analysis for album tracks (previously Plex analysis)"""
+        """Start database analysis for album tracks (server-aware)"""
         from ui.pages.sync import PlaylistTrackAnalysisWorker
-        worker = PlaylistTrackAnalysisWorker(self.album.tracks, self.plex_client)
+        worker = PlaylistTrackAnalysisWorker(self.album.tracks, self.media_client)
         worker.signals.analysis_started.connect(self.on_analysis_started)
         worker.signals.track_analyzed.connect(self.on_track_analyzed)
         worker.signals.analysis_completed.connect(self.on_analysis_completed)
@@ -3291,7 +3292,7 @@ class ArtistsPage(QWidget):
             
             # Create worker for incremental update only
             self._auto_database_worker = DatabaseUpdateWorker(
-                self.plex_client,
+                self.media_client,
                 "database/music_library.db",
                 full_refresh=False  # Always incremental for automatic updates
             )
@@ -3338,12 +3339,27 @@ class ArtistsPage(QWidget):
     def setup_clients(self):
         """Initialize client connections"""
         try:
+            from config.settings import config_manager
+            
             self.spotify_client = SpotifyClient()
             self.plex_client = PlexClient()
+            
+            # Add Jellyfin client for multi-server support
+            from core.jellyfin_client import JellyfinClient
+            self.jellyfin_client = JellyfinClient()
+            
+            # Set up unified media client based on active server
+            active_server = config_manager.get_active_media_server()
+            if active_server == "plex":
+                self.media_client = self.plex_client
+                self.server_type = "plex"
+            else:  # jellyfin
+                self.media_client = self.jellyfin_client
+                self.server_type = "jellyfin"
+            
             self.soulseek_client = SoulseekClient()
 
             # --- FIX: Ensure the soulseek_client uses the download path from config ---
-            from config.settings import config_manager
             download_path = config_manager.get('soulseek.download_path')
             if download_path and hasattr(self.soulseek_client, 'download_path'):
                 self.soulseek_client.download_path = download_path
@@ -4332,7 +4348,7 @@ class ArtistsPage(QWidget):
             QMessageBox.critical(self, "Error", "Downloads page is not connected. Cannot start download.")
             return
             
-        if not self.plex_client:
+        if not self.media_client:
             QMessageBox.critical(self, "Error", "Music database is not available. Cannot verify existing tracks.")
             return
         
@@ -4414,12 +4430,28 @@ class ArtistsPage(QWidget):
             album_with_tracks.tracks = tracks  # Add tracks attribute dynamically
             
             # Create and show the new sophisticated modal
+            # Get active server and media client
+            from config.settings import config_manager
+            active_server = config_manager.get_active_media_server()
+            
+            if active_server == "jellyfin":
+                media_client = getattr(self, 'jellyfin_client', None)
+                if not media_client:
+                    QMessageBox.critical(self, "Error", "Jellyfin client not available")
+                    return
+            else:
+                media_client = self.plex_client
+                if not media_client:
+                    QMessageBox.critical(self, "Error", "Plex client not available")
+                    return
+            
             modal = DownloadMissingAlbumTracksModal(
                 album=album_with_tracks,  # Use the album with tracks
                 album_card=album_card,
                 parent_page=self,
                 downloads_page=self.downloads_page,
-                plex_client=self.plex_client
+                media_client=media_client,
+                server_type=active_server
             )
             
             # Store the session for resumption
