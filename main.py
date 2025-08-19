@@ -418,7 +418,7 @@ def main():
     
     app = QApplication(sys.argv)
     app.setApplicationName("SoulSync")
-    app.setApplicationVersion(".5")
+    app.setApplicationVersion("0.6")
     
     main_window = MainWindow()
     main_window.show()
