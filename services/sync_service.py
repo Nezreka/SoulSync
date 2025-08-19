@@ -146,7 +146,8 @@ class PlaylistSyncService:
                 return self._create_error_result(playlist.name, ["Sync cancelled"])
             
             total_tracks = len(playlist.tracks)
-            
+            media_client, server_type = self._get_active_media_client()
+
             self._update_progress(playlist.name, "Matching tracks against Plex library", "", 20, 5, 2, total_tracks=total_tracks)
             
             # Use the same robust matching approach as "Download Missing Tracks"
@@ -207,21 +208,23 @@ class PlaylistSyncService:
                                 matched_tracks=len(matched_tracks),
                                 failed_tracks=len(unmatched_tracks))
             
-            # Get the actual Plex track objects (not PlexTrackInfo)
-            plex_tracks = [r.plex_track for r in matched_tracks if r.plex_track]
-            logger.info(f"Creating playlist with {len(plex_tracks)} matched tracks")
-            
+            # Get the actual media server track objects
+            media_tracks = [r.plex_track for r in matched_tracks if r.plex_track] # plex_track is a generic name here
+            logger.info(f"Creating playlist with {len(media_tracks)} matched tracks")
+
             # Validate that all tracks have proper ratingKey attributes for playlist creation
             valid_tracks = []
-            for i, track in enumerate(plex_tracks):
+            for i, track in enumerate(media_tracks):
                 if track and hasattr(track, 'ratingKey'):
                     valid_tracks.append(track)
                     logger.debug(f"✔️ Track {i+1} valid for playlist: '{track.title}' (ratingKey: {track.ratingKey})")
                 else:
                     logger.warning(f"❌ Track {i+1} invalid for playlist: {track} (type: {type(track)}, has ratingKey: {hasattr(track, 'ratingKey') if track else 'N/A'})")
             
-            logger.info(f"Playlist validation: {len(valid_tracks)}/{len(plex_tracks)} tracks are valid Plex objects with ratingKeys")
-            plex_tracks = valid_tracks
+            logger.info(f"Playlist validation: {len(valid_tracks)}/{len(media_tracks)} tracks are valid {server_type.title()} objects with ratingKeys")
+            
+            # Use the validated tracks for the sync
+            plex_tracks = valid_tracks # Keep variable name for compatibility with the rest of the function
             
             # Use active media server for playlist sync
             media_client, server_type = self._get_active_media_client()
@@ -230,7 +233,8 @@ class PlaylistSyncService:
                 sync_success = False
             else:
                 logger.info(f"Syncing playlist '{playlist.name}' to {server_type.upper()} server")
-                sync_success = media_client.update_playlist(playlist.name, plex_tracks)
+                # THE FIX: Ensure we are passing the correct, native track objects to the client
+                sync_success = media_client.update_playlist(playlist.name, valid_tracks)
             
             synced_tracks = len(plex_tracks) if sync_success else 0
             failed_tracks = len(playlist.tracks) - synced_tracks - downloaded_tracks

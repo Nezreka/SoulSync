@@ -872,7 +872,7 @@ class JellyfinClient:
             logger.info(f"Creating Jellyfin playlist '{name}' with {len(track_ids)} tracks")
             
             # For large playlists, create empty playlist first then add tracks in batches
-            if len(track_ids) > 500:
+            if True:
                 return self._create_large_playlist(name, track_ids)
             
             # Create playlist using POST request for smaller playlists
