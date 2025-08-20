@@ -64,6 +64,9 @@ class ConfigManager:
     def get_plex_config(self) -> Dict[str, str]:
         return self.get('plex', {})
     
+    def get_jellyfin_config(self) -> Dict[str, str]:
+        return self.get('jellyfin', {})
+    
     def get_soulseek_config(self) -> Dict[str, str]:
         return self.get('soulseek', {})
     
@@ -76,25 +79,60 @@ class ConfigManager:
     def get_logging_config(self) -> Dict[str, str]:
         return self.get('logging', {})
     
+    def get_active_media_server(self) -> str:
+        return self.get('active_media_server', 'plex')
+    
+    def set_active_media_server(self, server: str):
+        """Set the active media server (plex or jellyfin)"""
+        if server not in ['plex', 'jellyfin']:
+            raise ValueError(f"Invalid media server: {server}")
+        self.set('active_media_server', server)
+    
+    def get_active_media_server_config(self) -> Dict[str, str]:
+        """Get configuration for the currently active media server"""
+        active_server = self.get_active_media_server()
+        if active_server == 'plex':
+            return self.get_plex_config()
+        elif active_server == 'jellyfin':
+            return self.get_jellyfin_config()
+        else:
+            return {}
+    
     def is_configured(self) -> bool:
         spotify = self.get_spotify_config()
-        plex = self.get_plex_config()
+        active_server = self.get_active_media_server()
         soulseek = self.get_soulseek_config()
+        
+        # Check active media server configuration
+        media_server_configured = False
+        if active_server == 'plex':
+            plex = self.get_plex_config()
+            media_server_configured = bool(plex.get('base_url')) and bool(plex.get('token'))
+        elif active_server == 'jellyfin':
+            jellyfin = self.get_jellyfin_config()
+            media_server_configured = bool(jellyfin.get('base_url')) and bool(jellyfin.get('api_key'))
         
         return (
             bool(spotify.get('client_id')) and
             bool(spotify.get('client_secret')) and
-            bool(plex.get('base_url')) and
-            bool(plex.get('token')) and
+            media_server_configured and
             bool(soulseek.get('slskd_url'))
         )
     
     def validate_config(self) -> Dict[str, bool]:
-        return {
+        active_server = self.get_active_media_server()
+        
+        validation = {
             'spotify': bool(self.get('spotify.client_id')) and bool(self.get('spotify.client_secret')),
-            'plex': bool(self.get('plex.base_url')) and bool(self.get('plex.token')),
             'soulseek': bool(self.get('soulseek.slskd_url'))
         }
+        
+        # Validate both server types but mark active one
+        validation['plex'] = bool(self.get('plex.base_url')) and bool(self.get('plex.token'))
+        validation['jellyfin'] = bool(self.get('jellyfin.base_url')) and bool(self.get('jellyfin.api_key'))
+        validation['active_media_server'] = active_server
+        
+        return validation
     
     def get_quality_preference(self) -> str:
         """Get the user's preferred audio quality setting"""
