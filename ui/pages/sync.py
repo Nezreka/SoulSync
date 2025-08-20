@@ -889,28 +889,41 @@ class TrackLoadingWorker(QRunnable):
     
     def run(self):
         """Load tracks in background thread"""
+        logger.info(f"TrackLoadingWorker starting for playlist {self.playlist_id}")
         try:
             if self._cancelled:
+                logger.info(f"TrackLoadingWorker cancelled before starting for playlist {self.playlist_id}")
                 return
                 
+            logger.info(f"Emitting loading_started signal for playlist {self.playlist_id}")
             self.signals.loading_started.emit(self.playlist_id)
             
             if self._cancelled:
+                logger.info(f"TrackLoadingWorker cancelled after loading_started for playlist {self.playlist_id}")
                 return
             
             # Fetch tracks from Spotify API
+            logger.info(f"Fetching tracks from Spotify API for playlist {self.playlist_id}")
             tracks = self.spotify_client._get_playlist_tracks(self.playlist_id)
+            logger.info(f"Successfully fetched {len(tracks) if tracks else 0} tracks for playlist {self.playlist_id}")
             
             if self._cancelled:
+                logger.info(f"TrackLoadingWorker cancelled after fetching tracks for playlist {self.playlist_id}")
                 return
             
             # Emit success signal
+            logger.info(f"Emitting tracks_loaded signal for playlist {self.playlist_id} with {len(tracks) if tracks else 0} tracks")
             self.signals.tracks_loaded.emit(self.playlist_id, tracks)
+            logger.info(f"TrackLoadingWorker completed successfully for playlist {self.playlist_id}")
             
         except Exception as e:
+            logger.error(f"TrackLoadingWorker failed for playlist {self.playlist_id}: {e}")
             if not self._cancelled:
                 # Emit error signal only if not cancelled
+                logger.info(f"Emitting loading_failed signal for playlist {self.playlist_id}")
                 self.signals.loading_failed.emit(self.playlist_id, str(e))
+            else:
+                logger.info(f"TrackLoadingWorker was cancelled, not emitting error signal for playlist {self.playlist_id}")
 
 class SyncWorkerSignals(QObject):
     """Signals for sync worker"""
@@ -1842,37 +1855,60 @@ class PlaylistDetailsModal(QDialog):
     
     def on_tracks_loaded(self, playlist_id, tracks):
         """Handle successful track loading"""
+        logger.info(f"Tracks loaded signal received: playlist_id={playlist_id}, tracks_count={len(tracks) if tracks else 0}")
+        
+        # Log validation state
+        playlist_match = playlist_id == self.playlist.id
+        not_closing = not self.is_closing
+        not_hidden = not self.isHidden()
+        has_table = hasattr(self, 'track_table')
+        
+        logger.info(f"Validation state: playlist_match={playlist_match}, not_closing={not_closing}, not_hidden={not_hidden}, has_table={has_table}")
+        
         # Validate modal state before processing
-        if (playlist_id == self.playlist.id and 
-            not self.is_closing and 
-            not self.isHidden() and 
-            hasattr(self, 'track_table')):
+        if (playlist_match and not_closing and not_hidden and has_table):
+            logger.info(f"Processing tracks for playlist {self.playlist.name}")
             
             self.playlist.tracks = tracks
             
             # Cache tracks in parent for future use
             if hasattr(self.parent_page, 'track_cache'):
                 self.parent_page.track_cache[playlist_id] = tracks
+                logger.info(f"Cached {len(tracks)} tracks for playlist {playlist_id}")
             
             # Refresh the track table
-            self.refresh_track_table()
+            try:
+                self.refresh_track_table()
+                logger.info(f"Successfully refreshed track table with {len(tracks)} tracks")
+            except Exception as e:
+                logger.error(f"Error refreshing track table: {e}")
+        else:
+            logger.warning(f"Skipping track loading due to validation failure for playlist {playlist_id}")
     
     def on_tracks_loading_failed(self, playlist_id, error_message):
         """Handle track loading failure"""
+        logger.error(f"Track loading failed for playlist {playlist_id}: {error_message}")
+        
         # Validate modal state before processing
         if (playlist_id == self.playlist.id and 
             not self.is_closing and 
             not self.isHidden() and 
             hasattr(self, 'track_table')):
+            logger.info(f"Displaying error message in track table")
             self.track_table.setRowCount(1)
             error_item = QTableWidgetItem(f"Error loading tracks: {error_message}")
             error_item.setFlags(error_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             self.track_table.setItem(0, 0, error_item)
             self.track_table.setSpan(0, 0, 1, 4)
+        else:
+            logger.warning(f"Cannot display error message due to modal state validation failure")
     
     def refresh_track_table(self):
         """Refresh the track table with loaded tracks"""
+        logger.info(f"refresh_track_table called for playlist {self.playlist.name}")
+        
         if not hasattr(self, 'track_table'):
+            logger.error("No track_table attribute found")
             return
             
         # Limit tracks to prevent UI blocking on large playlists
@@ -1880,10 +1916,13 @@ class PlaylistDetailsModal(QDialog):
         display_limit = 100
         tracks_to_show = self.playlist.tracks[:display_limit]
         
+        logger.info(f"Setting track table row count to {len(tracks_to_show)} (total tracks: {total_tracks})")
+        
         self.track_table.setRowCount(len(tracks_to_show))
         self.track_table.clearSpans()  # Remove any spans from loading state
         
         # Populate table with limited tracks
+        logger.info(f"Populating track table with {len(tracks_to_show)} tracks")
         for row, track in enumerate(tracks_to_show):
             # Track name with ellipsis label
             track_label = EllipsisLabel(track.name)
