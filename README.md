@@ -290,27 +290,26 @@ Alternatively, you can paste this key directly into the API Key field in the Set
 
 ```json
 {
+  "active_media_server": "plex",
   "spotify": {
-    "client_id": "<YOUR_SPOTIFY_CLIENT_ID>",
-    "client_secret": "<YOUR_SPOTIFY_CLIENT_SECRET>"
+    "client_id": "CLIENT ID",
+    "client_secret": "CLIENT SECRET"
   },
   "plex": {
-    "base_url": "<YOUR_PLEX_SERVER_URL>",
-    "token": "<YOUR_PLEX_TOKEN>"
+    "base_url": "http://192.168.86.36:32400",
+    "token": "PLEX TOKEN",
+    "auto_detect": true
   },
   "jellyfin": {
-    "base_url": "<YOUR_JELLYFIN_SERVER_URL>",
-    "api_key": "<YOUR_JELLYFIN_API_KEY>",
-    "user_id": "<YOUR_JELLYFIN_USER_ID>"
+    "base_url": "http://localhost:8096",
+    "api_key": "JELLYFIN API KEY",
+    "auto_detect": true
   },
   "soulseek": {
-    "slskd_url": "<YOUR_SLSKD_URL>",
-    "api_key": "<YOUR_SLSKD_API_KEY>",
-    "download_path": "./path/to/slskd/download/folder",
-    "transfer_path": "./path/to/music/folder"
-  },
-  "server": {
-    "active_media_server": "plex"
+    "slskd_url": "http://localhost:5030",
+    "api_key": "SLSKD API KEY",
+    "download_path": "./downloads",
+    "transfer_path": "./transfers"
   },
   "logging": {
     "path": "logs/app.log",
