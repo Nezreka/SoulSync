@@ -211,6 +211,26 @@ Before configuring SoulSync, you'll need to obtain API credentials from Spotify 
 2. Copy the **Client ID** - this is your `client_id`
 3. Click "View client secret" to reveal and copy the **Client Secret** - this is your `client_secret`
 
+##### Tidal ID and Secret
+
+**Step 1: Create a Spotify App**
+1. Go to the [Tidal Developer Dashboard](hhttps://developer.tidal.com/dashboard)
+2. Log in with your Tidal account
+3. Click "Create New App"
+4. Fill in the required information:
+   - **App name**: "SoulSync" (or any name you prefer)
+   - **App description**: "Music library sync application"
+   - **Redirect URI**: `http://127.0.0.1:8889/tidal/callback`
+   - **Required Scopes:**
+   - user.read (Read access to a user's account information, such as country and email address.)
+   - playlists.read (Required to list playlists created by a user.)
+5. Click "Save"
+
+**Step 2: Get Your Credentials**
+1. In your newly created app, click "Settings"
+2. Copy the **Client ID** - this is your `client_id`
+3. Click "View client secret" to reveal and copy the **Client Secret** - this is your `client_secret`
+
 ##### Plex Token
 
 **Method 1: Through Plex Web Interface (Recommended)**
