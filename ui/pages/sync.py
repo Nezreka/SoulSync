@@ -38,15 +38,25 @@ class EllipsisLabel(QLabel):
     def setText(self, text):
         self.full_text = text
         # Set elided text with ellipsis
-        fm = self.fontMetrics()
-        elided_text = fm.elidedText(text, Qt.TextElideMode.ElideRight, self.width() - 10)
-        super().setText(elided_text)
-        
-        # Set tooltip to show full text if it's elided
-        if elided_text != text:
+        try:
+            fm = self.fontMetrics()
+            widget_width = self.width()
+            # Use a minimum width if widget isn't sized yet
+            if widget_width <= 0:
+                widget_width = 200  # Default fallback width
+            elided_text = fm.elidedText(text, Qt.TextElideMode.ElideRight, widget_width - 10)
+            super().setText(elided_text)
+            
+            # Set tooltip to show full text if it's elided
+            if elided_text != text:
+                self.setToolTip(text)
+            else:
+                self.setToolTip("")  # Clear tooltip if text fits
+        except Exception as e:
+            # Fallback to just setting the text if ellipsis calculation fails
+            logger.debug(f"EllipsisLabel setText error: {e}")
+            super().setText(text)
             self.setToolTip(text)
-        else:
-            self.setToolTip("")  # Clear tooltip if text fits
     
     def resizeEvent(self, event):
         """Handle resize events to recalculate ellipsis"""
@@ -1924,31 +1934,49 @@ class PlaylistDetailsModal(QDialog):
         # Populate table with limited tracks
         logger.info(f"Populating track table with {len(tracks_to_show)} tracks")
         for row, track in enumerate(tracks_to_show):
-            # Track name with ellipsis label
-            track_label = EllipsisLabel(track.name)
-            track_label.setFont(QFont("SF Pro Text", 11, QFont.Weight.Medium))
-            track_label.setStyleSheet("color: #ffffff; background: transparent; border: none;")
-            self.track_table.setCellWidget(row, 0, track_label)
-            
-            # Artist(s) with ellipsis label
-            artists = ", ".join(track.artists)
-            artist_label = EllipsisLabel(artists)
-            artist_label.setFont(QFont("SF Pro Text", 11))
-            artist_label.setStyleSheet("color: #ffffff; background: transparent; border: none;")
-            self.track_table.setCellWidget(row, 1, artist_label)
-            
-            # Album with ellipsis label
-            album_label = EllipsisLabel(track.album)
-            album_label.setFont(QFont("SF Pro Text", 11))
-            album_label.setStyleSheet("color: #ffffff; background: transparent; border: none;")
-            self.track_table.setCellWidget(row, 2, album_label)
-            
-            # Duration with standard item (doesn't need scrolling)
-            duration = self.format_duration(track.duration_ms)
-            duration_item = QTableWidgetItem(duration)
-            duration_item.setFlags(duration_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            duration_item.setFont(QFont("SF Mono", 10))
-            self.track_table.setItem(row, 3, duration_item)
+            try:
+                logger.debug(f"Processing track {row+1}/{len(tracks_to_show)}: {track.name} by {', '.join(track.artists) if track.artists else 'Unknown'}")
+                
+                # Track name with ellipsis label
+                track_label = EllipsisLabel(track.name)
+                track_label.setFont(QFont("SF Pro Text", 11, QFont.Weight.Medium))
+                track_label.setStyleSheet("color: #ffffff; background: transparent; border: none;")
+                self.track_table.setCellWidget(row, 0, track_label)
+                logger.debug(f"Set track name widget for row {row}")
+                
+                # Artist(s) with ellipsis label
+                artists = ", ".join(track.artists) if track.artists else "Unknown Artist"
+                artist_label = EllipsisLabel(artists)
+                artist_label.setFont(QFont("SF Pro Text", 11))
+                artist_label.setStyleSheet("color: #ffffff; background: transparent; border: none;")
+                self.track_table.setCellWidget(row, 1, artist_label)
+                logger.debug(f"Set artist widget for row {row}")
+                
+                # Album with ellipsis label
+                album_name = track.album if track.album else "Unknown Album"
+                album_label = EllipsisLabel(album_name)
+                album_label.setFont(QFont("SF Pro Text", 11))
+                album_label.setStyleSheet("color: #ffffff; background: transparent; border: none;")
+                self.track_table.setCellWidget(row, 2, album_label)
+                logger.debug(f"Set album widget for row {row}")
+                
+                # Duration with standard item (doesn't need scrolling)
+                duration = self.format_duration(track.duration_ms)
+                duration_item = QTableWidgetItem(duration)
+                duration_item.setFlags(duration_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                duration_item.setFont(QFont("SF Mono", 10))
+                self.track_table.setItem(row, 3, duration_item)
+                logger.debug(f"Set duration item for row {row}")
+                
+                logger.debug(f"Completed track {row+1}/{len(tracks_to_show)}")
+                
+            except Exception as e:
+                logger.error(f"Error processing track {row+1}: {e}")
+                logger.error(f"Track data: name='{track.name if hasattr(track, 'name') else 'N/A'}', artists='{track.artists if hasattr(track, 'artists') else 'N/A'}', album='{track.album if hasattr(track, 'album') else 'N/A'}'")
+                # Continue with next track rather than failing completely
+                continue
+        
+        logger.info(f"Finished populating all {len(tracks_to_show)} tracks")
         
         # Add info message if tracks were limited
         if total_tracks > display_limit:
