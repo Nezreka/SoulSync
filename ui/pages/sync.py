@@ -1058,7 +1058,9 @@ class PlaylistDetailsModal(QDialog):
             # Check cache first
             if hasattr(parent, 'track_cache') and playlist.id in parent.track_cache:
                 self.playlist.tracks = parent.track_cache[playlist.id]
-                self.refresh_track_table()
+                # Defer table refresh until modal is shown and properly sized
+                from PyQt6.QtCore import QTimer
+                QTimer.singleShot(0, self.refresh_track_table)
             else:
                 self.load_tracks_async()
     
