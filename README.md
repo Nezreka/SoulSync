@@ -214,7 +214,7 @@ Before configuring SoulSync, you'll need to obtain API credentials from Spotify 
 ##### Tidal ID and Secret
 
 **Step 1: Create a Tidal App**
-1. Go to the [Tidal Developer Dashboard](hhttps://developer.tidal.com/dashboard)
+1. Go to the [Tidal Developer Dashboard](https://developer.tidal.com/dashboard)
 2. Log in with your Tidal account
 3. Click "Create New App"
 4. Fill in the required information:
