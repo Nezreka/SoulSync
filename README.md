@@ -23,14 +23,14 @@ Docker is unlikely since this is a fully GUI based app. The unique setup would b
 ## ✨ Core Features
 
 ### 🤖 **Automation Engine**
-SoulSync handles everything automatically once you set it up. You can sync multiple Spotify and YouTube playlists at the same time, and it'll prioritize FLAC files and reliable sources. When downloads finish, it organizes them into clean folder structures and updates your Plex library automatically.
+SoulSync handles everything automatically once you set it up. You can sync multiple Spotify / Youtube / Tidal playlists at the same time, and it'll prioritize FLAC files and reliable sources. When downloads finish, it organizes them into clean folder structures and updates your Plex library automatically.
 
 The app runs a background process every 60 minutes to retry failed downloads - so if a track wasn't available earlier, it'll keep trying until it finds it. It also auto-detects your Plex or Jellyfin server and slskd on your network, backs up your playlists before making changes, and reconnects to services if they go down.
 
 Once it's running, SoulSync basically acts like a personal music librarian that works in the background.
 
-### 🎬 **Spotify & YouTube Integration**
-Works with both Spotify and YouTube playlists. For YouTube, it extracts clean track names by removing stuff like "(Official Music Video)" and other junk from titles. For Spotify, it tracks playlist changes so it only downloads new tracks instead of re-scanning everything.
+### 🎬 **Spotify & YouTube & Tidal Integration**
+Works with both Spotify / Youtube / Tidal playlists. For YouTube, it extracts clean track names by removing stuff like "(Official Music Video)" and other junk from titles. For Spotify, it tracks playlist changes so it only downloads new tracks instead of re-scanning everything.
 
 Both get the same smart matching system with color-coded confidence scores, and you can bulk download all missing tracks with progress tracking.
 
