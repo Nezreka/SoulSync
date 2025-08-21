@@ -448,6 +448,8 @@ class ServiceTestThread(QThread):
         try:
             if self.service_type == "spotify":
                 success, message = self._test_spotify()
+            elif self.service_type == "tidal":
+                success, message = self._test_tidal()
             elif self.service_type == "plex":
                 success, message = self._test_plex()
             elif self.service_type == "jellyfin":
@@ -520,6 +522,55 @@ class ServiceTestThread(QThread):
             except:
                 pass
             return False, f"✗ Spotify test failed:\n{str(e)}"
+    
+    def _test_tidal(self):
+        """Test Tidal connection"""
+        try:
+            from core.tidal_client import TidalClient
+            
+            # Basic validation first
+            if not self.test_config.get('client_id') or not self.test_config.get('client_secret'):
+                return False, "✗ Please enter both Client ID and Client Secret"
+            
+            # Save temporarily to test
+            original_client_id = config_manager.get('tidal.client_id')
+            original_client_secret = config_manager.get('tidal.client_secret')
+            
+            config_manager.set('tidal.client_id', self.test_config['client_id'])
+            config_manager.set('tidal.client_secret', self.test_config['client_secret'])
+            
+            # Test connection with timeout protection
+            try:
+                client = TidalClient()
+                
+                # Test authentication - this will trigger OAuth flow if needed
+                if client.is_authenticated() or client._ensure_valid_token():
+                    user_info = client.get_user_info()
+                    username = user_info.get('display_name', 'Tidal User') if user_info else 'Tidal User'
+                    message = f"✓ Tidal connection successful!\nConnected as: {username}\nOAuth flow completed."
+                    success = True
+                else:
+                    message = "✗ Tidal authentication failed.\nPlease complete the OAuth flow in your browser.\nCheck your credentials and redirect URI."
+                    success = False
+                    
+            except Exception as client_e:
+                message = f"✗ Failed to create Tidal client:\n{str(client_e)}"
+                success = False
+            
+            # Restore original values
+            config_manager.set('tidal.client_id', original_client_id)
+            config_manager.set('tidal.client_secret', original_client_secret)
+            
+            return success, message
+            
+        except Exception as e:
+            # Restore original values even on exception
+            try:
+                config_manager.set('tidal.client_id', original_client_id)
+                config_manager.set('tidal.client_secret', original_client_secret)
+            except:
+                pass
+            return False, f"✗ Tidal test failed:\n{str(e)}"
     
     def _test_plex(self):
         """Test Plex connection"""
@@ -959,6 +1010,11 @@ class SettingsPage(QWidget):
             self.client_id_input.setText(spotify_config.get('client_id', ''))
             self.client_secret_input.setText(spotify_config.get('client_secret', ''))
             
+            # Load Tidal config
+            tidal_config = config_manager.get('tidal', {})
+            self.tidal_client_id_input.setText(tidal_config.get('client_id', ''))
+            self.tidal_client_secret_input.setText(tidal_config.get('client_secret', ''))
+            
             # Load Plex config
             plex_config = config_manager.get_plex_config()
             self.plex_url_input.setText(plex_config.get('base_url', ''))
@@ -1044,6 +1100,10 @@ class SettingsPage(QWidget):
             config_manager.set('spotify.client_id', self.client_id_input.text())
             config_manager.set('spotify.client_secret', self.client_secret_input.text())
             
+            # Save Tidal settings
+            config_manager.set('tidal.client_id', self.tidal_client_id_input.text())
+            config_manager.set('tidal.client_secret', self.tidal_client_secret_input.text())
+            
             # Save Plex settings
             config_manager.set('plex.base_url', self.plex_url_input.text())
             config_manager.set('plex.token', self.plex_token_input.text())
@@ -1089,6 +1149,8 @@ class SettingsPage(QWidget):
             # Emit signals for service configuration changes to reinitialize clients
             self.settings_changed.emit('spotify.client_id', self.client_id_input.text())
             self.settings_changed.emit('spotify.client_secret', self.client_secret_input.text())
+            self.settings_changed.emit('tidal.client_id', self.tidal_client_id_input.text())
+            self.settings_changed.emit('tidal.client_secret', self.tidal_client_secret_input.text())
             self.settings_changed.emit('plex.base_url', self.plex_url_input.text())
             self.settings_changed.emit('plex.token', self.plex_token_input.text())
             self.settings_changed.emit('soulseek.slskd_url', self.slskd_url_input.text())
@@ -1142,6 +1204,43 @@ class SettingsPage(QWidget):
             'client_secret': self.client_secret_input.text()
         }
         self.start_service_test('spotify', test_config)
+    
+    def test_tidal_connection(self):
+        """Test Tidal API connection in background thread"""
+        test_config = {
+            'client_id': self.tidal_client_id_input.text(),
+            'client_secret': self.tidal_client_secret_input.text()
+        }
+        self.start_service_test('tidal', test_config)
+    
+    def authenticate_tidal(self):
+        """Manually trigger Tidal OAuth authentication"""
+        try:
+            from core.tidal_client import TidalClient
+            
+            # Make sure we have the current settings
+            config_manager.set('tidal.client_id', self.tidal_client_id_input.text())
+            config_manager.set('tidal.client_secret', self.tidal_client_secret_input.text())
+            
+            # Create client and authenticate
+            client = TidalClient()
+            
+            self.tidal_auth_btn.setText("🔐 Authenticating...")
+            self.tidal_auth_btn.setEnabled(False)
+            
+            if client.authenticate():
+                QMessageBox.information(self, "Success", "✓ Tidal authentication successful!\nYou can now use Tidal playlists.")
+                self.tidal_auth_btn.setText("✅ Authenticated")
+            else:
+                QMessageBox.warning(self, "Authentication Failed", "✗ Tidal authentication failed.\nPlease check your credentials and try again.")
+                self.tidal_auth_btn.setText("🔐 Authenticate")
+            
+            self.tidal_auth_btn.setEnabled(True)
+            
+        except Exception as e:
+            self.tidal_auth_btn.setText("🔐 Authenticate")
+            self.tidal_auth_btn.setEnabled(True)
+            QMessageBox.critical(self, "Error", f"Failed to authenticate with Tidal:\n{str(e)}")
     
     def test_active_server_connection(self):
         """Test the currently active (or pending) media server connection"""
@@ -1970,6 +2069,95 @@ class SettingsPage(QWidget):
         helper_text.setWordWrap(True)
         spotify_layout.addWidget(helper_text)
         
+        # Tidal settings
+        tidal_frame = QFrame()
+        tidal_frame.setStyleSheet("""
+            QFrame {
+                background: #333333;
+                border: 1px solid #444444;
+                border-radius: 8px;
+                padding: 8px;
+            }
+        """)
+        tidal_layout = QVBoxLayout(tidal_frame)
+        tidal_layout.setSpacing(8)
+        
+        tidal_title = QLabel("Tidal")
+        tidal_title.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        tidal_title.setStyleSheet("color: #ff6600;")
+        tidal_layout.addWidget(tidal_title)
+        
+        # Client ID
+        tidal_client_id_label = QLabel("Client ID:")
+        tidal_client_id_label.setStyleSheet(self.get_label_style(11))
+        tidal_layout.addWidget(tidal_client_id_label)
+        
+        self.tidal_client_id_input = QLineEdit()
+        self.tidal_client_id_input.setStyleSheet(self.get_input_style())
+        self.tidal_client_id_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.form_inputs['tidal.client_id'] = self.tidal_client_id_input
+        tidal_layout.addWidget(self.tidal_client_id_input)
+        
+        # Client Secret
+        tidal_client_secret_label = QLabel("Client Secret:")
+        tidal_client_secret_label.setStyleSheet(self.get_label_style(11))
+        tidal_layout.addWidget(tidal_client_secret_label)
+        
+        self.tidal_client_secret_input = QLineEdit()
+        self.tidal_client_secret_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.tidal_client_secret_input.setStyleSheet(self.get_input_style())
+        self.tidal_client_secret_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.form_inputs['tidal.client_secret'] = self.tidal_client_secret_input
+        tidal_layout.addWidget(self.tidal_client_secret_input)
+        
+        # Helper text for Tidal
+        tidal_helper_text = QLabel("Configure Tidal API credentials for playlist sync functionality")
+        tidal_helper_text.setStyleSheet("color: #ffffff; font-size: 10px; font-style: italic; background: transparent;")
+        tidal_helper_text.setWordWrap(True)
+        tidal_layout.addWidget(tidal_helper_text)
+        
+        # OAuth info
+        oauth_info_label = QLabel("Required Redirect URI:")
+        oauth_info_label.setStyleSheet("color: #ffffff; font-size: 11px; margin-top: 8px; background: transparent;")
+        tidal_layout.addWidget(oauth_info_label)
+        
+        oauth_url_label = QLabel("http://127.0.0.1:8889/tidal/callback")
+        oauth_url_label.setStyleSheet("""
+            color: #ff6600; 
+            font-size: 11px; 
+            font-family: 'Courier New', monospace;
+            background: #2a2a2a;
+            border: 1px solid #444444;
+            border-radius: 4px;
+            padding: 6px 8px;
+            margin-bottom: 8px;
+        """)
+        oauth_url_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        tidal_layout.addWidget(oauth_url_label)
+        
+        # Authenticate button
+        self.tidal_auth_btn = QPushButton("🔐 Authenticate")
+        self.tidal_auth_btn.setFixedHeight(30)
+        self.tidal_auth_btn.setStyleSheet("""
+            QPushButton {
+                background: #ff6600;
+                border: none;
+                border-radius: 15px;
+                color: #ffffff;
+                font-size: 11px;
+                font-weight: bold;
+                margin-top: 8px;
+            }
+            QPushButton:hover {
+                background: #ff7700;
+            }
+            QPushButton:pressed {
+                background: #e55500;
+            }
+        """)
+        self.tidal_auth_btn.clicked.connect(self.authenticate_tidal)
+        tidal_layout.addWidget(self.tidal_auth_btn)
+        
         # Server Selection Toggle Buttons
         server_selection_container = QWidget()
         server_selection_container.setStyleSheet("background: transparent;")
@@ -2188,6 +2376,7 @@ class SettingsPage(QWidget):
         soulseek_layout.addWidget(self.api_key_input)
         
         api_layout.addWidget(spotify_frame)
+        api_layout.addWidget(tidal_frame)
         api_layout.addWidget(server_selection_container)
         api_layout.addWidget(self.plex_container)
         api_layout.addWidget(self.jellyfin_container)
@@ -2203,6 +2392,12 @@ class SettingsPage(QWidget):
         self.test_buttons['spotify'].clicked.connect(self.test_spotify_connection)
         self.test_buttons['spotify'].setStyleSheet(self.get_test_button_style())
         
+        self.test_buttons['tidal'] = QPushButton("Test Tidal")
+        self.test_buttons['tidal'].setFixedHeight(30)
+        self.test_buttons['tidal'].setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.test_buttons['tidal'].clicked.connect(self.test_tidal_connection)
+        self.test_buttons['tidal'].setStyleSheet(self.get_test_button_style())
+        
         self.test_buttons['server'] = QPushButton("Test Server")
         self.test_buttons['server'].setFixedHeight(30)
         self.test_buttons['server'].setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -2216,6 +2411,7 @@ class SettingsPage(QWidget):
         self.test_buttons['soulseek'].setStyleSheet(self.get_test_button_style())
         
         test_layout.addWidget(self.test_buttons['spotify'])
+        test_layout.addWidget(self.test_buttons['tidal'])
         test_layout.addWidget(self.test_buttons['server'])
         test_layout.addWidget(self.test_buttons['soulseek'])
         

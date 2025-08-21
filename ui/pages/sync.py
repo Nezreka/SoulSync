@@ -13,6 +13,7 @@ from typing import List, Optional
 from core.soulseek_client import TrackResult
 import re
 import asyncio
+import time
 from core.matching_engine import MusicMatchingEngine
 from core.wishlist_service import get_wishlist_service
 from ui.components.toast_manager import ToastType
@@ -21,6 +22,7 @@ from core.plex_scan_manager import PlexScanManager
 from utils.logging_config import get_logger
 import yt_dlp
 from core.spotify_client import Track, Playlist
+from core.tidal_client import TidalClient
 
 logger = get_logger("sync")
 
@@ -876,6 +878,43 @@ class PlaylistLoaderThread(QThread):
         except Exception as e:
             self.loading_failed.emit(str(e))
 
+class TidalPlaylistLoaderThread(QThread):
+    playlist_loaded = pyqtSignal(object)  # Single playlist
+    loading_finished = pyqtSignal(int)  # Total count
+    loading_failed = pyqtSignal(str)  # Error message
+    progress_updated = pyqtSignal(str)  # Progress text
+    
+    def __init__(self, tidal_client):
+        super().__init__()
+        self.tidal_client = tidal_client
+        
+    def run(self):
+        try:
+            self.progress_updated.emit("Connecting to Tidal...")
+            if not self.tidal_client:
+                self.loading_failed.emit("Tidal client not available")
+                return
+            
+            # Try to ensure authentication (will trigger OAuth if needed)
+            if not self.tidal_client.is_authenticated():
+                self.progress_updated.emit("Authenticating with Tidal...")
+                if not self.tidal_client._ensure_valid_token():
+                    self.loading_failed.emit("Tidal authentication failed. Please check your settings and complete OAuth flow.")
+                    return
+            
+            self.progress_updated.emit("Fetching playlists...")
+            playlists = self.tidal_client.get_user_playlists_metadata_only()
+            
+            for i, playlist in enumerate(playlists):
+                self.progress_updated.emit(f"Loading playlist {i+1}/{len(playlists)}: {playlist.name}")
+                self.playlist_loaded.emit(playlist)
+                self.msleep(20)  # Reduced delay for faster but visible progressive loading
+            
+            self.loading_finished.emit(len(playlists))
+            
+        except Exception as e:
+            self.loading_failed.emit(str(e))
+
 class TrackLoadingWorkerSignals(QObject):
     """Signals for async track loading worker"""
     tracks_loaded = pyqtSignal(str, list)  # playlist_id, tracks
@@ -1681,6 +1720,18 @@ class PlaylistDetailsModal(QDialog):
         if self.parent_page and self.parent_page.start_playlist_sync(self.playlist):
             self.is_syncing = True
             
+            # Update Tidal card state to syncing (matches YouTube workflow)
+            if hasattr(self, 'is_tidal_playlist') and self.is_tidal_playlist and hasattr(self, 'playlist_id'):
+                print(f"🎵 Updating Tidal card state to syncing for playlist_id: {self.playlist_id}")
+                if hasattr(self.parent_page, 'update_tidal_card_phase'):
+                    self.parent_page.update_tidal_card_phase(self.playlist_id, 'syncing')
+            
+            # Update YouTube card state to syncing (existing logic)
+            if hasattr(self, 'youtube_url'):
+                print(f"🎬 Updating YouTube card state to syncing for URL: {self.youtube_url}")
+                if hasattr(self.parent_page, 'update_youtube_card_phase'):
+                    self.parent_page.update_youtube_card_phase(self.youtube_url, 'syncing')
+            
             # Update modal UI state
             self.set_sync_button_state(True)
             
@@ -2380,6 +2431,277 @@ class PlaylistItem(QFrame):
             self.download_modal.activateWindow()
             self.download_modal.raise_()
 
+class TidalPlaylistCard(QFrame):
+    """Tidal playlist card with persistent state tracking across all phases (matches YouTube workflow)"""
+    card_clicked = pyqtSignal(str, str)  # Signal: (playlist_id, phase)
+    
+    def __init__(self, playlist_id: str, playlist_name: str = "Loading...", track_count: int = 0, parent=None):
+        super().__init__(parent)
+        self.playlist_id = playlist_id
+        self.playlist_name = playlist_name
+        self.track_count = track_count
+        self.phase = "discovering"  # discovering, discovery_complete, syncing, sync_complete, downloading, download_complete
+        self.progress_data = {'total': 0, 'matched': 0, 'failed': 0}
+        
+        # Modal references
+        self.discovery_modal = None
+        self.download_modal = None
+        
+        # State data
+        self.playlist_data = None
+        self.discovered_tracks = []
+        
+        self.setup_ui()
+        self.update_display()
+    
+    def setup_ui(self):
+        self.setFixedHeight(80)
+        self.setStyleSheet("""
+            TidalPlaylistCard {
+                background: #282828;
+                border-radius: 8px;
+                border: 1px solid #404040;
+            }
+            TidalPlaylistCard:hover {
+                background: #333333;
+                border: 1px solid #ff6600;
+            }
+        """)
+        
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(20, 15, 20, 15)
+        layout.setSpacing(15)
+        
+        # Tidal icon indicator
+        tidal_icon = QLabel("🎵")
+        tidal_icon.setFixedSize(24, 24)
+        tidal_icon.setStyleSheet("""
+            QLabel {
+                color: #ff6600;
+                font-size: 16px;
+                font-weight: bold;
+                background: transparent;
+                text-align: center;
+                border-radius: 12px;
+                border: 1px solid #ff6600;
+            }
+        """)
+        tidal_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        # Content layout
+        content_layout = QVBoxLayout()
+        content_layout.setSpacing(4)
+        
+        # Playlist name
+        self.name_label = EllipsisLabel(self.playlist_name)
+        self.name_label.setStyleSheet("""
+            QLabel {
+                color: #ffffff;
+                font-size: 14px;
+                font-weight: bold;
+                background: transparent;
+            }
+        """)
+        
+        # Info row (track count + phase)
+        info_layout = QHBoxLayout()
+        info_layout.setSpacing(8)
+        info_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Track count
+        self.track_label = QLabel(f"{self.track_count} tracks")
+        self.track_label.setStyleSheet("""
+            QLabel {
+                color: #b3b3b3;
+                font-size: 11px;
+                background: transparent;
+            }
+        """)
+        
+        # Phase indicator
+        self.phase_label = QLabel(self.get_phase_text())
+        self.phase_label.setStyleSheet("""
+            QLabel {
+                color: #ff6600;
+                font-size: 11px;
+                background: transparent;
+                font-weight: bold;
+            }
+        """)
+        
+        info_layout.addWidget(self.track_label)
+        info_layout.addWidget(self.phase_label)
+        info_layout.addStretch()
+        
+        content_layout.addWidget(self.name_label)
+        content_layout.addLayout(info_layout)
+        
+        # Progress widget (hidden by default, shown during syncing/downloading)
+        self.progress_widget = self.create_progress_display()
+        self.progress_widget.hide()
+        
+        # Action button
+        self.action_btn = QPushButton("Discover Matches")
+        self.action_btn.setFixedSize(120, 30)
+        self.action_btn.setStyleSheet("""
+            QPushButton {
+                background: #ff6600;
+                border: none;
+                border-radius: 15px;
+                color: #ffffff;
+                font-size: 10px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #ff7700;
+            }
+            QPushButton:pressed {
+                background: #e55500;
+            }
+        """)
+        self.action_btn.clicked.connect(self.on_action_clicked)
+        
+        layout.addWidget(tidal_icon)
+        layout.addLayout(content_layout)
+        layout.addWidget(self.progress_widget)
+        layout.addStretch()
+        layout.addWidget(self.action_btn)
+    
+    def create_progress_display(self):
+        """Create sync status display widget like YouTubePlaylistCard"""
+        sync_status = QFrame()
+        sync_status.setFixedHeight(30)
+        sync_status.setStyleSheet("""
+            QFrame {
+                background: rgba(0, 0, 0, 0.3);
+                border-radius: 15px;
+                border: 1px solid rgba(255, 255, 255, 0.1);
+            }
+        """)
+        
+        layout = QHBoxLayout(sync_status)
+        layout.setContentsMargins(12, 6, 12, 6)
+        layout.setSpacing(8)
+        
+        # Create labels for progress display
+        self.total_tracks_label = QLabel(f"♪ {self.progress_data['total']}")
+        self.total_tracks_label.setFont(QFont("SF Pro Text", 9, QFont.Weight.Medium))
+        self.total_tracks_label.setStyleSheet("color: #b3b3b3; background: transparent;")
+        
+        self.matched_tracks_label = QLabel(f"✓ {self.progress_data['matched']}")
+        self.matched_tracks_label.setFont(QFont("SF Pro Text", 9, QFont.Weight.Medium))
+        self.matched_tracks_label.setStyleSheet("color: #1db954; background: transparent;")
+        
+        self.failed_tracks_label = QLabel(f"✗ {self.progress_data['failed']}")
+        self.failed_tracks_label.setFont(QFont("SF Pro Text", 9, QFont.Weight.Medium))
+        self.failed_tracks_label.setStyleSheet("color: #e22134; background: transparent;")
+        
+        layout.addWidget(self.total_tracks_label)
+        layout.addWidget(self.matched_tracks_label)
+        layout.addWidget(self.failed_tracks_label)
+        layout.addStretch()
+        
+        return sync_status
+    
+    def get_phase_text(self):
+        """Get display text for current phase"""
+        phase_texts = {
+            "discovering": "Ready to discover",
+            "discovery_complete": "Discovery complete",
+            "syncing": "Finding matches...",
+            "sync_complete": "Sync complete",
+            "downloading": "Downloading...",
+            "download_complete": "Download complete"
+        }
+        return phase_texts.get(self.phase, self.phase)
+    
+    def get_action_text(self):
+        """Get text for action button based on current phase"""
+        action_texts = {
+            "discovering": "Discover Matches",
+            "discovery_complete": "View Results",
+            "syncing": "View Progress",
+            "sync_complete": "Download Missing",
+            "downloading": "View Downloads",
+            "download_complete": "View Downloads"
+        }
+        return action_texts.get(self.phase, "Discover Matches")
+    
+    def update_phase_style(self):
+        """Update styling based on current phase"""
+        if self.phase in ['discovering']:
+            self.phase_label.setStyleSheet("color: #ff6600; font-size: 11px; background: transparent; font-weight: bold;")
+        elif self.phase in ['discovery_complete', 'sync_complete']:
+            self.phase_label.setStyleSheet("color: #1db954; font-size: 11px; background: transparent; font-weight: bold;")
+        elif self.phase in ['syncing', 'downloading']:
+            self.phase_label.setStyleSheet("color: #1db954; font-size: 11px; background: transparent; font-weight: bold;")
+        elif self.phase in ['download_complete']:
+            self.phase_label.setStyleSheet("color: #1db954; font-size: 11px; background: transparent; font-weight: bold;")
+    
+    def update_display(self):
+        """Update all display elements based on current state"""
+        self.name_label.setText(self.playlist_name)
+        self.track_label.setText(f"{self.track_count} tracks")
+        self.phase_label.setText(self.get_phase_text())
+        self.action_btn.setText(self.get_action_text())
+        self.update_phase_style()
+    
+    def set_phase(self, phase: str):
+        """Update the current phase and refresh display"""
+        self.phase = phase
+        self.update_display()
+        
+        # Show/hide progress widget based on phase
+        if phase in ['syncing', 'downloading', 'sync_complete']:
+            print(f"🎵 Tidal card phase set to {phase} - showing progress widget")
+            self.progress_widget.show()
+            self.action_btn.hide()
+            # For syncing phase, initialize with current progress data
+            if phase == 'syncing':
+                # Ensure we show some initial progress data
+                if self.progress_data['total'] == 0:
+                    # Initialize with track count if available
+                    self.progress_data['total'] = self.track_count
+                    self.total_tracks_label.setText(f"♪ {self.progress_data['total']}")
+                self.matched_tracks_label.setText(f"✓ {self.progress_data['matched']}")
+                self.failed_tracks_label.setText(f"✗ {self.progress_data['failed']}")
+            # For sync_complete, hide progress after a delay to show final results
+            elif phase == 'sync_complete':
+                from PyQt6.QtCore import QTimer
+                QTimer.singleShot(5000, lambda: self.progress_widget.hide() if self.phase == 'sync_complete' else None)
+                QTimer.singleShot(5000, lambda: self.action_btn.show() if self.phase == 'sync_complete' else None)
+        else:
+            self.progress_widget.hide()
+            self.action_btn.show()
+    
+    def update_playlist_info(self, name: str, track_count: int):
+        """Update playlist information and refresh display"""
+        self.playlist_name = name
+        self.track_count = track_count
+        self.update_display()
+    
+    def update_progress(self, total: int, matched: int, failed: int):
+        """Update progress data and refresh progress display"""
+        self.progress_data = {'total': total, 'matched': matched, 'failed': failed}
+        if self.progress_widget.isVisible():
+            self.total_tracks_label.setText(f"♪ {total}")
+            self.matched_tracks_label.setText(f"✓ {matched}")
+            self.failed_tracks_label.setText(f"✗ {failed}")
+    
+    def on_action_clicked(self):
+        """Handle action button click - emit signal with current phase"""
+        self.card_clicked.emit(self.playlist_id, self.phase)
+    
+    def mousePressEvent(self, event):
+        """Handle card clicks"""
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.card_clicked.emit(self.playlist_id, self.phase)
+        super().mousePressEvent(event)
+
 class YouTubePlaylistCard(QFrame):
     """YouTube playlist card with persistent state tracking across all phases"""
     card_clicked = pyqtSignal(str, str)  # Signal: (url, phase)
@@ -2764,16 +3086,19 @@ class SyncPage(QWidget):
     sync_activity = pyqtSignal(str, str, str, str)  # icon, title, subtitle, time
     database_updated_externally = pyqtSignal()
     
-    def __init__(self, spotify_client=None, plex_client=None, soulseek_client=None, downloads_page=None, jellyfin_client=None, parent=None):
+    def __init__(self, spotify_client=None, plex_client=None, soulseek_client=None, downloads_page=None, jellyfin_client=None, tidal_client=None, parent=None):
         super().__init__(parent)
         self.spotify_client = spotify_client
         self.plex_client = plex_client
         self.jellyfin_client = jellyfin_client
         self.soulseek_client = soulseek_client
+        self.tidal_client = tidal_client or TidalClient()
         self.downloads_page = downloads_page
         self.sync_statuses = load_sync_status()
         self.current_playlists = []
         self.playlist_loader = None
+        self.current_tidal_playlists = []
+        self.tidal_playlist_loader = None
         self.active_download_processes = {}
         # Track cache for performance
         self.track_cache = {}  # playlist_id -> tracks
@@ -2803,6 +3128,11 @@ class SyncPage(QWidget):
         self.youtube_playlist_states = {}  # url -> {phase, data, card, modals}
         self.youtube_cards = {}  # url -> YouTubePlaylistCard instance
         self.youtube_cards_container = None  # Container for all YouTube cards
+        
+        # Tidal playlist card hub system (identical to YouTube)
+        self.tidal_playlist_states = {}  # playlist_id -> {phase, data, card, modals}
+        self.tidal_cards = {}  # playlist_id -> TidalPlaylistCard instance
+        self.tidal_cards_container = None  # Container for all Tidal cards
         
         # Initialize unified media scan manager
         self.scan_manager = None
@@ -3322,8 +3652,36 @@ class SyncPage(QWidget):
         if not youtube_card_updated:
             print(f"🎬 ❌ No matching YouTube card found for playlist_id: {playlist_id}")
         
-        if not playlist_item and not youtube_card_updated:
-            print(f"🚀 No playlist widget OR YouTube card found for playlist_id: {playlist_id}")
+        # Update Tidal card progress (for Tidal playlists)
+        # Find the Tidal card by matching playlist IDs
+        tidal_card_updated = False
+        print(f"🎵 Searching for Tidal card with playlist_id: {playlist_id}")
+        for tidal_playlist_id, state in self.tidal_playlist_states.items():
+            playlist_data = state.get('playlist_data')
+            if playlist_data and hasattr(playlist_data, 'id'):
+                print(f"🎵 Checking Tidal card: tidal_playlist_id={tidal_playlist_id}, stored playlist_id={playlist_data.id}")
+                if playlist_data.id == playlist_id:
+                    print(f"🎵 ✅ Found matching Tidal card for playlist_id: {playlist_id}, updating progress")
+                    # Update card progress display
+                    if tidal_playlist_id in self.tidal_cards:
+                        card = self.tidal_cards[tidal_playlist_id]
+                        card.update_progress(
+                            total=progress.total_tracks,
+                            matched=progress.matched_tracks,
+                            failed=progress.failed_tracks
+                        )
+                    tidal_card_updated = True
+                    break
+                else:
+                    print(f"🎵 ❌ Playlist ID mismatch: {playlist_data.id} != {playlist_id}")
+            else:
+                print(f"🎵 Tidal card state missing playlist_data or id: tidal_playlist_id={tidal_playlist_id}")
+        
+        if not tidal_card_updated:
+            print(f"🎵 ❌ No matching Tidal card found for playlist_id: {playlist_id}")
+        
+        if not playlist_item and not youtube_card_updated and not tidal_card_updated:
+            print(f"🚀 No playlist widget, YouTube card, OR Tidal card found for playlist_id: {playlist_id}")
         
         # Update any open modal for this playlist
         print(f"🚀 About to call update_open_modals_progress")
@@ -3365,6 +3723,25 @@ class SyncPage(QWidget):
                 )
                 playlist_name = playlist_data.name
                 youtube_card_updated = True
+                break
+        
+        # Update Tidal card status (for Tidal playlists)
+        tidal_card_updated = False
+        for tidal_playlist_id, state in self.tidal_playlist_states.items():
+            playlist_data = state.get('playlist_data')
+            if playlist_data and hasattr(playlist_data, 'id') and playlist_data.id == playlist_id:
+                print(f"🎵 Tidal sync finished for playlist_id: {playlist_id}, updating card to sync_complete")
+                self.update_tidal_card_phase(tidal_playlist_id, 'sync_complete')
+                # Also update card progress display
+                if tidal_playlist_id in self.tidal_cards:
+                    card = self.tidal_cards[tidal_playlist_id]
+                    card.update_progress(
+                        total=result.total_tracks,
+                        matched=result.matched_tracks,
+                        failed=result.failed_tracks
+                    )
+                playlist_name = playlist_data.name
+                tidal_card_updated = True
                 break
 
         # Update any open modals
@@ -3806,6 +4183,10 @@ class SyncPage(QWidget):
         spotify_tab = self.create_spotify_playlist_tab()
         self.playlist_tabs.addTab(spotify_tab, "Spotify Playlists")
         
+        # Create Tidal tab
+        tidal_tab = self.create_tidal_playlist_tab()
+        self.playlist_tabs.addTab(tidal_tab, "Tidal Playlists")
+        
         # Create YouTube tab (placeholder for now)
         youtube_tab = self.create_youtube_playlist_tab()
         self.playlist_tabs.addTab(youtube_tab, "YouTube Playlists")
@@ -3882,6 +4263,87 @@ class SyncPage(QWidget):
         
         self.playlist_layout.addStretch()
         playlist_container.setWidget(self.playlist_widget)
+        
+        layout.addLayout(header_layout)
+        layout.addWidget(playlist_container)
+        
+        return tab
+    
+    def create_tidal_playlist_tab(self):
+        """Create the Tidal playlist tab (similar to Spotify but opens discovery modal)"""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setSpacing(15)
+        layout.setContentsMargins(15, 15, 15, 15)
+        
+        # Section header
+        header_layout = QHBoxLayout()
+        
+        section_title = QLabel("Your Tidal Playlists")
+        section_title.setFont(QFont("Arial", 16, QFont.Weight.Bold))
+        section_title.setStyleSheet("color: #ffffff;")
+        
+        self.tidal_refresh_btn = QPushButton("🔄 Refresh")
+        self.tidal_refresh_btn.setFixedSize(100, 35)
+        self.tidal_refresh_btn.clicked.connect(self.load_tidal_playlists_async)
+        self.tidal_refresh_btn.setStyleSheet("""
+            QPushButton {
+                background: #ff6600;
+                border: none;
+                border-radius: 17px;
+                color: #ffffff;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #ff7700;
+            }
+            QPushButton:pressed {
+                background: #e55500;
+            }
+            QPushButton:disabled {
+                background: #666666;
+                color: #999999;
+            }
+        """)
+        
+        header_layout.addWidget(section_title)
+        header_layout.addStretch()
+        header_layout.addWidget(self.tidal_refresh_btn)
+        
+        # Playlist area (scrollable)
+        playlist_container = QScrollArea()
+        playlist_container.setWidgetResizable(True)
+        playlist_container.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        playlist_container.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        playlist_container.setStyleSheet("""
+            QScrollArea {
+                border: none;
+                background: transparent;
+            }
+            QScrollBar:vertical {
+                background: #2a2a2a;
+                width: 12px;
+                border-radius: 6px;
+            }
+            QScrollBar::handle:vertical {
+                background: #555555;
+                border-radius: 6px;
+                min-height: 20px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #666666;
+            }
+        """)
+        
+        # This will hold all playlist items
+        self.tidal_playlist_widget = QWidget()
+        self.tidal_playlist_layout = QVBoxLayout(self.tidal_playlist_widget)
+        self.tidal_playlist_layout.setSpacing(8)
+        self.tidal_playlist_layout.setContentsMargins(0, 0, 0, 0)
+        self.tidal_playlist_layout.addStretch()  # Push items to top
+        
+        playlist_container.setWidget(self.tidal_playlist_widget)
         
         layout.addLayout(header_layout)
         layout.addWidget(playlist_container)
@@ -4446,6 +4908,446 @@ class SyncPage(QWidget):
         """Update progress text"""
         self.log_area.append(message)
     
+    def load_tidal_playlists_async(self):
+        """Start asynchronous Tidal playlist loading"""
+        if self.tidal_playlist_loader and self.tidal_playlist_loader.isRunning():
+            return
+        
+        # Complete cleanup of all Tidal operations before refresh
+        self.cleanup_all_tidal_operations()
+        
+        # Clear existing Tidal playlists
+        self.clear_tidal_playlists()
+        
+        # Add loading placeholder
+        loading_label = QLabel("🔄 Loading Tidal playlists...")
+        loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        loading_label.setStyleSheet("""
+            QLabel {
+                color: #b3b3b3;
+                font-size: 14px;
+                padding: 40px;
+                background: #282828;
+                border-radius: 8px;
+                border: 1px solid #404040;
+            }
+        """)
+        self.tidal_playlist_layout.insertWidget(0, loading_label)
+        
+        # Show loading state
+        self.tidal_refresh_btn.setText("🔄 Loading...")
+        self.tidal_refresh_btn.setEnabled(False)
+        self.log_area.append("Starting Tidal playlist loading...")
+        
+        # Create and start loader thread
+        self.tidal_playlist_loader = TidalPlaylistLoaderThread(self.tidal_client)
+        self.tidal_playlist_loader.playlist_loaded.connect(self.add_tidal_playlist_to_ui)
+        self.tidal_playlist_loader.loading_finished.connect(self.on_tidal_loading_finished)
+        self.tidal_playlist_loader.loading_failed.connect(self.on_tidal_loading_failed)
+        self.tidal_playlist_loader.progress_updated.connect(self.update_progress)
+        self.tidal_playlist_loader.start()
+    
+    def add_tidal_playlist_to_ui(self, playlist):
+        """Add a single Tidal playlist to the UI as it's loaded"""
+        # Create a TidalPlaylistCard that matches YouTube card workflow
+        card = TidalPlaylistCard(playlist.id, playlist.name, len(playlist.tracks) if hasattr(playlist, 'tracks') else 0, self)
+        
+        # Store card reference
+        self.tidal_cards[playlist.id] = card
+        
+        # Initialize state tracking
+        self.tidal_playlist_states[playlist.id] = {
+            'phase': 'discovering',
+            'playlist_data': None,
+            'discovered_tracks': [],
+            'card': card,
+            'discovery_modal': None,
+            'download_modal': None,
+            'original_name': playlist.name,  # Store original name for resets
+            'original_track_count': len(playlist.tracks) if hasattr(playlist, 'tracks') else 0
+        }
+        
+        # Add to layout and store reference
+        self.tidal_playlist_layout.insertWidget(self.tidal_playlist_layout.count() - 1, card)
+        self.current_tidal_playlists.append(playlist)
+        
+        # Connect to click handler (new card-based system)
+        card.card_clicked.connect(self.on_tidal_card_clicked)
+    
+    def on_tidal_loading_finished(self, count):
+        """Handle completion of Tidal playlist loading"""
+        # Remove loading placeholder if it exists
+        for i in range(self.tidal_playlist_layout.count()):
+            item = self.tidal_playlist_layout.itemAt(i)
+            if item and item.widget() and isinstance(item.widget(), QLabel):
+                if "Loading Tidal playlists" in item.widget().text():
+                    item.widget().deleteLater()
+                    break
+        
+        self.tidal_refresh_btn.setText("🔄 Refresh")
+        self.tidal_refresh_btn.setEnabled(True)
+        self.log_area.append(f"✓ Loaded {count} Tidal playlists successfully")
+    
+    def on_tidal_loading_failed(self, error_msg):
+        """Handle Tidal playlist loading failure"""
+        # Remove loading placeholder if it exists
+        for i in range(self.tidal_playlist_layout.count()):
+            item = self.tidal_playlist_layout.itemAt(i)
+            if item and item.widget() and isinstance(item.widget(), QLabel):
+                if "Loading Tidal playlists" in item.widget().text():
+                    item.widget().deleteLater()
+                    break
+        
+        self.tidal_refresh_btn.setText("🔄 Refresh")
+        self.tidal_refresh_btn.setEnabled(True)
+        self.log_area.append(f"✗ Failed to load Tidal playlists: {error_msg}")
+        QMessageBox.critical(self, "Error", f"Failed to load Tidal playlists: {error_msg}")
+    
+    def cleanup_all_tidal_operations(self):
+        """Complete cleanup of all Tidal operations - stop workers, close modals, cancel syncs"""
+        print("🧹 Starting complete Tidal cleanup for refresh...")
+        
+        # Close and cleanup all active Tidal modals
+        for playlist_id, state in list(self.tidal_playlist_states.items()):
+            # Close discovery modals
+            discovery_modal = state.get('discovery_modal')
+            if discovery_modal:
+                print(f"🔍 Closing Tidal discovery modal for playlist_id: {playlist_id}")
+                try:
+                    # Cancel any active workers in the discovery modal
+                    if hasattr(discovery_modal, 'spotify_worker') and discovery_modal.spotify_worker:
+                        discovery_modal.spotify_worker.cancel()
+                        discovery_modal.spotify_worker = None
+                    
+                    # Cancel any active sync operations
+                    if hasattr(discovery_modal, 'sync_in_progress') and discovery_modal.sync_in_progress:
+                        if hasattr(self, 'cancel_playlist_sync') and hasattr(discovery_modal, 'playlist'):
+                            self.cancel_playlist_sync(discovery_modal.playlist.id)
+                    
+                    # Force close the modal
+                    discovery_modal.close()
+                except Exception as e:
+                    print(f"⚠️ Error closing discovery modal: {e}")
+            
+            # Close download modals
+            download_modal = state.get('download_modal')
+            if download_modal:
+                print(f"📥 Closing Tidal download modal for playlist_id: {playlist_id}")
+                try:
+                    # Cancel all operations (downloads, searches, etc.)
+                    download_modal.cancel_operations()
+                    
+                    # Cancel any additional search workers that might be running
+                    if hasattr(download_modal, 'parallel_search_tracking'):
+                        download_modal.parallel_search_tracking.clear()
+                    
+                    # Stop any active timers
+                    if hasattr(download_modal, 'download_status_timer'):
+                        download_modal.download_status_timer.stop()
+                    
+                    # Clear any queued operations
+                    if hasattr(download_modal, 'active_downloads'):
+                        download_modal.active_downloads.clear()
+                    
+                    # Force close the modal
+                    download_modal.close()
+                except Exception as e:
+                    print(f"⚠️ Error closing download modal: {e}")
+        
+        # Cancel any active sync workers for Tidal playlists
+        tidal_playlist_ids = set()
+        for playlist_id, state in self.tidal_playlist_states.items():
+            playlist_data = state.get('playlist_data')
+            if playlist_data and hasattr(playlist_data, 'id'):
+                tidal_playlist_ids.add(playlist_data.id)
+        
+        # Cancel sync workers
+        for playlist_id in tidal_playlist_ids:
+            if playlist_id in self.active_sync_workers:
+                print(f"🔄 Cancelling sync worker for Tidal playlist_id: {playlist_id}")
+                try:
+                    worker = self.active_sync_workers[playlist_id]
+                    if hasattr(worker, 'cancel'):
+                        worker.cancel()
+                    del self.active_sync_workers[playlist_id]
+                except Exception as e:
+                    print(f"⚠️ Error cancelling sync worker: {e}")
+        
+        # Remove from active download modals (shared with YouTube)
+        for playlist_id in list(self.active_youtube_download_modals.keys()):
+            modal = self.active_youtube_download_modals[playlist_id]
+            if hasattr(modal, 'is_tidal_playlist') and modal.is_tidal_playlist:
+                print(f"📥 Removing Tidal download modal from active list: {playlist_id}")
+                try:
+                    del self.active_youtube_download_modals[playlist_id]
+                except Exception as e:
+                    print(f"⚠️ Error removing download modal: {e}")
+        
+        # Force cleanup of any remaining thread pool operations
+        # This ensures any lingering search workers are properly terminated
+        try:
+            thread_pool = QThreadPool.globalInstance()
+            # Note: QThreadPool doesn't have a direct "cancel all" method,
+            # but setting cancel_requested=True in the modals should make workers exit gracefully
+            print(f"🔧 Thread pool active count: {thread_pool.activeThreadCount()}")
+            if thread_pool.activeThreadCount() > 0:
+                print("⏳ Waiting briefly for thread pool workers to finish gracefully...")
+                # Give workers a moment to see the cancel_requested flag and exit
+                from PyQt6.QtCore import QTimer, QEventLoop
+                loop = QEventLoop()
+                QTimer.singleShot(500, loop.quit)  # 500ms timeout
+                loop.exec()
+        except Exception as e:
+            print(f"⚠️ Error during thread pool cleanup: {e}")
+        
+        print("✅ Tidal cleanup complete")
+
+    def clear_tidal_playlists(self):
+        """Clear all Tidal playlist items from UI"""
+        for i in reversed(range(self.tidal_playlist_layout.count())):
+            layout_item = self.tidal_playlist_layout.itemAt(i)
+            if layout_item:
+                widget = layout_item.widget()
+                if widget:
+                    # Remove TidalPlaylistCard widgets and skip static UI elements
+                    # (like refresh buttons, labels, etc.)
+                    if hasattr(widget, 'playlist_id') or isinstance(widget, TidalPlaylistCard):
+                        widget.setParent(None)
+        self.current_tidal_playlists.clear()
+        
+        # Clear the state tracking as well
+        self.tidal_cards.clear()
+        self.tidal_playlist_states.clear()
+    
+    def on_tidal_card_clicked(self, playlist_id: str, phase: str):
+        """Handle Tidal playlist card clicks - route to appropriate modal (matches YouTube workflow)"""
+        print(f"🎵 Tidal card clicked: playlist_id={playlist_id}, Phase={phase}")
+        
+        state = self.get_tidal_playlist_state(playlist_id)
+        if not state:
+            print(f"⚠️ No state found for playlist_id: {playlist_id}")
+            return
+        
+        # Route to appropriate modal based on current phase
+        if phase in ['discovering', 'discovery_complete']:
+            self.open_or_create_tidal_discovery_modal(playlist_id, state)
+        elif phase in ['sync_complete', 'downloading', 'download_complete']:
+            # For sync_complete phase, open discovery modal with "Download Missing" button
+            if phase == 'sync_complete':
+                self.open_or_create_tidal_discovery_modal(playlist_id, state)
+            else:
+                # For downloading/download_complete phases, check if download modal actually exists
+                # If not, route back to discovery modal (handles case where download modal was closed)
+                playlist_data = state.get('playlist_data')
+                download_modal = state.get('download_modal')
+                if download_modal and not download_modal.isVisible():
+                    # Modal exists but is hidden - show it
+                    print(f"📍 Reopening hidden Tidal download modal for playlist_id: {playlist_id}")
+                    download_modal.show()
+                    download_modal.activateWindow()
+                    download_modal.raise_()
+                elif download_modal and download_modal.isVisible():
+                    # Modal is already visible - bring to front
+                    print(f"📍 Bringing visible Tidal download modal to front for playlist_id: {playlist_id}")
+                    download_modal.activateWindow()
+                    download_modal.raise_()
+                else:
+                    print(f"📍 No download modal found, routing to discovery modal instead")
+                    self.open_or_create_tidal_discovery_modal(playlist_id, state)
+        elif phase == 'syncing':
+            # Show sync progress - route to discovery modal
+            self.open_or_create_tidal_discovery_modal(playlist_id, state)
+    
+    def open_or_create_tidal_discovery_modal(self, playlist_id: str, state: dict):
+        """Open or create the discovery modal for a Tidal playlist"""
+        # Check if modal already exists and is visible
+        if state.get('discovery_modal') and state['discovery_modal'].isVisible():
+            state['discovery_modal'].activateWindow()
+            state['discovery_modal'].raise_()
+            return
+        
+        # Check if modal exists but is hidden - reopen it
+        if state.get('discovery_modal') and not state['discovery_modal'].isVisible():
+            print(f"🔍 Reopening existing hidden discovery modal for playlist_id: {playlist_id}")
+            state['discovery_modal'].show()
+            state['discovery_modal'].activateWindow()
+            state['discovery_modal'].raise_()
+            return
+        
+        # Check if we have playlist data already (discovery_complete state)
+        if state.get('playlist_data') and state['phase'] == 'discovery_complete':
+            print(f"🔍 Opening existing discovery modal with data for playlist_id: {playlist_id}")
+            
+            # Create a new modal with the existing data
+            dummy_playlist_item = type('DummyPlaylistItem', (), {
+                'playlist_name': state['playlist_data'].name,
+                'track_count': len(state['playlist_data'].tracks),
+                'download_modal': None,
+                'show_operation_status': lambda self, status_text="View Progress": None,
+                'hide_operation_status': lambda self: None
+            })()
+            
+            # Create the discovery modal using the existing data
+            modal = YouTubeDownloadMissingTracksModal(
+                state['playlist_data'], 
+                dummy_playlist_item,
+                self, 
+                self.downloads_page
+            )
+            
+            # Mark this as a Tidal workflow
+            modal.is_tidal_playlist = True
+            modal.tidal_playlist = state['playlist_data']
+            modal.playlist_id = playlist_id  # For state tracking
+            
+            # Store modal reference in state
+            state['discovery_modal'] = modal
+            
+            # Show the modal
+            modal.show()
+            modal.activateWindow()
+            modal.raise_()
+            return
+        
+        # Need to discover playlist data first
+        print(f"🔍 Need to discover playlist data for playlist_id: {playlist_id}")
+        
+        # Get playlist data if not cached
+        playlist_data = state.get('playlist_data')
+        if not playlist_data:
+            # Try to get playlist from current loaded playlists
+            playlist_data = None
+            for playlist in self.current_tidal_playlists:
+                if hasattr(playlist, 'id') and playlist.id == playlist_id:
+                    playlist_data = playlist
+                    break
+            
+            if not playlist_data:
+                print(f"❌ Could not find playlist data for playlist_id: {playlist_id}")
+                return
+            
+            # Get full playlist data with tracks if not already loaded
+            if not hasattr(playlist_data, 'tracks') or not playlist_data.tracks:
+                try:
+                    full_playlist = self.tidal_client.get_playlist(playlist_id)
+                    if full_playlist and full_playlist.tracks:
+                        playlist_data = full_playlist
+                    else:
+                        print(f"❌ Failed to load tracks for Tidal playlist {playlist_id}")
+                        QMessageBox.warning(self, "Error", f"Failed to load tracks for playlist")
+                        return
+                except Exception as e:
+                    print(f"❌ Error loading Tidal playlist tracks: {e}")
+                    QMessageBox.warning(self, "Error", f"Error loading playlist tracks: {str(e)}")
+                    return
+        
+        # Create a dummy playlist item for the modal
+        dummy_playlist_item = type('DummyPlaylistItem', (), {
+            'playlist_name': playlist_data.name,
+            'track_count': len(playlist_data.tracks),
+            'download_modal': None,
+            'show_operation_status': lambda self, status_text="View Progress": None,
+            'hide_operation_status': lambda self: None
+        })()
+        
+        # Create the discovery modal
+        modal = YouTubeDownloadMissingTracksModal(
+            playlist_data, 
+            dummy_playlist_item,
+            self, 
+            self.downloads_page
+        )
+        
+        # Mark this as a Tidal workflow
+        modal.is_tidal_playlist = True
+        modal.tidal_playlist = playlist_data
+        modal.playlist_id = playlist_id  # For state tracking
+        
+        # Store playlist data and modal reference in state
+        state['playlist_data'] = playlist_data
+        state['discovery_modal'] = modal
+        
+        # Show the modal
+        modal.show()
+        modal.activateWindow()
+        modal.raise_()
+        
+        print(f"✅ Opened discovery modal for Tidal playlist '{playlist_data.name}' with {len(playlist_data.tracks)} tracks")
+    
+    def open_or_create_tidal_download_modal(self, playlist_id: str, state: dict):
+        """Open or create the download modal for a Tidal playlist"""
+        playlist_data = state.get('playlist_data')
+        if not playlist_data:
+            print(f"⚠️ No playlist data found for download modal")
+            return
+        
+        # Check if download modal already exists
+        if hasattr(playlist_data, 'id') and playlist_data.id in self.active_youtube_download_modals:
+            modal = self.active_youtube_download_modals[playlist_data.id]
+            if modal.isVisible():
+                modal.activateWindow()
+                modal.raise_()
+                return
+            else:
+                # Modal exists but is hidden - show it
+                modal.show()
+                modal.activateWindow()
+                modal.raise_()
+                return
+        
+        # Need to create new download modal - route back to discovery modal for now
+        print(f"📍 No download modal found, routing to discovery modal")
+        self.open_or_create_tidal_discovery_modal(playlist_id, state)
+    
+    def on_tidal_playlist_clicked(self, playlist):
+        """Legacy method for old TidalPlaylistItem - route to card system"""
+        print(f"🎵 Legacy Tidal playlist clicked: {playlist.name} - routing to card system")
+        
+        # For now, create a temporary discovery modal (this should be replaced when cards are fully integrated)
+        # Get full playlist data with tracks if not already loaded
+        if not hasattr(playlist, 'tracks') or not playlist.tracks:
+            try:
+                full_playlist = self.tidal_client.get_playlist(playlist.id)
+                if full_playlist and full_playlist.tracks:
+                    playlist = full_playlist
+                else:
+                    print(f"❌ Failed to load tracks for Tidal playlist {playlist.name}")
+                    QMessageBox.warning(self, "Error", f"Failed to load tracks for playlist '{playlist.name}'")
+                    return
+            except Exception as e:
+                print(f"❌ Error loading Tidal playlist tracks: {e}")
+                QMessageBox.warning(self, "Error", f"Error loading playlist tracks: {str(e)}")
+                return
+        
+        # Create a dummy playlist item for the modal (similar to YouTube workflow)
+        dummy_playlist_item = type('DummyPlaylistItem', (), {
+            'playlist_name': playlist.name,
+            'track_count': len(playlist.tracks),
+            'download_modal': None,
+            'show_operation_status': lambda self, status_text="View Progress": None,
+            'hide_operation_status': lambda self: None
+        })()
+        
+        # Create the discovery modal using the YouTube modal class 
+        # (it works for any track discovery workflow)
+        modal = YouTubeDownloadMissingTracksModal(
+            playlist, 
+            dummy_playlist_item,
+            self, 
+            self.downloads_page
+        )
+        
+        # Mark this as a Tidal workflow so it uses the Tidal discovery worker
+        modal.is_tidal_playlist = True
+        modal.tidal_playlist = playlist
+        
+        # Show the modal
+        modal.show()
+        modal.activateWindow()
+        modal.raise_()
+        
+        print(f"✅ Opened discovery modal for Tidal playlist '{playlist.name}' with {len(playlist.tracks)} tracks")
+    
     def disable_refresh_button(self, operation_name="Operation"):
         """Disable refresh button during sync/download operations"""
         self.refresh_btn.setEnabled(False)
@@ -4837,6 +5739,12 @@ class SyncPage(QWidget):
         if url in self.youtube_cards:
             card = self.youtube_cards[url]
             card.update_playlist_info(name, track_count)
+            
+            # Store original name and count for resets
+            if url in self.youtube_playlist_states:
+                state = self.youtube_playlist_states[url]
+                state['original_name'] = name
+                state['original_track_count'] = track_count
     
     def set_youtube_card_playlist_data(self, url: str, playlist_data):
         """Store playlist data for a YouTube card"""
@@ -4868,7 +5776,10 @@ class SyncPage(QWidget):
             if url in self.youtube_cards:
                 card = self.youtube_cards[url]
                 card.set_phase('discovering')
-                card.update_playlist_info("Loading...", 0)
+                # Use original name instead of "Loading..." to keep playlist title visible
+                original_name = state.get('original_name', 'Loading...')
+                original_count = state.get('original_track_count', 0)
+                card.update_playlist_info(original_name, original_count)
                 card.update_progress(0, 0, 0)
     
     def remove_youtube_playlist_card(self, url: str):
@@ -4881,6 +5792,82 @@ class SyncPage(QWidget):
         if url in self.youtube_playlist_states:
             del self.youtube_playlist_states[url]
     
+    # Tidal state management methods (identical structure to YouTube)
+    def update_tidal_card_phase(self, playlist_id: str, phase: str):
+        """Update the Tidal card's phase - cards are the single source of truth for state"""
+        if playlist_id not in self.tidal_cards or playlist_id not in self.tidal_playlist_states:
+            return
+
+        card = self.tidal_cards[playlist_id]
+        state = self.tidal_playlist_states[playlist_id]
+        
+        # Update the internal state - card handles its own visual appearance
+        card.set_phase(phase)
+        state['phase'] = phase
+        
+        # Clean up any existing status widgets for this playlist when changing phases
+        playlist_data = state.get('playlist_data')
+        if playlist_data and hasattr(playlist_data, 'id'):
+            if playlist_data.id in self.youtube_status_widgets:  # Reuse existing status widget system
+                status_widget = self.youtube_status_widgets.pop(playlist_data.id, None)
+                if status_widget:
+                    status_widget.setParent(None)
+                    status_widget.deleteLater()
+                    print(f"🧹 Cleaned up status widget for Tidal phase change to: {phase}")
+    
+    def update_tidal_card_playlist_info(self, playlist_id: str, name: str, track_count: int):
+        """Update Tidal card playlist information"""
+        if playlist_id in self.tidal_cards:
+            card = self.tidal_cards[playlist_id]
+            card.update_playlist_info(name, track_count)
+    
+    def set_tidal_card_playlist_data(self, playlist_id: str, playlist_data):
+        """Store playlist data for a Tidal card"""
+        if playlist_id in self.tidal_playlist_states:
+            self.tidal_playlist_states[playlist_id]['playlist_data'] = playlist_data
+            if hasattr(playlist_data, 'tracks'):
+                self.tidal_playlist_states[playlist_id]['discovered_tracks'] = playlist_data.tracks
+            
+            # Update card with playlist info
+            if playlist_id in self.tidal_cards:
+                card = self.tidal_cards[playlist_id]
+                card.playlist_data = playlist_data
+                card.discovered_tracks = playlist_data.tracks
+    
+    def get_tidal_playlist_state(self, playlist_id: str):
+        """Get the current state data for a Tidal playlist"""
+        return self.tidal_playlist_states.get(playlist_id, None)
+    
+    def reset_tidal_playlist_state(self, playlist_id: str):
+        """Reset Tidal playlist state (for cancel operations)"""
+        if playlist_id in self.tidal_playlist_states:
+            state = self.tidal_playlist_states[playlist_id]
+            state['phase'] = 'discovering'
+            state['playlist_data'] = None
+            state['discovered_tracks'] = []
+            state['discovery_modal'] = None
+            state['download_modal'] = None
+            
+            # Reset card to initial state
+            if playlist_id in self.tidal_cards:
+                card = self.tidal_cards[playlist_id]
+                card.set_phase('discovering')
+                # Use original name instead of "Loading..." to keep playlist title visible
+                original_name = state.get('original_name', 'Unknown Playlist')
+                original_count = state.get('original_track_count', 0)
+                card.update_playlist_info(original_name, original_count)
+                card.update_progress(0, 0, 0)
+    
+    def remove_tidal_playlist_card(self, playlist_id: str):
+        """Remove a Tidal playlist card (for full cleanup)"""
+        if playlist_id in self.tidal_cards:
+            card = self.tidal_cards[playlist_id]
+            card.setParent(None)
+            del self.tidal_cards[playlist_id]
+        
+        if playlist_id in self.tidal_playlist_states:
+            del self.tidal_playlist_states[playlist_id]
+
     def on_youtube_card_clicked(self, url: str, phase: str):
         """Handle YouTube playlist card clicks - route to appropriate modal"""
         print(f"🎬 YouTube card clicked: URL={url}, Phase={phase}")
@@ -5516,6 +6503,273 @@ class OptimizedSpotifyDiscoveryWorker(QRunnable):
         except Exception as e:
             print(f"❌ Error in retry with title+artist: {e}")
             return None
+
+class TidalSpotifyDiscoveryWorkerSignals(QObject):
+    track_discovered = pyqtSignal(int, object, str)  # row, spotify_track, status
+    progress_updated = pyqtSignal(int)  # current progress
+    finished = pyqtSignal(int)  # total successful discoveries
+
+class TidalSpotifyDiscoveryWorker(QRunnable):
+    def __init__(self, tidal_tracks, spotify_client, matching_engine):
+        super().__init__()
+        self.tidal_tracks = tidal_tracks
+        self.spotify_client = spotify_client
+        self.matching_engine = matching_engine
+        self.signals = TidalSpotifyDiscoveryWorkerSignals()
+        self.is_cancelled = False
+    
+    def cancel(self):
+        self.is_cancelled = True
+    
+    def run(self):
+        """Discover Spotify tracks for Tidal tracks with optimized timing"""
+        successful_discoveries = 0
+        
+        for i, tidal_track in enumerate(self.tidal_tracks):
+            if self.is_cancelled:
+                break
+                
+            try:
+                # Create search query from Tidal track data
+                if tidal_track.artists:
+                    query = f"{tidal_track.artists[0]} {tidal_track.name}"
+                else:
+                    query = tidal_track.name
+                
+                # Debug logging for search queries
+                print(f"🔍 Spotify search query for Tidal track: '{query}' (track: '{tidal_track.name}', artist: '{tidal_track.artists[0] if tidal_track.artists else 'None'}')")
+                
+                # Search Spotify - get more results for validation
+                spotify_results = self.spotify_client.search_tracks(query, limit=10)
+                
+                # Progress tracking
+                if spotify_results:
+                    print(f"📊 Found {len(spotify_results)} Spotify results for Tidal track:")
+                    for idx, result in enumerate(spotify_results[:3]):  # Show first 3
+                        print(f"  {idx+1}. '{result.name}' by {', '.join(result.artists)}")
+                
+                if spotify_results:
+                    # Use the matching engine to find the best match
+                    best_track = self.find_best_validated_match(tidal_track, spotify_results)
+                    
+                    if not best_track:
+                        # Try with swapped fields if no match found
+                        print(f"🔄 No direct match found, trying swapped fields for: '{tidal_track.name}' by '{tidal_track.artists[0] if tidal_track.artists else 'Unknown'}'")
+                        best_track = self.retry_with_swapped_fields(tidal_track)
+                        
+                        if best_track:
+                            print(f"🔄 Found match after swapping artist/track for: '{tidal_track.name}' by '{tidal_track.artists[0] if tidal_track.artists else 'Unknown'}'")
+                        else:
+                            # Final fallback: try with cleaned data
+                            best_track = self.retry_with_uncleaned_data(tidal_track)
+                            
+                            if best_track:
+                                print(f"🔍 Found match with uncleaned data for: '{tidal_track.name}' by '{tidal_track.artists[0] if tidal_track.artists else 'Unknown'}'")
+                            else:
+                                # Last resort: try title+artist combo
+                                best_track = self.retry_with_raw_title_and_artist(tidal_track)
+                                
+                                if best_track:
+                                    print(f"🎯 Found match with title+artist fallback for: '{tidal_track.name}' by '{tidal_track.artists[0] if tidal_track.artists else 'Unknown'}'")
+                    
+                    if best_track:
+                        successful_discoveries += 1
+                        self.signals.track_discovered.emit(i, best_track, "found")
+                        print(f"✅ Matched Tidal track '{tidal_track.name}' to Spotify track '{best_track.name}' by {', '.join(best_track.artists)}")
+                    else:
+                        self.signals.track_discovered.emit(i, None, "not_found")
+                        print(f"❌ No Spotify match found for Tidal track '{tidal_track.name}' by '{tidal_track.artists[0] if tidal_track.artists else 'Unknown'}'")
+                else:
+                    # No search results - try fallback approaches
+                    best_track = self.retry_with_swapped_fields(tidal_track)
+                    
+                    if best_track:
+                        print(f"🔄 Found match after swapping artist/track for: '{tidal_track.name}' by '{tidal_track.artists[0] if tidal_track.artists else 'Unknown'}'")
+                        successful_discoveries += 1
+                        self.signals.track_discovered.emit(i, best_track, "found")
+                    else:
+                        # Try with uncleaned data
+                        best_track = self.retry_with_uncleaned_data(tidal_track)
+                        
+                        if best_track:
+                            print(f"🔍 Found match with uncleaned data for: '{tidal_track.name}' by '{tidal_track.artists[0] if tidal_track.artists else 'Unknown'}'")
+                            successful_discoveries += 1
+                            self.signals.track_discovered.emit(i, best_track, "found")
+                        else:
+                            # Final fallback
+                            best_track = self.retry_with_raw_title_and_artist(tidal_track)
+                            
+                            if best_track:
+                                print(f"🎯 Found match with title+artist fallback for: '{tidal_track.name}' by '{tidal_track.artists[0] if tidal_track.artists else 'Unknown'}'")
+                                successful_discoveries += 1
+                                self.signals.track_discovered.emit(i, best_track, "found")
+                            else:
+                                self.signals.track_discovered.emit(i, None, "not_found")
+                                print(f"❌ No Spotify match found for Tidal track '{tidal_track.name}'")
+                
+                # Update progress
+                self.signals.progress_updated.emit(i + 1)
+                
+                # Brief pause to avoid overwhelming the API
+                time.sleep(0.25)  # 250ms delay
+                
+            except Exception as e:
+                print(f"❌ Error processing Tidal track '{tidal_track.name}': {str(e)}")
+                self.signals.track_discovered.emit(i, None, "error")
+                continue
+        
+        print(f"🎵 Tidal discovery completed: {successful_discoveries} successful discoveries")
+        self.signals.finished.emit(successful_discoveries)
+    
+    def find_best_validated_match(self, tidal_track, spotify_results):
+        """Find the best validated match using the matching engine"""
+        if not spotify_results:
+            return None
+        
+        # Clean the Tidal track name for matching (similar to YouTube logic)
+        cleaned_tidal_name = self.clean_for_tidal_matching(tidal_track.name)
+        
+        # Create a fake track object that looks like a YouTube track for the matching engine
+        tidal_as_youtube = type('Track', (), {
+            'name': cleaned_tidal_name,
+            'artists': tidal_track.artists if tidal_track.artists else ["Unknown"],
+            'album': getattr(tidal_track, 'album', 'Unknown Album'),
+            'duration_ms': getattr(tidal_track, 'duration_ms', 0)
+        })()
+        
+        confidence_threshold = 0.7
+        best_track = None
+        best_confidence = 0
+        
+        # Test each Spotify result against the Tidal track
+        for spotify_track in spotify_results:
+            try:
+                # Use the matching engine to calculate confidence
+                cleaned_spotify_track = self.matching_engine.normalize_track_for_matching(spotify_track)
+                confidence = self.matching_engine.calculate_similarity_confidence(
+                    tidal_as_youtube, cleaned_spotify_track
+                )
+                
+                if confidence > best_confidence:
+                    best_confidence = confidence
+                    best_track = spotify_track
+                    
+                print(f"🎯 Tidal->Spotify match confidence: {confidence:.3f} for '{spotify_track.name}' by {', '.join(spotify_track.artists)}")
+                    
+            except Exception as e:
+                print(f"❌ Error validating match: {e}")
+                continue
+        
+        if best_confidence >= confidence_threshold:
+            print(f"✅ Best validated Tidal->Spotify match: '{best_track.name}' (confidence: {best_confidence:.3f})")
+            return best_track
+        else:
+            print(f"❌ Best Tidal->Spotify confidence {best_confidence:.3f} < {confidence_threshold}")
+            return None
+    
+    def clean_for_tidal_matching(self, title):
+        """Clean Tidal track title for better matching (similar to YouTube logic)"""
+        if not title:
+            return ""
+        
+        # Remove common Tidal-specific markers and clean the title
+        cleaned = title.lower()
+        cleaned = re.sub(r'\s*\(.*?\)\s*', ' ', cleaned)  # Remove parenthetical content
+        cleaned = re.sub(r'\s*\[.*?\]\s*', ' ', cleaned)  # Remove bracketed content  
+        cleaned = re.sub(r'\s*-\s*remaster.*', ' ', cleaned, re.IGNORECASE)  # Remove remaster info
+        cleaned = re.sub(r'\s*-\s*\d{4}.*', ' ', cleaned)  # Remove year info
+        cleaned = re.sub(r'\s+', ' ', cleaned).strip()  # Normalize whitespace
+        
+        return cleaned
+    
+    def retry_with_swapped_fields(self, tidal_track):
+        """Retry search with artist/track fields swapped"""
+        try:
+            if not tidal_track.artists or len(tidal_track.artists) == 0:
+                return None
+                
+            # Swap: use track name as artist and artist name as track
+            swapped_query = f"{tidal_track.name} {tidal_track.artists[0]}"
+            print(f"🔄 Trying swapped Tidal fields: '{swapped_query}'")
+            
+            spotify_results = self.spotify_client.search_tracks(swapped_query, limit=5)
+            if spotify_results:
+                return self.find_best_validated_match(tidal_track, spotify_results)
+            return None
+        except Exception as e:
+            print(f"❌ Error in swapped fields retry for Tidal track: {e}")
+            return None
+    
+    def retry_with_uncleaned_data(self, tidal_track):
+        """Retry with original uncleaned Tidal track data"""
+        try:
+            # Use original, uncleaned title and artist
+            if tidal_track.artists:
+                raw_query = f"{tidal_track.artists[0]} {tidal_track.name}"
+            else:
+                raw_query = tidal_track.name
+            
+            print(f"🔍 Trying uncleaned Tidal data: '{raw_query}'")
+            
+            spotify_results = self.spotify_client.search_tracks(raw_query, limit=5)
+            if spotify_results:
+                return self.find_best_validated_match(tidal_track, spotify_results)
+            return None
+        except Exception as e:
+            print(f"❌ Error in uncleaned data retry for Tidal track: {e}")
+            return None
+    
+    def retry_with_raw_title_and_artist(self, tidal_track):
+        """Final fallback: combine raw title and artist in one query"""
+        try:
+            if not tidal_track.artists:
+                return None
+            
+            # Combine everything into one search term
+            combined_query = f"{tidal_track.name} {tidal_track.artists[0]}"
+            print(f"🎯 Trying combined Tidal query: '{combined_query}'")
+            
+            spotify_results = self.spotify_client.search_tracks(combined_query, limit=5)
+            if spotify_results:
+                best_confidence = 0
+                best_track = None
+                confidence_threshold = 0.6  # Lower threshold for final fallback
+                
+                for track in spotify_results:
+                    try:
+                        # Basic string similarity as last resort
+                        track_similarity = self.basic_string_similarity(
+                            f"{tidal_track.name} {tidal_track.artists[0]}".lower(),
+                            f"{track.name} {' '.join(track.artists)}".lower()
+                        )
+                        
+                        if track_similarity > best_confidence:
+                            best_confidence = track_similarity
+                            best_track = track
+                    except Exception as e:
+                        continue
+                
+                if best_confidence >= confidence_threshold:
+                    print(f"🎯 Title+artist fallback found match: confidence {best_confidence:.3f}")
+                    return best_track
+                else:
+                    print(f"❌ Title+artist fallback: Best confidence {best_confidence:.3f} < {confidence_threshold}")
+            else:
+                print(f"❌ No results found for title+artist query: '{combined_query}'")
+            
+            return None
+            
+        except Exception as e:
+            print(f"❌ Error in retry with title+artist for Tidal track: {e}")
+            return None
+    
+    def basic_string_similarity(self, s1, s2):
+        """Calculate basic string similarity for fallback matching"""
+        try:
+            from difflib import SequenceMatcher
+            return SequenceMatcher(None, s1, s2).ratio()
+        except:
+            return 0.0
 
 class SpotifyDiscoveryManagerSignals(QObject):
     track_discovered = pyqtSignal(int, object, str)  # row, spotify_track, status
@@ -7321,6 +8575,22 @@ class DownloadMissingTracksModal(QDialog):
                 if self.playlist.id in self.parent_page.active_youtube_download_modals:
                     del self.parent_page.active_youtube_download_modals[self.playlist.id]
             
+            # If this is a Tidal workflow, update card and clean up
+            if hasattr(self, 'is_tidal_playlist') and self.is_tidal_playlist and hasattr(self, 'playlist_id'):
+                # Update Tidal card to download_complete phase
+                if hasattr(self.parent_page, 'update_tidal_card_phase'):
+                    self.parent_page.update_tidal_card_phase(self.playlist_id, 'download_complete')
+                
+                # Clean up download modal reference from Tidal state
+                if hasattr(self.parent_page, 'tidal_playlist_states') and self.playlist_id in self.parent_page.tidal_playlist_states:
+                    state = self.parent_page.tidal_playlist_states[self.playlist_id]
+                    if state.get('download_modal') == self:
+                        state['download_modal'] = None
+                        
+                # Remove from active download modals
+                if self.playlist.id in self.parent_page.active_youtube_download_modals:
+                    del self.parent_page.active_youtube_download_modals[self.playlist.id]
+            
             # The process_finished signal is still emitted to unlock the main UI.
             self.process_finished.emit()
             
@@ -7429,6 +8699,18 @@ class DownloadMissingTracksModal(QDialog):
             if hasattr(self, 'youtube_url') and hasattr(self.parent_page, 'update_youtube_card_phase'):
                 print("🔄 Returning YouTube playlist to discovery_complete state")
                 self.parent_page.update_youtube_card_phase(self.youtube_url, 'discovery_complete')
+        
+        # Handle Tidal playlist cancel - revert to discovery_complete phase
+        if hasattr(self, 'is_tidal_playlist') and self.is_tidal_playlist and hasattr(self, 'playlist_id'):
+            if hasattr(self.parent_page, 'update_tidal_card_phase'):
+                print("🔄 Returning Tidal playlist to discovery_complete state")
+                self.parent_page.update_tidal_card_phase(self.playlist_id, 'discovery_complete')
+            
+            # Clean up download modal reference from Tidal state
+            if hasattr(self.parent_page, 'tidal_playlist_states') and self.playlist_id in self.parent_page.tidal_playlist_states:
+                state = self.parent_page.tidal_playlist_states[self.playlist_id]
+                if state.get('download_modal') == self:
+                    state['download_modal'] = None
             
             # Clean up this modal's reference.
             if self.playlist.id in self.parent_page.active_youtube_download_modals:
@@ -7518,6 +8800,11 @@ class DownloadMissingTracksModal(QDialog):
             if self.is_youtube_workflow and hasattr(self, 'youtube_url'):
                 if hasattr(self.parent_page, 'update_youtube_card_phase'):
                     self.parent_page.update_youtube_card_phase(self.youtube_url, 'downloading')
+            
+            # Handle Tidal playlist downloading phase update
+            if hasattr(self, 'is_tidal_playlist') and self.is_tidal_playlist and hasattr(self, 'playlist_id'):
+                if hasattr(self.parent_page, 'update_tidal_card_phase'):
+                    self.parent_page.update_tidal_card_phase(self.playlist_id, 'downloading')
             return
 
         print("No download in progress or cancel requested. Performing full cleanup.")
@@ -7689,8 +8976,11 @@ class YouTubeDownloadMissingTracksModal(QDialog):
             self.start_spotify_discovery()
     
     def setup_ui(self):
-        """Set up the YouTube-specific modal UI"""
-        self.setWindowTitle(f"YouTube Playlist Discovery - {self.playlist.name}")
+        """Set up the modal UI for YouTube or Tidal playlist discovery"""
+        if hasattr(self, 'is_tidal_playlist') and self.is_tidal_playlist:
+            self.setWindowTitle(f"Tidal Playlist Discovery - {self.playlist.name}")
+        else:
+            self.setWindowTitle(f"YouTube Playlist Discovery - {self.playlist.name}")
         self.resize(1400, 900)
         self.setWindowFlags(Qt.WindowType.Window)
         
@@ -8031,11 +9321,21 @@ class YouTubeDownloadMissingTracksModal(QDialog):
         from core.matching_engine import MusicMatchingEngine
         matching_engine = MusicMatchingEngine()
         
-        self.spotify_worker = OptimizedSpotifyDiscoveryWorker(
-            self.playlist.tracks, 
-            self.parent_page.spotify_client,
-            matching_engine
-        )
+        # Use TidalSpotifyDiscoveryWorker if this is a Tidal playlist
+        if hasattr(self, 'is_tidal_playlist') and self.is_tidal_playlist:
+            print("🎵 Using Tidal discovery worker for Tidal playlist")
+            self.spotify_worker = TidalSpotifyDiscoveryWorker(
+                self.playlist.tracks, 
+                self.parent_page.spotify_client,
+                matching_engine
+            )
+        else:
+            print("🎥 Using YouTube discovery worker for YouTube playlist")
+            self.spotify_worker = OptimizedSpotifyDiscoveryWorker(
+                self.playlist.tracks, 
+                self.parent_page.spotify_client,
+                matching_engine
+            )
         
         # Connect signals
         self.spotify_worker.signals.track_discovered.connect(self.on_track_discovered)
@@ -8142,6 +9442,22 @@ class YouTubeDownloadMissingTracksModal(QDialog):
         
         print(f"🎵 Spotify discovery completed: {successful_discoveries}/{self.total_tracks} tracks found")
         
+        # Update card state for Tidal playlists (matches YouTube workflow)
+        if hasattr(self, 'is_tidal_playlist') and self.is_tidal_playlist and hasattr(self, 'playlist_id'):
+            print(f"🎵 Updating Tidal card state to discovery_complete for playlist_id: {self.playlist_id}")
+            if hasattr(self.parent_page, 'update_tidal_card_phase'):
+                self.parent_page.update_tidal_card_phase(self.playlist_id, 'discovery_complete')
+            
+            # Store playlist data in state for future modal reopening
+            if hasattr(self.parent_page, 'set_tidal_card_playlist_data'):
+                self.parent_page.set_tidal_card_playlist_data(self.playlist_id, self.playlist)
+        
+        # Update card state for YouTube playlists (existing logic)
+        if hasattr(self, 'youtube_url'):
+            print(f"🎬 Updating YouTube card state to discovery_complete for URL: {self.youtube_url}")
+            if hasattr(self.parent_page, 'update_youtube_card_phase'):
+                self.parent_page.update_youtube_card_phase(self.youtube_url, 'discovery_complete')
+        
         # Enable the Plex analysis and sync buttons
         self.begin_search_btn.setEnabled(True)
         self.begin_search_btn.setText(f"🔍 Download Missing Tracks ({successful_discoveries} tracks)")
@@ -8187,7 +9503,7 @@ class YouTubeDownloadMissingTracksModal(QDialog):
             is_youtube_workflow=True  # Flag to indicate this is from YouTube discovery
         )
         
-        # Transfer URL tracking from discovery modal to download modal
+        # Transfer URL tracking from discovery modal to download modal (YouTube)
         if hasattr(self, 'youtube_url'):
             modal.youtube_url = self.youtube_url
             self.parent_page.active_youtube_processes[self.youtube_url] = modal
@@ -8196,6 +9512,22 @@ class YouTubeDownloadMissingTracksModal(QDialog):
             # Update card to downloading phase
             if hasattr(self.parent_page, 'update_youtube_card_phase'):
                 self.parent_page.update_youtube_card_phase(self.youtube_url, 'downloading')
+        
+        # Transfer playlist tracking from discovery modal to download modal (Tidal)
+        if hasattr(self, 'is_tidal_playlist') and self.is_tidal_playlist and hasattr(self, 'playlist_id'):
+            modal.playlist_id = self.playlist_id
+            modal.is_tidal_playlist = True
+            modal.tidal_playlist = discovered_playlist
+            print(f"🔄 Transferred Tidal playlist tracking to download modal: {self.playlist_id}")
+            
+            # Update Tidal card to downloading phase
+            if hasattr(self.parent_page, 'update_tidal_card_phase'):
+                self.parent_page.update_tidal_card_phase(self.playlist_id, 'downloading')
+            
+            # Update Tidal state to link download modal
+            if hasattr(self.parent_page, 'tidal_playlist_states') and self.playlist_id in self.parent_page.tidal_playlist_states:
+                state = self.parent_page.tidal_playlist_states[self.playlist_id]
+                state['download_modal'] = modal
         
         # Store the modal reference using the ID of the NEWLY created playlist object.
         print(f"📝 Storing modal with CORRECT discovered_playlist.id: {discovered_playlist.id}")
@@ -8310,6 +9642,12 @@ class YouTubeDownloadMissingTracksModal(QDialog):
         # Update card state - reset to initial discovering state for Cancel
         if hasattr(self, 'youtube_url') and hasattr(self.parent_page, 'reset_youtube_playlist_state'):
             self.parent_page.reset_youtube_playlist_state(self.youtube_url)
+        
+        # Update Tidal card state - reset to initial discovering state for Cancel
+        if hasattr(self, 'is_tidal_playlist') and self.is_tidal_playlist and hasattr(self, 'playlist_id'):
+            if hasattr(self.parent_page, 'reset_tidal_playlist_state'):
+                print(f"🧹 Resetting Tidal playlist state to discovering on cancel for playlist_id: {self.playlist_id}")
+                self.parent_page.reset_tidal_playlist_state(self.playlist_id)
         
         self.reject()
     
@@ -8461,7 +9799,10 @@ class YouTubeDownloadMissingTracksModal(QDialog):
     def show_loading_state(self):
         """Show loading state in the modal"""
         # Update window title
-        self.setWindowTitle("YouTube Playlist Discovery - Loading...")
+        if hasattr(self, 'is_tidal_playlist') and self.is_tidal_playlist:
+            self.setWindowTitle("Tidal Playlist Discovery - Loading...")
+        else:
+            self.setWindowTitle("YouTube Playlist Discovery - Loading...")
         
         # Clear the table
         self.track_table.setRowCount(0)
@@ -8497,7 +9838,10 @@ class YouTubeDownloadMissingTracksModal(QDialog):
         self.spotify_discovered_tracks = [None] * self.total_tracks
         
         # Update window title
-        self.setWindowTitle(f"YouTube Playlist Discovery - {playlist.name}")
+        if hasattr(self, 'is_tidal_playlist') and self.is_tidal_playlist:
+            self.setWindowTitle(f"Tidal Playlist Discovery - {playlist.name}")
+        else:
+            self.setWindowTitle(f"YouTube Playlist Discovery - {playlist.name}")
         
         # Update progress bars
         self.spotify_progress.setMaximum(self.total_tracks)
@@ -8533,6 +9877,27 @@ class YouTubeDownloadMissingTracksModal(QDialog):
             if self.youtube_url in self.parent_page.active_youtube_processes:
                 print(f"🧹 Cleaning up URL tracking for: {self.youtube_url}")
                 del self.parent_page.active_youtube_processes[self.youtube_url]
+        
+        # Clean up Tidal playlist state when modal is actually closed (not just hidden)
+        # But don't clean up if we're transitioning to download modal
+        if (hasattr(self, 'is_tidal_playlist') and self.is_tidal_playlist and 
+            hasattr(self, 'playlist_id') and hasattr(self.parent_page, 'tidal_playlist_states') and
+            not getattr(self, 'transitioning_to_download', False)):
+            
+            playlist_id = self.playlist_id
+            if playlist_id in self.parent_page.tidal_playlist_states:
+                state = self.parent_page.tidal_playlist_states[playlist_id]
+                
+                # Only clear the modal reference, don't reset the entire state
+                # This preserves discovery data for when user reopens the modal
+                if state.get('discovery_modal') == self:
+                    print(f"🧹 Cleaning up Tidal discovery modal reference for playlist_id: {playlist_id}")
+                    state['discovery_modal'] = None
+                    
+                    # If discovery was completed, keep the state, otherwise reset it
+                    if state.get('phase') == 'discovering':
+                        print(f"🧹 Discovery incomplete, resetting Tidal state for playlist_id: {playlist_id}")
+                        self.parent_page.reset_tidal_playlist_state(playlist_id)
         
         super().closeEvent(event)
 
