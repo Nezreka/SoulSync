@@ -1058,9 +1058,7 @@ class PlaylistDetailsModal(QDialog):
             # Check cache first
             if hasattr(parent, 'track_cache') and playlist.id in parent.track_cache:
                 self.playlist.tracks = parent.track_cache[playlist.id]
-                # Defer table refresh until modal is shown and properly sized
-                from PyQt6.QtCore import QTimer
-                QTimer.singleShot(0, self.refresh_track_table)
+                self.refresh_track_table()
             else:
                 self.load_tracks_async()
     
@@ -1917,9 +1915,7 @@ class PlaylistDetailsModal(QDialog):
     
     def refresh_track_table(self):
         """Refresh the track table with loaded tracks"""
-        import traceback
         logger.info(f"refresh_track_table called for playlist {self.playlist.name}")
-        logger.debug(f"Call stack: {traceback.format_stack()[-3:-1]}")  # Show who called this method
         
         if not hasattr(self, 'track_table'):
             logger.error("No track_table attribute found")
@@ -1981,15 +1977,6 @@ class PlaylistDetailsModal(QDialog):
                 continue
         
         logger.info(f"Finished populating all {len(tracks_to_show)} tracks")
-        
-        # Force table refresh and repaint
-        try:
-            self.track_table.resizeColumnsToContents()
-            self.track_table.viewport().update()
-            self.track_table.repaint()
-            logger.info("Forced table refresh and repaint")
-        except Exception as e:
-            logger.error(f"Error during table refresh: {e}")
         
         # Add info message if tracks were limited
         if total_tracks > display_limit:
