@@ -1131,7 +1131,17 @@ class PlaylistDetailsModal(QDialog):
     
     def setup_ui(self):
         self.setWindowTitle(f"Playlist Details - {self.playlist.name}")
-        self.setFixedSize(1200, 800)
+        
+        # Make modal responsive to screen size
+        from PyQt6.QtWidgets import QApplication
+        screen = QApplication.primaryScreen().geometry()
+        modal_width = min(1200, int(screen.width() * 0.9))
+        modal_height = min(800, int(screen.height() * 0.9))
+        self.resize(modal_width, modal_height)
+        
+        # Center the modal on screen
+        self.move((screen.width() - modal_width) // 2, (screen.height() - modal_height) // 2)
+        
         self.setStyleSheet("""
             QDialog {
                 background: #191414;
@@ -1140,22 +1150,22 @@ class PlaylistDetailsModal(QDialog):
         """)
         
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(32, 32, 32, 32)
-        main_layout.setSpacing(24)
+        main_layout.setContentsMargins(20, 20, 20, 20)  # Reduced margins for smaller screens
+        main_layout.setSpacing(16)
         
-        # Header section
+        # Header section (fixed height)
         header = self.create_header()
-        main_layout.addWidget(header)
+        main_layout.addWidget(header, 0)  # stretch factor 0 - fixed size
         
-        # Track list section
+        # Track list section (expandable)
         track_list = self.create_track_list()
-        main_layout.addWidget(track_list)
+        main_layout.addWidget(track_list, 1)  # stretch factor 1 - takes available space
         
-        # Button section
+        # Button section (fixed height, always visible)
         button_widget = QWidget()
         button_layout = self.create_buttons()
         button_widget.setLayout(button_layout)
-        main_layout.addWidget(button_widget)
+        main_layout.addWidget(button_widget, 0)  # stretch factor 0 - fixed size
     
     def create_header(self):
         header = QFrame()
