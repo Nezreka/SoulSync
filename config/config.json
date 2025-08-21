@@ -1,24 +1,28 @@
 {
   "active_media_server": "plex",
   "spotify": {
-    "client_id": "CLIENT ID",
-    "client_secret": "CLIENT SECRET"
+    "client_id": "SpotifyClientID",
+    "client_secret": "SpotifyClientSecret"
+  },
+  "tidal": {
+    "client_id": "TidalClientID",
+    "client_secret": "TidalClientSecret"
   },
   "plex": {
     "base_url": "http://192.168.86.36:32400",
-    "token": "PLEX TOKEN",
+    "token": "PLEX_API_TOKEN",
     "auto_detect": true
   },
   "jellyfin": {
     "base_url": "http://localhost:8096",
-    "api_key": "JELLYFIN API KEY",
+    "api_key": "JELLYFIN_API_KEY",
     "auto_detect": true
   },
   "soulseek": {
     "slskd_url": "http://localhost:5030",
-    "api_key": "SLSKD API KEY",
-    "download_path": "./downloads",
-    "transfer_path": "./transfers"
+    "api_key": "SoulseekAPIKey",
+    "download_path": "./Downloads",
+    "transfer_path": "./Transfer"
   },
   "logging": {
     "path": "logs/app.log",
