@@ -993,8 +993,99 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-function showVersionInfo() {
-    showToast('Version info modal not implemented yet', 'error');
+async function showVersionInfo() {
+    try {
+        console.log('Fetching version info...');
+        
+        // Fetch version data from API
+        const response = await fetch('/api/version-info');
+        if (!response.ok) {
+            throw new Error('Failed to fetch version info');
+        }
+        
+        const versionData = await response.json();
+        console.log('Version data received:', versionData);
+        
+        // Populate modal content
+        populateVersionModal(versionData);
+        
+        // Show modal
+        const modalOverlay = document.getElementById('version-modal-overlay');
+        modalOverlay.classList.remove('hidden');
+        
+        console.log('Version modal opened');
+        
+    } catch (error) {
+        console.error('Error showing version info:', error);
+        showToast('Failed to load version information', 'error');
+    }
+}
+
+function closeVersionModal() {
+    const modalOverlay = document.getElementById('version-modal-overlay');
+    modalOverlay.classList.add('hidden');
+    console.log('Version modal closed');
+}
+
+function populateVersionModal(versionData) {
+    const container = document.getElementById('version-content-container');
+    if (!container) {
+        console.error('Version content container not found');
+        return;
+    }
+    
+    // Update header with dynamic data
+    const titleElement = document.querySelector('.version-modal-title');
+    const subtitleElement = document.querySelector('.version-modal-subtitle');
+    
+    if (titleElement) titleElement.textContent = versionData.title;
+    if (subtitleElement) subtitleElement.textContent = versionData.subtitle;
+    
+    // Clear existing content
+    container.innerHTML = '';
+    
+    // Create sections
+    versionData.sections.forEach(section => {
+        const sectionDiv = document.createElement('div');
+        sectionDiv.className = 'version-feature-section';
+        
+        // Section title
+        const titleDiv = document.createElement('div');
+        titleDiv.className = 'version-section-title';
+        titleDiv.textContent = section.title;
+        sectionDiv.appendChild(titleDiv);
+        
+        // Section description
+        const descDiv = document.createElement('div');
+        descDiv.className = 'version-section-description';
+        descDiv.textContent = section.description;
+        sectionDiv.appendChild(descDiv);
+        
+        // Features list
+        const featuresList = document.createElement('ul');
+        featuresList.className = 'version-feature-list';
+        
+        section.features.forEach(feature => {
+            const featureItem = document.createElement('li');
+            featureItem.className = 'version-feature-item';
+            featureItem.textContent = feature;
+            featuresList.appendChild(featureItem);
+        });
+        
+        sectionDiv.appendChild(featuresList);
+        
+        // Usage note (if present)
+        if (section.usage_note) {
+            const usageDiv = document.createElement('div');
+            usageDiv.className = 'version-usage-note';
+            usageDiv.textContent = `💡 ${section.usage_note}`;
+            sectionDiv.appendChild(usageDiv);
+        }
+        
+        container.appendChild(sectionDiv);
+    });
+    
+    console.log('Version modal content populated');
 }
 
 // ===============================
@@ -1174,6 +1265,7 @@ window.navigateToPage = navigateToPage;
 window.openKofi = openKofi;
 window.copyAddress = copyAddress;
 window.showVersionInfo = showVersionInfo;
+window.closeVersionModal = closeVersionModal;
 window.testConnection = testConnection;
 window.autoDetectPlex = autoDetectPlex;
 window.autoDetectJellyfin = autoDetectJellyfin;

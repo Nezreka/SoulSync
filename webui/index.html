@@ -463,6 +463,29 @@
     <!-- Toast Notifications -->
     <div class="toast-container" id="toast-container"></div>
     
+    <!-- Version Info Modal -->
+    <div class="version-modal-overlay hidden" id="version-modal-overlay" onclick="closeVersionModal()">
+        <div class="version-modal" onclick="event.stopPropagation()">
+            <!-- Header -->
+            <div class="version-modal-header">
+                <h2 class="version-modal-title">What's New in SoulSync</h2>
+                <div class="version-modal-subtitle">Version 0.65 - Tidal Playlist Integration</div>
+            </div>
+            
+            <!-- Content Area with Scroll -->
+            <div class="version-modal-content">
+                <div class="version-content-container" id="version-content-container">
+                    <!-- Content will be populated by JavaScript -->
+                </div>
+            </div>
+            
+            <!-- Footer -->
+            <div class="version-modal-footer">
+                <button class="version-modal-close" onclick="closeVersionModal()">Close</button>
+            </div>
+        </div>
+    </div>
+    
     <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
 </html>
