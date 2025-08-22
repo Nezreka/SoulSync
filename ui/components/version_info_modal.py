@@ -13,7 +13,7 @@ class VersionInfoModal(QDialog):
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("What's New in SoulSync v0.6")
+        self.setWindowTitle("What's New in SoulSync v0.65")
         self.setModal(True)
         self.setFixedSize(600, 500)
         self.setup_ui()
@@ -68,7 +68,7 @@ class VersionInfoModal(QDialog):
         """)
         
         # Version subtitle
-        version_subtitle = QLabel("Version 0.6 - Complete Multi-Server Support")
+        version_subtitle = QLabel("Version 0.65 - Tidal Playlist Integration")
         version_subtitle.setFont(QFont("SF Pro Text", 11, QFont.Weight.Medium))
         version_subtitle.setStyleSheet("""
             color: rgba(255, 255, 255, 0.7);
@@ -112,49 +112,49 @@ class VersionInfoModal(QDialog):
         content_layout.setContentsMargins(30, 25, 30, 25)
         content_layout.setSpacing(25)
         
-        # Multi-Server Support
-        multiserver_section = self.create_feature_section(
-            "🔀 Complete Multi-Server Support",
-            "Full Plex and Jellyfin compatibility across all features and workflows",
+        # Tidal Integration
+        tidal_section = self.create_feature_section(
+            "🎵 Complete Tidal Playlist Integration",
+            "Full Tidal playlist support with seamless workflow integration matching YouTube/Spotify functionality",
             [
-                "• Added native Jellyfin client with full API integration for artists, albums, and tracks",
-                "• Automatic server detection and dynamic client switching throughout the application",
-                "• All sync tools now work seamlessly with both Plex and Jellyfin servers",
-                "• Database filtering by server source ensures clean separation of library data",
-                "• Updated all download and analysis workers for multi-server compatibility",
-                "• Server-specific UI adaptations (e.g., metadata updater hidden for Jellyfin)",
-                "• Unified media client architecture for consistent cross-server functionality"
+                "• Native Tidal API client with OAuth 2.0 authentication and automatic token management",
+                "• Tidal playlist tab positioned between Spotify and YouTube with identical UI/UX patterns",
+                "• Advanced playlist card system with persistent state tracking across all phases",
+                "• Complete discovery workflow: discovering → discovered → syncing → downloading phases",
+                "• Intelligent track matching using existing Spotify-based algorithms for compatibility",
+                "• Smart modal routing with proper state persistence (close/cancel behavior)",
+                "• Full refresh functionality with comprehensive worker cleanup and modal management"
             ],
-            "Switch between Plex and Jellyfin in Settings → Server Configuration - all features automatically adapt!"
+            "Configure Tidal in Settings → Connections, then discover and sync your Tidal playlists just like Spotify!"
         )
-        content_layout.addWidget(multiserver_section)
+        content_layout.addWidget(tidal_section)
         
-        # Enhanced Compatibility
-        compatibility_section = self.create_feature_section(
-            "⚙️ Enhanced Cross-Server Features",
-            "All major workflows updated for seamless multi-server operation",
+        # Advanced Features
+        features_section = self.create_feature_section(
+            "⚙️ Advanced Workflow Features",
+            "Sophisticated state management and user experience improvements",
             [
-                "• Playlist sync (Spotify & YouTube) now supports both Plex and Jellyfin",
-                "• Download Missing Tracks modals work with active server automatically",
-                "• Artist browsing and album analysis adapt to your selected media server",
-                "• Database updates and library scans respect server-specific configurations",
-                "• Playlist track analysis workers dynamically use the correct server API",
-                "• All toast notifications and UI feedback are server-aware"
+                "• Identical workflow behavior across all playlist sources (Spotify, YouTube, Tidal)",
+                "• Smart refresh system that cancels all active operations and preserves playlist names",
+                "• Phase-aware card clicking: routes to discovery, sync progress, or download modals appropriately",
+                "• Proper modal state persistence: closing download modals preserves discovery state",
+                "• Cancel operations reset playlists to fresh state for updated playlist data",
+                "• Multi-server compatibility: works with both Plex and Jellyfin automatically"
             ]
         )
-        content_layout.addWidget(compatibility_section)
+        content_layout.addWidget(features_section)
         
         # Technical Improvements  
         technical_section = self.create_feature_section(
-            "🔧 Technical Architecture Updates",
-            "Robust foundation for reliable multi-server operation",
+            "🔧 Technical Implementation Details",
+            "Robust architecture ensuring reliable playlist management across all sources",
             [
-                "• Implemented server-agnostic database schema with source tracking",
-                "• Added unified configuration management for multiple media servers",
-                "• Created wrapper classes for consistent API interfaces across servers",
-                "• Enhanced error handling with server-specific messaging",
-                "• Optimized performance with intelligent client caching and connection pooling",
-                "• Future-ready architecture for additional media server integrations"
+                "• Implemented comprehensive state tracking system with playlist card hub architecture",
+                "• Added PKCE (Proof Key for Code Exchange) OAuth flow for enhanced Tidal security",
+                "• Created unified modal system supporting YouTube, Spotify, and Tidal workflows",
+                "• Enhanced worker cancellation system for proper resource cleanup during operations",
+                "• JSON:API response parsing for Tidal's complex relationship-based data structure",
+                "• Future-ready architecture for additional music streaming service integrations"
             ]
         )
         content_layout.addWidget(technical_section)
