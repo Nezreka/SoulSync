@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import sys
+import argparse
 import asyncio
 import time
 from pathlib import Path
@@ -404,18 +405,73 @@ class MainWindow(QMainWindow):
             # Force accept the event to prevent hanging
             event.accept()
 
-def main():
-    logging_config = config_manager.get_logging_config()
-    log_level = logging_config.get('level', 'INFO')
-    log_file = logging_config.get('path', 'logs/newmusic.log')
-    setup_logging(level=log_level, log_file=log_file)
+def run_web_app():
+    """Run the application in headless web mode using Flask"""
+    from flask import Flask, render_template, jsonify
     
-    logger.info("Starting Soulsync application")
+    app = Flask(__name__, template_folder='webui', static_folder='webui/static')
     
-    if not config_manager.config_path.exists():
-        logger.error("Configuration file not found. Please check config/config.json")
-        sys.exit(1)
+    # Initialize service clients (same as GUI mode)
+    spotify_client = SpotifyClient()
+    plex_client = PlexClient()
+    jellyfin_client = JellyfinClient()
+    soulseek_client = SoulseekClient()
     
+    @app.route('/')
+    def home():
+        return render_template('index.html')
+    
+    @app.route('/status')
+    def status():
+        """Return service connection status as JSON"""
+        try:
+            # Check Spotify
+            spotify_status = spotify_client.sp is not None
+            
+            # Check active media server
+            active_server = config_manager.get_active_media_server()
+            if active_server == "plex":
+                media_status = plex_client.is_connected()
+            elif active_server == "jellyfin":
+                media_status = jellyfin_client.is_connected()
+            else:
+                media_status = False
+            
+            # Check Soulseek
+            soulseek_status = soulseek_client.is_configured()
+            
+            return jsonify({
+                'spotify': spotify_status,
+                'media_server': media_status,
+                'soulseek': soulseek_status,
+                'active_media_server': active_server
+            })
+        except Exception as e:
+            logger.error(f"Error getting service status: {e}")
+            return jsonify({'error': str(e)}), 500
+    
+    @app.route('/config')
+    def config_info():
+        """Return basic configuration info"""
+        try:
+            validation = config_manager.validate_config()
+            return jsonify({
+                'configured': config_manager.is_configured(),
+                'active_media_server': config_manager.get_active_media_server(),
+                'validation': validation
+            })
+        except Exception as e:
+            logger.error(f"Error getting config info: {e}")
+            return jsonify({'error': str(e)}), 500
+    
+    logger.info("Starting SoulSync in web mode...")
+    logger.info("Web interface available at http://localhost:5000")
+    
+    # Run Flask app
+    app.run(host='0.0.0.0', port=5000, debug=False)
+
+def run_gui_app():
+    """Run the application in GUI mode using PyQt6"""
     app = QApplication(sys.argv)
     app.setApplicationName("SoulSync")
     app.setApplicationVersion("0.6")
@@ -431,6 +487,32 @@ def main():
     except Exception as e:
         logger.error(f"Unexpected error: {e}")
         sys.exit(1)
+
+def main():
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='SoulSync - Music Sync & Manager')
+    parser.add_argument('--headless', action='store_true', 
+                        help='Run in headless mode with web interface instead of GUI')
+    args = parser.parse_args()
+    
+    # Setup logging
+    logging_config = config_manager.get_logging_config()
+    log_level = logging_config.get('level', 'INFO')
+    log_file = logging_config.get('path', 'logs/newmusic.log')
+    setup_logging(level=log_level, log_file=log_file)
+    
+    # Check configuration
+    if not config_manager.config_path.exists():
+        logger.error("Configuration file not found. Please check config/config.json")
+        sys.exit(1)
+    
+    # Choose mode based on arguments
+    if args.headless:
+        logger.info("Starting SoulSync in headless web mode")
+        run_web_app()
+    else:
+        logger.info("Starting SoulSync in GUI mode")
+        run_gui_app()
 
 if __name__ == "__main__":
     main()
