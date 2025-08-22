@@ -618,210 +618,82 @@ body {
     letter-spacing: -0.5px;
 }
 
-/* =====================================
-   DOWNLOADS (SEARCH) PAGE STYLES
-   ===================================== */
-
-#downloads-page .page-header p {
-    font-size: 14px;
-    color: rgba(255, 255, 255, 0.7);
-    margin-top: 4px;
+/* Dashboard Page Styling */
+.dashboard-content {
+    display: flex;
+    gap: 40px;
+    height: calc(100vh - 150px);
 }
 
-.downloads-content-splitter {
-    display: flex;
-    gap: 16px;
-    height: calc(100% - 100px); /* Adjust based on header height */
-}
-
-.search-results-panel {
-    flex: 3; /* Takes up more space */
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
+.activity-section {
+    flex: 1;
     background: rgba(255, 255, 255, 0.02);
-    border: 1px solid rgba(255, 255, 255, 0.05);
     border-radius: 12px;
-    padding: 16px;
+    padding: 24px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
-.download-manager-panel {
-    flex: 2; /* Takes up less space */
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 12px;
-    padding: 16px;
-}
-
-.download-manager-panel h4 {
+.activity-section h3 {
+    font-family: 'SF Pro Text', -apple-system, sans-serif;
     font-size: 16px;
     font-weight: 600;
-    color: #ffffff;
-    margin-bottom: 4px;
+    color: rgba(255, 255, 255, 0.9);
+    margin-bottom: 16px;
 }
 
-/* Elegant Search Bar */
-.elegant-search-bar {
+.activity-feed {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.activity-item {
     display: flex;
-    gap: 10px;
-    align-items: center;
-    background: rgba(0, 0, 0, 0.2);
-    padding: 8px;
-    border-radius: 8px;
+    gap: 12px;
+    padding: 12px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
 
-#search-input {
-    flex-grow: 1;
-    background: #2a2a2a;
-    border: 1px solid #444;
-    border-radius: 6px;
-    color: #fff;
-    padding: 10px 14px;
-    font-size: 14px;
-}
-#search-input:focus {
-    outline: none;
-    border-color: #1ed760;
+.activity-time {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.5);
+    min-width: 80px;
 }
 
-.search-btn, .cancel-search-btn {
-    padding: 10px 20px;
-    border: none;
-    border-radius: 6px;
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background-color 0.2s;
+.activity-text {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.8);
+    flex: 1;
 }
 
-.search-btn {
-    background-color: #1db954;
-    color: #000;
-}
-.search-btn:hover {
-    background-color: #1ed760;
-}
-
-.cancel-search-btn {
-    background-color: #d32f2f;
-    color: #fff;
-}
-.cancel-search-btn:hover {
-    background-color: #f44336;
+.stats-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 16px;
+    width: 300px;
 }
 
-/* Search Status */
-.search-status {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 12px;
-    background: rgba(29, 185, 84, 0.08);
+.stat-card {
+    background: linear-gradient(135deg, rgba(29, 185, 84, 0.1) 0%, rgba(255, 255, 255, 0.02) 100%);
     border: 1px solid rgba(29, 185, 84, 0.2);
-    border-radius: 6px;
+    border-radius: 12px;
+    padding: 24px;
+    text-align: center;
+}
+
+.stat-value {
+    font-family: 'SF Pro Display', -apple-system, sans-serif;
+    font-size: 32px;
+    font-weight: 700;
+    color: #1ed760;
+    line-height: 1;
+    margin-bottom: 8px;
+}
+
+.stat-label {
     font-size: 12px;
     color: rgba(255, 255, 255, 0.7);
+    font-weight: 500;
 }
-
-.spinner {
-    width: 16px;
-    height: 16px;
-    border: 2px solid rgba(255, 255, 255, 0.2);
-    border-top-color: #1ed760;
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-}
-
-/* Search Results Area */
-.search-results-area {
-    flex-grow: 1;
-    overflow-y: auto;
-    background: rgba(0, 0, 0, 0.2);
-    border-radius: 8px;
-    padding: 8px;
-}
-
-.no-results-placeholder {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    height: 100%;
-    color: rgba(255, 255, 255, 0.4);
-    font-style: italic;
-}
-
-/* Download Manager */
-.download-stats {
-    display: flex;
-    gap: 16px;
-    font-size: 12px;
-    color: #b3b3b3;
-}
-.download-stats b {
-    color: #fff;
-}
-
-.clear-completed-btn {
-    background: rgba(220, 53, 69, 0.2);
-    color: #dc3545;
-    border: 1px solid rgba(220, 53, 69, 0.4);
-    padding: 6px 12px;
-    border-radius: 6px;
-    font-size: 11px;
-    cursor: pointer;
-    align-self: flex-start;
-}
-.clear-completed-btn:hover {
-    background: rgba(220, 53, 69, 0.3);
-}
-
-.download-tabs {
-    display: flex;
-    border-bottom: 1px solid #444;
-}
-
-.tab-btn {
-    padding: 8px 16px;
-    background: transparent;
-    border: none;
-    color: #b3b3b3;
-    cursor: pointer;
-    border-bottom: 2px solid transparent;
-    font-size: 13px;
-}
-
-.tab-btn.active {
-    color: #1ed760;
-    border-bottom-color: #1ed760;
-}
-
-.download-queue-container {
-    flex-grow: 1;
-    overflow-y: auto;
-    position: relative;
-}
-
-.download-queue {
-    display: none;
-    flex-direction: column;
-    gap: 8px;
-    padding: 8px;
-}
-
-.download-queue.active {
-    display: flex;
-}
-
-.empty-queue-message {
-    text-align: center;
-    padding: 20px;
-    color: rgba(255, 255, 255, 0.4);
-    font-style: italic;
-}
-
 
 /* Settings Page Styling - Two Column Layout */
 .settings-content {
@@ -1756,588 +1628,4 @@ body {
 
 .version-modal-overlay:not(.hidden) .version-modal {
     animation: modalFadeIn 0.3s ease-out;
-}
-
-/* ===== SPOTIFY MATCHING MODAL STYLES ===== */
-
-.spotify-matching-modal-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100vw;
-    height: 100vh;
-    background: rgba(0, 0, 0, 0.8);
-    backdrop-filter: blur(8px);
-    z-index: 10000;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    opacity: 1;
-    transition: opacity 0.3s ease-in-out;
-}
-
-.spotify-matching-modal-overlay.hidden {
-    opacity: 0;
-    pointer-events: none;
-}
-
-.spotify-matching-modal {
-    background: #121212;
-    border-radius: 12px;
-    border: 1px solid rgba(29, 185, 84, 0.2);
-    width: 1100px;
-    max-width: 95vw;
-    height: 750px;
-    max-height: 90vh;
-    display: flex;
-    flex-direction: column;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8);
-    transform: scale(1);
-    transition: transform 0.3s ease-in-out;
-}
-
-.spotify-matching-modal-overlay.hidden .spotify-matching-modal {
-    transform: scale(0.9);
-}
-
-/* Modal Header */
-.spotify-modal-header {
-    padding: 20px 20px 15px 20px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-    background: #121212;
-}
-
-.spotify-modal-title {
-    color: #1DB954;
-    font-size: 22px;
-    font-weight: 700;
-    margin: 0 0 8px 0;
-    font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
-}
-
-.spotify-modal-subtitle {
-    color: #B3B3B3;
-    font-size: 16px;
-    font-weight: 400;
-    margin: 0;
-    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
-}
-
-/* Modal Content */
-.spotify-modal-content {
-    flex: 1;
-    overflow-y: auto;
-    background: #121212;
-    padding: 20px;
-}
-
-.spotify-modal-content::-webkit-scrollbar {
-    width: 8px;
-}
-
-.spotify-modal-content::-webkit-scrollbar-track {
-    background: #2A2A2A;
-    border-radius: 4px;
-}
-
-.spotify-modal-content::-webkit-scrollbar-thumb {
-    background: #535353;
-    border-radius: 4px;
-}
-
-.spotify-modal-content::-webkit-scrollbar-thumb:hover {
-    background: #6A6A6A;
-}
-
-.spotify-content-container {
-    display: flex;
-    flex-direction: column;
-    gap: 30px;
-}
-
-/* Suggestions Section */
-.suggestions-section {
-    display: flex;
-    flex-direction: column;
-    gap: 15px;
-}
-
-.suggestions-title, .manual-search-title {
-    color: #B3B3B3;
-    font-size: 16px;
-    font-weight: 500;
-    margin: 0;
-    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
-}
-
-.suggestions-grid {
-    display: flex;
-    gap: 20px;
-    flex-wrap: wrap;
-    min-height: 120px;
-    align-items: flex-start;
-}
-
-.loading-suggestions {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    color: #B3B3B3;
-    font-size: 14px;
-    padding: 20px;
-}
-
-.suggestion-loading-spinner {
-    width: 20px;
-    height: 20px;
-    border: 2px solid rgba(29, 185, 84, 0.2);
-    border-top-color: #1DB954;
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-}
-
-/* Artist/Album Cards */
-.spotify-card {
-    background: #1E1E1E;
-    border: 2px solid #2A2A2A;
-    border-radius: 12px;
-    padding: 15px;
-    width: 180px;
-    cursor: pointer;
-    transition: all 0.3s ease;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    text-align: center;
-    position: relative;
-}
-
-.spotify-card:hover {
-    border-color: #1DB954;
-    background: #282828;
-    transform: translateY(-2px);
-    box-shadow: 0 8px 20px rgba(29, 185, 84, 0.2);
-}
-
-.spotify-card.selected {
-    border-color: #1DB954;
-    background: rgba(29, 185, 84, 0.1);
-    box-shadow: 0 0 0 2px rgba(29, 185, 84, 0.3);
-}
-
-.spotify-card-image {
-    width: 120px;
-    height: 120px;
-    border-radius: 8px;
-    background: #2A2A2A;
-    margin-bottom: 12px;
-    overflow: hidden;
-    position: relative;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.spotify-card-image img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-}
-
-.spotify-card-image-placeholder {
-    color: #535353;
-    font-size: 24px;
-}
-
-.spotify-card-name {
-    color: #FFFFFF;
-    font-size: 14px;
-    font-weight: 600;
-    margin-bottom: 4px;
-    line-height: 1.2;
-    overflow: hidden;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
-}
-
-.spotify-card-details {
-    color: #B3B3B3;
-    font-size: 12px;
-    font-weight: 400;
-    line-height: 1.3;
-    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
-}
-
-/* Manual Search Section */
-.manual-search-section {
-    display: flex;
-    flex-direction: column;
-    gap: 15px;
-    margin-top: 15px;
-    padding-top: 15px;
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.manual-search-bar {
-    display: flex;
-    flex-direction: column;
-    gap: 15px;
-}
-
-#spotify-manual-search {
-    background: #2A2A2A;
-    border: 2px solid #535353;
-    border-radius: 15px;
-    color: white;
-    padding: 12px 16px;
-    font-size: 14px;
-    transition: border-color 0.3s ease;
-    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
-}
-
-#spotify-manual-search:focus {
-    outline: none;
-    border-color: #1DB954;
-}
-
-.manual-search-results {
-    display: flex;
-    gap: 20px;
-    flex-wrap: wrap;
-    min-height: 60px;
-    align-items: flex-start;
-}
-
-/* Modal Footer */
-.spotify-modal-footer {
-    padding: 15px 20px;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
-    background: rgba(255, 255, 255, 0.02);
-    display: flex;
-    justify-content: flex-end;
-    gap: 12px;
-}
-
-.spotify-modal-btn {
-    border: none;
-    border-radius: 15px;
-    padding: 10px 20px;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background-color 0.3s ease;
-    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
-}
-
-.spotify-modal-btn.primary {
-    background: #1DB954;
-    color: #FFFFFF;
-}
-
-.spotify-modal-btn.primary:hover:not(:disabled) {
-    background: #1ED760;
-}
-
-.spotify-modal-btn.primary:disabled {
-    background: #2A2A2A;
-    color: #535353;
-    cursor: not-allowed;
-}
-
-.spotify-modal-btn.secondary {
-    background: #535353;
-    color: #FFFFFF;
-}
-
-.spotify-modal-btn.secondary:hover {
-    background: #6A6A6A;
-}
-
-/* ===== SEARCH RESULTS & DOWNLOAD QUEUE STYLES ===== */
-
-/* Search Result Items */
-.search-result-item {
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 8px;
-    padding: 12px;
-    margin-bottom: 8px;
-    transition: all 0.2s ease;
-}
-
-.search-result-item:hover {
-    background: rgba(255, 255, 255, 0.05);
-    border-color: rgba(29, 185, 84, 0.3);
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-}
-
-.result-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 8px;
-}
-
-.result-title {
-    font-size: 16px;
-    font-weight: 600;
-    color: #ffffff;
-    margin: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    flex: 1;
-    margin-right: 12px;
-}
-
-.result-type-badge {
-    padding: 4px 8px;
-    border-radius: 4px;
-    font-size: 10px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-.result-type-badge.track {
-    background: rgba(29, 185, 84, 0.2);
-    color: #1ed760;
-    border: 1px solid rgba(29, 185, 84, 0.3);
-}
-
-.result-type-badge.album {
-    background: rgba(255, 165, 0, 0.2);
-    color: #ffa500;
-    border: 1px solid rgba(255, 165, 0, 0.3);
-}
-
-.result-details {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 16px;
-    margin-bottom: 12px;
-    font-size: 12px;
-    color: #b3b3b3;
-}
-
-.result-detail-item {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-}
-
-.result-actions {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-}
-
-.result-btn {
-    padding: 6px 12px;
-    border: none;
-    border-radius: 4px;
-    font-size: 12px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.2s ease;
-}
-
-.result-btn.download {
-    background: #1db954;
-    color: #000;
-}
-
-.result-btn.download:hover {
-    background: #1ed760;
-}
-
-.result-btn.stream {
-    background: rgba(255, 255, 255, 0.1);
-    color: #fff;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-}
-
-.result-btn.stream:hover {
-    background: rgba(255, 255, 255, 0.2);
-}
-
-/* Download Queue Items */
-.download-queue-item {
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 6px;
-    padding: 10px;
-    margin-bottom: 6px;
-    transition: all 0.2s ease;
-}
-
-.download-queue-item:hover {
-    background: rgba(255, 255, 255, 0.05);
-}
-
-.download-item-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 8px;
-}
-
-.download-item-title {
-    font-size: 13px;
-    font-weight: 500;
-    color: #ffffff;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    flex: 1;
-    margin-right: 8px;
-}
-
-.download-item-status {
-    font-size: 10px;
-    padding: 2px 6px;
-    border-radius: 3px;
-    font-weight: 600;
-    text-transform: uppercase;
-}
-
-.download-item-status.downloading {
-    background: rgba(29, 185, 84, 0.2);
-    color: #1ed760;
-}
-
-.download-item-status.queued {
-    background: rgba(255, 165, 0, 0.2);
-    color: #ffa500;
-}
-
-.download-item-status.completed {
-    background: rgba(72, 191, 227, 0.2);
-    color: #48bfe3;
-}
-
-.download-item-status.failed {
-    background: rgba(220, 53, 69, 0.2);
-    color: #dc3545;
-}
-
-.download-item-details {
-    font-size: 11px;
-    color: #b3b3b3;
-    margin-bottom: 6px;
-}
-
-.download-progress {
-    height: 4px;
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: 2px;
-    overflow: hidden;
-    margin-bottom: 4px;
-}
-
-.download-progress-fill {
-    height: 100%;
-    background: linear-gradient(90deg, #1db954, #1ed760);
-    transition: width 0.3s ease;
-    border-radius: 2px;
-}
-
-.download-progress-text {
-    font-size: 10px;
-    color: #b3b3b3;
-    text-align: right;
-}
-
-/* Filter Controls (for search results) */
-.filter-controls {
-    background: rgba(0, 0, 0, 0.2);
-    border-radius: 6px;
-    padding: 8px;
-}
-
-.filter-toggle-btn {
-    background: transparent;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    color: #b3b3b3;
-    padding: 6px 12px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 12px;
-}
-
-.filter-toggle-btn:hover {
-    background: rgba(255, 255, 255, 0.05);
-    color: #fff;
-}
-
-.filter-content {
-    margin-top: 8px;
-    padding-top: 8px;
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
-    display: flex;
-    gap: 12px;
-    align-items: center;
-}
-
-.filter-group {
-    display: flex;
-    gap: 4px;
-    align-items: center;
-}
-
-.filter-label {
-    font-size: 11px;
-    color: #b3b3b3;
-    margin-right: 6px;
-}
-
-.filter-btn {
-    padding: 4px 8px;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 4px;
-    color: #b3b3b3;
-    font-size: 10px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-}
-
-.filter-btn:hover {
-    background: rgba(255, 255, 255, 0.1);
-    color: #fff;
-}
-
-.filter-btn.active {
-    background: rgba(29, 185, 84, 0.2);
-    border-color: rgba(29, 185, 84, 0.4);
-    color: #1ed760;
-}
-
-/* Loading and Empty States */
-.loading-results {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 40px 20px;
-    color: #b3b3b3;
-    gap: 12px;
-}
-
-.loading-results-spinner {
-    width: 32px;
-    height: 32px;
-    border: 3px solid rgba(29, 185, 84, 0.2);
-    border-top-color: #1db954;
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-}
-
-/* Animations */
-@keyframes spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
 }
