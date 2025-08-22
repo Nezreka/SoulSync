@@ -1,40 +1,467 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>SoulSync - Web Mode</title>
+    <meta charset="UTF-8">
+    <title>SoulSync - Music Sync & Manager</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-    <div class="container">
-        <h1>🎵 SoulSync - Web Mode</h1>
-        <p>Your music sync application is running in headless mode.</p>
-        
-        <div class="status">
-            <h3>Service Status</h3>
-            <div id="status-container">
-                <div class="service">
-                    <span>Spotify:</span>
-                    <span id="spotify-status" class="disconnected">Checking...</span>
+    <div class="main-container">
+        <!-- Sidebar - Always Visible -->
+        <div class="sidebar">
+            <!-- Header Section -->
+            <div class="sidebar-header">
+                <h1 class="app-name">SoulSync</h1>
+                <p class="app-subtitle">Music Sync & Manager</p>
+            </div>
+            
+            <!-- Navigation Section -->
+            <nav class="sidebar-nav">
+                <button class="nav-button active" data-page="dashboard">
+                    <span class="nav-icon">📊</span>
+                    <span class="nav-text">Dashboard</span>
+                </button>
+                <button class="nav-button" data-page="sync">
+                    <span class="nav-icon">🔄</span>
+                    <span class="nav-text">Sync</span>
+                </button>
+                <button class="nav-button" data-page="downloads">
+                    <span class="nav-icon">📥</span>
+                    <span class="nav-text">Search</span>
+                </button>
+                <button class="nav-button" data-page="artists">
+                    <span class="nav-icon">🎵</span>
+                    <span class="nav-text">Artists</span>
+                </button>
+                <button class="nav-button" data-page="settings">
+                    <span class="nav-icon">⚙️</span>
+                    <span class="nav-text">Settings</span>
+                </button>
+            </nav>
+            
+            <!-- Spacer -->
+            <div class="sidebar-spacer"></div>
+            
+            <!-- Media Player Section -->
+            <div class="media-player" id="media-player">
+                <!-- Loading Animation -->
+                <div class="loading-animation hidden" id="loading-animation">
+                    <div class="loading-bar">
+                        <div class="loading-progress"></div>
+                    </div>
+                    <div class="loading-text">0%</div>
                 </div>
-                <div class="service">
-                    <span>Media Server:</span>
-                    <span id="media-status" class="disconnected">Checking...</span>
+                
+                <!-- Header (always visible) -->
+                <div class="media-header">
+                    <div class="media-info">
+                        <div class="track-title" id="track-title">No track</div>
+                        <div class="artist-name" id="artist-name">Unknown Artist</div>
+                    </div>
+                    <button class="play-button" id="play-button" disabled>▷</button>
                 </div>
-                <div class="service">
-                    <span>Soulseek:</span>
-                    <span id="soulseek-status" class="disconnected">Checking...</span>
+                
+                <!-- Expanded Content (hidden initially) -->
+                <div class="media-expanded hidden" id="media-expanded">
+                    <div class="album-name" id="album-name">Unknown Album</div>
+                    <div class="media-controls">
+                        <div class="volume-control">
+                            <span class="volume-icon">🔊</span>
+                            <input type="range" class="volume-slider" id="volume-slider" min="0" max="100" value="70">
+                        </div>
+                        <button class="stop-button" id="stop-button" disabled>⏹</button>
+                    </div>
+                </div>
+                
+                <!-- No Track Message -->
+                <div class="no-track-message" id="no-track-message">
+                    Start playing music to see controls
+                </div>
+            </div>
+            
+            <!-- Crypto Donation Section -->
+            <div class="crypto-donation">
+                <div class="donation-header">
+                    <span class="donation-title">Support Development</span>
+                    <button class="toggle-button" id="donation-toggle">Show</button>
+                </div>
+                <div class="donation-addresses hidden" id="donation-addresses">
+                    <div class="donation-item" onclick="openKofi()">
+                        <span class="donation-name">Ko-fi</span>
+                        <span class="donation-link">Click to open</span>
+                    </div>
+                    <div class="donation-item" onclick="copyAddress('3JVWrRSkozAQSmw5DXYVxYKsM9bndPTqdS', 'Bitcoin')">
+                        <span class="donation-name">Bitcoin</span>
+                        <span class="donation-address">3JVWrR...dPTqdS</span>
+                    </div>
+                    <div class="donation-item" onclick="copyAddress('0x343fC48c2cd1C6332b0df9a58F86e6520a026AC5', 'Ethereum')">
+                        <span class="donation-name">Ethereum</span>
+                        <span class="donation-address">0x343f...026AC5</span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Version Section -->
+            <div class="version-section">
+                <button class="version-button" onclick="showVersionInfo()">v.0.65</button>
+            </div>
+            
+            <!-- Status Section -->
+            <div class="status-section">
+                <h4 class="status-title">Service Status</h4>
+                <div class="status-indicator" id="spotify-indicator">
+                    <span class="status-dot disconnected"></span>
+                    <span class="status-name">Spotify</span>
+                </div>
+                <div class="status-indicator" id="media-server-indicator">
+                    <span class="status-dot disconnected"></span>
+                    <span class="status-name" id="media-server-name">Plex</span>
+                </div>
+                <div class="status-indicator" id="soulseek-indicator">
+                    <span class="status-dot disconnected"></span>
+                    <span class="status-name">Soulseek</span>
                 </div>
             </div>
         </div>
         
-        <div class="status">
-            <h3>Available Endpoints</h3>
-            <ul>
-                <li><a href="/status" style="color: #4caf50;">/status</a> - Service status JSON</li>
-                <li><a href="/config" style="color: #4caf50;">/config</a> - Configuration info</li>
-            </ul>
+        <!-- Main Content Area -->
+        <div class="main-content">
+            <!-- Dashboard Page -->
+            <div class="page active" id="dashboard-page">
+                <div class="page-header">
+                    <h2>Dashboard</h2>
+                </div>
+                <div class="dashboard-content">
+                    <!-- Activity Feed -->
+                    <div class="activity-section">
+                        <h3>Recent Activity</h3>
+                        <div class="activity-feed" id="activity-feed">
+                            <div class="activity-item">
+                                <span class="activity-time">Just now</span>
+                                <span class="activity-text">Web UI initialized</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Statistics Cards -->
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-value">0</div>
+                            <div class="stat-label">Tracks Synced</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">0</div>
+                            <div class="stat-label">Downloads</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">3</div>
+                            <div class="stat-label">Services</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Sync Page -->
+            <div class="page" id="sync-page">
+                <div class="page-header">
+                    <h2>Sync</h2>
+                </div>
+                <div class="sync-content">
+                    <div class="playlist-section">
+                        <h3>Select Playlist</h3>
+                        <select class="playlist-selector" id="playlist-selector">
+                            <option value="">Loading playlists...</option>
+                        </select>
+                        <button class="sync-button" id="sync-button">Start Sync</button>
+                    </div>
+                    <div class="sync-progress hidden" id="sync-progress">
+                        <div class="progress-bar">
+                            <div class="progress-fill"></div>
+                        </div>
+                        <div class="progress-text">0% Complete</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Downloads/Search Page -->
+            <div class="page" id="downloads-page">
+                <div class="page-header">
+                    <h2>Search & Download</h2>
+                </div>
+                <div class="downloads-content">
+                    <div class="search-section">
+                        <input type="text" class="search-input" id="search-input" placeholder="Search for music...">
+                        <button class="search-button" id="search-button">Search</button>
+                    </div>
+                    <div class="search-results" id="search-results">
+                        <!-- Results will be populated here -->
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Artists Page -->
+            <div class="page" id="artists-page">
+                <div class="page-header">
+                    <h2>Artists</h2>
+                </div>
+                <div class="artists-content">
+                    <div class="artists-grid" id="artists-grid">
+                        <!-- Artists will be populated here -->
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Settings Page -->
+            <div class="page" id="settings-page">
+                <div class="page-header">
+                    <h2>Settings</h2>
+                </div>
+                <div class="settings-content">
+                    <!-- Two Column Layout -->
+                    <div class="settings-columns">
+                        <!-- Left Column - API Configuration -->
+                        <div class="settings-left-column">
+                            <!-- API Configuration -->
+                            <div class="settings-group">
+                                <h3>API Configuration</h3>
+                                
+                                <!-- Spotify Settings -->
+                                <div class="api-service-frame">
+                                    <h4 class="service-title spotify-title">Spotify</h4>
+                                    <div class="form-group">
+                                        <label>Client ID:</label>
+                                        <input type="text" id="spotify-client-id" placeholder="Spotify Client ID">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Client Secret:</label>
+                                        <input type="password" id="spotify-client-secret" placeholder="Spotify Client Secret">
+                                    </div>
+                                    <div class="callback-info">
+                                        <div class="callback-label">Required Redirect URI:</div>
+                                        <div class="callback-url">http://127.0.0.1:8888/callback</div>
+                                        <div class="callback-help">Add this URL to your Spotify app's 'Redirect URIs' in the Spotify Developer Dashboard</div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Tidal Settings -->
+                                <div class="api-service-frame">
+                                    <h4 class="service-title tidal-title">Tidal</h4>
+                                    <div class="form-group">
+                                        <label>Client ID:</label>
+                                        <input type="text" id="tidal-client-id" placeholder="Tidal Client ID">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Client Secret:</label>
+                                        <input type="password" id="tidal-client-secret" placeholder="Tidal Client Secret">
+                                    </div>
+                                    <div class="callback-info">
+                                        <div class="callback-label">Required Redirect URI:</div>
+                                        <div class="callback-url">http://127.0.0.1:8889/tidal/callback</div>
+                                        <div class="callback-help">Add this URL to your Tidal app configuration</div>
+                                    </div>
+                                    <div class="form-actions">
+                                        <button class="auth-button" onclick="authenticateTidal()">🔐 Authenticate</button>
+                                    </div>
+                                </div>
+                                
+                                <!-- Soulseek Settings -->
+                                <div class="api-service-frame">
+                                    <h4 class="service-title soulseek-title">Soulseek</h4>
+                                    <div class="form-group">
+                                        <label>slskd URL:</label>
+                                        <div class="path-input-group">
+                                            <input type="url" id="soulseek-url" placeholder="http://localhost:5030">
+                                            <button class="detect-button" onclick="autoDetectSlskd()">Auto-detect</button>
+                                        </div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>API Key:</label>
+                                        <input type="password" id="soulseek-api-key" placeholder="Slskd API Key">
+                                    </div>
+                                </div>
+                                
+                                <!-- Test Connection Buttons -->
+                                <div class="api-test-buttons">
+                                    <button class="test-button" onclick="testConnection('spotify')">Test Spotify</button>
+                                    <button class="test-button" onclick="testConnection('tidal')">Test Tidal</button>
+                                    <button class="test-button" onclick="testConnection('soulseek')">Test Soulseek</button>
+                                </div>
+                            </div>
+                            
+                            <!-- Server Connections -->
+                            <div class="settings-group">
+                                <h3>Server Connections</h3>
+                                
+                                <!-- Server Toggle Buttons -->
+                                <div class="server-toggle-container">
+                                    <button class="server-toggle-btn active" id="plex-toggle" onclick="toggleServer('plex')">Plex</button>
+                                    <button class="server-toggle-btn" id="jellyfin-toggle" onclick="toggleServer('jellyfin')">Jellyfin</button>
+                                </div>
+                                
+                                <!-- Plex Settings -->
+                                <div class="server-config-container" id="plex-container">
+                                    <div class="form-group">
+                                        <label>Plex Server URL:</label>
+                                        <input type="url" id="plex-url" placeholder="http://localhost:32400">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Plex Token:</label>
+                                        <input type="password" id="plex-token" placeholder="X-Plex-Token">
+                                    </div>
+                                    <div class="form-actions">
+                                        <button class="detect-button" onclick="autoDetectPlex()">Auto-detect</button>
+                                        <button class="test-button" onclick="testConnection('plex')">Test</button>
+                                    </div>
+                                </div>
+                                
+                                <!-- Jellyfin Settings -->
+                                <div class="server-config-container hidden" id="jellyfin-container">
+                                    <div class="form-group">
+                                        <label>Jellyfin Server URL:</label>
+                                        <input type="url" id="jellyfin-url" placeholder="http://localhost:8096">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>API Key:</label>
+                                        <input type="password" id="jellyfin-api-key" placeholder="Jellyfin API Key">
+                                    </div>
+                                    <div class="form-actions">
+                                        <button class="detect-button" onclick="autoDetectJellyfin()">Auto-detect</button>
+                                        <button class="test-button" onclick="testConnection('jellyfin')">Test</button>
+                                    </div>
+                                </div>
+                                
+                                <!-- Server Test Button -->
+                                <div class="server-test-section">
+                                    <button class="test-button server-test-btn" onclick="testConnection('server')">Test Server</button>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Right Column - Download Settings, Database, Metadata, Logging -->
+                        <div class="settings-right-column">
+                            <!-- Download Settings -->
+                            <div class="settings-group">
+                                <h3>Download Settings</h3>
+                                
+                                <div class="form-group">
+                                    <label>Preferred Quality:</label>
+                                    <select id="preferred-quality">
+                                        <option value="flac">FLAC</option>
+                                        <option value="mp3_320">320 kbps MP3</option>
+                                        <option value="mp3_256">256 kbps MP3</option>
+                                        <option value="mp3_192">192 kbps MP3</option>
+                                        <option value="any">Any</option>
+                                    </select>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label>Slskd Download Dir:</label>
+                                    <div class="path-input-group">
+                                        <input type="text" id="download-path" placeholder="./downloads">
+                                        <button class="browse-button" onclick="browsePath('download')">Browse</button>
+                                    </div>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label>Matched Transfer Dir (Plex Music Dir?):</label>
+                                    <div class="path-input-group">
+                                        <input type="text" id="transfer-path" placeholder="./Transfer">
+                                        <button class="browse-button" onclick="browsePath('transfer')">Browse</button>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Database Settings -->
+                            <div class="settings-group">
+                                <h3>Database Settings</h3>
+                                
+                                <div class="form-group">
+                                    <label>Concurrent Workers:</label>
+                                    <select id="max-workers">
+                                        <option value="3">3</option>
+                                        <option value="4">4</option>
+                                        <option value="5" selected>5</option>
+                                        <option value="6">6</option>
+                                        <option value="7">7</option>
+                                        <option value="8">8</option>
+                                        <option value="9">9</option>
+                                        <option value="10">10</option>
+                                    </select>
+                                </div>
+                                
+                                <div class="help-text">Number of parallel threads for database updates. Higher values = faster updates but more server load.</div>
+                            </div>
+                            
+                            <!-- Metadata Enhancement Settings -->
+                            <div class="settings-group">
+                                <h3>🎵 Metadata Enhancement</h3>
+                                
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="metadata-enabled" checked>
+                                        Enable metadata enhancement with Spotify data
+                                    </label>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="embed-album-art" checked>
+                                        Embed high-quality album art from Spotify
+                                    </label>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label>Supported Formats:</label>
+                                    <div class="supported-formats">MP3, FLAC, MP4/M4A, OGG</div>
+                                </div>
+                            </div>
+                            
+                            <!-- Playlist Sync Settings -->
+                            <div class="settings-group">
+                                <h3>Playlist Sync Settings</h3>
+                                
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="create-backup" checked>
+                                        Create playlist backups before sync
+                                    </label>
+                                </div>
+                            </div>
+                            
+                            <!-- Logging Information (Read-only) -->
+                            <div class="settings-group">
+                                <h3>Logging Information</h3>
+                                
+                                <div class="form-group">
+                                    <label>Log Level:</label>
+                                    <div class="readonly-field" id="log-level-display">DEBUG</div>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label>Log Path:</label>
+                                    <div class="readonly-field" id="log-path-display">logs/app.log</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Save Button -->
+                    <div class="settings-actions">
+                        <button class="save-button" id="save-settings">💾 Save Settings</button>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
+    
+    <!-- Loading Overlay -->
+    <div class="loading-overlay hidden" id="loading-overlay">
+        <div class="loading-spinner"></div>
+        <div class="loading-message">Processing...</div>
+    </div>
+    
+    <!-- Toast Notifications -->
+    <div class="toast-container" id="toast-container"></div>
     
     <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
