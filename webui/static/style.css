@@ -392,7 +392,7 @@ body {
 .crypto-donation {
     background: linear-gradient(180deg, transparent 0%, rgba(255, 255, 255, 0.02) 30%, rgba(255, 255, 255, 0.04) 100%);
     border-top: 1px solid rgba(255, 255, 255, 0.08);
-    border-bottom-right-radius: 12px;
+   
     padding: 15px 0;
 }
 
@@ -474,8 +474,8 @@ body {
     height: 45px;
     background: linear-gradient(180deg, transparent 0%, rgba(255, 255, 255, 0.02) 30%, rgba(255, 255, 255, 0.04) 100%);
     border-top: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 8px;
-    margin: 0 10px;
+    
+    margin: 0;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -494,6 +494,7 @@ body {
     border-radius: 4px;
     cursor: pointer;
     transition: all 0.2s ease;
+    border: 1px solid transparent;
 }
 
 .version-button:hover {
@@ -508,7 +509,7 @@ body {
 
 /* Status Section - Matching status indicators */
 .status-section {
-    height: 150px;
+    height: fit-content;
     background: linear-gradient(180deg, transparent 0%, rgba(255, 255, 255, 0.02) 30%, rgba(255, 255, 255, 0.04) 100%);
     border-top: 1px solid rgba(255, 255, 255, 0.08);
     border-bottom-right-radius: 12px;
@@ -1428,4 +1429,203 @@ body {
     .settings-content {
         max-width: 900px; /* Wider settings forms */
     }
+}
+
+/* ===== VERSION MODAL STYLES ===== */
+
+.version-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.75);
+    backdrop-filter: blur(8px);
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 1;
+    transition: opacity 0.3s ease-in-out;
+}
+
+.version-modal-overlay.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.version-modal {
+    background: #1a1a1a;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    width: 600px;
+    max-width: 90vw;
+    height: 500px;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    transform: scale(1);
+    transition: transform 0.3s ease-in-out;
+}
+
+.version-modal-overlay.hidden .version-modal {
+    transform: scale(0.9);
+}
+
+/* Header */
+.version-modal-header {
+    padding: 30px 30px 15px 30px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    border-top-left-radius: 12px;
+    border-top-right-radius: 12px;
+    background: #1a1a1a;
+}
+
+.version-modal-title {
+    color: #ffffff;
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    margin: 0 0 5px 0;
+    font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+}
+
+.version-modal-subtitle {
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.1px;
+    margin: 0;
+    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+}
+
+/* Content Area */
+.version-modal-content {
+    flex: 1;
+    padding: 0;
+    overflow-y: auto;
+    background: #1a1a1a;
+}
+
+.version-modal-content::-webkit-scrollbar {
+    width: 8px;
+}
+
+.version-modal-content::-webkit-scrollbar-track {
+    background: #2a2a2a;
+    border-radius: 4px;
+}
+
+.version-modal-content::-webkit-scrollbar-thumb {
+    background: #555555;
+    border-radius: 4px;
+}
+
+.version-modal-content::-webkit-scrollbar-thumb:hover {
+    background: #666666;
+}
+
+.version-content-container {
+    padding: 25px 30px;
+}
+
+/* Feature Sections */
+.version-feature-section {
+    margin-bottom: 25px;
+    padding: 18px 20px;
+    border-left: 3px solid rgba(29, 185, 84, 0.4);
+    margin-left: 5px;
+    background: transparent;
+}
+
+.version-section-title {
+    color: #1ed760;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: -0.2px;
+    margin: 0 0 8px 0;
+    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+}
+
+.version-section-description {
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 11px;
+    line-height: 1.4;
+    margin: 0 0 12px 0;
+    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+}
+
+.version-feature-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.version-feature-item {
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 10px;
+    line-height: 1.5;
+    padding: 2px 0 2px 8px;
+    margin: 2px 0;
+    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+}
+
+.version-usage-note {
+    color: #1ed760;
+    font-size: 10px;
+    line-height: 1.4;
+    margin: 8px 0 0 0;
+    padding: 8px 0;
+    font-style: italic;
+    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+}
+
+/* Footer */
+.version-modal-footer {
+    padding: 15px 30px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    border-bottom-left-radius: 12px;
+    border-bottom-right-radius: 12px;
+    background: rgba(255, 255, 255, 0.02);
+    display: flex;
+    justify-content: flex-end;
+}
+
+.version-modal-close {
+    background: #1db954;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 25px;
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.1px;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+}
+
+.version-modal-close:hover {
+    background: #1ed760;
+}
+
+.version-modal-close:active {
+    background: #169c46;
+}
+
+/* Animation for modal appearance */
+@keyframes modalFadeIn {
+    from {
+        opacity: 0;
+        transform: scale(0.9);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.version-modal-overlay:not(.hidden) .version-modal {
+    animation: modalFadeIn 0.3s ease-out;
 }
