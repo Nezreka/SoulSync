@@ -184,76 +184,20 @@
             </div>
             
             <!-- Downloads/Search Page -->
-            <!-- Downloads/Search Page -->
             <div class="page" id="downloads-page">
-                <!-- Header -->
                 <div class="page-header">
-                    <h2>Music Downloads</h2>
-                    <p>Search, discover, and download high-quality music</p>
+                    <h2>Search & Download</h2>
                 </div>
-
-                <!-- Main Content Splitter -->
-                <div class="downloads-content-splitter">
-                    <!-- Left: Search & Results -->
-                    <div class="search-results-panel">
-                        <!-- Search Bar -->
-                        <div class="elegant-search-bar">
-                            <input type="text" id="search-input" placeholder="Search for music... (e.g., 'Virtual Mage', 'Queen Bohemian Rhapsody')">
-                            <button id="search-cancel-btn" class="cancel-search-btn hidden">✕ Cancel</button>
-                            <button id="search-btn" class="search-btn">🔍 Search</button>
-                        </div>
-
-                        <!-- Filter Controls -->
-                        <div class="filter-controls hidden" id="filter-container">
-                            <button class="filter-toggle-btn" id="filter-toggle-btn">⏷ Filters</button>
-                            <div class="filter-content hidden" id="filter-content">
-                                <!-- Filter and Sort Rows will be here -->
-                            </div>
-                        </div>
-
-                        <!-- Search Status -->
-                        <div class="search-status">
-                            <div class="spinner hidden" id="search-spinner"></div>
-                            <span id="search-status-text">Ready to search • Enter artist, song, or album name</span>
-                        </div>
-
-                        <!-- Results Area -->
-                        <div class="search-results-area">
-                            <div class="search-results-container" id="search-results-container">
-                                <!-- Results will be populated here -->
-                                <div class="no-results-placeholder">
-                                    Your search results will appear here.
-                                </div>
-                            </div>
-                        </div>
+                <div class="downloads-content">
+                    <div class="search-section">
+                        <input type="text" class="search-input" id="search-input" placeholder="Search for music...">
+                        <button class="search-button" id="search-button">Search</button>
                     </div>
-
-                    <!-- Right: Download Manager -->
-                    <div class="download-manager-panel">
-                        <h4>Download Manager</h4>
-                        <div class="download-stats">
-                            <span>Active: <b id="active-downloads-count">0</b></span>
-                            <span>Finished: <b id="finished-downloads-count">0</b></span>
-                        </div>
-                        <button class="clear-completed-btn" id="clear-completed-btn">🗑️ Clear Completed</button>
-                        
-                        <!-- Tabbed Download Queues -->
-                        <div class="download-tabs">
-                            <button class="tab-btn active" data-tab="active-queue">Download Queue</button>
-                            <button class="tab-btn" data-tab="finished-queue">Finished</button>
-                        </div>
-                        <div class="download-queue-container">
-                            <div class="download-queue active" id="active-queue">
-                                <div class="empty-queue-message">No active downloads.</div>
-                            </div>
-                            <div class="download-queue" id="finished-queue">
-                                <div class="empty-queue-message">No finished downloads.</div>
-                            </div>
-                        </div>
+                    <div class="search-results" id="search-results">
+                        <!-- Results will be populated here -->
                     </div>
                 </div>
             </div>
-
             
             <!-- Artists Page -->
             <div class="page" id="artists-page">
@@ -538,54 +482,6 @@
             <!-- Footer -->
             <div class="version-modal-footer">
                 <button class="version-modal-close" onclick="closeVersionModal()">Close</button>
-            </div>
-        </div>
-    </div>
-    
-    <!-- Spotify Matching Modal -->
-    <div class="spotify-matching-modal-overlay hidden" id="spotify-matching-modal-overlay" onclick="closeSpotifyMatchingModal()">
-        <div class="spotify-matching-modal" onclick="event.stopPropagation()">
-            <!-- Header -->
-            <div class="spotify-modal-header">
-                <h2 class="spotify-modal-title" id="spotify-modal-title">Match Download to Spotify</h2>
-                <div class="spotify-modal-subtitle" id="spotify-modal-subtitle">Step 1: Select the correct Artist</div>
-            </div>
-            
-            <!-- Content Area with Scroll -->
-            <div class="spotify-modal-content">
-                <div class="spotify-content-container">
-                    
-                    <!-- Auto Suggestions Section -->
-                    <div class="suggestions-section">
-                        <h4 class="suggestions-title">Top Suggestions</h4>
-                        <div class="suggestions-grid" id="auto-suggestions-grid">
-                            <!-- Auto-generated suggestions will be populated here -->
-                            <div class="loading-suggestions">
-                                <div class="suggestion-loading-spinner"></div>
-                                <span>Generating suggestions...</span>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- Manual Search Section -->
-                    <div class="manual-search-section">
-                        <h4 class="manual-search-title">Or, Search Manually</h4>
-                        <div class="manual-search-bar">
-                            <input type="text" id="spotify-manual-search" placeholder="Manually search for an artist...">
-                            <div class="manual-search-results" id="manual-search-results">
-                                <!-- Manual search results will appear here -->
-                            </div>
-                        </div>
-                    </div>
-                    
-                </div>
-            </div>
-            
-            <!-- Footer -->
-            <div class="spotify-modal-footer">
-                <button class="spotify-modal-btn secondary" onclick="skipSpotifyMatching()">Skip Matching</button>
-                <button class="spotify-modal-btn secondary" onclick="closeSpotifyMatchingModal()">Cancel</button>
-                <button class="spotify-modal-btn primary" id="confirm-spotify-match" onclick="confirmSpotifyMatch()" disabled>Confirm Selection</button>
             </div>
         </div>
     </div>
