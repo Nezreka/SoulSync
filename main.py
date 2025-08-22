@@ -467,8 +467,8 @@ def run_web_app():
     logger.info("Starting SoulSync in web mode...")
     logger.info("Web interface available at http://localhost:5000")
     
-    # Run Flask app
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    # Run Flask app in debug mode for auto-reload
+    app.run(host='0.0.0.0', port=5000, debug=True)
 
 def run_gui_app():
     """Run the application in GUI mode using PyQt6"""
