@@ -1,0 +1,33 @@
+body { 
+    font-family: Arial, sans-serif; 
+    margin: 40px; 
+    background: #121212; 
+    color: white; 
+}
+
+.container { 
+    max-width: 800px; 
+    margin: 0 auto; 
+}
+
+.status { 
+    padding: 20px; 
+    background: #1e1e1e; 
+    border-radius: 8px; 
+    margin: 20px 0; 
+}
+
+.service { 
+    display: flex; 
+    justify-content: space-between; 
+    padding: 10px 0; 
+    border-bottom: 1px solid #333; 
+}
+
+.connected { 
+    color: #4caf50; 
+}
+
+.disconnected { 
+    color: #f44336; 
+}

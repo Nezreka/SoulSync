@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SoulSync - Web Mode</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>🎵 SoulSync - Web Mode</h1>
+        <p>Your music sync application is running in headless mode.</p>
+        
+        <div class="status">
+            <h3>Service Status</h3>
+            <div id="status-container">
+                <div class="service">
+                    <span>Spotify:</span>
+                    <span id="spotify-status" class="disconnected">Checking...</span>
+                </div>
+                <div class="service">
+                    <span>Media Server:</span>
+                    <span id="media-status" class="disconnected">Checking...</span>
+                </div>
+                <div class="service">
+                    <span>Soulseek:</span>
+                    <span id="soulseek-status" class="disconnected">Checking...</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="status">
+            <h3>Available Endpoints</h3>
+            <ul>
+                <li><a href="/status" style="color: #4caf50;">/status</a> - Service status JSON</li>
+                <li><a href="/config" style="color: #4caf50;">/config</a> - Configuration info</li>
+            </ul>
+        </div>
+    </div>
+    
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
