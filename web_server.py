@@ -592,6 +592,81 @@ def start_download():
         print(f"Download error: {e}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/downloads/status')
+def get_download_status():
+    """
+    Sophisticated download status fetching that matches GUI's update_download_status method.
+    Fetches raw transfer data directly from slskd and flattens it like the GUI.
+    """
+    if not soulseek_client:
+        return jsonify({"transfers": []})
+        
+    try:
+        # Fetch raw transfers data exactly like GUI's StatusProcessingWorker
+        transfers_data = asyncio.run(soulseek_client._make_request('GET', 'transfers/downloads'))
+        
+        if not transfers_data:
+            return jsonify({"transfers": []})
+        
+        # Flatten the nested data structure exactly like the GUI
+        all_transfers = []
+        for user_data in transfers_data:
+            if 'directories' in user_data:
+                for directory in user_data['directories']:
+                    if 'files' in directory:
+                        for file_info in directory['files']:
+                            # Add username to each file object for convenience
+                            file_info['username'] = user_data.get('username', 'Unknown')
+                            all_transfers.append(file_info)
+        
+        return jsonify({"transfers": all_transfers})
+        
+    except Exception as e:
+        print(f"Error fetching download status: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/downloads/cancel', methods=['POST'])
+def cancel_download():
+    """
+    Cancel a specific download transfer, matching GUI functionality.
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({"success": False, "error": "No data provided."}), 400
+    
+    download_id = data.get('download_id')
+    username = data.get('username')
+
+    if not all([download_id, username]):
+        return jsonify({"success": False, "error": "Missing download_id or username."}), 400
+
+    try:
+        # Call the same client method the GUI uses
+        success = asyncio.run(soulseek_client.cancel_download(download_id, username, remove=True))
+        if success:
+            return jsonify({"success": True, "message": "Download cancelled."})
+        else:
+            return jsonify({"success": False, "error": "Failed to cancel download via slskd."}), 500
+    except Exception as e:
+        print(f"Error cancelling download: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/downloads/clear-finished', methods=['POST'])
+def clear_finished_downloads():
+    """
+    Clear all terminal (completed, cancelled, failed) downloads from slskd.
+    """
+    try:
+        # This single client call handles clearing everything that is no longer active
+        success = asyncio.run(soulseek_client.clear_all_completed_downloads())
+        if success:
+            return jsonify({"success": True, "message": "Finished downloads cleared."})
+        else:
+            return jsonify({"success": False, "error": "Backend failed to clear downloads."}), 500
+    except Exception as e:
+        print(f"Error clearing finished downloads: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
 @app.route('/api/artists')
 def get_artists():
     # Placeholder: returns mock artist data

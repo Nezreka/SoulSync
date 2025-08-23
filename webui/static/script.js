@@ -96,18 +96,26 @@ async function loadPageData(pageId) {
     try {
         switch (pageId) {
             case 'dashboard':
+                // Stop download polling when leaving downloads page
+                stopDownloadPolling();
                 await loadDashboardData();
                 break;
             case 'sync':
+                // Stop download polling when leaving downloads page
+                stopDownloadPolling();
                 await loadSyncData();
                 break;
             case 'downloads':
                 await loadDownloadsData();
                 break;
             case 'artists':
+                // Stop download polling when leaving downloads page
+                stopDownloadPolling();
                 await loadArtistsData();
                 break;
             case 'settings':
+                // Stop download polling when leaving downloads page
+                stopDownloadPolling();
                 await loadSettingsData();
                 break;
         }
@@ -921,6 +929,12 @@ async function loadSyncData() {
     }
 }
 
+// Download tracking state management - matching GUI functionality
+let activeDownloads = {};
+let finishedDownloads = {};
+let downloadStatusInterval = null;
+let isDownloadPollingActive = false;
+
 async function loadDownloadsData() {
     // Downloads page loads search results dynamically
     console.log('Downloads page loaded');
@@ -928,12 +942,271 @@ async function loadDownloadsData() {
     // Connect downloads search button
     const searchButton = document.getElementById('downloads-search-btn');
     const searchInput = document.getElementById('downloads-search-input');
+    const clearButton = document.querySelector('.controls-panel__clear-btn');
     
     if (searchButton && searchInput) {
         searchButton.addEventListener('click', performDownloadsSearch);
         searchInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') performDownloadsSearch();
         });
+    }
+    
+    if (clearButton) {
+        clearButton.addEventListener('click', clearFinishedDownloads);
+    }
+    
+    // Start sophisticated polling system (1-second interval like GUI)
+    startDownloadPolling();
+    
+    // Initialize tab management
+    initializeDownloadTabs();
+}
+
+function startDownloadPolling() {
+    if (isDownloadPollingActive) return;
+    
+    console.log('Starting download status polling (1-second interval)');
+    isDownloadPollingActive = true;
+    
+    // Initial call
+    updateDownloadQueues();
+    
+    // Start 1-second polling (matching GUI's 1000ms timer)
+    downloadStatusInterval = setInterval(updateDownloadQueues, 1000);
+}
+
+function stopDownloadPolling() {
+    if (downloadStatusInterval) {
+        clearInterval(downloadStatusInterval);
+        downloadStatusInterval = null;
+    }
+    isDownloadPollingActive = false;
+    console.log('Stopped download status polling');
+}
+
+async function updateDownloadQueues() {
+    try {
+        const response = await fetch('/api/downloads/status');
+        const data = await response.json();
+
+        if (data.error) {
+            console.error("Error fetching download status:", data.error);
+            return;
+        }
+
+        const newActive = {};
+        const newFinished = {};
+        
+        // Terminal states matching GUI logic
+        const terminalStates = ['Completed', 'Succeeded', 'Cancelled', 'Canceled', 'Failed', 'Errored'];
+
+        // Process transfers exactly like GUI
+        data.transfers.forEach(item => {
+            const isTerminal = terminalStates.some(state => 
+                item.state && item.state.includes(state)
+            );
+            
+            if (isTerminal) {
+                newFinished[item.id] = item;
+            } else {
+                newActive[item.id] = item;
+            }
+        });
+
+        // Update global state
+        activeDownloads = newActive;
+        finishedDownloads = newFinished;
+        
+        // Render both queues
+        renderQueue('active-queue', activeDownloads, true);
+        renderQueue('finished-queue', finishedDownloads, false);
+        
+        // Update tab counts
+        updateTabCounts();
+        
+        // Update stats in the side panel
+        updateDownloadStats();
+
+    } catch (error) {
+        // Only log errors occasionally to avoid console spam
+        if (Math.random() < 0.1) {
+            console.error("Failed to update download queues:", error);
+        }
+    }
+}
+
+function renderQueue(containerId, downloads, isActiveQueue) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    const downloadIds = Object.keys(downloads);
+
+    if (downloadIds.length === 0) {
+        container.innerHTML = `<div class="download-queue__empty-message">${isActiveQueue ? 'No active downloads.' : 'No finished downloads.'}</div>`;
+        return;
+    }
+
+    let html = '';
+    for (const id of downloadIds) {
+        const item = downloads[id];
+        const title = item.filename ? item.filename.split(/[\\/]/).pop() : 'Unknown File';
+        const progress = item.percentComplete || 0;
+        const bytesTransferred = item.bytesTransferred || 0;
+        const totalBytes = item.size || 0;
+        const speed = item.averageSpeed || 0;
+        
+        // Format file size
+        const formatSize = (bytes) => {
+            if (!bytes) return 'Unknown size';
+            const units = ['B', 'KB', 'MB', 'GB'];
+            let size = bytes;
+            let unitIndex = 0;
+            while (size >= 1024 && unitIndex < units.length - 1) {
+                size /= 1024;
+                unitIndex++;
+            }
+            return `${size.toFixed(1)} ${units[unitIndex]}`;
+        };
+        
+        // Format speed
+        const formatSpeed = (bytesPerSecond) => {
+            if (!bytesPerSecond || bytesPerSecond <= 0) return '';
+            return `${formatSize(bytesPerSecond)}/s`;
+        };
+        
+        let actionButtonHTML = '';
+        if (isActiveQueue) {
+            // Active items get progress bar and cancel button
+            actionButtonHTML = `
+                <div class="download-item__progress-container">
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: ${progress}%;"></div>
+                    </div>
+                    <div class="progress-text">
+                        ${item.state} - ${progress.toFixed(1)}%
+                        ${speed > 0 ? `• ${formatSpeed(speed)}` : ''}
+                        ${totalBytes > 0 ? `• ${formatSize(bytesTransferred)} / ${formatSize(totalBytes)}` : ''}
+                    </div>
+                </div>
+                <button class="download-item__cancel-btn" onclick="cancelDownloadItem('${item.id}', '${item.username}')">✕ Cancel</button>
+            `;
+        } else {
+            // Finished items get status and open button
+            let statusClass = '';
+            if (item.state.includes('Cancelled')) statusClass = 'status--cancelled';
+            else if (item.state.includes('Failed') || item.state.includes('Errored')) statusClass = 'status--failed';
+            else if (item.state.includes('Completed') || item.state.includes('Succeeded')) statusClass = 'status--completed';
+            
+            actionButtonHTML = `
+                <div class="download-item__status-container">
+                    <span class="download-item__status-text ${statusClass}">${item.state}</span>
+                </div>
+                <button class="download-item__open-btn" title="Cannot open folder from web browser" disabled>📁 Open</button>
+            `;
+        }
+        
+        html += `
+            <div class="download-item" data-id="${item.id}">
+                <div class="download-item__header">
+                    <div class="download-item__title" title="${title}">${title}</div>
+                    <div class="download-item__uploader" title="from ${item.username}">from ${item.username}</div>
+                </div>
+                <div class="download-item__content">
+                    ${actionButtonHTML}
+                </div>
+            </div>
+        `;
+    }
+    container.innerHTML = html;
+}
+
+function updateTabCounts() {
+    const activeCount = Object.keys(activeDownloads).length;
+    const finishedCount = Object.keys(finishedDownloads).length;
+    
+    const activeTabBtn = document.querySelector('.tab-btn[data-tab="active-queue"]');
+    const finishedTabBtn = document.querySelector('.tab-btn[data-tab="finished-queue"]');
+    
+    if (activeTabBtn) activeTabBtn.textContent = `Download Queue (${activeCount})`;
+    if (finishedTabBtn) finishedTabBtn.textContent = `Finished (${finishedCount})`;
+}
+
+function updateDownloadStats() {
+    const activeCount = Object.keys(activeDownloads).length;
+    const finishedCount = Object.keys(finishedDownloads).length;
+    
+    const activeLabel = document.getElementById('active-downloads-label');
+    const finishedLabel = document.getElementById('finished-downloads-label');
+    
+    if (activeLabel) activeLabel.textContent = `• Active Downloads: ${activeCount}`;
+    if (finishedLabel) finishedLabel.textContent = `• Finished Downloads: ${finishedCount}`;
+}
+
+function initializeDownloadTabs() {
+    const tabButtons = document.querySelectorAll('.tab-btn');
+    tabButtons.forEach(btn => {
+        btn.addEventListener('click', () => switchDownloadTab(btn));
+    });
+}
+
+function switchDownloadTab(button) {
+    const targetTabId = button.getAttribute('data-tab');
+    
+    // Update buttons
+    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+    button.classList.add('active');
+
+    // Update content panes
+    document.querySelectorAll('.download-queue').forEach(queue => queue.classList.remove('active'));
+    const targetQueue = document.getElementById(targetTabId);
+    if (targetQueue) targetQueue.classList.add('active');
+}
+
+async function cancelDownloadItem(downloadId, username) {
+    if (!confirm('Are you sure you want to cancel this download?')) return;
+
+    try {
+        const response = await fetch('/api/downloads/cancel', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ download_id: downloadId, username: username })
+        });
+        const result = await response.json();
+        
+        if (result.success) {
+            showToast('Download cancelled', 'success');
+        } else {
+            showToast(`Failed to cancel: ${result.error}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error cancelling download:', error);
+        showToast('Error sending cancel request', 'error');
+    }
+}
+
+async function clearFinishedDownloads() {
+    const finishedCount = Object.keys(finishedDownloads).length;
+    if (finishedCount === 0) {
+        showToast('No finished downloads to clear', 'error');
+        return;
+    }
+    
+    if (!confirm(`Are you sure you want to clear all ${finishedCount} finished downloads?`)) return;
+    
+    try {
+        const response = await fetch('/api/downloads/clear-finished', {
+            method: 'POST'
+        });
+        const result = await response.json();
+        
+        if (result.success) {
+            showToast('Finished downloads cleared', 'success');
+        } else {
+            showToast(`Failed to clear: ${result.error}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error clearing finished downloads:', error);
+        showToast('Error sending clear request', 'error');
     }
 }
 
@@ -1520,3 +1793,6 @@ window.downloadTrack = downloadTrack;
 window.downloadAlbum = downloadAlbum;
 window.toggleAlbumExpansion = toggleAlbumExpansion;
 window.downloadAlbumTrack = downloadAlbumTrack;
+window.switchDownloadTab = switchDownloadTab;
+window.cancelDownloadItem = cancelDownloadItem;
+window.clearFinishedDownloads = clearFinishedDownloads;
