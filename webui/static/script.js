@@ -924,6 +924,154 @@ async function loadSyncData() {
 async function loadDownloadsData() {
     // Downloads page loads search results dynamically
     console.log('Downloads page loaded');
+    
+    // Connect downloads search button
+    const searchButton = document.getElementById('downloads-search-btn');
+    const searchInput = document.getElementById('downloads-search-input');
+    
+    if (searchButton && searchInput) {
+        searchButton.addEventListener('click', performDownloadsSearch);
+        searchInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') performDownloadsSearch();
+        });
+    }
+}
+
+async function performDownloadsSearch() {
+    const query = document.getElementById('downloads-search-input').value.trim();
+    if (!query) {
+        showToast('Please enter a search term', 'error');
+        return;
+    }
+    
+    try {
+        showLoadingOverlay('Searching...');
+        
+        const response = await fetch('/api/search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query })
+        });
+        
+        const data = await response.json();
+        
+        if (data.error) {
+            showToast(`Search error: ${data.error}`, 'error');
+            return;
+        }
+        
+        const results = data.results || [];
+        displayDownloadsResults(results);
+        
+        if (results.length === 0) {
+            showToast('No results found', 'error');
+        } else {
+            showToast(`Found ${results.length} results`, 'success');
+        }
+        
+    } catch (error) {
+        console.error('Search failed:', error);
+        showToast('Search failed', 'error');
+    } finally {
+        hideLoadingOverlay();
+    }
+}
+
+function displayDownloadsResults(results) {
+    const resultsArea = document.getElementById('search-results-area');
+    if (!resultsArea) return;
+    
+    if (!results.length) {
+        resultsArea.innerHTML = '<div class="search-results-placeholder"><p>No search results found.</p></div>';
+        return;
+    }
+    
+    let html = '';
+    results.forEach((result, index) => {
+        const isAlbum = result.result_type === 'album';
+        
+        if (isAlbum) {
+            const trackCount = result.tracks ? result.tracks.length : 0;
+            html += `
+                <div class="search-result-item album-result">
+                    <div class="result-info">
+                        <strong>🎵 ${escapeHtml(result.album_title || result.title || 'Unknown Album')}</strong><br>
+                        <span>by ${escapeHtml(result.artist || 'Unknown Artist')}</span><br>
+                        <small>${trackCount} tracks • ${escapeHtml(result.quality || 'Mixed')}</small>
+                    </div>
+                    <button onclick="downloadAlbum(${index})" class="download-btn">⬇ Download Album</button>
+                </div>
+            `;
+        } else {
+            const sizeText = result.size ? `${(result.size / 1024 / 1024).toFixed(1)} MB` : 'Unknown size';
+            html += `
+                <div class="search-result-item track-result">
+                    <div class="result-info">
+                        <strong>${escapeHtml(result.title || 'Unknown Title')}</strong><br>
+                        <span>by ${escapeHtml(result.artist || 'Unknown Artist')}</span><br>
+                        <small>${sizeText} • ${escapeHtml(result.quality || 'Unknown')} ${result.bitrate ? `${result.bitrate}kbps` : ''}</small>
+                    </div>
+                    <button onclick="downloadTrack(${index})" class="download-btn">⬇ Download</button>
+                </div>
+            `;
+        }
+    });
+    
+    resultsArea.innerHTML = html;
+    // Store results globally for download functions
+    window.currentSearchResults = results;
+}
+
+async function downloadTrack(index) {
+    const results = window.currentSearchResults;
+    if (!results || !results[index]) return;
+    
+    const track = results[index];
+    
+    try {
+        const response = await fetch('/api/download', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(track)
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showToast(`Download started: ${track.title}`, 'success');
+        } else {
+            showToast(`Download failed: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        console.error('Download error:', error);
+        showToast('Failed to start download', 'error');
+    }
+}
+
+async function downloadAlbum(index) {
+    const results = window.currentSearchResults;
+    if (!results || !results[index]) return;
+    
+    const album = results[index];
+    
+    try {
+        const response = await fetch('/api/download', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(album)
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showToast(data.message, 'success');
+        } else {
+            showToast(`Album download failed: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        console.error('Album download error:', error);
+        showToast('Failed to start album download', 'error');
+    }
 }
 
 async function loadArtistsData() {
@@ -1276,3 +1424,5 @@ window.browsePath = browsePath;
 window.selectResult = selectResult;
 window.startStream = startStream;
 window.startDownload = startDownload;
+window.downloadTrack = downloadTrack;
+window.downloadAlbum = downloadAlbum;
