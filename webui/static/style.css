@@ -2264,30 +2264,6 @@ body {
     margin-left: 8px;
 }
 
-.track-download-btn {
-    background: linear-gradient(to bottom,
-        rgba(29, 185, 84, 0.8),
-        rgba(24, 156, 71, 0.7));
-    border: 1px solid rgba(29, 185, 84, 0.4);
-    border-radius: 50%;
-    color: #000000;
-    font-size: 12px;
-    font-weight: bold;
-    width: 28px;
-    height: 28px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.track-download-btn:hover {
-    background: linear-gradient(to bottom,
-        rgba(30, 215, 96, 0.9),
-        rgba(25, 180, 80, 0.8));
-    border-color: rgba(29, 185, 84, 0.6);
-}
 
 /* Sophisticated Download Tracking Styles */
 
@@ -2507,3 +2483,96 @@ body {
 .download-queue::-webkit-scrollbar-thumb:hover {
     background: rgba(29, 185, 84, 0.5);
 }
+
+/* APPEND THIS CSS SNIPPET */
+
+/* ======================================================= */
+/* == STYLES FOR FILTERS PANEL                          == */
+/* ======================================================= */
+
+.filters-container {
+    background: linear-gradient(to bottom, rgba(45, 45, 45, 0.6), rgba(35, 35, 35, 0.8));
+    border-radius: 10px;
+    border: 1px solid rgba(80, 80, 80, 0.25);
+    padding: 8px 16px;
+    transition: max-height 0.4s ease-in-out;
+    max-height: fit-content; /* Collapsed height */
+    margin-top: 16px;
+}
+
+.filters-container.expanded {
+    max-height: fit-content; /* Expanded height */
+   
+}
+.filters-container:not(.expanded) .filter-content {
+    display: none;
+}
+
+.filter-toggle-header {
+    display: flex;
+}
+
+.filter-toggle-btn {
+    background: linear-gradient(to bottom, rgba(80, 80, 80, 0.9), rgba(70, 70, 70, 0.95));
+    border: 1px solid rgba(100, 100, 100, 0.3);
+    border-radius: 6px;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 11px;
+    font-weight: 600;
+    padding: 6px 12px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.filter-toggle-btn:hover {
+    background: linear-gradient(to bottom, rgba(90, 90, 90, 0.9), rgba(80, 80, 80, 0.95));
+}
+
+.filter-content {
+    padding-top: 10px;
+}
+
+.filter-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.filter-label {
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.filter-btn {
+    background: linear-gradient(to bottom, rgba(80, 80, 80, 0.4), rgba(60, 60, 60, 0.6));
+    border: 1px solid rgba(120, 120, 120, 0.3);
+    border-radius: 16px;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 11px;
+    font-weight: 500;
+    padding: 4px 12px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.filter-btn:hover {
+    background: linear-gradient(to bottom, rgba(100, 100, 100, 0.5), rgba(80, 80, 80, 0.7));
+    border-color: rgba(140, 140, 140, 0.4);
+}
+
+.filter-btn.active {
+    background: linear-gradient(to bottom, #1ed760, #1db954);
+    border-color: transparent;
+    color: #000000;
+    font-weight: 700;
+}
+
+.sort-order-btn {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    font-size: 14px;
+}
+/* END OF CSS SNIPPET */
