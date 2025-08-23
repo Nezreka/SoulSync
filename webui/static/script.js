@@ -12,6 +12,10 @@ let currentStream = {
     progress: 0,
     track: null
 };
+
+// Streaming state management (new functionality)
+let streamStatusPoller = null;
+let audioPlayer = null;
 let allSearchResults = [];
 let currentFilterType = 'all';
 let currentFilterFormat = 'all';
@@ -56,6 +60,17 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Load initial data
     loadInitialData();
+    
+    // Handle window resize to re-check track title scrolling
+    window.addEventListener('resize', function() {
+        if (currentTrack) {
+            const trackTitleElement = document.getElementById('track-title');
+            const trackTitle = currentTrack.title || 'Unknown Track';
+            setTimeout(() => {
+                checkAndEnableScrolling(trackTitleElement, trackTitle);
+            }, 100); // Small delay to allow layout to settle
+        }
+    });
     
     console.log('SoulSync WebUI initialized successfully!');
 });
@@ -182,6 +197,21 @@ function initializeMediaPlayer() {
     const stopButton = document.getElementById('stop-button');
     const volumeSlider = document.getElementById('volume-slider');
     
+    // Initialize HTML5 audio player
+    audioPlayer = document.getElementById('audio-player');
+    if (audioPlayer) {
+        // Set up audio event listeners
+        audioPlayer.addEventListener('timeupdate', updateAudioProgress);
+        audioPlayer.addEventListener('ended', onAudioEnded);
+        audioPlayer.addEventListener('error', onAudioError);
+        audioPlayer.addEventListener('loadstart', onAudioLoadStart);
+        audioPlayer.addEventListener('canplay', onAudioCanPlay);
+        
+        // Set initial volume
+        audioPlayer.volume = 0.7; // 70%
+        volumeSlider.value = 70;
+    }
+    
     // Track title click - toggle expansion
     trackTitle.addEventListener('click', toggleMediaPlayerExpansion);
     
@@ -192,9 +222,6 @@ function initializeMediaPlayer() {
     
     // Update volume slider styling
     volumeSlider.addEventListener('input', updateVolumeSliderAppearance);
-    
-    // Start stream status polling if needed
-    setInterval(updateStreamStatus, 1000);
 }
 
 function toggleMediaPlayerExpansion() {
@@ -216,12 +243,43 @@ function toggleMediaPlayerExpansion() {
     }
 }
 
+function extractTrackTitle(filename) {
+    if (!filename) return null;
+    
+    // Remove file extension
+    let title = filename.replace(/\.[^/.]+$/, '');
+    
+    // Remove path components, keep only the filename
+    title = title.split('/').pop().split('\\').pop();
+    
+    // Clean up common filename patterns
+    title = title
+        .replace(/^\d+\.?\s*/, '') // Remove track numbers at start
+        .replace(/^\d+\s*-\s*/, '') // Remove "01 - " patterns
+        .replace(/\s*-\s*\d{4}\s*$/, '') // Remove years at end
+        .replace(/\s*\[\d+kbps\].*$/, '') // Remove bitrate info
+        .replace(/\s*\(.*?\)\s*$/, '') // Remove parenthetical info at end
+        .trim();
+    
+    return title || null;
+}
+
 function setTrackInfo(track) {
     currentTrack = track;
     
-    document.getElementById('track-title').textContent = track.title || 'Unknown Track';
+    const trackTitleElement = document.getElementById('track-title');
+    const trackTitle = track.title || 'Unknown Track';
+    
+    // Set up the HTML structure for scrolling
+    trackTitleElement.innerHTML = `<span class="title-text">${escapeHtml(trackTitle)}</span>`;
+    
     document.getElementById('artist-name').textContent = track.artist || 'Unknown Artist';
     document.getElementById('album-name').textContent = track.album || 'Unknown Album';
+    
+    // Check if title needs scrolling (similar to GUI app)
+    setTimeout(() => {
+        checkAndEnableScrolling(trackTitleElement, trackTitle);
+    }, 100); // Allow DOM to settle
     
     // Enable controls
     document.getElementById('play-button').disabled = false;
@@ -236,11 +294,42 @@ function setTrackInfo(track) {
     }
 }
 
+function checkAndEnableScrolling(element, text) {
+    // Remove any existing scrolling class and reset styles
+    element.classList.remove('scrolling');
+    element.style.removeProperty('--scroll-distance');
+    
+    // Force a layout to get accurate measurements
+    element.offsetWidth;
+    
+    // Get the inner text element
+    const titleTextElement = element.querySelector('.title-text');
+    if (!titleTextElement) return;
+    
+    // Check if text is wider than container
+    const containerWidth = element.offsetWidth;
+    const textWidth = titleTextElement.scrollWidth;
+    
+    // Enable scrolling if text is significantly wider than container
+    if (textWidth > containerWidth + 15) {
+        const scrollDistance = containerWidth - textWidth;
+        element.style.setProperty('--scroll-distance', `${scrollDistance}px`);
+        element.classList.add('scrolling');
+        console.log(`📜 Enabled scrolling for title: "${text}"`);
+        console.log(`📜 Container: ${containerWidth}px, Text: ${textWidth}px, Scroll: ${scrollDistance}px`);
+    }
+}
+
+
 function clearTrack() {
     currentTrack = null;
     isPlaying = false;
     
-    document.getElementById('track-title').textContent = 'No track';
+    const trackTitleElement = document.getElementById('track-title');
+    trackTitleElement.innerHTML = '<span class="title-text">No track</span>';
+    trackTitleElement.classList.remove('scrolling'); // Remove scrolling animation
+    trackTitleElement.style.removeProperty('--scroll-distance'); // Clear CSS variable
+    
     document.getElementById('artist-name').textContent = 'Unknown Artist';
     document.getElementById('album-name').textContent = 'Unknown Album';
     document.getElementById('play-button').textContent = '▷';
@@ -264,50 +353,24 @@ function setPlayingState(playing) {
 }
 
 async function handlePlayPause() {
-    if (!currentTrack) return;
-    
-    try {
-        const response = await fetch(API.stream.toggle, { method: 'POST' });
-        const data = await response.json();
-        
-        if (data.error) {
-            showToast(`Playback error: ${data.error}`, 'error');
-        } else {
-            setPlayingState(data.playing);
-        }
-    } catch (error) {
-        console.error('Error toggling playback:', error);
-        showToast('Failed to toggle playback', 'error');
-    }
+    // Use new streaming system toggle function
+    togglePlayback();
 }
 
 async function handleStop() {
-    try {
-        const response = await fetch(API.stream.stop, { method: 'POST' });
-        const data = await response.json();
-        
-        if (data.error) {
-            showToast(`Stop error: ${data.error}`, 'error');
-        } else {
-            clearTrack();
-            currentStream.status = 'stopped';
-        }
-    } catch (error) {
-        console.error('Error stopping playback:', error);
-        showToast('Failed to stop playback', 'error');
-    }
+    // Use new streaming system stop function
+    await stopStream();
+    clearTrack();
 }
 
 function handleVolumeChange(event) {
     const volume = event.target.value;
     updateVolumeSliderAppearance();
     
-    // Send volume change to backend
-    fetch('/api/media/volume', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ volume: volume / 100 })
-    }).catch(error => console.error('Error setting volume:', error));
+    // Update HTML5 audio player volume
+    if (audioPlayer) {
+        audioPlayer.volume = volume / 100;
+    }
 }
 
 function updateVolumeSliderAppearance() {
@@ -334,34 +397,291 @@ function setLoadingProgress(percentage) {
     loadingText.textContent = `${Math.round(percentage)}%`;
 }
 
-async function updateStreamStatus() {
+// ===============================
+// STREAMING FUNCTIONALITY
+// ===============================
+
+async function startStream(searchResult) {
+    // Start streaming a track - handles same track toggle and new track streaming
     try {
-        const response = await fetch(API.stream.status);
+        console.log(`🎮 startStream() called with data:`, searchResult);
+        
+        // Check if this is the same track that's currently playing/loading
+        const currentTrackId = currentTrack ? `${currentTrack.username}:${currentTrack.filename}` : null;
+        const newTrackId = `${searchResult.username}:${searchResult.filename}`;
+        
+        console.log(`🎮 startStream() called for: ${searchResult.filename}`);
+        console.log(`🎮 Current track ID: ${currentTrackId}`);
+        console.log(`🎮 New track ID: ${newTrackId}`);
+        
+        if (currentTrackId === newTrackId && audioPlayer && !audioPlayer.paused) {
+            // Same track clicked while playing - toggle pause
+            console.log("🔄 Toggling playback for same track");
+            togglePlayback();
+            return;
+        }
+        
+        // Different track or no current track - start new stream
+        console.log("🎵 Starting new stream");
+        
+        // Stop current streaming/playback if any
+        await stopStream();
+        
+        // Set track info and show loading state
+        setTrackInfo({
+            title: extractTrackTitle(searchResult.filename) || searchResult.title || 'Unknown Track',
+            artist: searchResult.artist || searchResult.username || 'Unknown Artist', 
+            album: searchResult.album || 'Unknown Album',
+            username: searchResult.username,
+            filename: searchResult.filename
+        });
+        
+        showLoadingAnimation();
+        setLoadingProgress(0);
+        
+        // Start streaming request
+        const response = await fetch(API.stream.start, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(searchResult)
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
         const data = await response.json();
         
-        if (data.track && currentStream.status !== data.status) {
-            currentStream = data;
-            
-            switch (data.status) {
-                case 'loading':
-                    setLoadingProgress(data.progress);
-                    break;
-                case 'playing':
-                    hideLoadingAnimation();
-                    setPlayingState(true);
-                    break;
-                case 'paused':
-                    hideLoadingAnimation();
-                    setPlayingState(false);
-                    break;
-                case 'stopped':
-                    clearTrack();
-                    break;
-            }
+        if (!data.success) {
+            throw new Error(data.error || 'Failed to start streaming');
         }
+        
+        console.log("✅ Stream started successfully");
+        
+        // Start status polling
+        startStreamStatusPolling();
+        
     } catch (error) {
-        // Don't log errors for stream status - it's expected when no stream is active
+        console.error('Error starting stream:', error);
+        showToast(`Failed to start stream: ${error.message}`, 'error');
+        hideLoadingAnimation();
+        clearTrack();
     }
+}
+
+function startStreamStatusPolling() {
+    // Start polling for stream status updates
+    if (streamStatusPoller) {
+        clearInterval(streamStatusPoller);
+    }
+    
+    console.log('🔄 Starting stream status polling (1-second interval)');
+    updateStreamStatus(); // Initial check
+    streamStatusPoller = setInterval(updateStreamStatus, 1000);
+}
+
+function stopStreamStatusPolling() {
+    // Stop polling for stream status updates
+    if (streamStatusPoller) {
+        clearInterval(streamStatusPoller);
+        streamStatusPoller = null;
+        console.log('⏹️ Stopped stream status polling');
+    }
+}
+
+async function updateStreamStatus() {
+    // Poll server for streaming progress and handle state changes
+    try {
+        const response = await fetch(API.stream.status);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        // Update current stream state
+        currentStream.status = data.status;
+        currentStream.progress = data.progress;
+        
+        switch (data.status) {
+            case 'loading':
+                setLoadingProgress(data.progress);
+                break;
+                
+            case 'queued':
+                // Show queue status
+                const loadingText = document.querySelector('.loading-text');
+                if (loadingText) {
+                    loadingText.textContent = 'Queued...';
+                }
+                break;
+                
+            case 'ready':
+                // Stream is ready - start audio playback
+                console.log('🎵 Stream ready, starting audio playback');
+                stopStreamStatusPolling();
+                await startAudioPlayback();
+                break;
+                
+            case 'error':
+                console.error('❌ Streaming error:', data.error_message);
+                stopStreamStatusPolling();
+                hideLoadingAnimation();
+                showToast(`Streaming error: ${data.error_message}`, 'error');
+                clearTrack();
+                break;
+        }
+        
+    } catch (error) {
+        console.error('Error updating stream status:', error);
+        // Don't clear everything on network errors - might be temporary
+    }
+}
+
+async function startAudioPlayback() {
+    // Start HTML5 audio playback of the streamed file
+    try {
+        if (!audioPlayer) {
+            throw new Error('Audio player not initialized');
+        }
+        
+        // Set audio source with cache-busting timestamp
+        const audioUrl = `/stream/audio?t=${new Date().getTime()}`;
+        audioPlayer.src = audioUrl;
+        
+        console.log(`🎵 Loading audio from: ${audioUrl}`);
+        
+        // Start playback
+        await audioPlayer.play();
+        
+        // Update UI to playing state
+        hideLoadingAnimation();
+        setPlayingState(true);
+        
+        console.log('✅ Audio playback started successfully');
+        
+    } catch (error) {
+        console.error('❌ Error starting audio playback:', error);
+        hideLoadingAnimation();
+        showToast(`Playback error: ${error.message}`, 'error');
+        clearTrack();
+    }
+}
+
+async function stopStream() {
+    // Stop streaming and clean up all state
+    try {
+        // Stop status polling
+        stopStreamStatusPolling();
+        
+        // Stop audio playback
+        if (audioPlayer) {
+            audioPlayer.pause();
+            audioPlayer.src = '';
+        }
+        
+        // Call backend stop endpoint
+        const response = await fetch(API.stream.stop, { method: 'POST' });
+        if (response.ok) {
+            const data = await response.json();
+            console.log('🛑 Stream stopped:', data.message);
+        }
+        
+        // Reset UI state
+        hideLoadingAnimation();
+        setPlayingState(false);
+        
+        // Reset stream state
+        currentStream = {
+            status: 'stopped',
+            progress: 0,
+            track: null
+        };
+        
+    } catch (error) {
+        console.error('Error stopping stream:', error);
+    }
+}
+
+function togglePlayback() {
+    // Toggle play/pause for currently loaded audio
+    if (!audioPlayer || !currentTrack) {
+        console.log('⚠️ No audio player or track to toggle');
+        return;
+    }
+    
+    if (audioPlayer.paused) {
+        audioPlayer.play()
+            .then(() => {
+                setPlayingState(true);
+                console.log('▶️ Resumed playback');
+            })
+            .catch(error => {
+                console.error('Error resuming playback:', error);
+                showToast('Failed to resume playback', 'error');
+            });
+    } else {
+        audioPlayer.pause();
+        setPlayingState(false);
+        console.log('⏸️ Paused playback');
+    }
+}
+
+// ===============================
+// AUDIO EVENT HANDLERS
+// ===============================
+
+function updateAudioProgress() {
+    // Update progress bar based on audio playback time
+    if (!audioPlayer || !audioPlayer.duration) return;
+    
+    const progress = (audioPlayer.currentTime / audioPlayer.duration) * 100;
+    // TODO: Update progress bar in sidebar when implemented
+    
+    // Update time display if elements exist
+    const currentTimeElement = document.getElementById('current-time');
+    const totalTimeElement = document.getElementById('total-time');
+    
+    if (currentTimeElement) {
+        currentTimeElement.textContent = formatTime(audioPlayer.currentTime);
+    }
+    if (totalTimeElement) {
+        totalTimeElement.textContent = formatTime(audioPlayer.duration);
+    }
+}
+
+function onAudioEnded() {
+    // Handle audio playback completion
+    console.log('🏁 Audio playback ended');
+    setPlayingState(false);
+    // TODO: Auto-advance to next track if queue exists
+}
+
+function onAudioError(event) {
+    // Handle audio playback errors
+    console.error('❌ Audio error:', event.target.error);
+    hideLoadingAnimation();
+    showToast('Audio playback error occurred', 'error');
+    clearTrack();
+}
+
+function onAudioLoadStart() {
+    // Handle audio load start
+    console.log('🔄 Audio loading started');
+}
+
+function onAudioCanPlay() {
+    // Handle when audio can start playing
+    console.log('✅ Audio ready to play');
+}
+
+function formatTime(seconds) {
+    // Format seconds as MM:SS
+    if (!seconds || !isFinite(seconds)) return '0:00';
+    
+    const minutes = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${minutes}:${secs.toString().padStart(2, '0')}`;
 }
 
 // ===============================
@@ -790,7 +1110,7 @@ function displaySearchResults(results) {
                         ${result.album ? `<div class="result-album">${escapeHtml(result.album)}</div>` : ''}
                     </div>
                     <div class="result-actions">
-                        <button class="stream-button" onclick="event.stopPropagation(); startStream(${index})">
+                        <button class="stream-button" onclick="event.stopPropagation(); streamTrack(${index})">
                             ▷ Stream
                         </button>
                         <button class="download-button" onclick="event.stopPropagation(); startDownload(${index})">
@@ -816,50 +1136,6 @@ function selectResult(index) {
     // Could show detailed view or additional actions here
 }
 
-async function startStream(index) {
-    const result = searchResults[index];
-    if (!result || result.type === 'album') {
-        showToast('Cannot stream albums (yet)', 'error');
-        return;
-    }
-    
-    try {
-        showLoadingAnimation();
-        
-        const streamData = {
-            username: result.username,
-            filename: result.filename,
-            title: result.title,
-            artist: result.artist,
-            album: result.album,
-            quality: result.quality,
-            bitrate: result.bitrate,
-            duration: result.duration,
-            size_mb: result.file_size / 1024 / 1024
-        };
-        
-        const response = await fetch(API.stream.start, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(streamData)
-        });
-        
-        const data = await response.json();
-        
-        if (data.error) {
-            hideLoadingAnimation();
-            showToast(`Stream error: ${data.error}`, 'error');
-        } else {
-            setTrackInfo(data.track);
-            currentStream.status = 'loading';
-            showToast('Starting stream...', 'success');
-        }
-    } catch (error) {
-        hideLoadingAnimation();
-        console.error('Error starting stream:', error);
-        showToast('Failed to start stream', 'error');
-    }
-}
 
 async function startDownload(index) {
     const result = searchResults[index];
@@ -1291,6 +1567,7 @@ function displayDownloadsResults(results) {
                                 </div>
                             </div>
                             <div class="track-item-actions">
+                                <button onclick="streamAlbumTrack(${index}, ${trackIndex})" class="track-stream-btn">▶</button>
                                 <button onclick="downloadAlbumTrack(${index}, ${trackIndex})" class="track-download-btn">⬇</button>
                             </div>
                         </div>
@@ -1335,6 +1612,7 @@ function displayDownloadsResults(results) {
                         <div class="track-uploader">Shared by ${escapeHtml(result.username || 'Unknown')}</div>
                     </div>
                     <div class="track-actions">
+                        <button onclick="streamTrack(${index})" class="track-stream-btn">▶ Stream</button>
                         <button onclick="downloadTrack(${index})" class="track-download-btn">⬇ Download</button>
                     </div>
                 </div>
@@ -1445,6 +1723,66 @@ async function downloadAlbumTrack(albumIndex, trackIndex) {
     } catch (error) {
         console.error('Track download error:', error);
         showToast('Failed to start track download', 'error');
+    }
+}
+
+// ===============================
+// STREAMING WRAPPER FUNCTIONS
+// ===============================
+
+async function streamTrack(index) {
+    // Stream a single track from search results
+    try {
+        console.log(`🎵 streamTrack called with index: ${index}`);
+        console.log(`🎵 window.currentSearchResults:`, window.currentSearchResults);
+        
+        if (!window.currentSearchResults || !window.currentSearchResults[index]) {
+            console.error(`❌ No search results or invalid index. Results length: ${window.currentSearchResults ? window.currentSearchResults.length : 'undefined'}`);
+            showToast('Track not found', 'error');
+            return;
+        }
+        
+        const result = window.currentSearchResults[index];
+        console.log(`🎵 Streaming track:`, result);
+        
+        await startStream(result);
+        
+    } catch (error) {
+        console.error('Track streaming error:', error);
+        showToast('Failed to start track stream', 'error');
+    }
+}
+
+
+async function streamAlbumTrack(albumIndex, trackIndex) {
+    // Stream a specific track from an album
+    try {
+        console.log(`🎵 streamAlbumTrack called with albumIndex: ${albumIndex}, trackIndex: ${trackIndex}`);
+        console.log(`🎵 window.currentSearchResults:`, window.currentSearchResults);
+        
+        if (!window.currentSearchResults || !window.currentSearchResults[albumIndex]) {
+            console.error(`❌ No search results or invalid album index. Results length: ${window.currentSearchResults ? window.currentSearchResults.length : 'undefined'}`);
+            showToast('Album not found', 'error');
+            return;
+        }
+        
+        const album = window.currentSearchResults[albumIndex];
+        console.log(`🎵 Album data:`, album);
+        
+        if (!album.tracks || !album.tracks[trackIndex]) {
+            console.error(`❌ No tracks in album or invalid track index. Tracks length: ${album.tracks ? album.tracks.length : 'undefined'}`);
+            showToast('Track not found in album', 'error');
+            return;
+        }
+        
+        const track = album.tracks[trackIndex];
+        console.log(`🎵 Streaming album track:`, track);
+        
+        await startStream(track);
+        
+    } catch (error) {
+        console.error('Album track streaming error:', error);
+        showToast('Failed to start track stream', 'error');
     }
 }
 
@@ -1797,6 +2135,8 @@ window.authenticateTidal = authenticateTidal;
 window.browsePath = browsePath;
 window.selectResult = selectResult;
 window.startStream = startStream;
+window.streamTrack = streamTrack;
+window.streamAlbumTrack = streamAlbumTrack;
 window.startDownload = startDownload;
 window.downloadTrack = downloadTrack;
 window.downloadAlbum = downloadAlbum;

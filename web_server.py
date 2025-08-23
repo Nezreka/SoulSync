@@ -6,8 +6,13 @@ import socket
 import ipaddress
 import subprocess
 import platform
+import threading
+import time
+import shutil
+import glob
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from flask import Flask, render_template, request, jsonify, redirect
+from flask import Flask, render_template, request, jsonify, redirect, send_file
 
 # --- Core Application Imports ---
 # Import the same core clients and config manager used by the GUI app
@@ -40,6 +45,221 @@ try:
 except Exception as e:
     print(f"🔴 FATAL: Error initializing service clients: {e}")
     spotify_client = plex_client = jellyfin_client = soulseek_client = tidal_client = None
+
+# --- Global Streaming State Management ---
+# Thread-safe state tracking for streaming functionality
+stream_state = {
+    "status": "stopped",  # States: stopped, loading, queued, ready, error
+    "progress": 0,
+    "track_info": None,
+    "file_path": None,    # Path to the audio file in the 'Stream' folder
+    "error_message": None
+}
+stream_lock = threading.Lock()  # Prevent race conditions
+stream_background_task = None
+stream_executor = ThreadPoolExecutor(max_workers=1)  # Only one stream at a time
+
+def _prepare_stream_task(track_data):
+    """
+    Background streaming task that downloads track to Stream folder and updates global state.
+    This replicates the logic from StreamingThread.run() in the GUI app.
+    """
+    try:
+        print(f"🎵 Starting stream preparation for: {track_data.get('filename')}")
+        
+        # Update state to loading
+        with stream_lock:
+            stream_state.update({
+                "status": "loading",
+                "progress": 0,
+                "track_info": track_data,
+                "file_path": None,
+                "error_message": None
+            })
+        
+        # Get paths
+        download_path = config_manager.get('soulseek.download_path', './downloads')
+        project_root = os.path.dirname(os.path.abspath(__file__))  # Web server root
+        stream_folder = os.path.join(project_root, 'Stream')
+        
+        # Ensure Stream directory exists
+        os.makedirs(stream_folder, exist_ok=True)
+        
+        # Clear any existing files in Stream folder (only one file at a time)
+        for existing_file in glob.glob(os.path.join(stream_folder, '*')):
+            try:
+                if os.path.isfile(existing_file):
+                    os.remove(existing_file)
+                elif os.path.isdir(existing_file):
+                    shutil.rmtree(existing_file)
+                print(f"🗑️ Cleared old stream file: {existing_file}")
+            except Exception as e:
+                print(f"⚠️ Could not remove existing stream file: {e}")
+        
+        # Start the download using the same mechanism as regular downloads
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            download_result = loop.run_until_complete(soulseek_client.download(
+                track_data.get('username'),
+                track_data.get('filename'),
+                track_data.get('size', 0)
+            ))
+            
+            if not download_result:
+                with stream_lock:
+                    stream_state.update({
+                        "status": "error",
+                        "error_message": "Failed to initiate download"
+                    })
+                return
+            
+            # Poll for completion with progress updates
+            max_wait_time = 45  # Wait up to 45 seconds
+            poll_interval = 2   # Check every 2 seconds
+            
+            for wait_count in range(max_wait_time // poll_interval):
+                # Check download progress via slskd API
+                try:
+                    transfers_data = loop.run_until_complete(soulseek_client._make_request('GET', 'transfers/downloads'))
+                    download_status = _find_streaming_download_in_transfers(transfers_data, track_data)
+                    
+                    if download_status:
+                        api_progress = download_status.get('percentComplete', 0)
+                        download_state = download_status.get('state', '').lower()
+                        original_state = download_status.get('state', '')
+                        
+                        # Update progress
+                        with stream_lock:
+                            stream_state["progress"] = api_progress
+                            if 'queued' in download_state or 'initializing' in download_state:
+                                stream_state["status"] = "queued"
+                            elif 'inprogress' in download_state:
+                                stream_state["status"] = "loading"
+                        
+                        # Check if download is complete
+                        is_completed = ('Succeeded' in original_state or 
+                                      ('Completed' in original_state and 'Errored' not in original_state) or 
+                                      api_progress >= 100)
+                        
+                        if is_completed:
+                            print(f"✓ Download completed via API status: {original_state}")
+                            # Try to find the actual file
+                            found_file = _find_downloaded_file(download_path, track_data)
+                            
+                            if found_file:
+                                # Move file to Stream folder
+                                original_filename = os.path.basename(found_file)
+                                stream_path = os.path.join(stream_folder, original_filename)
+                                
+                                shutil.move(found_file, stream_path)
+                                print(f"✓ Moved file to stream folder: {stream_path}")
+                                
+                                # Update state to ready
+                                with stream_lock:
+                                    stream_state.update({
+                                        "status": "ready",
+                                        "progress": 100,
+                                        "file_path": stream_path
+                                    })
+                                
+                                # Clean up download from slskd API
+                                try:
+                                    download_id = download_status.get('id', '')
+                                    if download_id:
+                                        success = loop.run_until_complete(
+                                            soulseek_client.signal_download_completion(
+                                                download_id, track_data.get('username'), remove=True)
+                                        )
+                                        if success:
+                                            print(f"✓ Cleaned up download {download_id} from API")
+                                except Exception as e:
+                                    print(f"⚠️ Error cleaning up download: {e}")
+                                
+                                return  # Success!
+                            else:
+                                print("❌ Could not find downloaded file")
+                                break
+                    
+                except Exception as e:
+                    print(f"⚠️ Error checking download progress: {e}")
+                
+                # Wait before next poll
+                time.sleep(poll_interval)
+            
+            # If we get here, download timed out
+            with stream_lock:
+                stream_state.update({
+                    "status": "error", 
+                    "error_message": "Download timed out"
+                })
+                
+        finally:
+            loop.close()
+            
+    except Exception as e:
+        print(f"❌ Stream preparation failed: {e}")
+        with stream_lock:
+            stream_state.update({
+                "status": "error",
+                "error_message": str(e)
+            })
+
+def _find_streaming_download_in_transfers(transfers_data, track_data):
+    """Find streaming download in transfer data using same logic as download queue"""
+    try:
+        if not transfers_data:
+            return None
+            
+        # Flatten the transfers data structure
+        all_transfers = []
+        for user_data in transfers_data:
+            if 'directories' in user_data:
+                for directory in user_data['directories']:
+                    if 'files' in directory:
+                        all_transfers.extend(directory['files'])
+        
+        # Look for our specific file by filename and username
+        target_filename = os.path.basename(track_data.get('filename', ''))
+        target_username = track_data.get('username', '')
+        
+        for transfer in all_transfers:
+            transfer_filename = os.path.basename(transfer.get('filename', ''))
+            transfer_username = transfer.get('username', '')
+            
+            if (transfer_filename == target_filename and 
+                transfer_username == target_username):
+                return transfer
+        
+        return None
+    except Exception as e:
+        print(f"Error finding streaming download in transfers: {e}")
+        return None
+
+def _find_downloaded_file(download_path, track_data):
+    """Find the downloaded audio file in the downloads directory tree"""
+    audio_extensions = {'.mp3', '.flac', '.ogg', '.aac', '.wma', '.wav', '.m4a'}
+    target_filename = os.path.basename(track_data.get('filename', ''))
+    
+    try:
+        # Walk through the downloads directory to find the file
+        for root, dirs, files in os.walk(download_path):
+            for file in files:
+                # Check if this is our target file
+                if file == target_filename:
+                    file_path = os.path.join(root, file)
+                    # Verify it's an audio file and has content
+                    if (os.path.splitext(file)[1].lower() in audio_extensions and 
+                        os.path.getsize(file_path) > 1024):  # At least 1KB
+                        return file_path
+        
+        print(f"❌ Could not find downloaded file: {target_filename}")
+        return None
+        
+    except Exception as e:
+        print(f"Error searching for downloaded file: {e}")
+        return None
 
 # --- Refactored Logic from GUI Threads ---
 # This logic is extracted from your QThread classes to be used directly by Flask.
@@ -678,25 +898,116 @@ def get_artists():
 
 @app.route('/api/stream/start', methods=['POST'])
 def stream_start():
-    # Placeholder: simulates starting a media stream
+    """Start streaming a track in the background"""
+    global stream_background_task
+    
     data = request.get_json()
-    print(f"Simulating stream start for: {data.get('filename')}")
-    return jsonify({"success": True, "track": data})
+    if not data:
+        return jsonify({"success": False, "error": "No track data provided"}), 400
+    
+    print(f"🎵 Web UI Stream request for: {data.get('filename')}")
+    
+    try:
+        # Stop any existing streaming task
+        if stream_background_task and not stream_background_task.done():
+            stream_background_task.cancel()
+        
+        # Reset stream state
+        with stream_lock:
+            stream_state.update({
+                "status": "stopped",
+                "progress": 0,
+                "track_info": None,
+                "file_path": None,
+                "error_message": None
+            })
+        
+        # Start new background streaming task
+        stream_background_task = stream_executor.submit(_prepare_stream_task, data)
+        
+        return jsonify({"success": True, "message": "Streaming started"})
+        
+    except Exception as e:
+        print(f"❌ Error starting stream: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/stream/status')
 def stream_status():
-    # Placeholder: simulates stream status
-    return jsonify({"status": "playing", "progress": 50, "track": {"title": "Bohemian Rhapsody"}})
+    """Get current streaming status and progress"""
+    try:
+        with stream_lock:
+            # Return copy of current stream state
+            return jsonify({
+                "status": stream_state["status"],
+                "progress": stream_state["progress"],
+                "track_info": stream_state["track_info"],
+                "error_message": stream_state["error_message"]
+            })
+    except Exception as e:
+        print(f"❌ Error getting stream status: {e}")
+        return jsonify({
+            "status": "error",
+            "progress": 0,
+            "track_info": None,
+            "error_message": str(e)
+        }), 500
 
-@app.route('/api/stream/toggle', methods=['POST'])
-def stream_toggle():
-    # Placeholder: simulates toggling play/pause
-    return jsonify({"playing": False})
+@app.route('/stream/audio')
+def stream_audio():
+    """Serve the audio file from the Stream folder"""
+    try:
+        with stream_lock:
+            if stream_state["status"] != "ready" or not stream_state["file_path"]:
+                return jsonify({"error": "No audio file ready for streaming"}), 404
+            
+            file_path = stream_state["file_path"]
+        
+        if not os.path.exists(file_path):
+            return jsonify({"error": "Audio file not found"}), 404
+        
+        print(f"🎵 Serving audio file: {os.path.basename(file_path)}")
+        return send_file(file_path, as_attachment=False)
+        
+    except Exception as e:
+        print(f"❌ Error serving audio file: {e}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/stream/stop', methods=['POST'])
 def stream_stop():
-    # Placeholder: simulates stopping a stream
-    return jsonify({"success": True})
+    """Stop streaming and clean up"""
+    global stream_background_task
+    
+    try:
+        # Cancel background task
+        if stream_background_task and not stream_background_task.done():
+            stream_background_task.cancel()
+        
+        # Clear Stream folder
+        project_root = os.path.dirname(os.path.abspath(__file__))
+        stream_folder = os.path.join(project_root, 'Stream')
+        
+        if os.path.exists(stream_folder):
+            for filename in os.listdir(stream_folder):
+                file_path = os.path.join(stream_folder, filename)
+                if os.path.isfile(file_path):
+                    os.remove(file_path)
+                    print(f"🗑️ Removed stream file: {filename}")
+        
+        # Reset stream state
+        with stream_lock:
+            stream_state.update({
+                "status": "stopped",
+                "progress": 0,
+                "track_info": None,
+                "file_path": None,
+                "error_message": None
+            })
+        
+        return jsonify({"success": True, "message": "Stream stopped"})
+        
+    except Exception as e:
+        print(f"❌ Error stopping stream: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/version-info', methods=['GET'])
 def get_version_info():
