@@ -504,16 +504,93 @@ def start_sync():
 
 @app.route('/api/search', methods=['POST'])
 def search_music():
-    # Placeholder: simulates a music search
+    """Real search using soulseek_client"""
     data = request.get_json()
-    query = data.get('query', '')
-    print(f"Simulating search for: {query}")
-    # In a real implementation, you would call soulseek_client.search()
-    mock_results = [
-        {"title": "Bohemian Rhapsody", "artist": "Queen", "album": "A Night at the Opera", "type": "track", "quality": "FLAC", "username": "user1", "filename": "Queen - Bohemian Rhapsody.flac", "file_size": 35000000},
-        {"title": "A Night at the Opera", "artist": "Queen", "type": "album", "track_count": 12, "size_mb": 350, "username": "user2"}
-    ]
-    return jsonify({"results": mock_results})
+    query = data.get('query')
+    if not query:
+        return jsonify({"error": "No search query provided."}), 400
+
+    print(f"Web UI Search for: '{query}'")
+    
+    try:
+        tracks, albums = asyncio.run(soulseek_client.search(query))
+
+        # Convert to dictionaries for JSON response
+        processed_albums = []
+        for album in albums:
+            album_dict = album.__dict__.copy()
+            album_dict["tracks"] = [track.__dict__ for track in album.tracks]
+            album_dict["result_type"] = "album"
+            processed_albums.append(album_dict)
+
+        processed_tracks = []
+        for track in tracks:
+            track_dict = track.__dict__.copy()
+            track_dict["result_type"] = "track"
+            processed_tracks.append(track_dict)
+        
+        # Sort by quality score
+        all_results = sorted(processed_albums + processed_tracks, key=lambda x: x.get('quality_score', 0), reverse=True)
+
+        return jsonify({"results": all_results})
+        
+    except Exception as e:
+        print(f"Search error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/download', methods=['POST'])
+def start_download():
+    """Simple download route"""
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No download data provided."}), 400
+    
+    try:
+        result_type = data.get('result_type', 'track')
+        
+        if result_type == 'album':
+            tracks = data.get('tracks', [])
+            if not tracks:
+                return jsonify({"error": "No tracks found in album."}), 400
+            
+            started_downloads = 0
+            for track_data in tracks:
+                try:
+                    download_id = asyncio.run(soulseek_client.download(
+                        track_data.get('username'),
+                        track_data.get('filename'),
+                        track_data.get('size', 0)
+                    ))
+                    if download_id:
+                        started_downloads += 1
+                except Exception as e:
+                    print(f"Failed to start track download: {e}")
+                    continue
+            
+            return jsonify({
+                "success": True, 
+                "message": f"Started {started_downloads} downloads from album"
+            })
+        
+        else:
+            # Single track download
+            username = data.get('username')
+            filename = data.get('filename')
+            file_size = data.get('size', 0)
+            
+            if not username or not filename:
+                return jsonify({"error": "Missing username or filename."}), 400
+            
+            download_id = asyncio.run(soulseek_client.download(username, filename, file_size))
+            
+            if download_id:
+                return jsonify({"success": True, "message": "Download started"})
+            else:
+                return jsonify({"error": "Failed to start download"}), 500
+                
+    except Exception as e:
+        print(f"Download error: {e}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/artists')
 def get_artists():

@@ -2007,3 +2007,35 @@ body {
 .version-modal-overlay:not(.hidden) .version-modal {
     animation: modalFadeIn 0.3s ease-out;
 }
+
+/* Simple Downloads Results Styling */
+.search-result-item {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.search-result-item .result-info {
+    flex: 1;
+}
+
+.search-result-item .download-btn {
+    background: rgba(29, 185, 84, 0.1);
+    color: #1ed760;
+    border: 1px solid rgba(29, 185, 84, 0.3);
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: all 0.2s ease;
+}
+
+.search-result-item .download-btn:hover {
+    background: rgba(29, 185, 84, 0.2);
+    border-color: rgba(29, 185, 84, 0.5);
+}
