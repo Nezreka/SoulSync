@@ -183,22 +183,96 @@
                 </div>
             </div>
             
-            <!-- Downloads/Search Page -->
+            <!-- Downloads Page -->
             <div class="page" id="downloads-page">
-                <div class="page-header">
-                    <h2>Search & Download</h2>
-                </div>
+                <!-- 
+                This top-level container replicates the QSplitter from downloads.py,
+                creating the two-panel layout for the page.
+                -->
                 <div class="downloads-content">
-                    <div class="search-section">
-                        <input type="text" class="search-input" id="search-input" placeholder="Search for music...">
-                        <button class="search-button" id="search-button">Search</button>
+                    
+                    <!-- ======================================================= -->
+                    <!-- == LEFT PANEL: Search, Filters, and Results          == -->
+                    <!-- ======================================================= -->
+                    <div class="downloads-main-panel">
+                        
+                        <!-- Header: Replicates create_elegant_header() -->
+                        <div class="downloads-header">
+                            <h2 class="downloads-title">🎵 Music Downloads</h2>
+                            <p class="downloads-subtitle">Search, discover, and download high-quality music</p>
+                        </div>
+
+                        <!-- Search Bar: Replicates create_elegant_search_bar() -->
+                        <div class="search-bar-container">
+                            <input type="text" id="downloads-search-input" placeholder="Search for music... (e.g., 'Virtual Mage', 'Queen Bohemian Rhapsody')">
+                            <button id="downloads-cancel-btn" class="hidden">✕ Cancel</button>
+                            <button id="downloads-search-btn">🔍 Search</button>
+                        </div>
+
+                        <!-- Search Status Bar -->
+                        <div class="search-status-container">
+                            <div class="spinner-animation hidden"></div>
+                            <p id="search-status-text">Ready to search • Enter artist, song, or album name</p>
+                            <div class="dots-animation hidden"></div>
+                        </div>
+
+                        <!-- Search Results Area: Replicates the QScrollArea -->
+                        <div class="search-results-container">
+                            <div class="search-results-header">
+                                <h3>Search Results</h3>
+                            </div>
+                            <div class="search-results-scroll-area" id="search-results-area">
+                                <!-- 
+                                The placeholder search results have been removed.
+                                This area will now be populated by JavaScript based on API responses.
+                                -->
+                                <div class="search-results-placeholder">
+                                    <p>Your search results will appear here.</p>
+                                </div>
+                            </div>
+                        </div>
                     </div>
-                    <div class="search-results" id="search-results">
-                        <!-- Results will be populated here -->
+
+                    <!-- ======================================================= -->
+                    <!-- == RIGHT PANEL: Controls and Download Queue          == -->
+                    <!-- ======================================================= -->
+                    <div class="downloads-side-panel">
+                        
+                        <!-- Controls Panel: Replicates create_collapsible_controls_panel() -->
+                        <div class="controls-panel">
+                            <h3 class="controls-panel__header">Download Manager</h3>
+                            <div class="controls-panel__stats">
+                                <p id="active-downloads-label">• Active Downloads: 0</p>
+                                <p id="finished-downloads-label">• Finished Downloads: 0</p>
+                            </div>
+                            <div class="controls-panel__actions">
+                                <button class="controls-panel__clear-btn">🗑️ Clear Completed</button>
+                            </div>
+                        </div>
+
+                        <!-- Download Queue: Replicates TabbedDownloadManager -->
+                        <div class="download-manager">
+                            <div class="download-manager__tabs">
+                                <button class="tab-btn active" data-tab="active-queue">Download Queue (0)</button>
+                                <button class="tab-btn" data-tab="finished-queue">Finished (0)</button>
+                            </div>
+                            <div class="download-manager__content">
+                                
+                                <!-- Active Queue -->
+                                <div class="download-queue active" id="active-queue">
+                                    <div class="download-queue__empty-message">No active downloads.</div>
+                                </div>
+                                
+                                <!-- Finished Queue -->
+                                <div class="download-queue" id="finished-queue">
+                                    <div class="download-queue__empty-message">No finished downloads.</div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
-            
+
             <!-- Artists Page -->
             <div class="page" id="artists-page">
                 <div class="page-header">
