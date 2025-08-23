@@ -1163,8 +1163,6 @@ function switchDownloadTab(button) {
 }
 
 async function cancelDownloadItem(downloadId, username) {
-    if (!confirm('Are you sure you want to cancel this download?')) return;
-
     try {
         const response = await fetch('/api/downloads/cancel', {
             method: 'POST',
@@ -1190,8 +1188,6 @@ async function clearFinishedDownloads() {
         showToast('No finished downloads to clear', 'error');
         return;
     }
-    
-    if (!confirm(`Are you sure you want to clear all ${finishedCount} finished downloads?`)) return;
     
     try {
         const response = await fetch('/api/downloads/clear-finished', {

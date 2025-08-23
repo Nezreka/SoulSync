@@ -2435,6 +2435,12 @@ body {
 }
 
 /* Tab Management */
+.download-manager__tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 8px;
+}
+
 .download-manager__tabs .tab-btn {
     background: rgba(255, 255, 255, 0.05);
     color: rgba(255, 255, 255, 0.7);
@@ -2445,7 +2451,9 @@ body {
     font-size: 12px;
     font-weight: 500;
     transition: all 0.2s ease;
-    margin-right: 8px;
+    flex: 1;
+    text-align: center;
+    white-space: nowrap;
 }
 
 .download-manager__tabs .tab-btn.active {
