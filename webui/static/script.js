@@ -339,11 +339,25 @@ function clearTrack() {
     // Hide loading animation
     hideLoadingAnimation();
     
-    // Show no track message and collapse if expanded
+    // Show no track message and collapse media player
     document.getElementById('no-track-message').classList.remove('hidden');
+    
+    // Force collapse the media player when track is cleared
     if (mediaPlayerExpanded) {
         toggleMediaPlayerExpansion();
     }
+    
+    // Ensure media player returns to compact state
+    const mediaPlayer = document.getElementById('media-player');
+    if (mediaPlayer) {
+        mediaPlayer.style.minHeight = '85px';
+        const expandedContent = document.getElementById('media-expanded');
+        if (expandedContent) {
+            expandedContent.classList.add('hidden');
+        }
+    }
+    
+    console.log('🧹 Track cleared and media player reset');
 }
 
 function setPlayingState(playing) {
@@ -551,19 +565,54 @@ async function startAudioPlayback() {
         
         console.log(`🎵 Loading audio from: ${audioUrl}`);
         
-        // Start playback
-        await audioPlayer.play();
+        // Wait a moment for the file to be fully ready
+        await new Promise(resolve => setTimeout(resolve, 500));
         
-        // Update UI to playing state
-        hideLoadingAnimation();
-        setPlayingState(true);
+        // Try to start playback with retry logic
+        let retryCount = 0;
+        const maxRetries = 3;
         
-        console.log('✅ Audio playback started successfully');
+        while (retryCount < maxRetries) {
+            try {
+                await audioPlayer.play();
+                console.log('✅ Audio playback started successfully');
+                
+                // Update UI to playing state
+                hideLoadingAnimation();
+                setPlayingState(true);
+                return; // Success!
+                
+            } catch (playError) {
+                retryCount++;
+                console.warn(`⚠️ Audio play attempt ${retryCount} failed:`, playError.message);
+                
+                if (retryCount >= maxRetries) {
+                    throw playError; // Re-throw after max retries
+                }
+                
+                // Wait before retry
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+        }
         
     } catch (error) {
         console.error('❌ Error starting audio playback:', error);
         hideLoadingAnimation();
-        showToast(`Playback error: ${error.message}`, 'error');
+        
+        // Provide user-friendly error messages
+        let userMessage = 'Playback failed';
+        
+        if (error.message.includes('no supported source') || 
+            error.message.includes('Not supported') ||
+            error.message.includes('MEDIA_ELEMENT_ERROR')) {
+            userMessage = 'Audio format not supported by your browser. Try downloading instead.';
+        } else if (error.message.includes('network') || error.message.includes('fetch')) {
+            userMessage = 'Network error - please try again';
+        } else if (error.message.includes('decode')) {
+            userMessage = 'Audio file is corrupted or incompatible';
+        }
+        
+        showToast(userMessage, 'error');
         clearTrack();
     }
 }
@@ -659,10 +708,49 @@ function onAudioEnded() {
 
 function onAudioError(event) {
     // Handle audio playback errors
-    console.error('❌ Audio error:', event.target.error);
+    const error = event.target.error;
+    console.error('❌ Audio error:', error);
+    
+    // Don't show error toast if it's just a format/codec issue and retrying
+    if (error && error.code) {
+        console.error(`Audio error code: ${error.code}, message: ${error.message || 'Unknown error'}`);
+        
+        // Only show user-facing errors for serious issues
+        if (error.code === 4) { // MEDIA_ELEMENT_ERROR: Media not supported
+            console.warn('⚠️ Media format not supported by browser, but streaming may still work');
+            // Don't clear track or show error - let retry logic handle it
+            return;
+        }
+    }
+    
     hideLoadingAnimation();
-    showToast('Audio playback error occurred', 'error');
-    clearTrack();
+    
+    // Only clear track after a short delay to allow for recovery
+    setTimeout(() => {
+        if (audioPlayer && audioPlayer.error) {
+            let userMessage = 'Audio format not supported by your browser. Try downloading instead.';
+            
+            if (error && error.code) {
+                switch (error.code) {
+                    case 1: // MEDIA_ERR_ABORTED
+                        userMessage = 'Playback was stopped';
+                        break;
+                    case 2: // MEDIA_ERR_NETWORK
+                        userMessage = 'Network error - please try again';
+                        break;
+                    case 3: // MEDIA_ERR_DECODE
+                        userMessage = 'Audio file is corrupted or incompatible';
+                        break;
+                    case 4: // MEDIA_ERR_SRC_NOT_SUPPORTED
+                        userMessage = 'Audio format not supported by your browser. Try downloading instead.';
+                        break;
+                }
+            }
+            
+            showToast(userMessage, 'error');
+            clearTrack();
+        }
+    }, 2000);
 }
 
 function onAudioLoadStart() {
@@ -682,6 +770,54 @@ function formatTime(seconds) {
     const minutes = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     return `${minutes}:${secs.toString().padStart(2, '0')}`;
+}
+
+// ===============================
+// AUDIO FORMAT SUPPORT DETECTION
+// ===============================
+
+function getFileExtension(filename) {
+    if (!filename) return '';
+    const ext = filename.toLowerCase().match(/\.([^.]+)$/);
+    return ext ? ext[1] : '';
+}
+
+function isAudioFormatSupported(filename) {
+    const ext = getFileExtension(filename);
+    const supportedFormats = ['mp3', 'ogg', 'wav'];  // Most reliable formats
+    const partialSupport = ['flac', 'aac'];  // Depends on browser
+    const unsupported = ['m4a', 'wma', 'ape', 'aiff'];  // Generally problematic
+    
+    if (supportedFormats.includes(ext)) {
+        return true;
+    }
+    
+    if (partialSupport.includes(ext)) {
+        // Test if browser can actually play this format
+        return canPlayAudioFormat(ext);
+    }
+    
+    return false;  // Unsupported formats
+}
+
+function canPlayAudioFormat(extension) {
+    const audio = document.createElement('audio');
+    
+    const mimeTypes = {
+        'mp3': 'audio/mpeg',
+        'ogg': 'audio/ogg; codecs="vorbis"',
+        'wav': 'audio/wav',
+        'flac': 'audio/flac',
+        'aac': 'audio/aac',
+        'm4a': 'audio/mp4',
+        'wma': 'audio/x-ms-wma'
+    };
+    
+    const mimeType = mimeTypes[extension];
+    if (!mimeType) return false;
+    
+    const canPlay = audio.canPlayType(mimeType);
+    return canPlay === 'probably' || canPlay === 'maybe';
 }
 
 // ===============================
@@ -1745,6 +1881,13 @@ async function streamTrack(index) {
         const result = window.currentSearchResults[index];
         console.log(`🎵 Streaming track:`, result);
         
+        // Check for unsupported formats before streaming
+        if (result.filename && !isAudioFormatSupported(result.filename)) {
+            const format = getFileExtension(result.filename);
+            showToast(`Sorry, ${format.toUpperCase()} format is not supported in web browsers. Try downloading instead.`, 'error');
+            return;
+        }
+        
         await startStream(result);
         
     } catch (error) {
@@ -1778,7 +1921,25 @@ async function streamAlbumTrack(albumIndex, trackIndex) {
         const track = album.tracks[trackIndex];
         console.log(`🎵 Streaming album track:`, track);
         
-        await startStream(track);
+        // Ensure album tracks have required fields
+        const trackData = {
+            ...track,
+            username: track.username || album.username,
+            filename: track.filename || track.path,
+            artist: track.artist || album.artist,
+            album: track.album || album.title || album.album
+        };
+        
+        console.log(`🎵 Enhanced track data:`, trackData);
+        
+        // Check for unsupported formats before streaming
+        if (trackData.filename && !isAudioFormatSupported(trackData.filename)) {
+            const format = getFileExtension(trackData.filename);
+            showToast(`Sorry, ${format.toUpperCase()} format is not supported in web browsers. Try downloading instead.`, 'error');
+            return;
+        }
+        
+        await startStream(trackData);
         
     } catch (error) {
         console.error('Album track streaming error:', error);
