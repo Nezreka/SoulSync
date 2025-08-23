@@ -966,7 +966,22 @@ def stream_audio():
             return jsonify({"error": "Audio file not found"}), 404
         
         print(f"🎵 Serving audio file: {os.path.basename(file_path)}")
-        return send_file(file_path, as_attachment=False)
+        
+        # Determine MIME type based on file extension
+        file_ext = os.path.splitext(file_path)[1].lower()
+        mime_types = {
+            '.mp3': 'audio/mpeg',
+            '.flac': 'audio/flac',
+            '.ogg': 'audio/ogg',
+            '.aac': 'audio/aac',
+            '.m4a': 'audio/mp4',
+            '.wav': 'audio/wav',
+            '.wma': 'audio/x-ms-wma'
+        }
+        
+        mimetype = mime_types.get(file_ext, 'audio/mpeg')  # Default to MP3
+        
+        return send_file(file_path, as_attachment=False, mimetype=mimetype)
         
     except Exception as e:
         print(f"❌ Error serving audio file: {e}")
