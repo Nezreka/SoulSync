@@ -209,6 +209,52 @@
                             <button id="downloads-search-btn">🔍 Search</button>
                         </div>
 
+                       
+                        <div id="filters-container" class="filters-container hidden">
+                            <div class="filter-toggle-header">
+                                <button id="filter-toggle-btn" class="filter-toggle-btn">⏷ Filters</button>
+                            </div>
+
+                            <div id="filter-content" class="filter-content hidden">
+                                <!-- Filter by Type -->
+                                <div class="filter-group">
+                                    <label class="filter-label">Type:</label>
+                                    <button class="filter-btn active" data-filter-type="type" data-value="all">All</button>
+                                    <button class="filter-btn" data-filter-type="type" data-value="album">Albums</button>
+                                    <button class="filter-btn" data-filter-type="type" data-value="track">Singles</button>
+                                </div>
+
+                                <!-- Filter by Format -->
+                                <div class="filter-group">
+                                    <label class="filter-label">Format:</label>
+                                    <button class="filter-btn active" data-filter-type="format" data-value="all">All</button>
+                                    <button class="filter-btn" data-filter-type="format" data-value="flac">FLAC</button>
+                                    <button class="filter-btn" data-filter-type="format" data-value="mp3">MP3</button>
+                                    <!-- Added missing format buttons -->
+                                    <button class="filter-btn" data-filter-type="format" data-value="ogg">OGG</button>
+                                    <button class="filter-btn" data-filter-type="format" data-value="aac">AAC</button>
+                                    <button class="filter-btn" data-filter-type="format" data-value="wma">WMA</button>
+                                </div>
+
+                                <!-- Sort Controls -->
+                                <div class="filter-group">
+                                    <label class="filter-label">Sort by:</label>
+                                    <button id="sort-order-btn" class="filter-btn sort-order-btn" data-order="desc">↓</button>
+                                    <!-- Added all sort options from the GUI -->
+                                    <button class="filter-btn active" data-filter-type="sort" data-value="relevance">Relevance</button>
+                                    <button class="filter-btn" data-filter-type="sort" data-value="quality_score">Quality</button>
+                                    <button class="filter-btn" data-filter-type="sort" data-value="size">Size</button>
+                                    <button class="filter-btn" data-filter-type="sort" data-value="title">Name</button>
+                                    <button class="filter-btn" data-filter-type="sort" data-value="username">Uploader</button>
+                                    <button class="filter-btn" data-filter-type="sort" data-value="bitrate">Bitrate</button>
+                                    <button class="filter-btn" data-filter-type="sort" data-value="duration">Duration</button>
+                                    <button class="filter-btn" data-filter-type="sort" data-value="availability">Available</button>
+                                    <button class="filter-btn" data-filter-type="sort" data-value="upload_speed">Speed</button>
+                                </div>
+                            </div>
+                        </div>
+
+
                         <!-- Search Status Bar -->
                         <div class="search-status-container">
                             <div class="spinner-animation hidden"></div>

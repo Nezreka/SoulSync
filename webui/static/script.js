@@ -12,6 +12,11 @@ let currentStream = {
     progress: 0,
     track: null
 };
+let allSearchResults = [];
+let currentFilterType = 'all';
+let currentFilterFormat = 'all';
+let currentSortBy = 'quality_score';
+let isSortReversed = false;
 
 // API endpoints
 const API = {
@@ -43,8 +48,7 @@ document.addEventListener('DOMContentLoaded', function() {
     initializeNavigation();
     initializeMediaPlayer();
     initializeDonationWidget();
-    initializeSettings();
-    initializeSearch();
+
     
     // Start periodic updates
     updateServiceStatus();
@@ -92,29 +96,32 @@ function navigateToPage(pageId) {
     loadPageData(pageId);
 }
 
+// REPLACE your old loadPageData function with this one:
+// REPLACE your old loadPageData function with this corrected one
+
 async function loadPageData(pageId) {
     try {
         switch (pageId) {
             case 'dashboard':
-                // Stop download polling when leaving downloads page
                 stopDownloadPolling();
                 await loadDashboardData();
                 break;
             case 'sync':
-                // Stop download polling when leaving downloads page
                 stopDownloadPolling();
                 await loadSyncData();
                 break;
             case 'downloads':
+                // --- FIX: Initialize first, THEN load data. This is the correct order. ---
+                initializeSearch();
+                initializeFilters();
                 await loadDownloadsData();
                 break;
             case 'artists':
-                // Stop download polling when leaving downloads page
                 stopDownloadPolling();
                 await loadArtistsData();
                 break;
             case 'settings':
-                // Stop download polling when leaving downloads page
+                initializeSettings();
                 stopDownloadPolling();
                 await loadSettingsData();
                 break;
@@ -707,13 +714,16 @@ function browsePath(pathType) {
 // ===============================
 
 function initializeSearch() {
-    const searchInput = document.getElementById('search-input');
-    const searchButton = document.getElementById('search-button');
+    // --- FIX: Corrected the element IDs to match the HTML ---
+    const searchInput = document.getElementById('downloads-search-input');
+    const searchButton = document.getElementById('downloads-search-btn');
     
-    searchButton.addEventListener('click', performSearch);
-    searchInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') performSearch();
-    });
+    if (searchButton && searchInput) {
+        searchButton.addEventListener('click', performDownloadsSearch);
+        searchInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') performDownloadsSearch();
+        });
+    }
 }
 
 async function performSearch() {
@@ -1230,11 +1240,14 @@ async function performDownloadsSearch() {
         }
         
         const results = data.results || [];
-        displayDownloadsResults(results);
+        allSearchResults = results;
+        resetFilters();
+        applyFiltersAndSort();
         
         if (results.length === 0) {
             showToast('No results found', 'error');
         } else {
+            document.getElementById('filters-container').classList.remove('hidden');
             showToast(`Found ${results.length} results`, 'success');
         }
         
@@ -1792,3 +1805,168 @@ window.downloadAlbumTrack = downloadAlbumTrack;
 window.switchDownloadTab = switchDownloadTab;
 window.cancelDownloadItem = cancelDownloadItem;
 window.clearFinishedDownloads = clearFinishedDownloads;
+
+// APPEND THIS JAVASCRIPT SNIPPET (B)
+
+function initializeFilters() {
+    const toggleBtn = document.getElementById('filter-toggle-btn');
+    const container = document.getElementById('filters-container');
+    const content = document.getElementById('filter-content');
+
+    if (toggleBtn && container && content) {
+        // Using .onclick ensures we only ever have one click handler
+        toggleBtn.onclick = () => {
+            const isExpanded = container.classList.contains('expanded');
+            
+            if (isExpanded) {
+                // Collapse the container
+                container.classList.remove('expanded');
+                toggleBtn.textContent = '⏷ Filters';
+            } else {
+                // Expand the container
+                content.classList.remove('hidden'); // Make sure content is visible for animation
+                container.classList.add('expanded');
+                toggleBtn.textContent = '⏶ Filters';
+            }
+        };
+    }
+
+    // This part is correct and doesn't need to change
+    document.querySelectorAll('.filter-btn').forEach(button => {
+        button.addEventListener('click', handleFilterClick);
+    });
+}
+
+function handleFilterClick(event) {
+    const button = event.target;
+    const filterType = button.dataset.filterType;
+    const value = button.dataset.value;
+
+    if (filterType === 'type') currentFilterType = value;
+    if (filterType === 'format') currentFilterFormat = value;
+    if (filterType === 'sort') currentSortBy = value;
+
+    if (button.id === 'sort-order-btn') {
+        isSortReversed = !isSortReversed;
+        button.textContent = isSortReversed ? '↑' : '↓';
+    }
+
+    document.querySelectorAll(`.filter-btn[data-filter-type="${filterType}"]`).forEach(btn => {
+        btn.classList.remove('active');
+    });
+    if (filterType) { // Don't try to activate the sort order button
+        button.classList.add('active');
+    }
+
+    applyFiltersAndSort();
+}
+
+function resetFilters() {
+    currentFilterType = 'all';
+    currentFilterFormat = 'all';
+    currentSortBy = 'quality_score';
+    isSortReversed = false;
+    
+    document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
+    document.querySelector('.filter-btn[data-filter-type="type"][data-value="all"]').classList.add('active');
+    document.querySelector('.filter-btn[data-filter-type="format"][data-value="all"]').classList.add('active');
+    document.querySelector('.filter-btn[data-filter-type="sort"][data-value="quality_score"]').classList.add('active');
+    document.getElementById('sort-order-btn').textContent = '↓';
+}
+
+function applyFiltersAndSort() {
+    let processedResults = [...allSearchResults];
+    const query = document.getElementById('downloads-search-input').value.trim().toLowerCase();
+
+    // 1. Filter by Type
+    if (currentFilterType !== 'all') {
+        processedResults = processedResults.filter(r => r.result_type === currentFilterType);
+    }
+
+    // 2. Filter by Format
+    if (currentFilterFormat !== 'all') {
+        processedResults = processedResults.filter(r => {
+            const quality = (r.dominant_quality || r.quality || '').toLowerCase();
+            return quality === currentFilterFormat;
+        });
+    }
+
+    // 3. Sort Results
+    processedResults.sort((a, b) => {
+        let valA, valB;
+
+        // Special handling for relevance sort
+        if (currentSortBy === 'relevance') {
+            valA = calculateRelevanceScore(a, query);
+            valB = calculateRelevanceScore(b, query);
+            return valB - valA; // Higher score is better
+        }
+        
+        // Special handling for availability
+        if (currentSortBy === 'availability') {
+            valA = (a.free_upload_slots || 0) - (a.queue_length || 0) * 0.1;
+            valB = (b.free_upload_slots || 0) - (b.queue_length || 0) * 0.1;
+            return valB - valA;
+        }
+
+        valA = a[currentSortBy] || 0;
+        valB = b[currentSortBy] || 0;
+
+        if (typeof valA === 'string') {
+            // For name/title sort, use the correct property
+            const titleA = (a.album_title || a.title || '').toLowerCase();
+            const titleB = (b.album_title || b.title || '').toLowerCase();
+            return titleA.localeCompare(titleB);
+        }
+        
+        // Default numeric sort (descending)
+        return valB - valA;
+    });
+
+    // Handle sort direction toggle
+    const sortDefaults = {
+        relevance: 'desc', quality_score: 'desc', size: 'desc', bitrate: 'desc', 
+        upload_speed: 'desc', duration: 'desc', availability: 'desc',
+        title: 'asc', username: 'asc'
+    };
+    
+    const defaultOrder = sortDefaults[currentSortBy] || 'desc';
+    if ((defaultOrder === 'asc' && isSortReversed) || (defaultOrder === 'desc' && !isSortReversed)) {
+        processedResults.reverse();
+    }
+    
+    displayDownloadsResults(processedResults);
+}
+
+function calculateRelevanceScore(result, query) {
+    let score = 0.0;
+    const queryTerms = query.split(' ').filter(t => t.length > 1);
+
+    // 1. Search Term Matching (40%)
+    let searchableText = `${result.title || ''} ${result.artist || ''} ${result.album || ''} ${result.album_title || ''}`.toLowerCase();
+    let termMatches = 0;
+    for (const term of queryTerms) {
+        if (searchableText.includes(term)) {
+            termMatches++;
+        }
+    }
+    score += (termMatches / queryTerms.length) * 0.40;
+
+    // 2. Quality Score (25%)
+    score += (result.quality_score || 0) * 0.25;
+
+    // 3. User Reliability (Availability & Speed) (20%)
+    const reliability = ((result.free_upload_slots || 0) > 0 ? 0.5 : 0) + Math.min(1, (result.upload_speed || 0) / 500) * 0.5;
+    score += reliability * 0.20;
+
+    // 4. File Completeness (Bitrate & Duration) (15%)
+    const completeness = (Math.min(1, (result.bitrate || 0) / 320) * 0.5) + (result.duration > 0 ? 0.5 : 0);
+    score += completeness * 0.15;
+    
+    return score;
+}
+
+// Add to global scope for onclick
+window.handleFilterClick = handleFilterClick;
+
+// END OF JAVASCRIPT SNIPPET (B)
