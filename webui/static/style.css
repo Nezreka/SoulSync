@@ -2008,34 +2008,283 @@ body {
     animation: modalFadeIn 0.3s ease-out;
 }
 
-/* Simple Downloads Results Styling */
-.search-result-item {
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 8px;
-    padding: 12px;
-    margin-bottom: 8px;
+/* GUI-Matching Search Results Styling */
+
+/* Single Track Card (SearchResultItem) */
+.track-result-card {
+    background: linear-gradient(to bottom,
+        rgba(48, 48, 52, 0.95),
+        rgba(38, 38, 42, 0.98));
+    border-radius: 18px;
+    border: 1px solid rgba(70, 70, 76, 0.5);
+    margin: 8px 4px;
+    padding: 16px;
     display: flex;
-    justify-content: space-between;
     align-items: center;
-}
-
-.search-result-item .result-info {
-    flex: 1;
-}
-
-.search-result-item .download-btn {
-    background: rgba(29, 185, 84, 0.1);
-    color: #1ed760;
-    border: 1px solid rgba(29, 185, 84, 0.3);
-    padding: 8px 16px;
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 12px;
+    gap: 16px;
     transition: all 0.2s ease;
 }
 
-.search-result-item .download-btn:hover {
-    background: rgba(29, 185, 84, 0.2);
-    border-color: rgba(29, 185, 84, 0.5);
+.track-result-card:hover {
+    background: linear-gradient(to bottom,
+        rgba(55, 55, 60, 0.98),
+        rgba(45, 45, 50, 1.0));
+    border: 1px solid rgba(29, 185, 84, 0.8);
+}
+
+.track-icon {
+    background: linear-gradient(to bottom right,
+        rgba(29, 185, 84, 0.3),
+        rgba(24, 156, 71, 0.2));
+    border-radius: 22px;
+    border: 2px solid rgba(29, 185, 84, 0.4);
+    font-size: 18px;
+    color: rgba(29, 185, 84, 1.0);
+    width: 44px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.track-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.track-title {
+    font-size: 14px;
+    font-weight: bold;
+    color: #ffffff;
+    margin-bottom: 2px;
+}
+
+.track-artist {
+    font-size: 12px;
+    color: #b3b3b3;
+    margin-bottom: 2px;
+}
+
+.track-details {
+    font-size: 10px;
+    color: #888888;
+    margin-bottom: 2px;
+}
+
+.track-uploader {
+    font-size: 10px;
+    color: rgba(29, 185, 84, 1.0);
+    font-weight: 500;
+}
+
+.track-actions {
+    flex-shrink: 0;
+}
+
+.track-download-btn {
+    background: linear-gradient(to bottom,
+        rgba(29, 185, 84, 0.95),
+        rgba(24, 156, 71, 0.9));
+    border: 2px solid rgba(29, 185, 84, 0.3);
+    border-radius: 23px;
+    color: #000000;
+    font-size: 14px;
+    font-weight: bold;
+    padding: 8px 16px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.track-download-btn:hover {
+    background: linear-gradient(to bottom,
+        rgba(30, 215, 96, 1.0),
+        rgba(25, 180, 80, 1.0));
+}
+
+/* Album Card (AlbumResultItem) */
+.album-result-card {
+    background: linear-gradient(to bottom,
+        rgba(52, 52, 58, 0.95),
+        rgba(42, 42, 48, 0.98));
+    border-radius: 20px;
+    border: 1px solid rgba(75, 75, 82, 0.5);
+    margin: 8px 4px;
+    padding: 18px;
+    transition: all 0.2s ease;
+}
+
+.album-result-card:hover {
+    border: 1px solid rgba(29, 185, 84, 0.8);
+}
+
+.album-card-header {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+}
+
+.album-icon {
+    font-size: 28px;
+    background: linear-gradient(to bottom right,
+        rgba(29, 185, 84, 0.2),
+        rgba(24, 156, 71, 0.15));
+    border-radius: 28px;
+    border: 2px solid rgba(29, 185, 84, 0.4);
+    width: 56px;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(29, 185, 84, 1.0);
+    flex-shrink: 0;
+}
+
+.album-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.album-title {
+    font-size: 16px;
+    font-weight: bold;
+    color: #ffffff;
+    margin-bottom: 3px;
+}
+
+.album-artist {
+    font-size: 13px;
+    color: #b3b3b3;
+    margin-bottom: 3px;
+}
+
+.album-details {
+    font-size: 11px;
+    color: #888888;
+    margin-bottom: 3px;
+}
+
+.album-uploader {
+    font-size: 11px;
+    color: rgba(29, 185, 84, 1.0);
+    font-weight: 500;
+}
+
+.album-actions {
+    flex-shrink: 0;
+}
+
+.album-download-btn {
+    background: linear-gradient(to bottom,
+        rgba(29, 185, 84, 0.95),
+        rgba(24, 156, 71, 0.9));
+    border: 2px solid rgba(29, 185, 84, 0.3);
+    border-radius: 23px;
+    color: #000000;
+    font-size: 15px;
+    font-weight: bold;
+    padding: 10px 20px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.album-download-btn:hover {
+    background: linear-gradient(to bottom,
+        rgba(30, 215, 96, 1.0),
+        rgba(25, 180, 80, 1.0));
+}
+
+/* Album Expansion Functionality */
+.album-card-header {
+    cursor: pointer;
+    position: relative;
+}
+
+.album-expand-indicator {
+    position: absolute;
+    left: -12px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 12px;
+    color: rgba(29, 185, 84, 0.8);
+    transition: transform 0.2s ease;
+}
+
+.album-result-card.expanded .album-expand-indicator {
+    transform: translateY(-50%) rotate(90deg);
+}
+
+/* Track List within Albums */
+.album-track-list {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(75, 75, 82, 0.3);
+}
+
+/* Individual Track Items (TrackItem) */
+.track-item {
+    background: rgba(40, 40, 40, 0.5);
+    border-radius: 8px;
+    border: 1px solid rgba(60, 60, 60, 0.3);
+    padding: 10px;
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    transition: all 0.2s ease;
+}
+
+.track-item:hover {
+    background: rgba(50, 50, 50, 0.7);
+    border: 1px solid rgba(29, 185, 84, 0.5);
+}
+
+.track-item-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.track-item-title {
+    font-size: 12px;
+    font-weight: bold;
+    color: #ffffff;
+    margin-bottom: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.track-item-details {
+    font-size: 10px;
+    color: #888888;
+}
+
+.track-item-actions {
+    flex-shrink: 0;
+    margin-left: 8px;
+}
+
+.track-download-btn {
+    background: linear-gradient(to bottom,
+        rgba(29, 185, 84, 0.8),
+        rgba(24, 156, 71, 0.7));
+    border: 1px solid rgba(29, 185, 84, 0.4);
+    border-radius: 50%;
+    color: #000000;
+    font-size: 12px;
+    font-weight: bold;
+    width: 28px;
+    height: 28px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.track-download-btn:hover {
+    background: linear-gradient(to bottom,
+        rgba(30, 215, 96, 0.9),
+        rgba(25, 180, 80, 0.8));
+    border-color: rgba(29, 185, 84, 0.6);
 }

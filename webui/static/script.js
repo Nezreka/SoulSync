@@ -992,26 +992,69 @@ function displayDownloadsResults(results) {
         
         if (isAlbum) {
             const trackCount = result.tracks ? result.tracks.length : 0;
+            const totalSize = result.total_size ? `${(result.total_size / 1024 / 1024).toFixed(1)} MB` : 'Unknown size';
+            
+            // Generate individual track items
+            let trackListHtml = '';
+            if (result.tracks && result.tracks.length > 0) {
+                result.tracks.forEach((track, trackIndex) => {
+                    const trackSize = track.size ? `${(track.size / 1024 / 1024).toFixed(1)} MB` : 'Unknown size';
+                    const trackBitrate = track.bitrate ? `${track.bitrate}kbps` : '';
+                    trackListHtml += `
+                        <div class="track-item">
+                            <div class="track-item-info">
+                                <div class="track-item-title">${escapeHtml(track.title || `Track ${trackIndex + 1}`)}</div>
+                                <div class="track-item-details">
+                                    ${track.track_number ? `${track.track_number}. ` : ''}${escapeHtml(track.artist || result.artist || 'Unknown Artist')} • ${trackSize} • ${escapeHtml(track.quality || 'Unknown')} ${trackBitrate}
+                                </div>
+                            </div>
+                            <div class="track-item-actions">
+                                <button onclick="downloadAlbumTrack(${index}, ${trackIndex})" class="track-download-btn">⬇</button>
+                            </div>
+                        </div>
+                    `;
+                });
+            }
+            
             html += `
-                <div class="search-result-item album-result">
-                    <div class="result-info">
-                        <strong>🎵 ${escapeHtml(result.album_title || result.title || 'Unknown Album')}</strong><br>
-                        <span>by ${escapeHtml(result.artist || 'Unknown Artist')}</span><br>
-                        <small>${trackCount} tracks • ${escapeHtml(result.quality || 'Mixed')}</small>
+                <div class="album-result-card" data-album-index="${index}">
+                    <div class="album-card-header" onclick="toggleAlbumExpansion(${index})">
+                        <div class="album-expand-indicator">▶</div>
+                        <div class="album-icon">💿</div>
+                        <div class="album-info">
+                            <div class="album-title">${escapeHtml(result.album_title || result.title || 'Unknown Album')}</div>
+                            <div class="album-artist">by ${escapeHtml(result.artist || 'Unknown Artist')}</div>
+                            <div class="album-details">
+                                ${trackCount} tracks • ${totalSize} • ${escapeHtml(result.quality || 'Mixed')}
+                            </div>
+                            <div class="album-uploader">Shared by ${escapeHtml(result.username || 'Unknown')}</div>
+                        </div>
+                        <div class="album-actions" onclick="event.stopPropagation()">
+                            <button onclick="downloadAlbum(${index})" class="album-download-btn">⬇ Download Album</button>
+                        </div>
                     </div>
-                    <button onclick="downloadAlbum(${index})" class="download-btn">⬇ Download Album</button>
+                    <div class="album-track-list" style="display: none;">
+                        ${trackListHtml}
+                    </div>
                 </div>
             `;
         } else {
             const sizeText = result.size ? `${(result.size / 1024 / 1024).toFixed(1)} MB` : 'Unknown size';
+            const bitrateText = result.bitrate ? `${result.bitrate}kbps` : '';
             html += `
-                <div class="search-result-item track-result">
-                    <div class="result-info">
-                        <strong>${escapeHtml(result.title || 'Unknown Title')}</strong><br>
-                        <span>by ${escapeHtml(result.artist || 'Unknown Artist')}</span><br>
-                        <small>${sizeText} • ${escapeHtml(result.quality || 'Unknown')} ${result.bitrate ? `${result.bitrate}kbps` : ''}</small>
+                <div class="track-result-card">
+                    <div class="track-icon">🎵</div>
+                    <div class="track-info">
+                        <div class="track-title">${escapeHtml(result.title || 'Unknown Title')}</div>
+                        <div class="track-artist">by ${escapeHtml(result.artist || 'Unknown Artist')}</div>
+                        <div class="track-details">
+                            ${sizeText} • ${escapeHtml(result.quality || 'Unknown')} ${bitrateText}
+                        </div>
+                        <div class="track-uploader">Shared by ${escapeHtml(result.username || 'Unknown')}</div>
                     </div>
-                    <button onclick="downloadTrack(${index})" class="download-btn">⬇ Download</button>
+                    <div class="track-actions">
+                        <button onclick="downloadTrack(${index})" class="track-download-btn">⬇ Download</button>
+                    </div>
                 </div>
             `;
         }
@@ -1071,6 +1114,55 @@ async function downloadAlbum(index) {
     } catch (error) {
         console.error('Album download error:', error);
         showToast('Failed to start album download', 'error');
+    }
+}
+
+function toggleAlbumExpansion(albumIndex) {
+    const albumCard = document.querySelector(`[data-album-index="${albumIndex}"]`);
+    if (!albumCard) return;
+    
+    const trackList = albumCard.querySelector('.album-track-list');
+    const indicator = albumCard.querySelector('.album-expand-indicator');
+    
+    if (trackList.style.display === 'none' || !trackList.style.display) {
+        // Expand
+        trackList.style.display = 'block';
+        indicator.textContent = '▼';
+        albumCard.classList.add('expanded');
+    } else {
+        // Collapse
+        trackList.style.display = 'none';
+        indicator.textContent = '▶';
+        albumCard.classList.remove('expanded');
+    }
+}
+
+async function downloadAlbumTrack(albumIndex, trackIndex) {
+    const results = window.currentSearchResults;
+    if (!results || !results[albumIndex] || !results[albumIndex].tracks || !results[albumIndex].tracks[trackIndex]) return;
+    
+    const track = results[albumIndex].tracks[trackIndex];
+    
+    try {
+        const response = await fetch('/api/download', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                ...track,
+                result_type: 'track'
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showToast(`Download started: ${track.title}`, 'success');
+        } else {
+            showToast(`Track download failed: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        console.error('Track download error:', error);
+        showToast('Failed to start track download', 'error');
     }
 }
 
@@ -1426,3 +1518,5 @@ window.startStream = startStream;
 window.startDownload = startDownload;
 window.downloadTrack = downloadTrack;
 window.downloadAlbum = downloadAlbum;
+window.toggleAlbumExpansion = toggleAlbumExpansion;
+window.downloadAlbumTrack = downloadAlbumTrack;
