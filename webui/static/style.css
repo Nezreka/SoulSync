@@ -2448,7 +2448,7 @@ body {
 /* Queue Content */
 .download-queue {
     display: none;
-    max-height: 300px;
+    max-height: 100%;
     overflow-y: auto;
     padding: 8px;
 }
