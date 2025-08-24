@@ -22,6 +22,8 @@ let currentFilterFormat = 'all';
 let currentSortBy = 'quality_score';
 let isSortReversed = false;
 let searchAbortController = null;
+let dbStatsInterval = null;
+let dbUpdateStatusInterval = null;
 
 // API endpoints
 const API = {
@@ -117,6 +119,9 @@ function navigateToPage(pageId) {
 
 async function loadPageData(pageId) {
     try {
+        // Stop any active polling when navigating away
+        stopDbStatsPolling();
+        stopDbUpdatePolling();
         switch (pageId) {
             case 'dashboard':
                 stopDownloadPolling();
@@ -127,7 +132,6 @@ async function loadPageData(pageId) {
                 await loadSyncData();
                 break;
             case 'downloads':
-                // --- FIX: Initialize first, THEN load data. This is the correct order. ---
                 initializeSearch();
                 initializeFilters();
                 await loadDownloadsData();
@@ -3208,4 +3212,205 @@ function matchedDownloadAlbumTrack(albumIndex, trackIndex) {
     openMatchingModal(trackData, false, albumData);
 }
 
+// ===========================================
+// == DASHBOARD DATABASE UPDATER FUNCTIONALITY ==
+// ===========================================
+
+// --- State and Polling Management ---
+
+function stopDbStatsPolling() {
+    if (dbStatsInterval) {
+        clearInterval(dbStatsInterval);
+        dbStatsInterval = null;
+    }
+}
+
+function stopDbUpdatePolling() {
+    if (dbUpdateStatusInterval) {
+        clearInterval(dbUpdateStatusInterval);
+        dbUpdateStatusInterval = null;
+    }
+}
+
+async function loadDashboardData() {
+    // Attach event listeners for the DB updater tool
+    const updateButton = document.getElementById('db-update-button');
+    if (updateButton) {
+        updateButton.addEventListener('click', handleDbUpdateButtonClick);
+    }
+
+    // Initial load of stats
+    await fetchAndUpdateDbStats();
+    
+    // Start periodic refresh of stats (every 30 seconds)
+    stopDbStatsPolling(); // Ensure no duplicates
+    dbStatsInterval = setInterval(fetchAndUpdateDbStats, 30000);
+
+    // Also check the status of any ongoing update when the page loads
+    await checkAndUpdateDbProgress();
+}
+
+// --- Data Fetching and UI Updates ---
+
+async function fetchAndUpdateDbStats() {
+    try {
+        const response = await fetch('/api/database/stats');
+        if (!response.ok) return;
+        
+        const stats = await response.json();
+
+        // This function updates the stat cards in the top grid
+        updateDashboardStatCards(stats);
+
+        // This function updates the info within the DB Updater tool card
+        updateDbUpdaterCardInfo(stats);
+
+    } catch (error) {
+        console.warn('Could not fetch DB stats:', error);
+    }
+}
+
+function updateDashboardStatCards(stats) {
+    // You can expand this later to update the main stat cards
+    // For now, we focus on the updater tool itself.
+}
+
+
+
+function updateDbUpdaterCardInfo(stats) {
+    // Update the detailed stats within the DB Updater tool card
+    const lastRefreshEl = document.getElementById('db-last-refresh');
+    const artistsStatEl = document.getElementById('db-stat-artists');
+    const albumsStatEl = document.getElementById('db-stat-albums');
+    const tracksStatEl = document.getElementById('db-stat-tracks');
+    const sizeStatEl = document.getElementById('db-stat-size');
+
+    if (lastRefreshEl) {
+        if (stats.last_full_refresh) {
+            const date = new Date(stats.last_full_refresh);
+            lastRefreshEl.textContent = date.toLocaleString();
+        } else {
+            lastRefreshEl.textContent = 'Never';
+        }
+    }
+
+    if (artistsStatEl) artistsStatEl.textContent = stats.artists.toLocaleString() || '0';
+    if (albumsStatEl) albumsStatEl.textContent = stats.albums.toLocaleString() || '0';
+    if (tracksStatEl) tracksStatEl.textContent = stats.tracks.toLocaleString() || '0';
+    if (sizeStatEl) sizeStatEl.textContent = `${stats.database_size_mb.toFixed(2)} MB`;
+    
+    // Update the title of the tool card to show which server is active
+    const toolCardTitle = document.querySelector('#db-updater-card .tool-card-title');
+    if (toolCardTitle && stats.server_source) {
+        const serverName = stats.server_source.charAt(0).toUpperCase() + stats.server_source.slice(1);
+        toolCardTitle.textContent = `${serverName} Database Updater`;
+    }
+}
+
+async function checkAndUpdateDbProgress() {
+    try {
+        const response = await fetch('/api/database/update/status');
+        if (!response.ok) return;
+
+        const state = await response.json();
+        updateDbProgressUI(state);
+
+        if (state.status === 'running') {
+            // If an update is running, start polling for progress
+            stopDbUpdatePolling();
+            dbUpdateStatusInterval = setInterval(checkAndUpdateDbProgress, 1000);
+        }
+
+    } catch (error) {
+        console.warn('Could not fetch DB update status:', error);
+    }
+}
+
+function updateDbProgressUI(state) {
+    const button = document.getElementById('db-update-button');
+    const phaseLabel = document.getElementById('db-phase-label');
+    const progressLabel = document.getElementById('db-progress-label');
+    const progressBar = document.getElementById('db-progress-bar');
+    const refreshSelect = document.getElementById('db-refresh-type');
+
+    if (!button || !phaseLabel || !progressLabel || !progressBar || !refreshSelect) return;
+
+    if (state.status === 'running') {
+        button.textContent = 'Stop Update';
+        button.disabled = false;
+        refreshSelect.disabled = true;
+
+        phaseLabel.textContent = state.phase || 'Processing...';
+        progressLabel.textContent = `${state.processed} / ${state.total} artists (${state.progress.toFixed(1)}%)`;
+        progressBar.style.width = `${state.progress}%`;
+    } else { // idle, finished, or error
+        stopDbUpdatePolling();
+        button.textContent = 'Update Database';
+        button.disabled = false;
+        refreshSelect.disabled = false;
+
+        if (state.status === 'error') {
+            phaseLabel.textContent = `Error: ${state.error_message}`;
+            progressBar.style.backgroundColor = '#ff4444'; // Red for error
+        } else {
+            phaseLabel.textContent = state.phase || 'Idle';
+            progressBar.style.backgroundColor = '#1db954'; // Green for normal
+        }
+        
+        if (state.status === 'finished' || state.status === 'error') {
+             // Final stats refresh after completion/error
+            setTimeout(fetchAndUpdateDbStats, 500);
+        }
+    }
+}
+
+
+// --- Event Handlers ---
+
+async function handleDbUpdateButtonClick() {
+    const button = document.getElementById('db-update-button');
+    const currentAction = button.textContent;
+
+    if (currentAction === 'Update Database') {
+        const refreshSelect = document.getElementById('db-refresh-type');
+        const isFullRefresh = refreshSelect.value === 'full';
+
+        if (isFullRefresh) {
+            const confirmed = confirm("⚠️ Full Refresh Warning!\n\nThis will clear and rebuild the database for the active server. It can take a long time. Are you sure you want to proceed?");
+            if (!confirmed) return;
+        }
+
+        try {
+            const response = await fetch('/api/database/update', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ full_refresh: isFullRefresh })
+            });
+
+            if (response.ok) {
+                showToast('Database update started!', 'success');
+                // Start polling immediately
+                stopDbUpdatePolling();
+                dbUpdateStatusInterval = setInterval(checkAndUpdateDbProgress, 1000);
+            } else {
+                const errorData = await response.json();
+                showToast(`Error: ${errorData.error}`, 'error');
+            }
+        } catch (error) {
+            showToast('Failed to start update process.', 'error');
+        }
+
+    } else { // "Stop Update"
+        try {
+            const response = await fetch('/api/database/update/stop', { method: 'POST' });
+            if (response.ok) {
+                showToast('Stop request sent.', 'info');
+            } else {
+                showToast('Failed to send stop request.', 'error');
+            }
+        } catch (error) {
+            showToast('Error sending stop request.', 'error');
+        }
+    }
+}
 
