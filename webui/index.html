@@ -222,6 +222,24 @@
                             <div class="tool-card" id="db-updater-card">
                                 <h4 class="tool-card-title">Database Updater</h4>
                                 <p class="tool-card-info">Last Full Refresh: <span id="db-last-refresh">Never</span></p>
+                                <div class="tool-card-stats">
+                                    <div class="stat-item">
+                                        <span class="stat-item-label">Artists:</span>
+                                        <span class="stat-item-value" id="db-stat-artists">0</span>
+                                    </div>
+                                    <div class="stat-item">
+                                        <span class="stat-item-label">Albums:</span>
+                                        <span class="stat-item-value" id="db-stat-albums">0</span>
+                                    </div>
+                                    <div class="stat-item">
+                                        <span class="stat-item-label">Tracks:</span>
+                                        <span class="stat-item-value" id="db-stat-tracks">0</span>
+                                    </div>
+                                    <div class="stat-item">
+                                        <span class="stat-item-label">Size:</span>
+                                        <span class="stat-item-value" id="db-stat-size">0.0 MB</span>
+                                    </div>
+                                </div>
                                 <div class="tool-card-controls">
                                     <select id="db-refresh-type">
                                         <option value="incremental">Incremental Update</option>

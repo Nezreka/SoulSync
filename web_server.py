@@ -24,6 +24,8 @@ from core.jellyfin_client import JellyfinClient
 from core.soulseek_client import SoulseekClient
 from core.tidal_client import TidalClient # Added import for Tidal
 from core.matching_engine import MusicMatchingEngine
+from core.database_update_worker import DatabaseUpdateWorker, DatabaseStatsWorker
+from database.music_database import get_database
 
 # --- Flask App Setup ---
 base_dir = os.path.abspath(os.path.dirname(__file__))
@@ -80,6 +82,19 @@ stream_state = {
 stream_lock = threading.Lock()  # Prevent race conditions
 stream_background_task = None
 stream_executor = ThreadPoolExecutor(max_workers=1)  # Only one stream at a time
+
+db_update_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="DBUpdate")
+db_update_worker = None
+db_update_state = {
+    "status": "idle",  # idle, running, finished, error
+    "phase": "Idle",
+    "progress": 0,
+    "current_item": "",
+    "processed": 0,
+    "total": 0,
+    "error_message": ""
+}
+db_update_lock = threading.Lock()
 
 # --- Global Matched Downloads Context Management ---
 # Thread-safe storage for matched download contexts
@@ -2278,6 +2293,120 @@ def start_simple_background_monitor():
                 import traceback
                 traceback.print_exc()
                 time.sleep(10)
+
+
+# ===============================
+# == DATABASE UPDATER API      ==
+# ===============================
+
+def _db_update_progress_callback(current_item, processed, total, percentage):
+    with db_update_lock:
+        db_update_state.update({
+            "current_item": current_item,
+            "processed": processed,
+            "total": total,
+            "progress": percentage
+        })
+
+def _db_update_phase_callback(phase):
+    with db_update_lock:
+        db_update_state["phase"] = phase
+
+def _db_update_finished_callback(total_artists, total_albums, total_tracks, successful, failed):
+    with db_update_lock:
+        db_update_state["status"] = "finished"
+        db_update_state["phase"] = f"Completed: {successful} successful, {failed} failed."
+
+def _db_update_error_callback(error_message):
+    with db_update_lock:
+        db_update_state["status"] = "error"
+        db_update_state["error_message"] = error_message
+
+def _run_db_update_task(full_refresh, server_type):
+    """The actual function that runs in the background thread."""
+    global db_update_worker
+    media_client = None
+    
+    if server_type == "plex":
+        media_client = plex_client
+    elif server_type == "jellyfin":
+        media_client = jellyfin_client
+
+    if not media_client:
+        _db_update_error_callback(f"Media client for '{server_type}' not available.")
+        return
+
+    with db_update_lock:
+        db_update_worker = DatabaseUpdateWorker(
+            media_client=media_client,
+            full_refresh=full_refresh,
+            server_type=server_type
+        )
+        # Connect signals to callbacks
+        db_update_worker.progress_updated.connect(_db_update_progress_callback)
+        db_update_worker.phase_changed.connect(_db_update_phase_callback)
+        db_update_worker.finished.connect(_db_update_finished_callback)
+        db_update_worker.error.connect(_db_update_error_callback)
+
+    # This is a blocking call that runs the QThread's logic
+    db_update_worker.run()
+
+
+@app.route('/api/database/stats', methods=['GET'])
+def get_database_stats():
+    """Endpoint to get current database statistics."""
+    try:
+        # This logic is adapted from DatabaseStatsWorker
+        db = get_database()
+        stats = db.get_database_info_for_server()
+        return jsonify(stats)
+    except Exception as e:
+        print(f"Error getting database stats: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/database/update', methods=['POST'])
+def start_database_update():
+    """Endpoint to start the database update process."""
+    global db_update_worker
+    with db_update_lock:
+        if db_update_state["status"] == "running":
+            return jsonify({"success": False, "error": "An update is already in progress."}), 409
+
+        data = request.get_json()
+        full_refresh = data.get('full_refresh', False)
+        active_server = config_manager.get_active_media_server()
+
+        db_update_state.update({
+            "status": "running",
+            "phase": "Initializing...",
+            "progress": 0, "current_item": "", "processed": 0, "total": 0, "error_message": ""
+        })
+        
+        # Submit the worker function to the executor
+        db_update_executor.submit(_run_db_update_task, full_refresh, active_server)
+
+    return jsonify({"success": True, "message": "Database update started."})
+
+@app.route('/api/database/update/status', methods=['GET'])
+def get_database_update_status():
+    """Endpoint to poll for the current update status."""
+    with db_update_lock:
+        return jsonify(db_update_state)
+
+@app.route('/api/database/update/stop', methods=['POST'])
+def stop_database_update():
+    """Endpoint to stop the current database update."""
+    global db_update_worker
+    with db_update_lock:
+        if db_update_worker and db_update_state["status"] == "running":
+            db_update_worker.stop()
+            db_update_state["status"] = "finished"
+            db_update_state["phase"] = "Update stopped by user."
+            return jsonify({"success": True, "message": "Stop request sent."})
+        else:
+            return jsonify({"success": False, "error": "No update is currently running."}), 404
+
+
     
     monitor_thread = threading.Thread(target=simple_monitor)
     monitor_thread.daemon = True

@@ -3770,3 +3770,34 @@ body {
     100% { left: 100%; }
 }
 
+
+/* Styles for Stats inside the DB Updater Tool Card */
+.tool-card-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    padding: 10px;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 6px;
+    margin-top: 5px; /* Add some space above */
+    margin-bottom: 5px; /* Add some space below */
+}
+
+.stat-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+}
+
+.stat-item-label {
+    color: #b3b3b3;
+}
+
+.stat-item-value {
+    color: #ffffff;
+    font-weight: 600;
+    background-color: rgba(29, 185, 84, 0.1);
+    border-radius: 4px;
+    padding: 2px 6px;
+}
