@@ -865,11 +865,56 @@ async function copyAddress(address, cryptoName) {
 // ===============================
 
 function initializeSettings() {
+    // This function is called when the settings page is loaded.
+    // It attaches event listeners to all interactive elements on the page.
+
+    // Main save button
     const saveButton = document.getElementById('save-settings');
-    const mediaServerType = document.getElementById('media-server-type');
-    
-    saveButton.addEventListener('click', saveSettings);
-    mediaServerType.addEventListener('change', updateMediaServerFields);
+    if (saveButton) {
+        saveButton.addEventListener('click', saveSettings);
+    }
+
+    // Server toggle buttons
+    const plexToggle = document.getElementById('plex-toggle');
+    if (plexToggle) {
+        plexToggle.addEventListener('click', () => toggleServer('plex'));
+    }
+    const jellyfinToggle = document.getElementById('jellyfin-toggle');
+    if (jellyfinToggle) {
+        jellyfinToggle.addEventListener('click', () => toggleServer('jellyfin'));
+    }
+
+    // Auto-detect buttons
+    const detectSlskdBtn = document.querySelector('#soulseek-url + .detect-button');
+    if (detectSlskdBtn) {
+        detectSlskdBtn.addEventListener('click', autoDetectSlskd);
+    }
+    const detectPlexBtn = document.querySelector('#plex-container .detect-button');
+    if (detectPlexBtn) {
+        detectPlexBtn.addEventListener('click', autoDetectPlex);
+    }
+    const detectJellyfinBtn = document.querySelector('#jellyfin-container .detect-button');
+    if (detectJellyfinBtn) {
+        detectJellyfinBtn.addEventListener('click', autoDetectJellyfin);
+    }
+
+    // Test connection buttons
+    const testSpotifyBtn = document.querySelector('.api-test-buttons button[onclick="testConnection(\'spotify\')"]');
+    if (testSpotifyBtn) {
+        testSpotifyBtn.addEventListener('click', () => testConnection('spotify'));
+    }
+     const testTidalBtn = document.querySelector('.api-test-buttons button[onclick="testConnection(\'tidal\')"]');
+    if (testTidalBtn) {
+        testTidalBtn.addEventListener('click', () => testConnection('tidal'));
+    }
+    const testSoulseekBtn = document.querySelector('.api-test-buttons button[onclick="testConnection(\'soulseek\')"]');
+    if (testSoulseekBtn) {
+        testSoulseekBtn.addEventListener('click', () => testConnection('soulseek'));
+    }
+    const testServerBtn = document.querySelector('.server-test-btn');
+    if (testServerBtn) {
+        testServerBtn.addEventListener('click', () => testConnection('server'));
+    }
 }
 
 async function loadSettingsData() {
@@ -1705,6 +1750,7 @@ function displayDownloadsResults(results) {
                             <div class="track-item-actions">
                                 <button onclick="streamAlbumTrack(${index}, ${trackIndex})" class="track-stream-btn">▶</button>
                                 <button onclick="downloadAlbumTrack(${index}, ${trackIndex})" class="track-download-btn">⬇</button>
+                                <button onclick="matchedDownloadAlbumTrack(${index}, ${trackIndex})" class="track-matched-btn" title="Matched Download">🎯</button>
                             </div>
                         </div>
                     `;
@@ -1726,6 +1772,7 @@ function displayDownloadsResults(results) {
                         </div>
                         <div class="album-actions" onclick="event.stopPropagation()">
                             <button onclick="downloadAlbum(${index})" class="album-download-btn">⬇ Download Album</button>
+                            <button onclick="matchedDownloadAlbum(${index})" class="album-matched-btn">🎯 Matched Album</button>
                         </div>
                     </div>
                     <div class="album-track-list" style="display: none;">
@@ -1748,8 +1795,9 @@ function displayDownloadsResults(results) {
                         <div class="track-uploader">Shared by ${escapeHtml(result.username || 'Unknown')}</div>
                     </div>
                     <div class="track-actions">
-                        <button onclick="streamTrack(${index})" class="track-stream-btn">▶ Stream</button>
-                        <button onclick="downloadTrack(${index})" class="track-download-btn">⬇ Download</button>
+                        <button onclick="streamTrack(${index})" class="track-stream-btn" title="Stream Track">▶</button>
+                        <button onclick="downloadTrack(${index})" class="track-download-btn" title="Download">⬇</button>
+                        <button onclick="matchedDownloadTrack(${index})" class="track-matched-btn" title="Matched Download">🎯</button>
                     </div>
                 </div>
             `;
@@ -1811,6 +1859,49 @@ async function downloadAlbum(index) {
         console.error('Album download error:', error);
         showToast('Failed to start album download', 'error');
     }
+}
+
+// Matched download functions
+function matchedDownloadTrack(index) {
+    const results = window.currentSearchResults;
+    if (!results || !results[index]) return;
+    
+    const track = results[index];
+    console.log('🎯 Starting matched download for single track:', track);
+    
+    // Open matching modal for single track
+    openMatchingModal(track, false, null);
+}
+
+function matchedDownloadAlbum(index) {
+    const results = window.currentSearchResults;
+    if (!results || !results[index]) return;
+    
+    const album = results[index];
+    console.log('🎯 Starting matched download for album:', album);
+    
+    // Open matching modal for album download
+    openMatchingModal(album, true, album);
+}
+
+function matchedDownloadAlbumTrack(albumIndex, trackIndex) {
+    const results = window.currentSearchResults;
+    if (!results || !results[albumIndex]) return;
+    
+    const album = results[albumIndex];
+    if (!album.tracks || !album.tracks[trackIndex]) return;
+    
+    const track = album.tracks[trackIndex];
+    
+    // Ensure track has necessary properties from parent album
+    track.username = album.username;
+    track.artist = track.artist || album.artist;
+    track.album = album.album_title || album.title;
+    
+    console.log('🎯 Starting matched download for album track:', track);
+    
+    // Open matching modal for single track (from album context)
+    openMatchingModal(track, false, null);
 }
 
 function toggleAlbumExpansion(albumIndex) {
@@ -2281,7 +2372,11 @@ const additionalStyles = `
 // Inject additional styles
 document.head.insertAdjacentHTML('beforeend', additionalStyles);
 
-// Global functions (for onclick handlers)
+// Make functions available globally for onclick handlers
+window.openMatchingModal = openMatchingModal;
+window.closeMatchingModal = closeMatchingModal;
+window.selectArtist = selectArtist;
+window.selectAlbum = selectAlbum;
 window.navigateToPage = navigateToPage;
 window.openKofi = openKofi;
 window.copyAddress = copyAddress;
@@ -2306,6 +2401,10 @@ window.downloadAlbumTrack = downloadAlbumTrack;
 window.switchDownloadTab = switchDownloadTab;
 window.cancelDownloadItem = cancelDownloadItem;
 window.clearFinishedDownloads = clearFinishedDownloads;
+
+window.matchedDownloadTrack = matchedDownloadTrack;
+window.matchedDownloadAlbum = matchedDownloadAlbum;
+window.matchedDownloadAlbumTrack = matchedDownloadAlbumTrack;
 
 // APPEND THIS JAVASCRIPT SNIPPET (B)
 
@@ -2470,4 +2569,567 @@ function calculateRelevanceScore(result, query) {
 // Add to global scope for onclick
 window.handleFilterClick = handleFilterClick;
 
-// END OF JAVASCRIPT SNIPPET (B)
+// ===============================
+// MATCHED DOWNLOADS MODAL
+// ===============================
+
+// Global state for matching modal
+let currentMatchingData = {
+    searchResult: null,
+    isAlbumDownload: false,
+    albumResult: null,
+    selectedArtist: null,
+    selectedAlbum: null,
+    currentStage: 'artist' // 'artist' or 'album'
+};
+
+let searchTimers = {
+    artist: null,
+    album: null
+};
+
+function openMatchingModal(searchResult, isAlbumDownload = false, albumResult = null) {
+    console.log('🎯 Opening matching modal for:', searchResult);
+    
+    // Store the current matching data
+    currentMatchingData = {
+        searchResult: searchResult,
+        isAlbumDownload: isAlbumDownload,
+        albumResult: albumResult,
+        selectedArtist: null,
+        selectedAlbum: null,
+        currentStage: 'artist'
+    };
+    
+    // Show modal
+    const overlay = document.getElementById('matching-modal-overlay');
+    overlay.classList.remove('hidden');
+    
+    // Reset modal state
+    resetModalState();
+    
+    // Set appropriate title and stage
+    const modalTitle = document.getElementById('matching-modal-title');
+    const artistStageTitle = document.getElementById('artist-stage-title');
+    
+    if (isAlbumDownload) {
+        modalTitle.textContent = 'Match Album Download to Spotify';
+        artistStageTitle.textContent = 'Step 1: Select the correct Artist';
+        document.getElementById('album-selection-stage').style.display = 'block';
+    } else {
+        modalTitle.textContent = 'Match Download to Spotify';
+        artistStageTitle.textContent = 'Select the correct Artist for this Single';
+        document.getElementById('album-selection-stage').style.display = 'none';
+    }
+    
+    // Generate initial artist suggestions
+    fetchArtistSuggestions();
+    
+    // Setup event listeners
+    setupModalEventListeners();
+}
+
+function closeMatchingModal() {
+    const overlay = document.getElementById('matching-modal-overlay');
+    overlay.classList.add('hidden');
+    
+    // Clear timers
+    Object.values(searchTimers).forEach(timer => {
+        if (timer) clearTimeout(timer);
+    });
+    
+    // Reset state
+    currentMatchingData = {
+        searchResult: null,
+        isAlbumDownload: false,
+        albumResult: null,
+        selectedArtist: null,
+        selectedAlbum: null,
+        currentStage: 'artist'
+    };
+}
+
+function resetModalState() {
+    // Show artist stage, hide album stage
+    document.getElementById('artist-selection-stage').classList.remove('hidden');
+    document.getElementById('album-selection-stage').classList.add('hidden');
+    
+    // Clear all suggestion containers
+    document.getElementById('artist-suggestions').innerHTML = '';
+    document.getElementById('artist-manual-results').innerHTML = '';
+    document.getElementById('album-suggestions').innerHTML = '';
+    document.getElementById('album-manual-results').innerHTML = '';
+    
+    // Clear search inputs
+    document.getElementById('artist-search-input').value = '';
+    document.getElementById('album-search-input').value = '';
+    
+    // Reset button states
+    document.getElementById('confirm-match-btn').disabled = true;
+    
+    // Reset selections
+    currentMatchingData.selectedArtist = null;
+    currentMatchingData.selectedAlbum = null;
+    currentMatchingData.currentStage = 'artist';
+}
+
+function setupModalEventListeners() {
+    // Search input listeners
+    const artistInput = document.getElementById('artist-search-input');
+    const albumInput = document.getElementById('album-search-input');
+    
+    artistInput.removeEventListener('input', handleArtistSearch);
+    artistInput.addEventListener('input', handleArtistSearch);
+    
+    albumInput.removeEventListener('input', handleAlbumSearch);
+    albumInput.addEventListener('input', handleAlbumSearch);
+    
+    // Button listeners
+    const skipBtn = document.getElementById('skip-matching-btn');
+    const cancelBtn = document.getElementById('cancel-match-btn');
+    const confirmBtn = document.getElementById('confirm-match-btn');
+    
+    skipBtn.onclick = skipMatching;
+    cancelBtn.onclick = closeMatchingModal;
+    confirmBtn.onclick = confirmMatch;
+}
+
+async function fetchArtistSuggestions() {
+    try {
+        showLoadingCards('artist-suggestions', 'Finding artist...');
+        
+        const response = await fetch('/api/match/suggestions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                search_result: currentMatchingData.searchResult,
+                context: 'artist',
+                is_album: currentMatchingData.isAlbumDownload,
+                album_result: currentMatchingData.albumResult
+            })
+        });
+        
+        const data = await response.json();
+        if (data.suggestions) {
+            renderArtistSuggestions(data.suggestions);
+        } else {
+            showNoResultsMessage('artist-suggestions', 'No artist suggestions found');
+        }
+    } catch (error) {
+        console.error('Error fetching artist suggestions:', error);
+        showNoResultsMessage('artist-suggestions', 'Error loading suggestions');
+    }
+}
+
+async function fetchAlbumSuggestions() {
+    if (!currentMatchingData.selectedArtist) return;
+    
+    try {
+        showLoadingCards('album-suggestions', 'Finding album...');
+        
+        const response = await fetch('/api/match/suggestions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                search_result: currentMatchingData.searchResult,
+                context: 'album',
+                selected_artist: currentMatchingData.selectedArtist
+            })
+        });
+        
+        const data = await response.json();
+        if (data.suggestions) {
+            renderAlbumSuggestions(data.suggestions);
+        } else {
+            showNoResultsMessage('album-suggestions', 'No album suggestions found');
+        }
+    } catch (error) {
+        console.error('Error fetching album suggestions:', error);
+        showNoResultsMessage('album-suggestions', 'Error loading suggestions');
+    }
+}
+
+function renderArtistSuggestions(suggestions) {
+    const container = document.getElementById('artist-suggestions');
+    container.innerHTML = '';
+    
+    if (!suggestions.length) {
+        showNoResultsMessage('artist-suggestions', 'No artist matches found');
+        return;
+    }
+    
+    suggestions.forEach(suggestion => {
+        const card = createArtistCard(suggestion.artist, suggestion.confidence);
+        container.appendChild(card);
+    });
+}
+
+function renderAlbumSuggestions(suggestions) {
+    const container = document.getElementById('album-suggestions');
+    container.innerHTML = '';
+    
+    if (!suggestions.length) {
+        showNoResultsMessage('album-suggestions', 'No album matches found');
+        return;
+    }
+    
+    suggestions.forEach(suggestion => {
+        const card = createAlbumCard(suggestion.album, suggestion.confidence);
+        container.appendChild(card);
+    });
+}
+
+function createArtistCard(artist, confidence) {
+    const card = document.createElement('div');
+    card.className = 'suggestion-card';
+    card.onclick = () => selectArtist(artist);
+    
+    const imageUrl = artist.image_url || '';
+    const confidencePercent = Math.round(confidence * 100);
+    
+    card.innerHTML = `
+        <div class="suggestion-card-overlay"></div>
+        <div class="suggestion-card-content">
+            <div class="suggestion-card-name" title="${escapeHtml(artist.name)}">${escapeHtml(artist.name)}</div>
+            <div class="suggestion-card-details">
+                ${artist.genres && artist.genres.length ? escapeHtml(artist.genres.slice(0, 2).join(', ')) : 'Artist'}
+            </div>
+            <div class="suggestion-card-confidence">${confidencePercent}% match</div>
+        </div>
+    `;
+    
+    // Set background image if available
+    if (imageUrl) {
+        card.style.backgroundImage = `url(${imageUrl})`;
+        card.style.backgroundSize = 'cover';
+        card.style.backgroundPosition = 'center';
+    }
+    
+    return card;
+}
+
+function createAlbumCard(album, confidence) {
+    const card = document.createElement('div');
+    card.className = 'suggestion-card';
+    card.onclick = () => selectAlbum(album);
+    
+    const imageUrl = album.image_url || '';
+    const confidencePercent = Math.round(confidence * 100);
+    const year = album.release_date ? album.release_date.split('-')[0] : '';
+    
+    card.innerHTML = `
+        <div class="suggestion-card-overlay"></div>
+        <div class="suggestion-card-content">
+            <div class="suggestion-card-name" title="${escapeHtml(album.name)}">${escapeHtml(album.name)}</div>
+            <div class="suggestion-card-details">
+                ${album.album_type ? escapeHtml(album.album_type.charAt(0).toUpperCase() + album.album_type.slice(1)) : 'Album'}${year ? ` • ${year}` : ''}
+            </div>
+            <div class="suggestion-card-confidence">${confidencePercent}% match</div>
+        </div>
+    `;
+    
+    // Set background image if available
+    if (imageUrl) {
+        card.style.backgroundImage = `url(${imageUrl})`;
+        card.style.backgroundSize = 'cover';
+        card.style.backgroundPosition = 'center';
+    }
+    
+    return card;
+}
+
+function selectArtist(artist) {
+    // Clear previous selections
+    document.querySelectorAll('#artist-suggestions .suggestion-card').forEach(card => {
+        card.classList.remove('selected');
+    });
+    document.querySelectorAll('#artist-manual-results .suggestion-card').forEach(card => {
+        card.classList.remove('selected');
+    });
+    
+    // Mark new selection
+    event.currentTarget.classList.add('selected');
+    
+    // Store selection
+    currentMatchingData.selectedArtist = artist;
+    
+    console.log('🎯 Selected artist:', artist.name);
+    
+    if (currentMatchingData.isAlbumDownload) {
+        // Transition to album selection stage
+        transitionToAlbumStage();
+    } else {
+        // Enable confirm button for single downloads
+        document.getElementById('confirm-match-btn').disabled = false;
+    }
+}
+
+function selectAlbum(album) {
+    // Clear previous selections
+    document.querySelectorAll('#album-suggestions .suggestion-card').forEach(card => {
+        card.classList.remove('selected');
+    });
+    document.querySelectorAll('#album-manual-results .suggestion-card').forEach(card => {
+        card.classList.remove('selected');
+    });
+    
+    // Mark new selection
+    event.currentTarget.classList.add('selected');
+    
+    // Store selection
+    currentMatchingData.selectedAlbum = album;
+    
+    console.log('🎯 Selected album:', album.name);
+    
+    // Enable confirm button
+    document.getElementById('confirm-match-btn').disabled = false;
+}
+
+function transitionToAlbumStage() {
+    // Hide artist stage
+    document.getElementById('artist-selection-stage').classList.add('hidden');
+    
+    // Show album stage
+    const albumStage = document.getElementById('album-selection-stage');
+    albumStage.classList.remove('hidden');
+    
+    // Update selected artist name
+    document.getElementById('selected-artist-name').textContent = currentMatchingData.selectedArtist.name;
+    
+    // Update current stage
+    currentMatchingData.currentStage = 'album';
+    
+    // Fetch album suggestions
+    fetchAlbumSuggestions();
+}
+
+function handleArtistSearch(event) {
+    const query = event.target.value.trim();
+    
+    // Clear previous timer
+    if (searchTimers.artist) {
+        clearTimeout(searchTimers.artist);
+    }
+    
+    if (query.length < 2) {
+        document.getElementById('artist-manual-results').innerHTML = '';
+        return;
+    }
+    
+    // Debounce search
+    searchTimers.artist = setTimeout(() => {
+        performArtistSearch(query);
+    }, 400);
+}
+
+function handleAlbumSearch(event) {
+    const query = event.target.value.trim();
+    
+    // Clear previous timer
+    if (searchTimers.album) {
+        clearTimeout(searchTimers.album);
+    }
+    
+    if (query.length < 2) {
+        document.getElementById('album-manual-results').innerHTML = '';
+        return;
+    }
+    
+    // Debounce search
+    searchTimers.album = setTimeout(() => {
+        performAlbumSearch(query);
+    }, 400);
+}
+
+async function performArtistSearch(query) {
+    try {
+        showLoadingCards('artist-manual-results', 'Searching artists...');
+        
+        const response = await fetch('/api/match/search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                query: query,
+                context: 'artist'
+            })
+        });
+        
+        const data = await response.json();
+        if (data.results) {
+            renderArtistSearchResults(data.results);
+        } else {
+            showNoResultsMessage('artist-manual-results', 'No artists found');
+        }
+    } catch (error) {
+        console.error('Error searching artists:', error);
+        showNoResultsMessage('artist-manual-results', 'Error searching artists');
+    }
+}
+
+async function performAlbumSearch(query) {
+    if (!currentMatchingData.selectedArtist) return;
+    
+    try {
+        showLoadingCards('album-manual-results', 'Searching albums...');
+        
+        const response = await fetch('/api/match/search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                query: query,
+                context: 'album',
+                artist_id: currentMatchingData.selectedArtist.id
+            })
+        });
+        
+        const data = await response.json();
+        if (data.results) {
+            renderAlbumSearchResults(data.results);
+        } else {
+            showNoResultsMessage('album-manual-results', 'No albums found');
+        }
+    } catch (error) {
+        console.error('Error searching albums:', error);
+        showNoResultsMessage('album-manual-results', 'Error searching albums');
+    }
+}
+
+function renderArtistSearchResults(results) {
+    const container = document.getElementById('artist-manual-results');
+    container.innerHTML = '';
+    
+    results.forEach(result => {
+        const card = createArtistCard(result.artist, result.confidence);
+        container.appendChild(card);
+    });
+}
+
+function renderAlbumSearchResults(results) {
+    const container = document.getElementById('album-manual-results');
+    container.innerHTML = '';
+    
+    results.forEach(result => {
+        const card = createAlbumCard(result.album, result.confidence);
+        container.appendChild(card);
+    });
+}
+
+function showLoadingCards(containerId, message) {
+    const container = document.getElementById(containerId);
+    container.innerHTML = `<div class="loading-card">${message}</div>`;
+}
+
+function showNoResultsMessage(containerId, message) {
+    const container = document.getElementById(containerId);
+    container.innerHTML = `<div class="loading-card" style="color: rgba(255,255,255,0.5)">${message}</div>`;
+}
+
+function skipMatching() {
+    console.log('🎯 Skipping matching, proceeding with normal download');
+    
+    // Close modal
+    closeMatchingModal();
+    
+    // Start normal download
+    if (currentMatchingData.isAlbumDownload) {
+        // For albums, we need to download each track
+        showToast('⬇️ Starting album download (unmatched)', 'info');
+        // This would need to be implemented to download all album tracks
+    } else {
+        // Single track download
+        startDownload(window.currentSearchResults.indexOf(currentMatchingData.searchResult));
+    }
+}
+
+async function confirmMatch() {
+    if (!currentMatchingData.selectedArtist) {
+        showToast('⚠️ Please select an artist first', 'error');
+        return;
+    }
+    
+    if (currentMatchingData.isAlbumDownload && !currentMatchingData.selectedAlbum) {
+        showToast('⚠️ Please select an album first', 'error');
+        return;
+    }
+    
+    try {
+        console.log('🎯 Confirming match with:', {
+            artist: currentMatchingData.selectedArtist.name,
+            album: currentMatchingData.selectedAlbum?.name
+        });
+        
+        // Disable confirm button to prevent double-clicks
+        const confirmBtn = document.getElementById('confirm-match-btn');
+        const originalText = confirmBtn.textContent;
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = 'Starting...';
+        
+        const response = await fetch('/api/download/matched', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                search_result: currentMatchingData.searchResult,
+                spotify_artist: currentMatchingData.selectedArtist,
+                spotify_album: currentMatchingData.selectedAlbum || null
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showToast(`🎯 Matched download started for "${currentMatchingData.selectedArtist.name}"`, 'success');
+            closeMatchingModal();
+        } else {
+            throw new Error(data.error || 'Failed to start matched download');
+        }
+        
+    } catch (error) {
+        console.error('Error starting matched download:', error);
+        showToast(`❌ Error starting matched download: ${error.message}`, 'error');
+        
+        // Re-enable confirm button
+        const confirmBtn = document.getElementById('confirm-match-btn');
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = originalText;
+    }
+}
+
+function matchedDownloadTrack(trackIndex) {
+    const results = window.currentSearchResults;
+    if (!results || !results[trackIndex]) {
+        console.error('Could not find track for matched download:', trackIndex);
+        showToast('Error preparing matched download.', 'error');
+        return;
+    }
+    const trackData = results[trackIndex];
+    // It's a single track, so isAlbumDownload is false and there's no album context.
+    openMatchingModal(trackData, false, null);
+}
+
+function matchedDownloadAlbum(albumIndex) {
+    const results = window.currentSearchResults;
+    if (!results || !results[albumIndex]) {
+        console.error('Could not find album for matched download:', albumIndex);
+        showToast('Error preparing matched download.', 'error');
+        return;
+    }
+    const albumData = results[albumIndex];
+    // The first track is used as a reference for the initial artist search.
+    const firstTrack = albumData.tracks ? albumData.tracks[0] : albumData;
+    openMatchingModal(firstTrack, true, albumData);
+}
+
+function matchedDownloadAlbumTrack(albumIndex, trackIndex) {
+    const results = window.currentSearchResults;
+    if (!results || !results[albumIndex] || !results[albumIndex].tracks || !results[albumIndex].tracks[trackIndex]) {
+        console.error('Could not find album track for matched download:', albumIndex, trackIndex);
+        showToast('Error preparing matched download.', 'error');
+        return;
+    }
+    const albumData = results[albumIndex];
+    const trackData = albumData.tracks[trackIndex];
+
+    // Pass the specific track as the main search result, but also pass the full album data for context.
+    openMatchingModal(trackData, true, albumData);
+}
+
