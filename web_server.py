@@ -1444,62 +1444,145 @@ def search_match():
         print(f"❌ Error in match search: {e}")
         return jsonify({"error": str(e)}), 500
 
+
+def _start_album_download_tasks(album_result, spotify_artist, spotify_album):
+    """
+    This final version now fetches the official Spotify tracklist and uses it to
+    match and correct the metadata for each individual track before downloading,
+    ensuring perfect tagging and naming.
+    """
+    print(f"🎵 Processing matched album download for '{spotify_album['name']}' with {len(album_result.get('tracks', []))} tracks.")
+    
+    tracks_to_download = album_result.get('tracks', [])
+    if not tracks_to_download:
+        print("⚠️ Album result contained no tracks. Aborting.")
+        return 0
+
+    # --- THIS IS THE NEW LOGIC ---
+    # Fetch the official tracklist from Spotify ONCE for the entire album.
+    official_spotify_tracks = _get_spotify_album_tracks(spotify_album)
+    if not official_spotify_tracks:
+        print("⚠️ Could not fetch official tracklist from Spotify. Metadata may be inaccurate.")
+    # --- END OF NEW LOGIC ---
+
+    started_count = 0
+    for track_data in tracks_to_download:
+        try:
+            username = track_data.get('username') or album_result.get('username')
+            filename = track_data.get('filename')
+            size = track_data.get('size', 0)
+
+            if not username or not filename:
+                continue
+
+            # Pre-parse the filename to get a baseline for metadata
+            parsed_meta = _parse_filename_metadata(filename)
+            
+            # --- THIS IS THE CRITICAL MATCHING STEP ---
+            # Match the parsed metadata against the official Spotify tracklist
+            corrected_meta = _match_track_to_spotify_title(parsed_meta, official_spotify_tracks)
+            # --- END OF CRITICAL STEP ---
+
+            # Create a clean context object using the CORRECTED metadata
+            individual_track_context = {
+                'username': username,
+                'filename': filename,
+                'size': size,
+                'title': corrected_meta.get('title'),
+                'artist': corrected_meta.get('artist') or spotify_artist['name'],
+                'album': spotify_album['name'],
+                'track_number': corrected_meta.get('track_number')
+            }
+
+            download_id = asyncio.run(soulseek_client.download(username, filename, size))
+
+            if download_id:
+                context_key = f"{username}::{filename}"
+                with matched_context_lock:
+                    matched_downloads_context[context_key] = {
+                        "spotify_artist": spotify_artist,
+                        "spotify_album": spotify_album,
+                        "original_search_result": individual_track_context, # Contains corrected data
+                        "is_album_download": True
+                    }
+                print(f"  + Queued track: {filename} (Matched to: '{corrected_meta.get('title')}')")
+                started_count += 1
+            else:
+                print(f"  - Failed to queue track: {filename}")
+
+        except Exception as e:
+            print(f"❌ Error processing track in album batch: {track_data.get('filename')}. Error: {e}")
+            continue
+            
+    return started_count
+
+
+
+
 @app.route('/api/download/matched', methods=['POST'])
 def start_matched_download():
-    """Start a matched download with Spotify metadata context"""
+    """
+    Starts a matched download. For albums, it now delegates to the new
+    _start_album_download_tasks function to process each track individually,
+    perfectly mirroring the robust logic of downloads.py.
+    """
     try:
         data = request.get_json()
-        search_result = data.get('search_result', {})
+        # Rename for clarity: this payload is either a single track or a full album object
+        download_payload = data.get('search_result', {})
         spotify_artist = data.get('spotify_artist', {})
-        spotify_album = data.get('spotify_album', {})
+        spotify_album = data.get('spotify_album', None) # Can be None for singles
 
-        if not search_result or not spotify_artist:
-            return jsonify({"success": False, "error": "Missing search result or artist data"}), 400
+        if not download_payload or not spotify_artist:
+            return jsonify({"success": False, "error": "Missing download payload or artist data"}), 400
 
-        username = search_result.get('username')
-        filename = search_result.get('filename')
-        size = search_result.get('size', 0)
+        # Check if this is an album download (user selected an album in the modal)
+        # This is the most reliable way to determine the intent from the frontend.
+        is_album_download = bool(spotify_album and spotify_album.get('id'))
 
-        if not username or not filename:
-            return jsonify({"success": False, "error": "Missing username or filename in search result"}), 400
-
-        print(f"🎯 Starting matched download for: {filename} from {username}")
-
-        # --- THIS IS THE CRITICAL FIX ---
-        # Pre-parse the filename to get clean metadata BEFORE starting the download.
-        parsed_meta = _parse_filename_metadata(filename)
-        
-        # Update the search_result with the clean, parsed data.
-        search_result['title'] = parsed_meta.get('title') or search_result.get('title')
-        search_result['artist'] = parsed_meta.get('artist') or search_result.get('artist')
-        search_result['album'] = parsed_meta.get('album') or search_result.get('album')
-        search_result['track_number'] = parsed_meta.get('track_number') or search_result.get('track_number')
-        # --- END OF FIX ---
-
-        download_id_from_client = asyncio.run(soulseek_client.download(username, filename, size))
-
-        if download_id_from_client:
-            context_key = f"{username}::{filename}"
-            with matched_context_lock:
-                matched_downloads_context[context_key] = {
-                    "spotify_artist": spotify_artist,
-                    "spotify_album": spotify_album or None,
-                    "original_search_result": search_result, # Now contains cleaned data
-                    "is_album_download": bool(spotify_album)
-                }
-
-            print(f"✅ Context saved for matched download with key: {context_key}")
-            return jsonify({"success": True, "message": "Matched download started"})
+        if is_album_download:
+            # It's an album. The download_payload is the full album object.
+            # Delegate to the dedicated album processor.
+            started_count = _start_album_download_tasks(download_payload, spotify_artist, spotify_album)
+            if started_count > 0:
+                return jsonify({"success": True, "message": f"Queued {started_count} tracks for matched album download."})
+            else:
+                return jsonify({"success": False, "error": "Failed to queue any tracks from the album."}), 500
         else:
-            error_msg = 'Failed to start download via slskd API'
-            print(f"❌ Failed to start matched download: {error_msg}")
-            return jsonify({"success": False, "error": error_msg}), 500
+            # It's a single track. The download_payload is a single track object.
+            username = download_payload.get('username')
+            filename = download_payload.get('filename')
+            size = download_payload.get('size', 0)
+
+            if not username or not filename:
+                return jsonify({"success": False, "error": "Missing username or filename"}), 400
+
+            # Pre-parse the single track's metadata
+            parsed_meta = _parse_filename_metadata(filename)
+            download_payload['title'] = parsed_meta.get('title') or download_payload.get('title')
+            download_payload['artist'] = parsed_meta.get('artist') or download_payload.get('artist')
+            
+            download_id = asyncio.run(soulseek_client.download(username, filename, size))
+
+            if download_id:
+                context_key = f"{username}::{filename}"
+                with matched_context_lock:
+                    matched_downloads_context[context_key] = {
+                        "spotify_artist": spotify_artist,
+                        "spotify_album": None, # Explicitly null for singles
+                        "original_search_result": download_payload,
+                        "is_album_download": False
+                    }
+                return jsonify({"success": True, "message": "Matched download started"})
+            else:
+                return jsonify({"success": False, "error": "Failed to start download via slskd"}), 500
 
     except Exception as e:
         import traceback
         traceback.print_exc()
-        print(f"❌ Error starting matched download: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
+
 
 
 def _parse_filename_metadata(filename: str) -> dict:
@@ -1658,31 +1741,39 @@ def _search_track_in_album_context(original_search: dict, artist: dict) -> dict:
 
 def _detect_album_info_web(context: dict, artist: dict) -> dict:
     """
-    This is a complete replacement that mirrors the multi-priority logic from downloads.py,
-    ensuring consistent and accurate album/single detection.
+    This is the final, corrected version that ensures the official Spotify track
+    number from the context is always prioritized for matched album downloads,
+    fixing the track numbering issue by mirroring the logic from downloads.py.
     """
     try:
         original_search = context.get("original_search_result", {})
         spotify_album_context = context.get("spotify_album")
-        
-        # Priority 1: User-provided album context from the matching modal
-        if spotify_album_context and spotify_album_context.get('id'):
-            print("✅ Using user-provided album context.")
+        is_album_download = context.get("is_album_download", False)
+
+        # --- THIS IS THE CRITICAL FIX ---
+        # If this is part of a matched album download, we TRUST the context data completely.
+        # This is the exact logic from downloads.py.
+        if is_album_download and spotify_album_context:
+            print("✅ Matched Album context found. Prioritizing pre-matched Spotify data.")
+            
+            # We exclusively use the track number and title that were matched
+            # *before* the download started. We do not try to re-parse the filename.
+            track_number = original_search.get('track_number', 1)
+            clean_track_name = original_search.get('title', 'Unknown Track')
+
+            print(f"   -> Using pre-matched Track #{track_number} and Title '{clean_track_name}'")
+
             return {
                 'is_album': True,
                 'album_name': spotify_album_context['name'],
-                'track_number': _extract_track_number_from_filename(original_search.get('filename', ''), original_search.get('title')),
-                'clean_track_name': _clean_track_title(original_search.get('title', ''), artist['name']),
+                'track_number': track_number,
+                'clean_track_name': clean_track_name,
                 'album_image_url': spotify_album_context.get('image_url')
             }
 
-        # Priority 2: Album-aware search using album name from Soulseek tags
-        if original_search.get('album'):
-            album_result = _search_track_in_album_context(original_search, artist)
-            if album_result:
-                return album_result
-
-        # Priority 3: Fallback to individual track search for clean metadata
+        # This fallback block handles single tracks. It was already working correctly.
+        # It performs a live Spotify search to determine if a single is part of an album.
+        print("ℹ️ Single track context. Performing live Spotify search for album info.")
         cleaned_title = _clean_track_title(original_search.get('title', ''), artist['name'])
         query = f"artist:\"{artist['name']}\" track:\"{cleaned_title}\""
         tracks = spotify_client.search_tracks(query, limit=1)
@@ -1702,7 +1793,6 @@ def _detect_album_info_web(context: dict, artist: dict) -> dict:
         album_type = api_album.get('album_type', 'single')
         total_tracks = api_album.get('total_tracks', 1)
         is_album = (album_type == 'album' and total_tracks > 1 and matching_engine.similarity_score(api_album.get('name'), best_match.name) < 0.9)
-
         album_image_url = api_album.get('images', [{}])[0].get('url') if api_album.get('images') else None
 
         return {
@@ -1716,6 +1806,7 @@ def _detect_album_info_web(context: dict, artist: dict) -> dict:
         print(f"❌ Error in _detect_album_info_web: {e}")
         clean_title = _clean_track_title(context.get("original_search_result", {}).get('title', 'Unknown'), artist.get('name', ''))
         return {'is_album': False, 'clean_track_name': clean_title, 'album_name': clean_title, 'track_number': 1}
+
 
 
 
@@ -1890,22 +1981,89 @@ def _download_cover_art(album_info: dict, target_dir: str):
         print(f"❌ Error downloading cover.jpg: {e}")
 
 
-# --- Post-Processing Logic ---
+def _get_spotify_album_tracks(spotify_album: dict) -> list:
+    """Fetches all tracks for a given Spotify album ID."""
+    if not spotify_album or not spotify_album.get('id'):
+        return []
+    try:
+        tracks_data = spotify_client.get_album_tracks(spotify_album['id'])
+        if tracks_data and 'items' in tracks_data:
+            return [{
+                'name': item.get('name'),
+                'track_number': item.get('track_number'),
+                'id': item.get('id')
+            } for item in tracks_data['items']]
+        return []
+    except Exception as e:
+        print(f"❌ Error fetching Spotify album tracks: {e}")
+        return []
 
+def _match_track_to_spotify_title(slsk_track_meta: dict, spotify_tracks: list) -> dict:
+    """
+    Intelligently matches a Soulseek track to a track from the official Spotify
+    tracklist using track numbers and title similarity. Returns the matched Spotify track data.
+    """
+    if not spotify_tracks:
+        return slsk_track_meta # Return original if no list to match against
+
+    # Priority 1: Match by track number
+    if slsk_track_meta.get('track_number'):
+        track_num = slsk_track_meta['track_number']
+        for sp_track in spotify_tracks:
+            if sp_track.get('track_number') == track_num:
+                print(f"✅ Matched track by number ({track_num}): '{slsk_track_meta['title']}' -> '{sp_track['name']}'")
+                # Return a new dict with the corrected title and number
+                return {
+                    'title': sp_track['name'],
+                    'artist': slsk_track_meta.get('artist'),
+                    'album': slsk_track_meta.get('album'),
+                    'track_number': sp_track['track_number']
+                }
+
+    # Priority 2: Match by title similarity (if track number fails)
+    best_match = None
+    best_score = 0.6 # Require a decent similarity
+    for sp_track in spotify_tracks:
+        score = matching_engine.similarity_score(
+            matching_engine.normalize_string(slsk_track_meta.get('title', '')),
+            matching_engine.normalize_string(sp_track.get('name', ''))
+        )
+        if score > best_score:
+            best_score = score
+            best_match = sp_track
+    
+    if best_match:
+        print(f"✅ Matched track by title similarity ({best_score:.2f}): '{slsk_track_meta['title']}' -> '{best_match['name']}'")
+        return {
+            'title': best_match['name'],
+            'artist': slsk_track_meta.get('artist'),
+            'album': slsk_track_meta.get('album'),
+            'track_number': best_match['track_number']
+        }
+
+    print(f"⚠️ Could not confidently match track '{slsk_track_meta['title']}'. Using original metadata.")
+    return slsk_track_meta # Fallback to original
+
+
+# --- Post-Processing Logic ---
 def _post_process_matched_download(context_key, context, file_path):
     """
-    This is the new, robust post-processing function for matched downloads,
-    ported from downloads.py. It handles file organization, renaming, metadata
-    tagging, and cover art downloading for both singles and albums.
-    
-    NOTE: The primary fixes for the reported issues are in the helper functions
-    this function calls: `_detect_album_info_web` and the file finder used in the
-    `/api/downloads/status` route.
+    This is the final, corrected post-processing function. It now mirrors the
+    GUI's logic by trusting the pre-matched context for album downloads, which
+    solves the track numbering issue.
     """
     try:
         import os
         import shutil
+        import time
         from pathlib import Path
+
+        # --- GUI PARITY FIX: Add a delay to prevent file lock race conditions ---
+        # The GUI app waits 1 second to ensure the file handle is released by
+        # the download client before attempting to move or modify it.
+        print(f"⏳ Waiting 1 second for file handle release for: {os.path.basename(file_path)}")
+        time.sleep(1)
+        # --- END OF FIX ---
 
         print(f"🎯 Starting robust post-processing for: {context_key}")
         
@@ -1914,26 +2072,37 @@ def _post_process_matched_download(context_key, context, file_path):
             print(f"❌ Post-processing failed: Missing spotify_artist context.")
             return
 
+        is_album_download = context.get("is_album_download", False)
+        if is_album_download:
+            # For matched album downloads, we build album_info directly from the
+            # trusted context, bypassing the problematic _detect_album_info_web function.
+            print("✅ Matched Album context found. Building info directly from context.")
+            original_search = context.get("original_search_result", {})
+            spotify_album = context.get("spotify_album", {})
+            album_info = {
+                'is_album': True,
+                'album_name': spotify_album.get('name'),
+                'track_number': original_search.get('track_number', 1),
+                'clean_track_name': original_search.get('title', 'Unknown Track'),
+                'album_image_url': spotify_album.get('image_url')
+            }
+        else:
+            # For singles, we still need to detect if they belong to an album.
+            album_info = _detect_album_info_web(context, spotify_artist)
+
         # 1. Get transfer path and create artist directory
         transfer_dir = config_manager.get('soulseek.transfer_path', './Transfer')
         artist_name_sanitized = _sanitize_filename(spotify_artist["name"])
         artist_dir = os.path.join(transfer_dir, artist_name_sanitized)
         os.makedirs(artist_dir, exist_ok=True)
         
-        # 2. Determine if it's a single or album track using the NEW, robust Spotify API logic
-        album_info = _detect_album_info_web(context, spotify_artist)
-        
         file_ext = os.path.splitext(file_path)[1]
 
-        # 3. Build the final path based on whether it's an album or single
+        # 2. Build the final path (this logic is now correct because album_info is correct)
         if album_info and album_info['is_album']:
-            # --- ALBUM LOGIC ---
-            album_name = album_info['album_name']
+            album_name_sanitized = _sanitize_filename(album_info['album_name'])
+            final_track_name_sanitized = _sanitize_filename(album_info['clean_track_name'])
             track_number = album_info['track_number']
-            final_track_name = album_info['clean_track_name']
-            
-            album_name_sanitized = _sanitize_filename(album_name)
-            final_track_name_sanitized = _sanitize_filename(final_track_name)
 
             album_folder_name = f"{artist_name_sanitized} - {album_name_sanitized}"
             album_dir = os.path.join(artist_dir, album_folder_name)
@@ -1941,37 +2110,24 @@ def _post_process_matched_download(context_key, context, file_path):
             
             new_filename = f"{track_number:02d} - {final_track_name_sanitized}{file_ext}"
             final_path = os.path.join(album_dir, new_filename)
-            print(f"📁 Determined album path: {final_path}")
-
         else:
-            # --- SINGLE LOGIC ---
-            final_track_name = album_info['clean_track_name']
-            final_track_name_sanitized = _sanitize_filename(final_track_name)
-            
+            final_track_name_sanitized = _sanitize_filename(album_info['clean_track_name'])
             single_folder_name = f"{artist_name_sanitized} - {final_track_name_sanitized}"
             single_dir = os.path.join(artist_dir, single_folder_name) 
             os.makedirs(single_dir, exist_ok=True)
-            
             new_filename = f"{final_track_name_sanitized}{file_ext}"
             final_path = os.path.join(single_dir, new_filename)
-            print(f"🎵 Determined single path: {final_path}")
 
-        # 4. Enhance metadata BEFORE moving the file
-        print(f"✍️  Attempting metadata enhancement on: {file_path}")
+        # 3. Enhance metadata, move file, download art, and cleanup
         _enhance_file_metadata(file_path, context, spotify_artist, album_info)
-
-        # 5. Move the file to its new, organized location
+        
         print(f"🚚 Moving '{os.path.basename(file_path)}' to '{final_path}'")
         if os.path.exists(final_path):
-            print(f"⚠️ Destination file exists, overwriting: {final_path}")
             os.remove(final_path)
         shutil.move(file_path, final_path)
         
-        # 6. Download cover.jpg to the final directory
-        final_directory = os.path.dirname(final_path)
-        _download_cover_art(album_info, final_directory)
+        _download_cover_art(album_info, os.path.dirname(final_path))
         
-        # 7. Clean up empty source directories
         downloads_path = config_manager.get('soulseek.download_path', './downloads')
         _cleanup_empty_directories(downloads_path, file_path)
 
@@ -1981,6 +2137,7 @@ def _post_process_matched_download(context_key, context, file_path):
         import traceback
         print(f"\n❌ CRITICAL ERROR in post-processing for {context_key}: {e}")
         traceback.print_exc()
+
 
 
 

@@ -3046,53 +3046,61 @@ async function confirmMatch() {
         showToast('⚠️ Please select an artist first', 'error');
         return;
     }
-    
+
     if (currentMatchingData.isAlbumDownload && !currentMatchingData.selectedAlbum) {
         showToast('⚠️ Please select an album first', 'error');
         return;
     }
-    
+
+    const confirmBtn = document.getElementById('confirm-match-btn');
+    const originalText = confirmBtn.textContent; // FIX: Declare outside try block
+
     try {
         console.log('🎯 Confirming match with:', {
             artist: currentMatchingData.selectedArtist.name,
             album: currentMatchingData.selectedAlbum?.name
         });
-        
-        // Disable confirm button to prevent double-clicks
-        const confirmBtn = document.getElementById('confirm-match-btn');
-        const originalText = confirmBtn.textContent;
+
         confirmBtn.disabled = true;
         confirmBtn.textContent = 'Starting...';
-        
+
+        // --- THIS IS THE CRITICAL FIX ---
+        // Determine the correct data to send. For albums, we send the full albumResult
+        // which contains the complete list of tracks.
+        const downloadPayload = currentMatchingData.isAlbumDownload
+            ? currentMatchingData.albumResult
+            : currentMatchingData.searchResult;
+        // --- END OF FIX ---
+
         const response = await fetch('/api/download/matched', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                search_result: currentMatchingData.searchResult,
+                search_result: downloadPayload, // Send the correct payload
                 spotify_artist: currentMatchingData.selectedArtist,
                 spotify_album: currentMatchingData.selectedAlbum || null
             })
         });
-        
+
         const data = await response.json();
-        
+
         if (data.success) {
             showToast(`🎯 Matched download started for "${currentMatchingData.selectedArtist.name}"`, 'success');
             closeMatchingModal();
         } else {
             throw new Error(data.error || 'Failed to start matched download');
         }
-        
+
     } catch (error) {
         console.error('Error starting matched download:', error);
         showToast(`❌ Error starting matched download: ${error.message}`, 'error');
         
-        // Re-enable confirm button
-        const confirmBtn = document.getElementById('confirm-match-btn');
+        // Re-enable confirm button on failure
         confirmBtn.disabled = false;
         confirmBtn.textContent = originalText;
     }
 }
+
 
 function matchedDownloadTrack(trackIndex) {
     const results = window.currentSearchResults;
