@@ -944,7 +944,7 @@ def get_download_status():
                                     if found_path:
                                         print(f"🎯 Found completed matched file on disk: {found_path}")
                                         completed_matched_downloads.append((context_key, context, found_path))
-                                        _processed_download_ids.add(context_key)
+                                        # Don't add to _processed_download_ids yet - wait until thread starts successfully
                                     else:
                                         print(f"❌ CRITICAL: Could not find '{os.path.basename(filename_from_api)}' on disk. Post-processing skipped.")
 
@@ -953,19 +953,26 @@ def get_download_status():
             def process_completed_downloads():
                 for context_key, context, found_path in completed_matched_downloads:
                     try:
+                        print(f"🚀 Starting post-processing thread for: {context_key}")
                         # Start the post-processing in a separate thread
                         thread = threading.Thread(target=_post_process_matched_download, args=(context_key, context, found_path))
                         thread.daemon = True
                         thread.start()
+                        
+                        # Only mark as processed AFTER thread starts successfully
+                        _processed_download_ids.add(context_key)
+                        print(f"✅ Marked as processed: {context_key}")
+                        
                         # Remove context so it's not processed again
                         with matched_context_lock:
                             if context_key in matched_downloads_context:
                                 del matched_downloads_context[context_key]
+                                print(f"🗑️ Removed context: {context_key}")
+                                
                     except Exception as e:
                         print(f"❌ Error starting post-processing thread for {context_key}: {e}")
-                        # If starting the thread fails, remove from processed set to allow retry
-                        if context_key in _processed_download_ids:
-                            _processed_download_ids.remove(context_key)
+                        # Don't add to processed set if thread failed to start
+                        print(f"⚠️ Will retry {context_key} on next check")
 
             # Start a single thread to manage the launching of all processing threads
             processing_thread = threading.Thread(target=process_completed_downloads)
@@ -2104,6 +2111,17 @@ def _post_process_matched_download(context_key, context, file_path):
             album_name_sanitized = _sanitize_filename(album_info['album_name'])
             final_track_name_sanitized = _sanitize_filename(album_info['clean_track_name'])
             track_number = album_info['track_number']
+            
+            # Fix: Handle None track_number
+            if track_number is None:
+                print(f"⚠️ Track number is None, extracting from filename: {os.path.basename(file_path)}")
+                track_number = _extract_track_number_from_filename(file_path)
+                print(f"   -> Extracted track number: {track_number}")
+            
+            # Ensure track_number is valid
+            if not isinstance(track_number, int) or track_number < 1:
+                print(f"⚠️ Invalid track number ({track_number}), defaulting to 1")
+                track_number = 1
 
             album_folder_name = f"{artist_name_sanitized} - {album_name_sanitized}"
             album_dir = os.path.join(artist_dir, album_folder_name)
@@ -2138,6 +2156,17 @@ def _post_process_matched_download(context_key, context, file_path):
         import traceback
         print(f"\n❌ CRITICAL ERROR in post-processing for {context_key}: {e}")
         traceback.print_exc()
+        
+        # Remove from processed set so it can be retried
+        if context_key in _processed_download_ids:
+            _processed_download_ids.remove(context_key)
+            print(f"🔄 Removed {context_key} from processed set - will retry on next check")
+            
+        # Re-add to matched context for retry
+        with matched_context_lock:
+            if context_key not in matched_downloads_context:
+                matched_downloads_context[context_key] = context
+                print(f"♻️ Re-added {context_key} to context for retry")
 
 
 
@@ -2199,9 +2228,70 @@ def get_version_info():
     return jsonify(version_data)
 
 
+def start_simple_background_monitor():
+    """Simple background thread that calls the existing status endpoint logic."""
+    import time
+    import threading
+    
+    def simple_monitor():
+        print("🔄 Simple background monitor started")
+        
+        while True:
+            try:
+                # Check for pending matched downloads
+                with matched_context_lock:
+                    pending_count = len(matched_downloads_context)
+                    pending_keys = list(matched_downloads_context.keys())
+                
+                # Only process and log if there are pending downloads
+                if pending_count > 0:
+                    print(f"🎯 Monitor: {pending_count} pending downloads: {[key.split('::')[-1] for key in pending_keys[:3]]}{'...' if len(pending_keys) > 3 else ''}")
+                    
+                    # Just call the existing status endpoint logic directly
+                    with app.app_context():
+                        try:
+                            # Import what we need
+                            from flask import current_app
+                            with current_app.test_request_context():
+                                # Call the existing get_download_status function directly
+                                result = get_download_status()
+                                
+                                # Check how many are left after processing
+                                with matched_context_lock:
+                                    remaining_count = len(matched_downloads_context)
+                                
+                                if remaining_count < pending_count:
+                                    processed_count = pending_count - remaining_count
+                                    print(f"✅ Status check processed {processed_count} downloads, {remaining_count} remaining")
+                                else:
+                                    print(f"⏳ Status check completed, {remaining_count} still pending")
+                                    
+                        except Exception as status_error:
+                            print(f"❌ Status check error: {status_error}")
+                            import traceback
+                            traceback.print_exc()
+                
+                time.sleep(1)  # Check every 1 second for maximum responsiveness
+                
+            except Exception as e:
+                print(f"❌ Simple monitor error: {e}")
+                import traceback
+                traceback.print_exc()
+                time.sleep(10)
+    
+    monitor_thread = threading.Thread(target=simple_monitor)
+    monitor_thread.daemon = True
+    monitor_thread.start()
+
 # --- Main Execution ---
 
 if __name__ == '__main__':
     print("🚀 Starting SoulSync Web UI Server...")
     print("Open your browser and navigate to http://127.0.0.1:5001")
+    
+    # Start simple background monitor when server starts
+    print("🔧 Starting simple background monitor...")
+    start_simple_background_monitor()
+    print("✅ Simple background monitor started")
+    
     app.run(host='0.0.0.0', port=5001, debug=True)
