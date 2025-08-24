@@ -3129,7 +3129,10 @@ function matchedDownloadAlbumTrack(albumIndex, trackIndex) {
     const albumData = results[albumIndex];
     const trackData = albumData.tracks[trackIndex];
 
-    // Pass the specific track as the main search result, but also pass the full album data for context.
-    openMatchingModal(trackData, true, albumData);
+    // This is the definitive fix.
+    // The second argument MUST be 'false' to treat this as a single track download,
+    // which prevents the modal from asking for an album selection.
+    openMatchingModal(trackData, false, albumData);
 }
+
 
