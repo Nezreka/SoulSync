@@ -3192,3 +3192,581 @@ body {
     100% { opacity: 0.7; }
 }
 
+/* ======================================================= */
+/* == STYLES FOR DASHBOARD PAGE                         == */
+/* ======================================================= */
+
+/* Main Dashboard Layout */
+.dashboard-container {
+    display: flex;
+    flex-direction: column;
+    gap: 25px; /* Spacing between sections */
+    padding-bottom: 30px; /* Add space at the bottom */
+}
+
+.dashboard-section {
+    display: flex;
+    flex-direction: column;
+    gap: 15px; /* Spacing within a section (e.g., between title and content) */
+}
+
+.section-title {
+    font-family: 'SF Pro Display', -apple-system, sans-serif;
+    font-size: 18px;
+    font-weight: 700;
+    color: #ffffff;
+    padding-bottom: 5px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Header Styling */
+.dashboard-header {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+}
+
+.header-text {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.header-title {
+    font-size: 28px;
+    font-weight: 700;
+    color: #ffffff;
+}
+
+.header-subtitle {
+    font-size: 14px;
+    color: #b3b3b3;
+}
+
+.header-spacer {
+    flex-grow: 1; /* Pushes buttons to the right */
+}
+
+.header-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.header-button {
+    height: 45px;
+    border: none;
+    border-radius: 22px;
+    color: #000000;
+    font-size: 14px;
+    font-weight: 600;
+    padding: 12px 24px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
+    outline: none;
+    user-select: none;
+    
+    /* Enhanced glassmorphic effect */
+    backdrop-filter: blur(8px) saturate(1.2);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 
+        0 8px 20px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+.header-button:hover {
+    transform: translateY(-2px) scale(1.02);
+    box-shadow: 
+        0 12px 25px rgba(0, 0, 0, 0.4),
+        inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+.wishlist-button {
+    background: linear-gradient(135deg, #1db954 0%, #1ed760 100%);
+}
+.wishlist-button:hover {
+    background: linear-gradient(135deg, #1ed760 0%, #22ff6b 100%);
+}
+
+.watchlist-button {
+    background: linear-gradient(135deg, #ffc107 0%, #ffca28 100%);
+}
+.watchlist-button:hover {
+    background: linear-gradient(135deg, #ffca28 0%, #ffd54f 100%);
+}
+
+/* Service Status Grid */
+.service-status-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 20px;
+}
+
+.service-card {
+    /* Premium glassmorphic foundation matching modal and search cards */
+    background: linear-gradient(135deg, 
+        rgba(26, 26, 26, 0.95) 0%, 
+        rgba(18, 18, 18, 0.98) 100%);
+    backdrop-filter: blur(12px) saturate(1.1);
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+    padding: 20px;
+    position: relative;
+    overflow: hidden;
+    
+    /* Neumorphic depth shadows - elevated card effect */
+    box-shadow: 
+        0 18px 40px rgba(0, 0, 0, 0.6),
+        0 0 0 1px rgba(29, 185, 84, 0.08),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.1);
+    
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transform: translateZ(0);
+}
+
+.service-card:hover {
+    /* Enhanced glassmorphic hover state */
+    background: linear-gradient(135deg, 
+        rgba(30, 30, 30, 0.98) 0%, 
+        rgba(22, 22, 22, 1.0) 100%);
+    backdrop-filter: blur(16px) saturate(1.2);
+    border-color: rgba(29, 185, 84, 0.3);
+    border-top-color: rgba(29, 185, 84, 0.4);
+    
+    box-shadow: 
+        0 20px 45px rgba(0, 0, 0, 0.7),
+        0 0 0 1px rgba(29, 185, 84, 0.15),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.15);
+    
+    transform: translateY(-2px) translateZ(0);
+}
+
+.service-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.service-card-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #ffffff;
+}
+
+.service-card-indicator {
+    font-size: 18px;
+}
+
+.service-card-indicator.connected {
+    color: #1db954; /* Green */
+}
+
+.service-card-indicator.disconnected {
+    color: #ff4444; /* Red */
+}
+
+.service-card-status-text {
+    font-size: 12px;
+    color: #b3b3b3;
+}
+
+.service-card-response-time {
+    font-size: 11px;
+    color: #888888;
+}
+
+.service-card-footer {
+    margin-top: auto; /* Pushes button to the bottom */
+    padding-top: 8px;
+}
+
+.service-card-button {
+    /* Modal-style button matching new button system */
+    width: 100%;
+    padding: 10px 16px;
+    border: none;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
+    outline: none;
+    user-select: none;
+    
+    /* Secondary modal style */
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.8);
+}
+.service-card-button:hover {
+    background: rgba(255, 255, 255, 0.2);
+    color: #ffffff;
+    transform: translateY(-1px);
+}
+
+
+/* System Stats Grid */
+.stats-grid-dashboard {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 20px;
+}
+
+.stat-card-dashboard {
+    /* Premium glassmorphic foundation matching other cards */
+    background: linear-gradient(135deg, 
+        rgba(26, 26, 26, 0.95) 0%, 
+        rgba(18, 18, 18, 0.98) 100%);
+    backdrop-filter: blur(12px) saturate(1.1);
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+    padding: 24px 20px;
+    position: relative;
+    overflow: hidden;
+    
+    /* Neumorphic depth shadows */
+    box-shadow: 
+        0 18px 40px rgba(0, 0, 0, 0.6),
+        0 0 0 1px rgba(29, 185, 84, 0.08),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.1);
+    
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transform: translateZ(0);
+}
+
+.stat-card-title {
+    font-size: 12px;
+    color: #b3b3b3;
+}
+
+.stat-card-value {
+    font-size: 26px;
+    font-weight: 700;
+    color: #ffffff;
+}
+
+.stat-card-subtitle {
+    font-size: 11px;
+    color: #888888;
+}
+
+/* Tools & Operations Grid */
+.tools-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+    gap: 20px;
+}
+
+.tool-card {
+    /* Premium glassmorphic foundation */
+    background: linear-gradient(135deg, 
+        rgba(26, 26, 26, 0.95) 0%, 
+        rgba(18, 18, 18, 0.98) 100%);
+    backdrop-filter: blur(12px) saturate(1.1);
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+    padding: 24px;
+    position: relative;
+    overflow: hidden;
+    
+    /* Neumorphic depth shadows */
+    box-shadow: 
+        0 18px 40px rgba(0, 0, 0, 0.6),
+        0 0 0 1px rgba(29, 185, 84, 0.08),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.1);
+    
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transform: translateZ(0);
+}
+
+.tool-card-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: #ffffff;
+}
+
+.tool-card-info {
+    font-size: 12px;
+    color: #b3b3b3;
+    min-height: 2em; /* Reserve space for two lines */
+}
+
+.tool-card-controls {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.tool-card-controls select {
+    flex-grow: 1;
+    padding: 10px 16px;
+    background: linear-gradient(135deg, 
+        rgba(51, 51, 51, 0.95) 0%, 
+        rgba(34, 34, 34, 0.98) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    color: #ffffff;
+    font-size: 14px;
+    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
+    outline: none;
+    transition: all 0.2s ease;
+}
+.tool-card-controls select:hover {
+    border-color: rgba(255, 255, 255, 0.2);
+    background: linear-gradient(135deg, 
+        rgba(58, 58, 58, 0.95) 0%, 
+        rgba(40, 40, 40, 0.98) 100%);
+}
+.tool-card-controls select option {
+    background: #333333;
+    color: #ffffff;
+}
+
+.tool-card-controls button {
+    /* Modal-style primary button */
+    padding: 10px 20px;
+    border: none;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
+    outline: none;
+    user-select: none;
+    
+    /* Primary modal style */
+    background: #1db954;
+    color: #ffffff;
+    min-width: 140px;
+}
+.tool-card-controls button:hover:not(:disabled) {
+    background: #1ed760;
+    transform: translateY(-1px);
+}
+.tool-card-controls button:disabled {
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.4);
+    cursor: not-allowed;
+    transform: none;
+}
+
+.tool-card-progress-section {
+    padding-top: 10px;
+    border-top: 1px solid #404040;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.progress-phase-label {
+    font-size: 12px;
+    color: #b3b3b3;
+}
+.progress-details-label {
+    font-size: 11px;
+    color: #888888;
+    text-align: center;
+}
+
+.progress-bar-container {
+    height: 8px;
+    background: #555555;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.progress-bar-fill {
+    height: 100%;
+    background: #1db954;
+    border-radius: 4px;
+    width: 0%;
+    transition: width 0.3s ease;
+}
+
+
+/* Activity Feed */
+.activity-feed-container {
+    /* Premium glassmorphic foundation */
+    background: linear-gradient(135deg, 
+        rgba(26, 26, 26, 0.95) 0%, 
+        rgba(18, 18, 18, 0.98) 100%);
+    backdrop-filter: blur(12px) saturate(1.1);
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+    padding: 8px;
+    position: relative;
+    overflow: hidden;
+    
+    /* Neumorphic depth shadows */
+    box-shadow: 
+        0 18px 40px rgba(0, 0, 0, 0.6),
+        0 0 0 1px rgba(29, 185, 84, 0.08),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.1);
+    
+    max-height: 350px;
+    overflow-y: auto;
+}
+
+.activity-item {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    padding: 10px 15px;
+    border-bottom: 1px solid #404040;
+}
+.activity-item:last-child {
+    border-bottom: none;
+}
+
+.activity-icon {
+    font-size: 18px;
+    width: 32px;
+    height: 32px;
+    background: rgba(29, 185, 84, 0.1);
+    border-radius: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.activity-text-content {
+    flex-grow: 1;
+}
+
+.activity-title {
+    font-size: 12px;
+    font-weight: 500;
+    color: #ffffff;
+}
+
+.activity-subtitle {
+    font-size: 11px;
+    color: #b3b3b3;
+}
+
+.activity-time {
+    font-size: 11px;
+    color: #b3b3b3;
+    white-space: nowrap;
+}
+
+/* Responsive Design Enhancements */
+@media (max-width: 1200px) {
+    .tools-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .service-status-grid {
+        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    }
+    
+    .stats-grid-dashboard {
+        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    }
+}
+
+@media (max-width: 768px) {
+    .dashboard-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 15px;
+    }
+    
+    .header-actions {
+        width: 100%;
+        justify-content: flex-start;
+    }
+    
+    .header-button {
+        flex: 1;
+        min-width: 120px;
+    }
+    
+    .service-status-grid,
+    .stats-grid-dashboard {
+        grid-template-columns: 1fr;
+        gap: 15px;
+    }
+    
+    .tool-card-controls {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .tool-card-controls button {
+        width: 100%;
+        min-width: auto;
+    }
+}
+
+/* Custom Scrollbar for Activity Feed */
+.activity-feed-container::-webkit-scrollbar {
+    width: 8px;
+}
+
+.activity-feed-container::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 4px;
+}
+
+.activity-feed-container::-webkit-scrollbar-thumb {
+    background: rgba(29, 185, 84, 0.3);
+    border-radius: 4px;
+}
+
+.activity-feed-container::-webkit-scrollbar-thumb:hover {
+    background: rgba(29, 185, 84, 0.5);
+}
+
+/* Enhanced Progress Bar Animation */
+.progress-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, 
+        #1db954 0%, 
+        #1ed760 50%, 
+        #22ff6b 100%);
+    border-radius: 4px;
+    width: 0%;
+    transition: width 0.3s ease;
+    position: relative;
+}
+
+/* Progress bar shimmer effect when active */
+.progress-bar-fill:not([style*="width: 0%"])::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, 
+        transparent 0%, 
+        rgba(255, 255, 255, 0.2) 50%, 
+        transparent 100%);
+    animation: shimmer 2s infinite;
+}
+
+@keyframes shimmer {
+    0% { left: -100%; }
+    100% { left: 100%; }
+}
+
