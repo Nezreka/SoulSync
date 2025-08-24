@@ -1522,34 +1522,31 @@ def _start_album_download_tasks(album_result, spotify_artist, spotify_album):
 @app.route('/api/download/matched', methods=['POST'])
 def start_matched_download():
     """
-    Starts a matched download. For albums, it now delegates to the new
-    _start_album_download_tasks function to process each track individually,
-    perfectly mirroring the robust logic of downloads.py.
+    Starts a matched download. This version corrects a bug where album context
+    was being discarded for individual album track downloads, ensuring they are
+    processed identically to single track downloads.
     """
     try:
         data = request.get_json()
-        # Rename for clarity: this payload is either a single track or a full album object
         download_payload = data.get('search_result', {})
         spotify_artist = data.get('spotify_artist', {})
-        spotify_album = data.get('spotify_album', None) # Can be None for singles
+        spotify_album = data.get('spotify_album', None)
 
         if not download_payload or not spotify_artist:
             return jsonify({"success": False, "error": "Missing download payload or artist data"}), 400
 
-        # Check if this is an album download (user selected an album in the modal)
-        # This is the most reliable way to determine the intent from the frontend.
-        is_album_download = bool(spotify_album and spotify_album.get('id'))
+        # This check is for full album downloads (when the main album card button is clicked)
+        is_full_album_download = bool(spotify_album and download_payload.get('result_type') == 'album')
 
-        if is_album_download:
-            # It's an album. The download_payload is the full album object.
-            # Delegate to the dedicated album processor.
+        if is_full_album_download:
+            # This logic for full album downloads is correct and remains unchanged.
             started_count = _start_album_download_tasks(download_payload, spotify_artist, spotify_album)
             if started_count > 0:
                 return jsonify({"success": True, "message": f"Queued {started_count} tracks for matched album download."})
             else:
                 return jsonify({"success": False, "error": "Failed to queue any tracks from the album."}), 500
         else:
-            # It's a single track. The download_payload is a single track object.
+            # This block handles BOTH regular singles AND individual tracks from an album card.
             username = download_payload.get('username')
             filename = download_payload.get('filename')
             size = download_payload.get('size', 0)
@@ -1557,7 +1554,6 @@ def start_matched_download():
             if not username or not filename:
                 return jsonify({"success": False, "error": "Missing username or filename"}), 400
 
-            # Pre-parse the single track's metadata
             parsed_meta = _parse_filename_metadata(filename)
             download_payload['title'] = parsed_meta.get('title') or download_payload.get('title')
             download_payload['artist'] = parsed_meta.get('artist') or download_payload.get('artist')
@@ -1567,11 +1563,14 @@ def start_matched_download():
             if download_id:
                 context_key = f"{username}::{filename}"
                 with matched_context_lock:
+                    # THE FIX: We preserve the spotify_album context if it was provided.
+                    # For a regular single, spotify_album will be None.
+                    # For an album track, it will contain the album's data.
                     matched_downloads_context[context_key] = {
                         "spotify_artist": spotify_artist,
-                        "spotify_album": None, # Explicitly null for singles
+                        "spotify_album": spotify_album, # PRESERVE album context
                         "original_search_result": download_payload,
-                        "is_album_download": False
+                        "is_album_download": False # It's a single track download, not a full album job.
                     }
                 return jsonify({"success": True, "message": "Matched download started"})
             else:
@@ -1581,6 +1580,8 @@ def start_matched_download():
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
+
+
 
 
 
