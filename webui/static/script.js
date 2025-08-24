@@ -21,6 +21,7 @@ let currentFilterType = 'all';
 let currentFilterFormat = 'all';
 let currentSortBy = 'quality_score';
 let isSortReversed = false;
+let searchAbortController = null;
 
 // API endpoints
 const API = {
@@ -1219,10 +1220,23 @@ function initializeSearch() {
     const searchInput = document.getElementById('downloads-search-input');
     const searchButton = document.getElementById('downloads-search-btn');
     
+    // Add this line to get the cancel button
+    const cancelButton = document.getElementById('downloads-cancel-btn');
+
     if (searchButton && searchInput) {
         searchButton.addEventListener('click', performDownloadsSearch);
         searchInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') performDownloadsSearch();
+        });
+    }
+
+    // Add this event listener for the cancel button
+    if (cancelButton) {
+        cancelButton.addEventListener('click', () => {
+            if (searchAbortController) {
+                searchAbortController.abort(); // This cancels the fetch request
+                console.log("Search cancelled by user.");
+            }
         });
     }
 }
@@ -1673,46 +1687,97 @@ async function clearFinishedDownloads() {
     }
 }
 
+// REPLACE the old performDownloadsSearch function with this new one.
 async function performDownloadsSearch() {
     const query = document.getElementById('downloads-search-input').value.trim();
     if (!query) {
         showToast('Please enter a search term', 'error');
         return;
     }
-    
+
+    // --- UI Element References ---
+    const searchInput = document.getElementById('downloads-search-input');
+    const searchButton = document.getElementById('downloads-search-btn');
+    const cancelButton = document.getElementById('downloads-cancel-btn');
+    const statusText = document.getElementById('search-status-text');
+    const spinner = document.querySelector('.spinner-animation');
+    const dots = document.querySelector('.dots-animation');
+
+    // --- Start a new AbortController for this search ---
+    searchAbortController = new AbortController();
+
     try {
-        showLoadingOverlay('Searching...');
-        
+        // --- 1. Update UI to "Searching" State ---
+        searchInput.disabled = true;
+        searchButton.disabled = true;
+        cancelButton.classList.remove('hidden');
+        spinner.classList.remove('hidden');
+        dots.classList.remove('hidden');
+        statusText.textContent = `Searching for '${query}'...`;
+        displayDownloadsResults([]); // Clear previous results
+
+        // --- 2. Perform the Fetch Request ---
         const response = await fetch('/api/search', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query })
+            body: JSON.stringify({ query }),
+            signal: searchAbortController.signal // Link fetch to the AbortController
         });
-        
+
         const data = await response.json();
-        
+
         if (data.error) {
-            showToast(`Search error: ${data.error}`, 'error');
-            return;
+            throw new Error(data.error);
         }
-        
+
         const results = data.results || [];
         allSearchResults = results;
         resetFilters();
         applyFiltersAndSort();
-        
+
+        // --- 3. Update UI with Success State ---
         if (results.length === 0) {
+            statusText.textContent = `No results found for '${query}'`;
             showToast('No results found', 'error');
         } else {
             document.getElementById('filters-container').classList.remove('hidden');
+            
+            // Count albums and singles like the GUI app
+            let totalAlbums = 0;
+            let totalTracks = 0;
+            
+            results.forEach(result => {
+                if (result.result_type === 'album') {
+                    totalAlbums++;
+                } else {
+                    totalTracks++;
+                }
+            });
+            
+            statusText.textContent = `✨ Found ${results.length} results • ${totalAlbums} albums, ${totalTracks} singles`;
             showToast(`Found ${results.length} results`, 'success');
         }
-        
+
     } catch (error) {
-        console.error('Search failed:', error);
-        showToast('Search failed', 'error');
+        // --- 4. Handle Errors, Including Cancellation ---
+        if (error.name === 'AbortError') {
+            // This specific error is thrown when the user clicks "Cancel"
+            statusText.textContent = 'Search was cancelled.';
+            showToast('Search cancelled', 'info');
+            displayDownloadsResults([]); // Clear any partial results
+        } else {
+            console.error('Search failed:', error);
+            statusText.textContent = `Search failed: ${error.message}`;
+            showToast('Search failed', 'error');
+        }
     } finally {
-        hideLoadingOverlay();
+        // --- 5. Clean Up UI Regardless of Outcome ---
+        searchInput.disabled = false;
+        searchButton.disabled = false;
+        cancelButton.classList.add('hidden');
+        spinner.classList.add('hidden');
+        dots.classList.add('hidden');
+        searchAbortController = null; // Clear the controller
     }
 }
 
@@ -1748,8 +1813,8 @@ function displayDownloadsResults(results) {
                                 </div>
                             </div>
                             <div class="track-item-actions">
-                                <button onclick="streamAlbumTrack(${index}, ${trackIndex})" class="track-stream-btn">▶</button>
-                                <button onclick="downloadAlbumTrack(${index}, ${trackIndex})" class="track-download-btn">⬇</button>
+                                <button onclick="streamAlbumTrack(${index}, ${trackIndex})" class="track-stream-btn">Stream ▶</button>
+                                <button onclick="downloadAlbumTrack(${index}, ${trackIndex})" class="track-download-btn">Download ⬇</button>
                                 <button onclick="matchedDownloadAlbumTrack(${index}, ${trackIndex})" class="track-matched-btn" title="Matched Download">🎯</button>
                             </div>
                         </div>
@@ -1772,7 +1837,7 @@ function displayDownloadsResults(results) {
                         </div>
                         <div class="album-actions" onclick="event.stopPropagation()">
                             <button onclick="downloadAlbum(${index})" class="album-download-btn">⬇ Download Album</button>
-                            <button onclick="matchedDownloadAlbum(${index})" class="album-matched-btn">🎯 Matched Album</button>
+                            <button onclick="matchedDownloadAlbum(${index})" class="album-matched-btn" title="Matched Album Download">Matched Album🎯</button>
                         </div>
                     </div>
                     <div class="album-track-list" style="display: none;">
@@ -1795,9 +1860,9 @@ function displayDownloadsResults(results) {
                         <div class="track-uploader">Shared by ${escapeHtml(result.username || 'Unknown')}</div>
                     </div>
                     <div class="track-actions">
-                        <button onclick="streamTrack(${index})" class="track-stream-btn" title="Stream Track">▶</button>
-                        <button onclick="downloadTrack(${index})" class="track-download-btn" title="Download">⬇</button>
-                        <button onclick="matchedDownloadTrack(${index})" class="track-matched-btn" title="Matched Download">🎯</button>
+                        <button onclick="streamTrack(${index})" class="track-stream-btn" title="Stream Track">Stream ▶</button>
+                        <button onclick="downloadTrack(${index})" class="track-download-btn" title="Download">Download ⬇</button>
+                        <button onclick="matchedDownloadTrack(${index})" class="track-matched-btn" title="Matched Download">Matched Download🎯</button>
                     </div>
                 </div>
             `;

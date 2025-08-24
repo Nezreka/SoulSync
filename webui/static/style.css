@@ -3116,3 +3116,23 @@ body {
     background: linear-gradient(to bottom, #a747fe, #903fdd);
     transform: scale(1.05);
 }
+
+.album-matched-btn {
+    background: linear-gradient(to bottom, #9333ea, #7c28c0);
+    border: 2px solid rgba(147, 51, 234, 0.3);
+    border-radius: 23px;
+    color: #fff;
+    padding: 10px 20px;
+    font-size: 15px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.album-matched-btn:hover {
+    background: linear-gradient(to bottom, #a747fe, #903fdd);
+    transform: scale(1.05);
+}
