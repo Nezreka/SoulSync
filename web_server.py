@@ -11,6 +11,7 @@ import time
 import shutil
 import glob
 from pathlib import Path
+
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Flask, render_template, request, jsonify, redirect, send_file
 
@@ -22,10 +23,30 @@ from core.plex_client import PlexClient
 from core.jellyfin_client import JellyfinClient
 from core.soulseek_client import SoulseekClient
 from core.tidal_client import TidalClient # Added import for Tidal
+from core.matching_engine import MusicMatchingEngine
 
 # --- Flask App Setup ---
 base_dir = os.path.abspath(os.path.dirname(__file__))
+project_root = os.path.dirname(base_dir) # Go up one level to the project root
+config_path = os.path.join(project_root, 'config', 'config.json')
 
+if os.path.exists(config_path):
+    print(f"Found config file at: {config_path}")
+    # Assuming your config_manager has a method to load from a specific path
+    if hasattr(config_manager, 'load_config'):
+        config_manager.load_config(config_path)
+        print("✅ Web server configuration loaded successfully.")
+    else:
+        # Fallback if no load_config method, try re-initializing with path
+        print("🔴 WARNING: config_manager does not have a 'load_config' method. Attempting re-init.")
+        try:
+            from config.settings import ConfigManager
+            config_manager = ConfigManager(config_path)
+            print("✅ Web server configuration re-initialized successfully.")
+        except Exception as e:
+            print(f"🔴 FAILED to re-initialize config_manager: {e}")
+else:
+    print(f"🔴 WARNING: config.json not found at {config_path}. Using default settings.")
 # Correctly point to the 'webui' directory for templates and static files
 app = Flask(
     __name__,
@@ -41,10 +62,11 @@ try:
     jellyfin_client = JellyfinClient()
     soulseek_client = SoulseekClient()
     tidal_client = TidalClient()
+    matching_engine = MusicMatchingEngine()
     print("✅ Core service clients initialized.")
 except Exception as e:
     print(f"🔴 FATAL: Error initializing service clients: {e}")
-    spotify_client = plex_client = jellyfin_client = soulseek_client = tidal_client = None
+    spotify_client = plex_client = jellyfin_client = soulseek_client = tidal_client = matching_engine = None
 
 # --- Global Streaming State Management ---
 # Thread-safe state tracking for streaming functionality
@@ -58,6 +80,12 @@ stream_state = {
 stream_lock = threading.Lock()  # Prevent race conditions
 stream_background_task = None
 stream_executor = ThreadPoolExecutor(max_workers=1)  # Only one stream at a time
+
+# --- Global Matched Downloads Context Management ---
+# Thread-safe storage for matched download contexts
+# Key: slskd download ID, Value: dict containing Spotify artist/album data
+matched_downloads_context = {}
+matched_context_lock = threading.Lock()
 
 def _prepare_stream_task(track_data):
     """
@@ -812,38 +840,146 @@ def start_download():
         print(f"Download error: {e}")
         return jsonify({"error": str(e)}), 500
 
+
+def _find_completed_file_robust(download_dir, api_filename):
+    """
+    Robustly finds a completed file on disk, accounting for name variations and
+    unexpected subdirectories. This version uses the superior normalization logic
+    from the GUI's matching_engine.py to ensure consistency.
+    """
+    import re
+    import os
+    from difflib import SequenceMatcher
+    from unidecode import unidecode
+
+    def normalize_for_finding(text: str) -> str:
+        """A powerful normalization function adapted from matching_engine.py."""
+        if not text: return ""
+        text = unidecode(text).lower()
+        # Replace common separators with spaces to preserve word boundaries
+        text = re.sub(r'[._/]', ' ', text)
+        # Keep alphanumeric, spaces, and hyphens. Remove brackets/parentheses content.
+        text = re.sub(r'[\[\(].*?[\]\)]', '', text)
+        text = re.sub(r'[^a-z0-9\s-]', '', text)
+        # Consolidate multiple spaces
+        return ' '.join(text.split()).strip()
+
+    target_basename = os.path.basename(api_filename)
+    normalized_target = normalize_for_finding(target_basename)
+    print(f" searching for normalized filename '{normalized_target}' in '{download_dir}'...")
+
+    best_match_path = None
+    highest_similarity = 0.0
+
+    # Walk through the entire download directory
+    for root, _, files in os.walk(download_dir):
+        for file in files:
+            # Direct match is the best case
+            if os.path.basename(file) == target_basename:
+                print(f"Found exact match: {os.path.join(root, file)}")
+                return os.path.join(root, file)
+            
+            # Fuzzy matching for variations
+            normalized_file = normalize_for_finding(file)
+            similarity = SequenceMatcher(None, normalized_target, normalized_file).ratio()
+
+            if similarity > highest_similarity:
+                highest_similarity = similarity
+                best_match_path = os.path.join(root, file)
+    
+    # Use a high confidence threshold for fuzzy matches to avoid incorrect files
+    if highest_similarity > 0.85:
+        print(f"Found best fuzzy match with similarity {highest_similarity:.2f}: {best_match_path}")
+        return best_match_path
+    
+    print(f"Could not find a confident match for '{target_basename}'. Highest similarity was {highest_similarity:.2f}.")
+    return None
+
+
 @app.route('/api/downloads/status')
 def get_download_status():
     """
-    Sophisticated download status fetching that matches GUI's update_download_status method.
-    Fetches raw transfer data directly from slskd and flattens it like the GUI.
+    A robust status checker that correctly finds completed files by searching
+    the entire download directory with fuzzy matching, mirroring the logic from downloads.py.
     """
     if not soulseek_client:
         return jsonify({"transfers": []})
-        
+
     try:
-        # Fetch raw transfers data exactly like GUI's StatusProcessingWorker
+        global _processed_download_ids
         transfers_data = asyncio.run(soulseek_client._make_request('GET', 'transfers/downloads'))
-        
+
         if not transfers_data:
             return jsonify({"transfers": []})
-        
-        # Flatten the nested data structure exactly like the GUI
+
         all_transfers = []
+        completed_matched_downloads = []
+
+        # This logic now correctly processes the nested structure from the slskd API
         for user_data in transfers_data:
+            username = user_data.get('username', 'Unknown')
             if 'directories' in user_data:
                 for directory in user_data['directories']:
                     if 'files' in directory:
                         for file_info in directory['files']:
-                            # Add username to each file object for convenience
-                            file_info['username'] = user_data.get('username', 'Unknown')
+                            file_info['username'] = username
                             all_transfers.append(file_info)
-        
+                            state = file_info.get('state', '').lower()
+
+                            # Check for completion state
+                            if ('succeeded' in state or 'completed' in state) and 'errored' not in state:
+                                filename_from_api = file_info.get('filename')
+                                if not filename_from_api: continue
+                                
+                                # Check if this completed download has a matched context
+                                context_key = f"{username}::{filename_from_api}"
+                                with matched_context_lock:
+                                    context = matched_downloads_context.get(context_key)
+
+                                if context and context_key not in _processed_download_ids:
+                                    download_dir = config_manager.get('soulseek.download_path', './downloads')
+                                    # Use the new robust file finder
+                                    found_path = _find_completed_file_robust(download_dir, filename_from_api)
+                                    
+                                    if found_path:
+                                        print(f"🎯 Found completed matched file on disk: {found_path}")
+                                        completed_matched_downloads.append((context_key, context, found_path))
+                                        _processed_download_ids.add(context_key)
+                                    else:
+                                        print(f"❌ CRITICAL: Could not find '{os.path.basename(filename_from_api)}' on disk. Post-processing skipped.")
+
+        # If we found completed matched downloads, start processing them in background threads
+        if completed_matched_downloads:
+            def process_completed_downloads():
+                for context_key, context, found_path in completed_matched_downloads:
+                    try:
+                        # Start the post-processing in a separate thread
+                        thread = threading.Thread(target=_post_process_matched_download, args=(context_key, context, found_path))
+                        thread.daemon = True
+                        thread.start()
+                        # Remove context so it's not processed again
+                        with matched_context_lock:
+                            if context_key in matched_downloads_context:
+                                del matched_downloads_context[context_key]
+                    except Exception as e:
+                        print(f"❌ Error starting post-processing thread for {context_key}: {e}")
+                        # If starting the thread fails, remove from processed set to allow retry
+                        if context_key in _processed_download_ids:
+                            _processed_download_ids.remove(context_key)
+
+            # Start a single thread to manage the launching of all processing threads
+            processing_thread = threading.Thread(target=process_completed_downloads)
+            processing_thread.daemon = True
+            processing_thread.start()
+
         return jsonify({"transfers": all_transfers})
-        
+
     except Exception as e:
         print(f"Error fetching download status: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+
 
 @app.route('/api/downloads/cancel', methods=['POST'])
 def cancel_download():
@@ -1023,6 +1159,833 @@ def stream_stop():
     except Exception as e:
         print(f"❌ Error stopping stream: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
+# --- Matched Downloads API Endpoints ---
+
+def _generate_artist_suggestions(search_result, is_album=False, album_result=None):
+    """
+    Port of ArtistSuggestionThread.generate_artist_suggestions() from GUI
+    Generate artist suggestions using multiple strategies
+    """
+    if not spotify_client or not matching_engine:
+        return []
+    
+    try:
+        print(f"🔍 Generating artist suggestions for: {search_result.get('artist', '')} - {search_result.get('title', '')}")
+        suggestions = []
+        
+        # Special handling for albums - use album title to find artist
+        if is_album and album_result and album_result.get('album_title'):
+            print(f"🎵 Album mode detected - using album title for artist search")
+            album_title = album_result.get('album_title', '')
+            
+            # Clean album title (remove year prefixes like "(2005)")
+            import re
+            clean_album_title = re.sub(r'^\(\d{4}\)\s*', '', album_title).strip()
+            print(f"    clean_album_title: '{clean_album_title}'")
+            
+            # Search tracks using album title to find the artist
+            tracks = spotify_client.search_tracks(clean_album_title, limit=20)
+            print(f"📊 Found {len(tracks)} tracks from album search")
+            
+            # Collect unique artists and their associated tracks/albums
+            unique_artists = {}  # artist_name -> list of (track, album) tuples
+            for track in tracks:
+                for artist_name in track.artists:
+                    if artist_name not in unique_artists:
+                        unique_artists[artist_name] = []
+                    unique_artists[artist_name].append((track, track.album))
+            
+            # Batch fetch artist objects for speed
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            artist_objects = {}  # artist_name -> Artist object
+            
+            def fetch_artist(artist_name):
+                try:
+                    matches = spotify_client.search_artists(artist_name, limit=1)
+                    if matches:
+                        return artist_name, matches[0]
+                except Exception as e:
+                    print(f"⚠️ Error fetching artist '{artist_name}': {e}")
+                return artist_name, None
+            
+            # Use limited concurrency to respect rate limits
+            with ThreadPoolExecutor(max_workers=3) as executor:
+                future_to_artist = {executor.submit(fetch_artist, name): name for name in unique_artists.keys()}
+                
+                for future in as_completed(future_to_artist):
+                    artist_name, artist_obj = future.result()
+                    if artist_obj:
+                        artist_objects[artist_name] = artist_obj
+            
+            # Calculate confidence scores for each artist
+            artist_scores = {}
+            for artist_name, track_album_pairs in unique_artists.items():
+                if artist_name not in artist_objects:
+                    continue
+                    
+                artist = artist_objects[artist_name]
+                best_confidence = 0
+                
+                # Find the best confidence score across all albums for this artist
+                for track, album in track_album_pairs:
+                    confidence = matching_engine.similarity_score(
+                        matching_engine.normalize_string(clean_album_title),
+                        matching_engine.normalize_string(album)
+                    )
+                    if confidence > best_confidence:
+                        best_confidence = confidence
+                
+                artist_scores[artist_name] = (artist, best_confidence)
+            
+            # Create suggestions from top matches
+            for artist_name, (artist, confidence) in sorted(artist_scores.items(), key=lambda x: x[1][1], reverse=True)[:8]:
+                suggestions.append({
+                    "artist": {
+                        "id": artist.id,
+                        "name": artist.name,
+                        "image_url": getattr(artist, 'image_url', None),
+                        "genres": getattr(artist, 'genres', []),
+                        "popularity": getattr(artist, 'popularity', 0)
+                    },
+                    "confidence": confidence
+                })
+                
+        else:
+            # Single track mode - search by artist name
+            search_artist = search_result.get('artist', '')
+            if not search_artist:
+                return []
+            
+            print(f"🎵 Single track mode - searching for artist: '{search_artist}'")
+            
+            # Search for artists directly
+            artist_matches = spotify_client.search_artists(search_artist, limit=10)
+            
+            for artist in artist_matches:
+                # Calculate confidence based on artist name similarity
+                confidence = matching_engine.similarity_score(
+                    matching_engine.normalize_string(search_artist),
+                    matching_engine.normalize_string(artist.name)
+                )
+                
+                suggestions.append({
+                    "artist": {
+                        "id": artist.id,
+                        "name": artist.name,
+                        "image_url": getattr(artist, 'image_url', None),
+                        "genres": getattr(artist, 'genres', []),
+                        "popularity": getattr(artist, 'popularity', 0)
+                    },
+                    "confidence": confidence
+                })
+        
+        # Sort by confidence and return top results
+        suggestions.sort(key=lambda x: x['confidence'], reverse=True)
+        return suggestions[:4]
+        
+    except Exception as e:
+        print(f"❌ Error generating artist suggestions: {e}")
+        return []
+
+def _generate_album_suggestions(selected_artist, search_result):
+    """
+    Port of AlbumSuggestionThread logic from GUI
+    Generate album suggestions for a selected artist
+    """
+    if not spotify_client or not matching_engine:
+        return []
+    
+    try:
+        print(f"🔍 Generating album suggestions for artist: {selected_artist['name']}")
+        
+        # Determine target album name from search result
+        target_album_name = search_result.get('album', '') or search_result.get('album_title', '')
+        if not target_album_name:
+            print("⚠️ No album name found in search result")
+            return []
+        
+        # Clean target album name
+        import re
+        clean_target = re.sub(r'^\(\d{4}\)\s*', '', target_album_name).strip()
+        print(f"    target_album: '{clean_target}'")
+        
+        # Get artist's albums from Spotify
+        artist_albums = spotify_client.get_artist_albums(selected_artist['id'], limit=50)
+        print(f"📊 Found {len(artist_albums)} albums for artist")
+        
+        album_matches = []
+        for album in artist_albums:
+            # Calculate confidence based on album name similarity
+            confidence = matching_engine.similarity_score(
+                matching_engine.normalize_string(clean_target),
+                matching_engine.normalize_string(album.name)
+            )
+            
+            album_matches.append({
+                "album": {
+                    "id": album.id,
+                    "name": album.name,
+                    "release_date": getattr(album, 'release_date', ''),
+                    "album_type": getattr(album, 'album_type', 'album'),
+                    "image_url": getattr(album, 'image_url', None),
+                    "total_tracks": getattr(album, 'total_tracks', 0)
+                },
+                "confidence": confidence
+            })
+        
+        # Sort by confidence and return top results
+        album_matches.sort(key=lambda x: x['confidence'], reverse=True)
+        return album_matches[:4]
+        
+    except Exception as e:
+        print(f"❌ Error generating album suggestions: {e}")
+        return []
+
+@app.route('/api/match/suggestions', methods=['POST'])
+def get_match_suggestions():
+    """Get AI-powered suggestions for artist or album matching"""
+    try:
+        data = request.get_json()
+        search_result = data.get('search_result', {})
+        context = data.get('context', 'artist')  # 'artist' or 'album'
+        
+        if context == 'artist':
+            is_album = data.get('is_album', False)
+            album_result = data.get('album_result', None) if is_album else None
+            suggestions = _generate_artist_suggestions(search_result, is_album, album_result)
+        elif context == 'album':
+            selected_artist = data.get('selected_artist', {})
+            suggestions = _generate_album_suggestions(selected_artist, search_result)
+        else:
+            return jsonify({"error": "Invalid context. Must be 'artist' or 'album'"}), 400
+        
+        return jsonify({"suggestions": suggestions})
+        
+    except Exception as e:
+        print(f"❌ Error in match suggestions: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/match/search', methods=['POST'])
+def search_match():
+    """Manual search for artists or albums"""
+    try:
+        data = request.get_json()
+        query = data.get('query', '').strip()
+        context = data.get('context', 'artist')  # 'artist' or 'album'
+        
+        if not query:
+            return jsonify({"results": []})
+        
+        if context == 'artist':
+            # Search for artists
+            artist_matches = spotify_client.search_artists(query, limit=8)
+            results = []
+            
+            for artist in artist_matches:
+                # Calculate confidence based on search similarity
+                confidence = matching_engine.similarity_score(
+                    matching_engine.normalize_string(query),
+                    matching_engine.normalize_string(artist.name)
+                )
+                
+                results.append({
+                    "artist": {
+                        "id": artist.id,
+                        "name": artist.name,
+                        "image_url": getattr(artist, 'image_url', None),
+                        "genres": getattr(artist, 'genres', []),
+                        "popularity": getattr(artist, 'popularity', 0)
+                    },
+                    "confidence": confidence
+                })
+            
+            return jsonify({"results": results})
+            
+        elif context == 'album':
+            # Search for albums by specific artist
+            artist_id = data.get('artist_id')
+            if not artist_id:
+                return jsonify({"error": "Artist ID required for album search"}), 400
+            
+            # Get artist's albums and filter by query
+            artist_albums = spotify_client.get_artist_albums(artist_id, limit=50)
+            results = []
+            
+            for album in artist_albums:
+                # Calculate confidence based on query similarity
+                confidence = matching_engine.similarity_score(
+                    matching_engine.normalize_string(query),
+                    matching_engine.normalize_string(album.name)
+                )
+                
+                # Only include results with reasonable similarity
+                if confidence > 0.3:
+                    results.append({
+                        "album": {
+                            "id": album.id,
+                            "name": album.name,
+                            "release_date": getattr(album, 'release_date', ''),
+                            "album_type": getattr(album, 'album_type', 'album'),
+                            "image_url": getattr(album, 'image_url', None),
+                            "total_tracks": getattr(album, 'total_tracks', 0)
+                        },
+                        "confidence": confidence
+                    })
+            
+            # Sort by confidence
+            results.sort(key=lambda x: x['confidence'], reverse=True)
+            return jsonify({"results": results[:8]})
+        
+        else:
+            return jsonify({"error": "Invalid context. Must be 'artist' or 'album'"}), 400
+        
+    except Exception as e:
+        print(f"❌ Error in match search: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/download/matched', methods=['POST'])
+def start_matched_download():
+    """Start a matched download with Spotify metadata context"""
+    try:
+        data = request.get_json()
+        search_result = data.get('search_result', {})
+        spotify_artist = data.get('spotify_artist', {})
+        spotify_album = data.get('spotify_album', {})
+
+        if not search_result or not spotify_artist:
+            return jsonify({"success": False, "error": "Missing search result or artist data"}), 400
+
+        username = search_result.get('username')
+        filename = search_result.get('filename')
+        size = search_result.get('size', 0)
+
+        if not username or not filename:
+            return jsonify({"success": False, "error": "Missing username or filename in search result"}), 400
+
+        print(f"🎯 Starting matched download for: {filename} from {username}")
+
+        # --- THIS IS THE CRITICAL FIX ---
+        # Pre-parse the filename to get clean metadata BEFORE starting the download.
+        parsed_meta = _parse_filename_metadata(filename)
+        
+        # Update the search_result with the clean, parsed data.
+        search_result['title'] = parsed_meta.get('title') or search_result.get('title')
+        search_result['artist'] = parsed_meta.get('artist') or search_result.get('artist')
+        search_result['album'] = parsed_meta.get('album') or search_result.get('album')
+        search_result['track_number'] = parsed_meta.get('track_number') or search_result.get('track_number')
+        # --- END OF FIX ---
+
+        download_id_from_client = asyncio.run(soulseek_client.download(username, filename, size))
+
+        if download_id_from_client:
+            context_key = f"{username}::{filename}"
+            with matched_context_lock:
+                matched_downloads_context[context_key] = {
+                    "spotify_artist": spotify_artist,
+                    "spotify_album": spotify_album or None,
+                    "original_search_result": search_result, # Now contains cleaned data
+                    "is_album_download": bool(spotify_album)
+                }
+
+            print(f"✅ Context saved for matched download with key: {context_key}")
+            return jsonify({"success": True, "message": "Matched download started"})
+        else:
+            error_msg = 'Failed to start download via slskd API'
+            print(f"❌ Failed to start matched download: {error_msg}")
+            return jsonify({"success": False, "error": error_msg}), 500
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"❌ Error starting matched download: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+def _parse_filename_metadata(filename: str) -> dict:
+    """
+    A direct port of the metadata parsing logic from the GUI's soulseek_client.py.
+    This is the crucial missing step that cleans filenames BEFORE Spotify matching.
+    """
+    import re
+    import os
+    
+    metadata = {
+        'artist': None,
+        'title': None,
+        'album': None,
+        'track_number': None
+    }
+    
+    # Get just the filename without extension and path
+    base_name = os.path.splitext(os.path.basename(filename))[0]
+    
+    # --- Logic from soulseek_client.py ---
+    patterns = [
+        # Pattern: 01 - Artist - Title
+        r'^(?P<track_number>\d{1,2})\s*[-\.]\s*(?P<artist>.+?)\s*[-–]\s*(?P<title>.+)$',
+        # Pattern: Artist - Title
+        r'^(?P<artist>.+?)\s*[-–]\s*(?P<title>.+)$',
+        # Pattern: 01 - Title
+        r'^(?P<track_number>\d{1,2})\s*[-\.]\s*(?P<title>.+)$',
+    ]
+    
+    for pattern in patterns:
+        match = re.match(pattern, base_name)
+        if match:
+            match_dict = match.groupdict()
+            metadata['track_number'] = int(match_dict['track_number']) if match_dict.get('track_number') else None
+            metadata['artist'] = match_dict.get('artist', '').strip() or None
+            metadata['title'] = match_dict.get('title', '').strip() or None
+            break # Stop after first successful match
+            
+    # If title is still missing, use the whole base_name
+    if not metadata['title']:
+        metadata['title'] = base_name.strip()
+
+    # Fallback for underscore formats like 'Artist_Album_01_Title'
+    if not metadata['artist'] and '_' in base_name:
+        parts = base_name.split('_')
+        if len(parts) >= 3:
+            # A common pattern is Artist_Album_TrackNum_Title
+            if parts[-2].isdigit():
+                metadata['artist'] = parts[0].strip()
+                metadata['title'] = parts[-1].strip()
+                metadata['track_number'] = int(parts[-2])
+                metadata['album'] = parts[1].strip()
+    
+    # Final cleanup on title if it contains the artist
+    if metadata['artist'] and metadata['title'] and metadata['artist'].lower() in metadata['title'].lower():
+         metadata['title'] = metadata['title'].replace(metadata['artist'], '').lstrip(' -–_').strip()
+
+
+    # Try to extract album from the full directory path
+    if '/' in filename or '\\' in filename:
+        path_parts = filename.replace('\\', '/').split('/')
+        if len(path_parts) >= 2:
+            # The parent directory is often the album
+            potential_album = path_parts[-2]
+            # Clean common prefixes like '2024 - '
+            cleaned_album = re.sub(r'^\d{4}\s*-\s*', '', potential_album).strip()
+            metadata['album'] = cleaned_album
+
+    print(f"🧠 Parsed Filename '{base_name}': Artist='{metadata['artist']}', Title='{metadata['title']}', Album='{metadata['album']}', Track#='{metadata['track_number']}'")
+    return metadata
+
+
+# ===================================================================
+# NEW POST-PROCESSING HELPERS (Ported from downloads.py)
+# ===================================================================
+
+def _sanitize_filename(filename: str) -> str:
+    """Sanitize filename for file system compatibility."""
+    import re
+    sanitized = re.sub(r'[<>:"/\\|?*]', '_', filename)
+    sanitized = re.sub(r'\s+', ' ', sanitized).strip()
+    return sanitized[:200]
+
+def _clean_track_title(track_title: str, artist_name: str) -> str:
+    """Clean up track title by removing artist prefix and other noise."""
+    import re
+    original = track_title.strip()
+    cleaned = original
+    cleaned = re.sub(r'^\d{1,2}[\.\s\-]+', '', cleaned)
+    artist_pattern = re.escape(artist_name) + r'\s*-\s*'
+    cleaned = re.sub(f'^{artist_pattern}', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'^[A-Za-z0-9\.]+\s*-\s*\d{1,2}\s*-\s*', '', cleaned)
+    quality_patterns = [r'\s*[\[\(][0-9]+\s*kbps[\]\)]\s*', r'\s*[\[\(]flac[\]\)]\s*', r'\s*[\[\(]mp3[\]\)]\s*']
+    for pattern in quality_patterns:
+        cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'^[-\s\.]+', '', cleaned)
+    cleaned = re.sub(r'[-\s\.]+$', '', cleaned)
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    return cleaned if cleaned else original
+
+def _extract_track_number_from_filename(filename: str, title: str = None) -> int:
+    """Extract track number from filename or title, returns 1 if not found."""
+    import re
+    import os
+    text_to_check = f"{title or ''} {os.path.splitext(os.path.basename(filename))[0]}"
+    match = re.match(r'^\d{1,2}', text_to_check.strip())
+    if match:
+        return int(match.group(0))
+    return 1
+
+def _search_track_in_album_context(original_search: dict, artist: dict) -> dict:
+    """
+    Searches for a track within its album context to avoid matching promotional singles.
+    This is a direct port from downloads.py for web server use.
+    """
+    try:
+        album_name = original_search.get('album')
+        track_title = original_search.get('title')
+        if not all([album_name, track_title, artist]):
+            return None
+
+        clean_album = _clean_track_title(album_name, artist['name']) # Use track cleaner for album too
+        clean_track = _clean_track_title(track_title, artist['name'])
+
+        album_query = f"album:\"{clean_album}\" artist:\"{artist['name']}\""
+        albums = spotify_client.search_albums(album_query, limit=1)
+
+        if not albums:
+            return None
+
+        spotify_album = albums[0]
+        album_tracks_data = spotify_client.get_album_tracks(spotify_album.id)
+        if not album_tracks_data or 'items' not in album_tracks_data:
+            return None
+
+        for track_data in album_tracks_data['items']:
+            similarity = matching_engine.similarity_score(
+                matching_engine.normalize_string(clean_track),
+                matching_engine.normalize_string(track_data['name'])
+            )
+            if similarity > 0.7:
+                print(f"✅ Found track in album context: '{track_data['name']}'")
+                return {
+                    'is_album': True,
+                    'album_name': spotify_album.name,
+                    'track_number': track_data['track_number'],
+                    'clean_track_name': track_data['name'],
+                    'album_image_url': spotify_album.image_url
+                }
+        return None
+    except Exception as e:
+        print(f"❌ Error in _search_track_in_album_context: {e}")
+        return None
+
+
+def _detect_album_info_web(context: dict, artist: dict) -> dict:
+    """
+    This is a complete replacement that mirrors the multi-priority logic from downloads.py,
+    ensuring consistent and accurate album/single detection.
+    """
+    try:
+        original_search = context.get("original_search_result", {})
+        spotify_album_context = context.get("spotify_album")
+        
+        # Priority 1: User-provided album context from the matching modal
+        if spotify_album_context and spotify_album_context.get('id'):
+            print("✅ Using user-provided album context.")
+            return {
+                'is_album': True,
+                'album_name': spotify_album_context['name'],
+                'track_number': _extract_track_number_from_filename(original_search.get('filename', ''), original_search.get('title')),
+                'clean_track_name': _clean_track_title(original_search.get('title', ''), artist['name']),
+                'album_image_url': spotify_album_context.get('image_url')
+            }
+
+        # Priority 2: Album-aware search using album name from Soulseek tags
+        if original_search.get('album'):
+            album_result = _search_track_in_album_context(original_search, artist)
+            if album_result:
+                return album_result
+
+        # Priority 3: Fallback to individual track search for clean metadata
+        cleaned_title = _clean_track_title(original_search.get('title', ''), artist['name'])
+        query = f"artist:\"{artist['name']}\" track:\"{cleaned_title}\""
+        tracks = spotify_client.search_tracks(query, limit=1)
+
+        if not tracks:
+            print("⚠️ No Spotify match found, defaulting to single.")
+            return {'is_album': False, 'clean_track_name': cleaned_title, 'album_name': cleaned_title, 'track_number': 1}
+
+        best_match = tracks[0]
+        detailed_track = spotify_client.get_track_details(best_match.id)
+
+        if not detailed_track:
+            print("⚠️ Could not get detailed track info, defaulting to single.")
+            return {'is_album': False, 'clean_track_name': best_match.name, 'album_name': best_match.name, 'track_number': 1}
+
+        api_album = detailed_track.get('album', {})
+        album_type = api_album.get('album_type', 'single')
+        total_tracks = api_album.get('total_tracks', 1)
+        is_album = (album_type == 'album' and total_tracks > 1 and matching_engine.similarity_score(api_album.get('name'), best_match.name) < 0.9)
+
+        album_image_url = api_album.get('images', [{}])[0].get('url') if api_album.get('images') else None
+
+        return {
+            'is_album': is_album,
+            'album_name': api_album.get('name', best_match.name),
+            'track_number': detailed_track.get('track_number', 1),
+            'clean_track_name': best_match.name,
+            'album_image_url': album_image_url
+        }
+    except Exception as e:
+        print(f"❌ Error in _detect_album_info_web: {e}")
+        clean_title = _clean_track_title(context.get("original_search_result", {}).get('title', 'Unknown'), artist.get('name', ''))
+        return {'is_album': False, 'clean_track_name': clean_title, 'album_name': clean_title, 'track_number': 1}
+
+
+
+def _cleanup_empty_directories(download_path, moved_file_path):
+    """Cleans up empty directories after a file move, ignoring hidden files."""
+    import os
+    try:
+        current_dir = os.path.dirname(moved_file_path)
+        while current_dir != download_path and current_dir.startswith(download_path):
+            is_empty = not any(not f.startswith('.') for f in os.listdir(current_dir))
+            if is_empty:
+                print(f"Removing empty directory: {current_dir}")
+                os.rmdir(current_dir)
+                current_dir = os.path.dirname(current_dir)
+            else:
+                break
+    except Exception as e:
+        print(f"Warning: An error occurred during directory cleanup: {e}")
+
+
+
+# ===================================================================
+# METADATA & COVER ART HELPERS (Ported from downloads.py)
+# ===================================================================
+from mutagen import File as MutagenFile
+from mutagen.id3 import ID3, TIT2, TPE1, TALB, TDRC, TRCK, TCON, TPE2, TPOS, TXXX, APIC
+from mutagen.flac import FLAC, Picture
+from mutagen.mp4 import MP4, MP4Cover
+from mutagen.oggvorbis import OggVorbis
+import urllib.request
+
+def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_info: dict) -> bool:
+    """
+    Core function to enhance audio file metadata using Spotify data.
+    """
+    if not config_manager.get('metadata_enhancement.enabled', True):
+        print("🎵 Metadata enhancement disabled in config.")
+        return True
+
+    print(f"🎵 Enhancing metadata for: {os.path.basename(file_path)}")
+    try:
+        audio_file = MutagenFile(file_path, easy=True)
+        if audio_file is None:
+            audio_file = MutagenFile(file_path) # Try non-easy mode
+            if audio_file is None:
+                print(f"❌ Could not load audio file with Mutagen: {file_path}")
+                return False
+
+        metadata = _extract_spotify_metadata(context, artist, album_info)
+        if not metadata:
+            print("⚠️ Could not extract Spotify metadata, preserving original tags.")
+            return True
+
+        # Use 'easy' tags for broad compatibility first
+        audio_file['title'] = metadata.get('title', '')
+        audio_file['artist'] = metadata.get('artist', '')
+        audio_file['albumartist'] = metadata.get('album_artist', '')
+        audio_file['album'] = metadata.get('album', '')
+        if metadata.get('date'):
+            audio_file['date'] = metadata['date']
+        if metadata.get('genre'):
+            audio_file['genre'] = metadata['genre']
+        
+        track_num_str = f"{metadata.get('track_number', 1)}/{metadata.get('total_tracks', 1)}"
+        audio_file['tracknumber'] = track_num_str
+        
+        if metadata.get('disc_number'):
+            audio_file['discnumber'] = str(metadata.get('disc_number'))
+
+        audio_file.save()
+
+        # Embed album art if enabled
+        if config_manager.get('metadata_enhancement.embed_album_art', True):
+            # Re-open in non-easy mode for embedding art
+            audio_file_art = MutagenFile(file_path)
+            _embed_album_art_metadata(audio_file_art, metadata)
+            audio_file_art.save()
+
+        print("✅ Metadata enhanced successfully.")
+        return True
+    except Exception as e:
+        print(f"❌ Error enhancing metadata for {file_path}: {e}")
+        return False
+
+def _extract_spotify_metadata(context: dict, artist: dict, album_info: dict) -> dict:
+    """Extracts a comprehensive metadata dictionary from the provided context."""
+    metadata = {}
+    original_search = context.get("original_search_result", {})
+    spotify_album = context.get("spotify_album")
+
+    metadata['title'] = album_info.get('clean_track_name', original_search.get('title', ''))
+    metadata['artist'] = artist.get('name', '')
+    metadata['album_artist'] = artist.get('name', '') # Crucial for library organization
+
+    if album_info.get('is_album'):
+        metadata['album'] = album_info.get('album_name', 'Unknown Album')
+        metadata['track_number'] = album_info.get('track_number', 1)
+        metadata['total_tracks'] = spotify_album.get('total_tracks', 1) if spotify_album else 1
+    else:
+        metadata['album'] = metadata['title'] # For singles, album is the title
+        metadata['track_number'] = 1
+        metadata['total_tracks'] = 1
+
+    if spotify_album and spotify_album.get('release_date'):
+        metadata['date'] = spotify_album['release_date'][:4]
+
+    if artist.get('genres'):
+        metadata['genre'] = ', '.join(artist['genres'][:2])
+
+    metadata['album_art_url'] = album_info.get('album_image_url')
+
+    return metadata
+
+def _embed_album_art_metadata(audio_file, metadata: dict):
+    """Downloads and embeds high-quality Spotify album art into the file."""
+    try:
+        art_url = metadata.get('album_art_url')
+        if not art_url:
+            print("🎨 No album art URL available for embedding.")
+            return
+
+        with urllib.request.urlopen(art_url, timeout=10) as response:
+            image_data = response.read()
+            mime_type = response.info().get_content_type()
+
+        if not image_data:
+            print("❌ Failed to download album art data.")
+            return
+
+        # MP3 (ID3)
+        if isinstance(audio_file.tags, ID3):
+            audio_file.tags.add(APIC(encoding=3, mime=mime_type, type=3, desc='Cover', data=image_data))
+        # FLAC
+        elif isinstance(audio_file, FLAC):
+            picture = Picture()
+            picture.data = image_data
+            picture.type = 3
+            picture.mime = mime_type
+            picture.width = 640
+            picture.height = 640
+            picture.depth = 24
+            audio_file.add_picture(picture)
+        # MP4/M4A
+        elif isinstance(audio_file, MP4):
+            fmt = MP4Cover.FORMAT_JPEG if 'jpeg' in mime_type else MP4Cover.FORMAT_PNG
+            audio_file['covr'] = [MP4Cover(image_data, imageformat=fmt)]
+        
+        print("🎨 Album art successfully embedded.")
+    except Exception as e:
+        print(f"❌ Error embedding album art: {e}")
+
+def _download_cover_art(album_info: dict, target_dir: str):
+    """Downloads cover.jpg into the specified directory."""
+    try:
+        cover_path = os.path.join(target_dir, "cover.jpg")
+        if os.path.exists(cover_path):
+            return
+
+        art_url = album_info.get('album_image_url')
+        if not art_url:
+            print("📷 No cover art URL available for download.")
+            return
+
+        with urllib.request.urlopen(art_url, timeout=10) as response:
+            image_data = response.read()
+        
+        with open(cover_path, 'wb') as f:
+            f.write(image_data)
+        
+        print(f"✅ Cover art downloaded to: {cover_path}")
+    except Exception as e:
+        print(f"❌ Error downloading cover.jpg: {e}")
+
+
+# --- Post-Processing Logic ---
+
+def _post_process_matched_download(context_key, context, file_path):
+    """
+    This is the new, robust post-processing function for matched downloads,
+    ported from downloads.py. It handles file organization, renaming, metadata
+    tagging, and cover art downloading for both singles and albums.
+    
+    NOTE: The primary fixes for the reported issues are in the helper functions
+    this function calls: `_detect_album_info_web` and the file finder used in the
+    `/api/downloads/status` route.
+    """
+    try:
+        import os
+        import shutil
+        from pathlib import Path
+
+        print(f"🎯 Starting robust post-processing for: {context_key}")
+        
+        spotify_artist = context.get("spotify_artist")
+        if not spotify_artist:
+            print(f"❌ Post-processing failed: Missing spotify_artist context.")
+            return
+
+        # 1. Get transfer path and create artist directory
+        transfer_dir = config_manager.get('soulseek.transfer_path', './Transfer')
+        artist_name_sanitized = _sanitize_filename(spotify_artist["name"])
+        artist_dir = os.path.join(transfer_dir, artist_name_sanitized)
+        os.makedirs(artist_dir, exist_ok=True)
+        
+        # 2. Determine if it's a single or album track using the NEW, robust Spotify API logic
+        album_info = _detect_album_info_web(context, spotify_artist)
+        
+        file_ext = os.path.splitext(file_path)[1]
+
+        # 3. Build the final path based on whether it's an album or single
+        if album_info and album_info['is_album']:
+            # --- ALBUM LOGIC ---
+            album_name = album_info['album_name']
+            track_number = album_info['track_number']
+            final_track_name = album_info['clean_track_name']
+            
+            album_name_sanitized = _sanitize_filename(album_name)
+            final_track_name_sanitized = _sanitize_filename(final_track_name)
+
+            album_folder_name = f"{artist_name_sanitized} - {album_name_sanitized}"
+            album_dir = os.path.join(artist_dir, album_folder_name)
+            os.makedirs(album_dir, exist_ok=True)
+            
+            new_filename = f"{track_number:02d} - {final_track_name_sanitized}{file_ext}"
+            final_path = os.path.join(album_dir, new_filename)
+            print(f"📁 Determined album path: {final_path}")
+
+        else:
+            # --- SINGLE LOGIC ---
+            final_track_name = album_info['clean_track_name']
+            final_track_name_sanitized = _sanitize_filename(final_track_name)
+            
+            single_folder_name = f"{artist_name_sanitized} - {final_track_name_sanitized}"
+            single_dir = os.path.join(artist_dir, single_folder_name) 
+            os.makedirs(single_dir, exist_ok=True)
+            
+            new_filename = f"{final_track_name_sanitized}{file_ext}"
+            final_path = os.path.join(single_dir, new_filename)
+            print(f"🎵 Determined single path: {final_path}")
+
+        # 4. Enhance metadata BEFORE moving the file
+        print(f"✍️  Attempting metadata enhancement on: {file_path}")
+        _enhance_file_metadata(file_path, context, spotify_artist, album_info)
+
+        # 5. Move the file to its new, organized location
+        print(f"🚚 Moving '{os.path.basename(file_path)}' to '{final_path}'")
+        if os.path.exists(final_path):
+            print(f"⚠️ Destination file exists, overwriting: {final_path}")
+            os.remove(final_path)
+        shutil.move(file_path, final_path)
+        
+        # 6. Download cover.jpg to the final directory
+        final_directory = os.path.dirname(final_path)
+        _download_cover_art(album_info, final_directory)
+        
+        # 7. Clean up empty source directories
+        downloads_path = config_manager.get('soulseek.download_path', './downloads')
+        _cleanup_empty_directories(downloads_path, file_path)
+
+        print(f"✅ Post-processing complete for: {final_path}")
+
+    except Exception as e:
+        import traceback
+        print(f"\n❌ CRITICAL ERROR in post-processing for {context_key}: {e}")
+        traceback.print_exc()
+
+
+
+# Keep track of processed downloads to avoid re-processing
+_processed_download_ids = set()
 
 @app.route('/api/version-info', methods=['GET'])
 def get_version_info():

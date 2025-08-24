@@ -586,6 +586,70 @@
     <!-- Hidden HTML5 Audio Player for Streaming -->
     <audio id="audio-player" style="display: none;"></audio>
     
+    <!-- Matched Download Modal -->
+    <div class="modal-overlay hidden" id="matching-modal-overlay">
+        <div class="matching-modal" id="matching-modal">
+            <div class="matching-modal-header">
+                <h2 id="matching-modal-title">Match Download to Spotify</h2>
+                <button class="matching-modal-close" onclick="closeMatchingModal()">✕</button>
+            </div>
+            
+            <div class="matching-modal-content">
+                <!-- Artist Selection Stage -->
+                <div id="artist-selection-stage" class="selection-stage">
+                    <div class="stage-header">
+                        <h3 id="artist-stage-title">Step 1: Select the correct Artist</h3>
+                        <p class="stage-subtitle">Choose the artist that best matches your download</p>
+                    </div>
+                    
+                    <div class="suggestions-section">
+                        <h4 class="suggestions-title">Top Suggestions</h4>
+                        <div class="suggestions-container" id="artist-suggestions">
+                            <!-- Artist suggestion cards will be populated here -->
+                        </div>
+                    </div>
+                    
+                    <div class="manual-search-section">
+                        <h4 class="suggestions-title">Or, Search Manually</h4>
+                        <input type="text" id="artist-search-input" class="search-input" placeholder="Search for an artist...">
+                        <div class="suggestions-container" id="artist-manual-results">
+                            <!-- Manual search results will be populated here -->
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Album Selection Stage (for album downloads) -->
+                <div id="album-selection-stage" class="selection-stage hidden">
+                    <div class="stage-header">
+                        <h3 id="album-stage-title">Step 2: Select the correct Album</h3>
+                        <p class="stage-subtitle">Choose the album that best matches your download for <span id="selected-artist-name"></span></p>
+                    </div>
+                    
+                    <div class="suggestions-section">
+                        <h4 class="suggestions-title">Top Suggestions</h4>
+                        <div class="suggestions-container" id="album-suggestions">
+                            <!-- Album suggestion cards will be populated here -->
+                        </div>
+                    </div>
+                    
+                    <div class="manual-search-section">
+                        <h4 class="suggestions-title">Or, Search Manually</h4>
+                        <input type="text" id="album-search-input" class="search-input" placeholder="Search for an album...">
+                        <div class="suggestions-container" id="album-manual-results">
+                            <!-- Manual search results will be populated here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="matching-modal-actions">
+                <button id="skip-matching-btn" class="modal-button modal-button--secondary">Skip Matching</button>
+                <button id="cancel-match-btn" class="modal-button modal-button--cancel">Cancel</button>
+                <button id="confirm-match-btn" class="modal-button modal-button--primary" disabled>Confirm Selection</button>
+            </div>
+        </div>
+    </div>
+    
     <!-- Version Info Modal -->
     <div class="version-modal-overlay hidden" id="version-modal-overlay" onclick="closeVersionModal()">
         <div class="version-modal" onclick="event.stopPropagation()">
