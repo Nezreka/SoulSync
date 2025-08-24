@@ -128,34 +128,152 @@
         <div class="main-content">
             <!-- Dashboard Page -->
             <div class="page active" id="dashboard-page">
-                <div class="page-header">
-                    <h2>Dashboard</h2>
-                </div>
-                <div class="dashboard-content">
-                    <!-- Activity Feed -->
-                    <div class="activity-section">
-                        <h3>Recent Activity</h3>
-                        <div class="activity-feed" id="activity-feed">
-                            <div class="activity-item">
-                                <span class="activity-time">Just now</span>
-                                <span class="activity-text">Web UI initialized</span>
+                <div class="dashboard-container">
+                    <div class="dashboard-header">
+                        <div class="header-text">
+                            <h2 class="header-title">System Dashboard</h2>
+                            <p class="header-subtitle">Monitor your music system health and manage operations</p>
+                        </div>
+                        <div class="header-spacer"></div>
+                        <div class="header-actions">
+                            <button class="header-button watchlist-button" id="watchlist-button">👁️ Watchlist (0)</button>
+                            <button class="header-button wishlist-button" id="wishlist-button">🎵 Wishlist (0)</button>
+                        </div>
+                    </div>
+
+                    <div class="dashboard-section">
+                        <h3 class="section-title">Service Status</h3>
+                        <div class="service-status-grid">
+                            <div class="service-card" id="spotify-service-card">
+                                <div class="service-card-header">
+                                    <span class="service-card-title">Spotify</span>
+                                    <span class="service-card-indicator disconnected" id="spotify-status-indicator">●</span>
+                                </div>
+                                <p class="service-card-status-text" id="spotify-status-text">Disconnected</p>
+                                <p class="service-card-response-time" id="spotify-response-time">Response: --</p>
+                                <div class="service-card-footer">
+                                    <button class="service-card-button" onclick="testConnection('spotify')">Test Connection</button>
+                                </div>
+                            </div>
+                            <div class="service-card" id="media-server-service-card">
+                                <div class="service-card-header">
+                                    <span class="service-card-title" id="media-server-service-name">Plex</span>
+                                    <span class="service-card-indicator disconnected" id="media-server-status-indicator">●</span>
+                                </div>
+                                <p class="service-card-status-text" id="media-server-status-text">Disconnected</p>
+                                <p class="service-card-response-time" id="media-server-response-time">Response: --</p>
+                                <div class="service-card-footer">
+                                    <button class="service-card-button" onclick="testConnection('server')">Test Connection</button>
+                                </div>
+                            </div>
+                            <div class="service-card" id="soulseek-service-card">
+                                <div class="service-card-header">
+                                    <span class="service-card-title">Soulseek</span>
+                                    <span class="service-card-indicator disconnected" id="soulseek-status-indicator">●</span>
+                                </div>
+                                <p class="service-card-status-text" id="soulseek-status-text">Disconnected</p>
+                                <p class="service-card-response-time" id="soulseek-response-time">Response: --</p>
+                                <div class="service-card-footer">
+                                    <button class="service-card-button" onclick="testConnection('soulseek')">Test Connection</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="dashboard-section">
+                        <h3 class="section-title">System Statistics</h3>
+                        <div class="stats-grid-dashboard">
+                            <div class="stat-card-dashboard" id="active-downloads-card">
+                                <p class="stat-card-title">Active Downloads</p>
+                                <p class="stat-card-value">0</p>
+                                <p class="stat-card-subtitle">Currently downloading</p>
+                            </div>
+                            <div class="stat-card-dashboard" id="finished-downloads-card">
+                                <p class="stat-card-title">Finished Downloads</p>
+                                <p class="stat-card-value">0</p>
+                                <p class="stat-card-subtitle">Completed this session</p>
+                            </div>
+                            <div class="stat-card-dashboard" id="download-speed-card">
+                                <p class="stat-card-title">Download Speed</p>
+                                <p class="stat-card-value">0 KB/s</p>
+                                <p class="stat-card-subtitle">Combined speed</p>
+                            </div>
+                            <div class="stat-card-dashboard" id="active-syncs-card">
+                                <p class="stat-card-title">Active Syncs</p>
+                                <p class="stat-card-value">0</p>
+                                <p class="stat-card-subtitle">Playlists syncing</p>
+                            </div>
+                            <div class="stat-card-dashboard" id="uptime-card">
+                                <p class="stat-card-title">System Uptime</p>
+                                <p class="stat-card-value">0m</p>
+                                <p class="stat-card-subtitle">Application runtime</p>
+                            </div>
+                            <div class="stat-card-dashboard" id="memory-card">
+                                <p class="stat-card-title">Memory Usage</p>
+                                <p class="stat-card-value">--</p>
+                                <p class="stat-card-subtitle">Current usage</p>
                             </div>
                         </div>
                     </div>
                     
-                    <!-- Statistics Cards -->
-                    <div class="stats-grid">
-                        <div class="stat-card">
-                            <div class="stat-value">0</div>
-                            <div class="stat-label">Tracks Synced</div>
+                    <div class="dashboard-section">
+                        <h3 class="section-title">Tools & Operations</h3>
+                        <div class="tools-grid">
+                            <div class="tool-card" id="db-updater-card">
+                                <h4 class="tool-card-title">Database Updater</h4>
+                                <p class="tool-card-info">Last Full Refresh: <span id="db-last-refresh">Never</span></p>
+                                <div class="tool-card-controls">
+                                    <select id="db-refresh-type">
+                                        <option value="incremental">Incremental Update</option>
+                                        <option value="full">Full Refresh</option>
+                                    </select>
+                                    <button id="db-update-button">Update Database</button>
+                                </div>
+                                <div class="tool-card-progress-section">
+                                    <p class="progress-phase-label" id="db-phase-label">Idle</p>
+                                    <div class="progress-bar-container">
+                                         <div class="progress-bar-fill" id="db-progress-bar" style="width: 0%;"></div>
+                                    </div>
+                                    <p class="progress-details-label" id="db-progress-label">0 / 0 artists (0.0%)</p>
+                                </div>
+                            </div>
+
+                            <div class="tool-card" id="metadata-updater-card">
+                                <h4 class="tool-card-title">Metadata Updater</h4>
+                                <p class="tool-card-info">Updates artist photos, genres, and album art from Spotify.</p>
+                                 <div class="tool-card-controls">
+                                    <select id="metadata-refresh-interval">
+                                        <option value="180">6 months</option>
+                                        <option value="90">3 months</option>
+                                        <option value="30" selected>1 month</option>
+                                        <option value="14">2 weeks</option>
+                                        <option value="7">1 week</option>
+                                        <option value="0">Full refresh</option>
+                                    </select>
+                                    <button id="metadata-update-button">Begin Update</button>
+                                </div>
+                                 <div class="tool-card-progress-section">
+                                    <p class="progress-phase-label" id="metadata-phase-label">Current Artist: Not running</p>
+                                    <div class="progress-bar-container">
+                                         <div class="progress-bar-fill" id="metadata-progress-bar" style="width: 0%;"></div>
+                                    </div>
+                                    <p class="progress-details-label" id="metadata-progress-label">0 / 0 artists (0.0%)</p>
+                                </div>
+                            </div>
                         </div>
-                        <div class="stat-card">
-                            <div class="stat-value">0</div>
-                            <div class="stat-label">Downloads</div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="stat-value">3</div>
-                            <div class="stat-label">Services</div>
+                    </div>
+
+                    <div class="dashboard-section">
+                        <h3 class="section-title">Recent Activity</h3>
+                        <div class="activity-feed-container" id="dashboard-activity-feed">
+                            <div class="activity-item">
+                                <span class="activity-icon">📊</span>
+                                <div class="activity-text-content">
+                                    <p class="activity-title">System Started</p>
+                                    <p class="activity-subtitle">Dashboard initialized successfully</p>
+                                </div>
+                                <p class="activity-time">Now</p>
+                            </div>
                         </div>
                     </div>
                 </div>
