@@ -3367,6 +3367,8 @@ function updateDbProgressUI(state) {
 
 // --- Event Handlers ---
 
+// --- Find and REPLACE the existing handleDbUpdateButtonClick function ---
+
 async function handleDbUpdateButtonClick() {
     const button = document.getElementById('db-update-button');
     const currentAction = button.textContent;
@@ -3376,11 +3378,14 @@ async function handleDbUpdateButtonClick() {
         const isFullRefresh = refreshSelect.value === 'full';
 
         if (isFullRefresh) {
+            // Replicates the QMessageBox confirmation from the GUI
             const confirmed = confirm("⚠️ Full Refresh Warning!\n\nThis will clear and rebuild the database for the active server. It can take a long time. Are you sure you want to proceed?");
             if (!confirmed) return;
         }
 
         try {
+            button.disabled = true;
+            button.textContent = 'Starting...';
             const response = await fetch('/api/database/update', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -3389,15 +3394,18 @@ async function handleDbUpdateButtonClick() {
 
             if (response.ok) {
                 showToast('Database update started!', 'success');
-                // Start polling immediately
-                stopDbUpdatePolling();
-                dbUpdateStatusInterval = setInterval(checkAndUpdateDbProgress, 1000);
+                // Start polling immediately to get live status
+                checkAndUpdateDbProgress();
             } else {
                 const errorData = await response.json();
                 showToast(`Error: ${errorData.error}`, 'error');
+                button.disabled = false;
+                button.textContent = 'Update Database';
             }
         } catch (error) {
             showToast('Failed to start update process.', 'error');
+            button.disabled = false;
+            button.textContent = 'Update Database';
         }
 
     } else { // "Stop Update"
@@ -3413,4 +3421,3 @@ async function handleDbUpdateButtonClick() {
         }
     }
 }
-
