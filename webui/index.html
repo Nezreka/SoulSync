@@ -297,24 +297,79 @@
                 </div>
             </div>
             
-            <!-- Sync Page -->
+            <!-- Main container for the Sync page -->
             <div class="page" id="sync-page">
-                <div class="page-header">
-                    <h2>Sync</h2>
+                <!-- Header -->
+                <div class="sync-header">
+                    <h2 class="sync-title">Playlist Sync</h2>
+                    <p class="sync-subtitle">Synchronize your Spotify, Tidal, and YouTube playlists with your media server</p>
                 </div>
-                <div class="sync-content">
-                    <div class="playlist-section">
-                        <h3>Select Playlist</h3>
-                        <select class="playlist-selector" id="playlist-selector">
-                            <option value="">Loading playlists...</option>
-                        </select>
-                        <button class="sync-button" id="sync-button">Start Sync</button>
-                    </div>
-                    <div class="sync-progress hidden" id="sync-progress">
-                        <div class="progress-bar">
-                            <div class="progress-fill"></div>
+
+                <!-- Main two-column content area -->
+                <div class="sync-content-area">
+                    <!-- Left Panel: Tabbed Playlist Section -->
+                    <div class="sync-main-panel">
+                        <div class="sync-tabs">
+                            <button class="sync-tab-button active" data-tab="spotify">
+                                <span class="tab-icon spotify-icon"></span> Spotify
+                            </button>
+                            <button class="sync-tab-button" data-tab="tidal">
+                                <span class="tab-icon tidal-icon"></span> Tidal
+                            </button>
+                            <button class="sync-tab-button" data-tab="youtube">
+                                <span class="tab-icon youtube-icon"></span> YouTube
+                            </button>
                         </div>
-                        <div class="progress-text">0% Complete</div>
+
+                        <!-- Spotify Tab Content -->
+                        <div class="sync-tab-content active" id="spotify-tab-content">
+                            <div class="playlist-header">
+                                <h3>Your Spotify Playlists</h3>
+                                <button class="refresh-button" id="spotify-refresh-btn">🔄 Refresh</button>
+                            </div>
+                            <div class="playlist-scroll-container" id="spotify-playlist-container">
+                                <div class="playlist-placeholder">Click 'Refresh' to load your Spotify playlists.</div>
+                            </div>
+                        </div>
+
+                        <!-- Tidal Tab Content -->
+                        <div class="sync-tab-content" id="tidal-tab-content">
+                            <div class="playlist-header">
+                                <h3>Your Tidal Playlists</h3>
+                                <button class="refresh-button tidal" id="tidal-refresh-btn">🔄 Refresh</button>
+                            </div>
+                            <div class="playlist-scroll-container" id="tidal-playlist-container">
+                                <div class="playlist-placeholder">Click 'Refresh' to load your Tidal playlists.</div>
+                            </div>
+                        </div>
+
+                        <!-- YouTube Tab Content -->
+                        <div class="sync-tab-content" id="youtube-tab-content">
+                            <div class="youtube-input-section">
+                                <input type="text" id="youtube-url-input" placeholder="Paste YouTube Music Playlist URL...">
+                                <button id="youtube-parse-btn">Parse Playlist</button>
+                            </div>
+                            <div class="playlist-scroll-container" id="youtube-playlist-container">
+                                <div class="playlist-placeholder">Parsed YouTube playlists will appear here.</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right Panel: Sidebar with Options & Logging -->
+                    <div class="sync-sidebar">
+                        <div class="sidebar-section">
+                            <h4>Sync Actions</h4>
+                            <div id="selection-info">Select playlists to sync</div>
+                            <button id="start-sync-btn" class="neo-button" disabled>Start Sync</button>
+                        </div>
+                        <div class="sidebar-section progress-section">
+                            <h4>Sync Progress</h4>
+                            <div class="progress-bar-container">
+                                <div class="progress-bar-fill" id="sync-progress-bar" style="width: 0%;"></div>
+                            </div>
+                            <div id="sync-progress-text">Ready to sync...</div>
+                            <textarea id="sync-log-area" readonly>Waiting for sync to start...</textarea>
+                        </div>
                     </div>
                 </div>
             </div>
