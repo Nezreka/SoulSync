@@ -1323,6 +1323,7 @@ body {
 
 .downloads-side-panel{
     margin-top: 100px;
+    overflow-y: scroll;
 }
 
 /* Header: Replicates create_elegant_header() */
