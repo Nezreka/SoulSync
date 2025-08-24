@@ -2243,57 +2243,29 @@ def get_version_info():
     return jsonify(version_data)
 
 
-def start_simple_background_monitor():
-    """Simple background thread that calls the existing status endpoint logic."""
-    import time
-    import threading
-    
-    def simple_monitor():
-        print("🔄 Simple background monitor started")
-        
-        while True:
-            try:
-                # Check for pending matched downloads
-                with matched_context_lock:
-                    pending_count = len(matched_downloads_context)
-                    pending_keys = list(matched_downloads_context.keys())
-                
-                # Only process and log if there are pending downloads
-                if pending_count > 0:
-                    print(f"🎯 Monitor: {pending_count} pending downloads: {[key.split('::')[-1] for key in pending_keys[:3]]}{'...' if len(pending_keys) > 3 else ''}")
-                    
-                    # Just call the existing status endpoint logic directly
-                    with app.app_context():
-                        try:
-                            # Import what we need
-                            from flask import current_app
-                            with current_app.test_request_context():
-                                # Call the existing get_download_status function directly
-                                result = get_download_status()
-                                
-                                # Check how many are left after processing
-                                with matched_context_lock:
-                                    remaining_count = len(matched_downloads_context)
-                                
-                                if remaining_count < pending_count:
-                                    processed_count = pending_count - remaining_count
-                                    print(f"✅ Status check processed {processed_count} downloads, {remaining_count} remaining")
-                                else:
-                                    print(f"⏳ Status check completed, {remaining_count} still pending")
-                                    
-                        except Exception as status_error:
-                            print(f"❌ Status check error: {status_error}")
-                            import traceback
-                            traceback.print_exc()
-                
-                time.sleep(1)  # Check every 1 second for maximum responsiveness
-                
-            except Exception as e:
-                print(f"❌ Simple monitor error: {e}")
-                import traceback
-                traceback.print_exc()
-                time.sleep(10)
+def _simple_monitor_task():
+    """The actual monitoring task that runs in the background thread."""
+    print("🔄 Simple background monitor started")
+    while True:
+        try:
+            with matched_context_lock:
+                pending_count = len(matched_downloads_context)
+            
+            if pending_count > 0:
+                # Use app_context to safely call endpoint logic from a thread
+                with app.app_context():
+                    get_download_status()
+            
+            time.sleep(1)
+        except Exception as e:
+            print(f"❌ Simple monitor error: {e}")
+            time.sleep(10)
 
+def start_simple_background_monitor():
+    """Starts the simple background monitor thread."""
+    monitor_thread = threading.Thread(target=_simple_monitor_task)
+    monitor_thread.daemon = True
+    monitor_thread.start()
 
 # ===============================
 # == DATABASE UPDATER API      ==
@@ -2408,9 +2380,7 @@ def stop_database_update():
 
 
     
-    monitor_thread = threading.Thread(target=simple_monitor)
-    monitor_thread.daemon = True
-    monitor_thread.start()
+
 
 # --- Main Execution ---
 
