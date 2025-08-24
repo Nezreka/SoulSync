@@ -129,6 +129,7 @@ async function loadPageData(pageId) {
                 break;
             case 'sync':
                 stopDownloadPolling();
+                initializeSyncPage();
                 await loadSyncData();
                 break;
             case 'downloads':
@@ -3362,6 +3363,29 @@ function updateDbProgressUI(state) {
             setTimeout(fetchAndUpdateDbStats, 500);
         }
     }
+}
+
+// ===============================
+// SYNC PAGE FUNCTIONALITY (REDESIGNED)
+// ===============================
+
+function initializeSyncPage() {
+    const tabButtons = document.querySelectorAll('.sync-tab-button');
+    tabButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            const tabId = button.dataset.tab;
+
+            // Update button active state
+            tabButtons.forEach(btn => btn.classList.remove('active'));
+            button.classList.add('active');
+
+            // Update content active state
+            document.querySelectorAll('.sync-tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            document.getElementById(`${tabId}-tab-content`).classList.add('active');
+        });
+    });
 }
 
 

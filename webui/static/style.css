@@ -3801,3 +3801,246 @@ body {
     border-radius: 4px;
     padding: 2px 6px;
 }
+
+
+/* ======================================================= */
+/* == STYLES FOR SYNC PAGE (REDESIGNED)                 == */
+/* ======================================================= */
+
+/* Main Sync Page Layout */
+.sync-header {
+    margin-bottom: 25px;
+}
+
+.sync-title {
+    font-size: 28px;
+    font-weight: 700;
+    color: #ffffff;
+}
+
+.sync-subtitle {
+    font-size: 14px;
+    color: #b3b3b3;
+    margin-top: 5px;
+}
+
+.sync-content-area {
+    display: grid;
+    grid-template-columns: 2fr 1fr; /* 2/3 for main panel, 1/3 for sidebar */
+    gap: 25px;
+    height: calc(100vh - 200px); /* Adjust height to fit within the page */
+}
+
+.sync-main-panel, .sync-sidebar {
+    background: linear-gradient(135deg, rgba(26, 26, 26, 0.95), rgba(18, 18, 18, 0.98));
+    backdrop-filter: blur(10px);
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow: 0 15px 35px rgba(0,0,0,0.5);
+}
+
+/* Tab System */
+.sync-tabs {
+    display: flex;
+    gap: 2px;
+    margin-bottom: 15px;
+    background: rgba(0,0,0,0.2);
+    border-radius: 12px;
+    padding: 4px;
+}
+
+.sync-tab-button {
+    flex: 1;
+    padding: 12px;
+    background: transparent;
+    color: #b3b3b3;
+    border: none;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.sync-tab-button.active {
+    background: #1db954;
+    color: #000000;
+    box-shadow: 0 4px 15px rgba(29, 185, 84, 0.3);
+}
+.sync-tab-button[data-tab="tidal"].active { background: #ff6600; color: #fff; box-shadow: 0 4px 15px rgba(255, 102, 0, 0.3); }
+.sync-tab-button[data-tab="youtube"].active { background: #ff0000; color: #fff; box-shadow: 0 4px 15px rgba(255, 0, 0, 0.3); }
+
+.sync-tab-button:hover:not(.active) {
+    background: rgba(255, 255, 255, 0.1);
+    color: #ffffff;
+}
+
+.tab-icon {
+    width: 16px;
+    height: 16px;
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: center;
+}
+.spotify-icon { background-image: url('https://storage.googleapis.com/pr-newsroom-wp/1/2018/11/Spotify_Icon_RGB_White.png'); filter: invert(1); }
+.tidal-icon { background-image: url('https://tidal.com/favicon.ico'); } /* Simple fallback */
+.youtube-icon { background-image: url('https://www.youtube.com/s/desktop/014da055/img/favicon_32x32.png'); }
+.sync-tab-button.active .tab-icon { filter: none; }
+
+
+.sync-tab-content {
+    display: none;
+    flex-direction: column;
+    gap: 15px;
+    flex-grow: 1;
+    overflow: hidden;
+}
+
+.sync-tab-content.active {
+    display: flex;
+}
+
+/* Playlist Section Styling */
+.playlist-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.playlist-header h3 {
+    font-size: 16px;
+    font-weight: bold;
+    color: #ffffff;
+}
+
+.refresh-button {
+    background: #1db954;
+    border: none;
+    border-radius: 17px;
+    color: #000000;
+    font-size: 11px;
+    font-weight: bold;
+    padding: 8px 16px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+.refresh-button:hover { transform: scale(1.05); }
+.refresh-button.tidal { background: #ff6600; color: #fff; }
+.refresh-button.tidal:hover { background: #ff7700; }
+
+.playlist-scroll-container {
+    flex-grow: 1;
+    overflow-y: auto;
+    background: rgba(0,0,0,0.2);
+    border-radius: 8px;
+    padding: 10px;
+}
+
+.playlist-placeholder {
+    text-align: center;
+    color: #b3b3b3;
+    font-size: 14px;
+    padding: 40px;
+}
+
+.youtube-input-section {
+    display: flex;
+    gap: 10px;
+}
+
+#youtube-url-input {
+    flex-grow: 1;
+    background: #3a3a3a;
+    border: 1px solid #555555;
+    border-radius: 6px;
+    padding: 10px;
+    color: #ffffff;
+}
+#youtube-parse-btn {
+    width: 150px;
+    background: #ff0000;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+/* Right Sidebar */
+.sync-sidebar {
+    gap: 20px;
+}
+
+.sidebar-section {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.sidebar-section h4 {
+    font-size: 14px;
+    font-weight: bold;
+    color: #ffffff;
+}
+
+#selection-info {
+    font-size: 12px;
+    color: #b3b3b3;
+    text-align: center;
+}
+
+.neo-button {
+    width: 100%;
+    padding: 12px;
+    background: #1db954;
+    border: none;
+    border-radius: 22px;
+    color: #000000;
+    font-size: 14px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 5px 15px rgba(29, 185, 84, 0.2);
+}
+.neo-button:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(29, 185, 84, 0.3);
+}
+.neo-button:disabled {
+    background: #404040;
+    color: #666666;
+    cursor: not-allowed;
+    box-shadow: none;
+}
+
+.progress-section {
+    flex-grow: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+#sync-progress-text {
+    font-size: 11px;
+    color: #b3b3b3;
+}
+
+#sync-log-area {
+    flex-grow: 1;
+    background: #181818;
+    border: 1px solid #404040;
+    border-radius: 4px;
+    color: #b3b3b3;
+    font-size: 10px;
+    font-family: monospace;
+    padding: 8px;
+    resize: none;
+}
