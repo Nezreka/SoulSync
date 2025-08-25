@@ -1609,6 +1609,11 @@ let currentPlaylistTracks = [];
 let analysisResults = [];
 let missingTracks = [];
 
+// New variables for enhanced modal functionality
+let currentDownloadBatchId = null;
+let modalDownloadPoller = null;
+let currentModalPlaylistId = null;
+
 async function openDownloadMissingModal(playlistId) {
     console.log(`📥 Opening Download Missing Tracks modal for playlist: ${playlistId}`);
     
@@ -1641,6 +1646,7 @@ async function openDownloadMissingModal(playlistId) {
     }
     
     currentPlaylistTracks = tracks;
+    currentModalPlaylistId = playlistId; // Store playlist ID for new endpoints
     console.log(`✅ Loaded ${tracks.length} tracks for analysis`);
     
     // Create or get modal
@@ -1743,9 +1749,6 @@ async function openDownloadMissingModal(playlistId) {
                     <button class="download-control-btn primary" id="begin-analysis-btn" onclick="startTrackAnalysis()">
                         Begin Analysis
                     </button>
-                    <button class="download-control-btn primary" id="start-downloads-btn" onclick="startMissingDownloads()" style="display: none;">
-                        Start Downloads
-                    </button>
                     <button class="download-control-btn danger" id="cancel-all-btn" onclick="cancelAllOperations()" style="display: none;">
                         Cancel All
                     </button>
@@ -1761,6 +1764,11 @@ async function openDownloadMissingModal(playlistId) {
     activeAnalysisTaskId = null;
     analysisResults = [];
     missingTracks = [];
+    currentDownloadBatchId = null;
+    if (modalDownloadPoller) {
+        clearInterval(modalDownloadPoller);
+        modalDownloadPoller = null;
+    }
     
     // Show modal
     modal.style.display = 'flex';
@@ -1783,6 +1791,12 @@ function closeDownloadMissingModal() {
     currentPlaylistTracks = [];
     analysisResults = [];
     missingTracks = [];
+    currentDownloadBatchId = null;
+    currentModalPlaylistId = null;
+    if (modalDownloadPoller) {
+        clearInterval(modalDownloadPoller);
+        modalDownloadPoller = null;
+    }
 }
 
 async function startTrackAnalysis() {
@@ -1904,84 +1918,260 @@ function onAnalysisComplete(status) {
     
     console.log(`📊 Analysis results: ${analysisResults.length} total, ${missingTracks.length} missing`);
     
-    // Update UI for download phase
+    // Update UI and automatically start downloads if there are missing tracks
     document.getElementById('cancel-all-btn').style.display = 'none';
+    
     if (missingTracks.length > 0) {
-        document.getElementById('start-downloads-btn').style.display = 'inline-block';
+        console.log(`🚀 Analysis complete - automatically starting downloads for ${missingTracks.length} missing tracks`);
+        // Automatically initiate downloads - no button needed, just like the GUI
+        initiateMissingDownloads();
     } else {
         showToast('All tracks were found in your library!', 'success');
         document.getElementById('download-progress-text').textContent = 'No downloads needed - all tracks found!';
     }
 }
 
-async function startMissingDownloads() {
+async function initiateMissingDownloads() {
     if (missingTracks.length === 0) {
         showToast('No missing tracks to download', 'info');
         return;
     }
     
-    console.log(`⏬ Starting downloads for ${missingTracks.length} missing tracks`);
+    console.log(`⏬ Starting enhanced downloads for ${missingTracks.length} missing tracks`);
     
     try {
-        // Update UI
-        document.getElementById('start-downloads-btn').style.display = 'none';
-        document.getElementById('cancel-all-btn').style.display = 'inline-block';
-        document.getElementById('download-progress-text').textContent = 'Queueing downloads...';
+        // Update UI - Cancel button should already be visible from analysis
+        document.getElementById('download-progress-text').textContent = 'Initiating downloads...';
         
-        // Add cancel buttons to missing tracks
+        // Set initial status for all missing tracks
         for (const result of missingTracks) {
+            const statusElement = document.getElementById(`download-${result.track_index}`);
             const actionsElement = document.getElementById(`actions-${result.track_index}`);
+            if (statusElement) {
+                statusElement.textContent = '⏸️ Pending';
+                statusElement.className = 'track-download-status download-pending';
+            }
             if (actionsElement) {
                 actionsElement.innerHTML = `<button class="cancel-track-btn" onclick="cancelTrackDownload(${result.track_index})">Cancel</button>`;
             }
-            
-            // Update download status
-            const statusElement = document.getElementById(`download-${result.track_index}`);
-            if (statusElement) {
-                statusElement.textContent = '🔍 Queueing...';
-                statusElement.className = 'track-download-status download-searching';
-            }
         }
         
-        // Queue downloads
-        const response = await fetch('/api/tracks/download_missing', {
+        // Call new playlist-specific endpoint
+        const response = await fetch(`/api/playlists/${currentModalPlaylistId}/download_missing`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                missing_tracks: missingTracks
+                missing_tracks: missingTracks.map(track => ({
+                    track: track.track,
+                    track_index: track.track_index
+                })) // Include both track data and original index
             })
         });
         
         const data = await response.json();
         if (!data.success) throw new Error(data.error);
         
-        console.log(`✅ Queued ${data.queued} downloads`);
-        showToast(`Queued ${data.queued} downloads. Check the download queue for progress.`, 'success');
+        // Store batch ID for polling
+        currentDownloadBatchId = data.batch_id;
+        console.log(`✅ Started download batch: ${currentDownloadBatchId}`);
         
-        // Update UI
-        document.getElementById('download-progress-text').textContent = 
-            `${data.queued} downloads queued. Check download queue for live progress.`;
+        // Start live polling
+        startModalDownloadPolling();
         
-        // Update download status for queued tracks
-        for (const result of missingTracks) {
-            const statusElement = document.getElementById(`download-${result.track_index}`);
-            if (statusElement) {
-                statusElement.textContent = '📥 Queued';
-                statusElement.className = 'track-download-status download-searching';
-            }
-        }
-        
-        // Hide cancel button since downloads are now handled by the main download system
-        document.getElementById('cancel-all-btn').style.display = 'none';
+        showToast(`Started downloads for ${missingTracks.length} tracks with live progress tracking.`, 'success');
         
     } catch (error) {
         console.error('❌ Failed to start downloads:', error);
         showToast(`Failed to start downloads: ${error.message}`, 'error');
         
-        // Reset UI
-        document.getElementById('start-downloads-btn').style.display = 'inline-block';
+        // Reset UI on error - show the begin analysis button again
+        document.getElementById('begin-analysis-btn').style.display = 'inline-block';
         document.getElementById('cancel-all-btn').style.display = 'none';
-        document.getElementById('download-progress-text').textContent = 'Ready to download missing tracks';
+        document.getElementById('download-progress-text').textContent = 'Download initiation failed';
+    }
+}
+
+function startModalDownloadPolling() {
+    if (!currentDownloadBatchId) {
+        console.warn('No batch ID available for polling');
+        return;
+    }
+    
+    if (modalDownloadPoller) {
+        clearInterval(modalDownloadPoller);
+    }
+    
+    console.log(`📊 Starting download status polling for batch: ${currentDownloadBatchId}`);
+    
+    modalDownloadPoller = setInterval(async () => {
+        try {
+            const response = await fetch(`/api/playlists/${currentDownloadBatchId}/download_status`);
+            const data = await response.json();
+            
+            if (data.error) {
+                console.error('Polling error:', data.error);
+                return;
+            }
+            
+            const tasks = data.tasks || [];
+            let completedCount = 0;
+            let failedCount = 0;
+            let totalTasks = tasks.length;
+            
+            // Update each track's status - but only for missing tracks
+            for (const task of tasks) {
+                const trackIndex = task.track_index;
+                const row = document.querySelector(`tr[data-track-index="${trackIndex}"]`);
+                
+                // Only update if this is a missing track (has a matching entry in missingTracks array)
+                const isMissingTrack = missingTracks.some(mt => mt.track_index === trackIndex);
+                
+                
+                if (row && isMissingTrack) {
+                    const statusElement = row.querySelector('.track-download-status');
+                    const actionsElement = row.querySelector('.track-actions');
+                    
+                    // Store task ID for cancellation
+                    row.dataset.taskId = task.task_id;
+                    
+                    const status = task.status;
+                    
+                    switch (status) {
+                        case 'pending':
+                            statusElement.textContent = '⏸️ Pending';
+                            statusElement.className = 'track-download-status download-pending';
+                            actionsElement.innerHTML = `<button class="cancel-track-btn" onclick="cancelTrackDownload(${trackIndex})">Cancel</button>`;
+                            break;
+                        case 'searching':
+                            statusElement.textContent = '🔍 Searching...';
+                            statusElement.className = 'track-download-status download-searching';
+                            actionsElement.innerHTML = `<button class="cancel-track-btn" onclick="cancelTrackDownload(${trackIndex})">Cancel</button>`;
+                            break;
+                        case 'downloading':
+                            statusElement.textContent = '⏬ Downloading...';
+                            statusElement.className = 'track-download-status download-downloading';
+                            actionsElement.innerHTML = `<button class="cancel-track-btn" onclick="cancelTrackDownload(${trackIndex})">Cancel</button>`;
+                            
+                            // Start live download polling when we detect actual downloads have begun
+                            if (!isDownloadPollingActive) {
+                                console.log('🔄 Download detected - starting live download polling integration');
+                                startDownloadPolling();
+                            }
+                            break;
+                        case 'completed':
+                            statusElement.textContent = '✅ Completed';
+                            statusElement.className = 'track-download-status download-complete';
+                            actionsElement.innerHTML = '-';
+                            completedCount++;
+                            break;
+                        case 'failed':
+                            statusElement.textContent = '❌ Failed';
+                            statusElement.className = 'track-download-status download-failed';
+                            actionsElement.innerHTML = '-';
+                            failedCount++;
+                            break;
+                        case 'cancelled':
+                            statusElement.textContent = '❌ Cancelled';
+                            statusElement.className = 'track-download-status download-cancelled';
+                            actionsElement.innerHTML = '-';
+                            failedCount++;
+                            break;
+                        default:
+                            statusElement.textContent = `⚪ ${status}`;
+                            statusElement.className = 'track-download-status';
+                            break;
+                    }
+                }
+            }
+            
+            // Update progress
+            const progressPercent = totalTasks > 0 ? ((completedCount + failedCount) / totalTasks) * 100 : 0;
+            document.getElementById('download-progress-fill').style.width = `${progressPercent}%`;
+            document.getElementById('download-progress-text').textContent = 
+                `${completedCount}/${totalTasks} completed (${progressPercent.toFixed(0)}%)`;
+            
+            // Update downloaded count
+            document.getElementById('stat-downloaded').textContent = completedCount;
+            
+            // Stop polling when all tasks are complete
+            if (completedCount + failedCount >= totalTasks && totalTasks > 0) {
+                clearInterval(modalDownloadPoller);
+                modalDownloadPoller = null;
+                document.getElementById('cancel-all-btn').style.display = 'none';
+                console.log('✅ All download tasks completed, stopping polling');
+                
+                // Also stop live download polling if we started it
+                if (isDownloadPollingActive) {
+                    stopDownloadPolling();
+                }
+                
+                if (completedCount > 0) {
+                    showToast(`Download completed: ${completedCount} tracks downloaded successfully!`, 'success');
+                }
+            }
+            
+            // Update modal tracks with live download progress from the actual download queue
+            updateModalWithLiveDownloadProgress();
+            
+        } catch (error) {
+            console.error('Error polling download status:', error);
+        }
+    }, 2000); // Poll every 2 seconds
+}
+
+async function updateModalWithLiveDownloadProgress() {
+    try {
+        if (!currentDownloadBatchId) return;
+        
+        // Fetch live download data from the downloads API
+        const response = await fetch('/api/downloads/status');
+        const downloadData = await response.json();
+        
+        if (downloadData.error) return;
+        
+        // Get all active and finished downloads
+        const allDownloads = {...(downloadData.active || {}), ...(downloadData.finished || {})};
+        
+        // Update modal tracks that have active downloads
+        const modalRows = document.querySelectorAll('.download-missing-modal tr[data-track-index]');
+        
+        for (const row of modalRows) {
+            const taskId = row.dataset.taskId;
+            if (!taskId) continue;
+            
+            // Find corresponding download by checking if filename/title matches
+            const trackName = row.querySelector('.track-name')?.textContent?.trim();
+            if (!trackName) continue;
+            
+            // Search for matching download
+            for (const [downloadId, downloadInfo] of Object.entries(allDownloads)) {
+                const downloadTitle = downloadInfo.filename ? downloadInfo.filename.split(/[\\/]/).pop() : '';
+                
+                // Simple matching - could be improved with better logic
+                if (downloadTitle && trackName && (
+                    downloadTitle.toLowerCase().includes(trackName.toLowerCase()) ||
+                    trackName.toLowerCase().includes(downloadTitle.toLowerCase())
+                )) {
+                    // Update the track with live download progress
+                    const statusElement = row.querySelector('.track-download-status');
+                    const progress = downloadInfo.percentComplete || 0;
+                    const state = downloadInfo.state || '';
+                    
+                    if (statusElement && state.includes('InProgress') && progress > 0) {
+                        statusElement.textContent = `⏬ Downloading... ${Math.round(progress)}%`;
+                        statusElement.className = 'track-download-status download-downloading';
+                    } else if (statusElement && (state.includes('Completed') || state.includes('Succeeded'))) {
+                        statusElement.textContent = '✅ Completed';
+                        statusElement.className = 'track-download-status download-complete';
+                    }
+                    
+                    break; // Found a match, stop searching
+                }
+            }
+        }
+        
+    } catch (error) {
+        // Silent fail - don't spam console during normal operation
     }
 }
 
@@ -2044,19 +2234,81 @@ function resetToInitialState() {
     missingTracks = [];
 }
 
-function cancelTrackDownload(trackIndex) {
+async function cancelTrackDownload(trackIndex) {
     console.log(`🛑 Cancelling download for track ${trackIndex}`);
-    // Individual track cancellation would need to be implemented in the download system
-    // For now, just update the UI
-    const statusElement = document.getElementById(`download-${trackIndex}`);
-    const actionsElement = document.getElementById(`actions-${trackIndex}`);
     
-    if (statusElement) {
-        statusElement.textContent = '❌ Cancelled';
-        statusElement.className = 'track-download-status download-failed';
-    }
-    if (actionsElement) {
-        actionsElement.textContent = '-';
+    try {
+        // Find the table row for this track
+        const row = document.querySelector(`tr[data-track-index="${trackIndex}"]`);
+        if (!row) {
+            console.error(`Could not find row for track index ${trackIndex}`);
+            return;
+        }
+        
+        // Get the task ID that was stored by the polling function
+        const taskId = row.dataset.taskId;
+        if (!taskId) {
+            console.warn(`No task ID found for track ${trackIndex}, cancelling locally only`);
+            // Update UI immediately for local cancellation
+            const statusElement = row.querySelector('.track-download-status');
+            const actionsElement = row.querySelector('.track-actions');
+            
+            if (statusElement) {
+                statusElement.textContent = '❌ Cancelled';
+                statusElement.className = 'track-download-status download-cancelled';
+            }
+            if (actionsElement) {
+                actionsElement.innerHTML = '-';
+            }
+            return;
+        }
+        
+        // Update UI immediately to show cancellation in progress
+        const statusElement = row.querySelector('.track-download-status');
+        const actionsElement = row.querySelector('.track-actions');
+        
+        if (statusElement) {
+            statusElement.textContent = '⏹️ Cancelling...';
+            statusElement.className = 'track-download-status download-cancelling';
+        }
+        if (actionsElement) {
+            actionsElement.innerHTML = '-';
+        }
+        
+        // Call the backend cancel endpoint
+        const response = await fetch('/api/downloads/cancel_task', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ task_id: taskId })
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            console.log(`✅ Successfully cancelled task ${taskId}`);
+            // The polling function will update the UI with the final cancelled state
+            showToast('Download cancelled successfully', 'info');
+        } else {
+            throw new Error(data.error || 'Failed to cancel download');
+        }
+        
+    } catch (error) {
+        console.error('❌ Error cancelling download:', error);
+        showToast(`Failed to cancel download: ${error.message}`, 'error');
+        
+        // Reset UI on error
+        const row = document.querySelector(`tr[data-track-index="${trackIndex}"]`);
+        if (row) {
+            const statusElement = row.querySelector('.track-download-status');
+            const actionsElement = row.querySelector('.track-actions');
+            
+            if (statusElement && statusElement.textContent === '⏹️ Cancelling...') {
+                statusElement.textContent = '❌ Cancel Failed';
+                statusElement.className = 'track-download-status download-failed';
+            }
+            if (actionsElement) {
+                actionsElement.innerHTML = `<button class="cancel-track-btn" onclick="cancelTrackDownload(${trackIndex})">Cancel</button>`;
+            }
+        }
     }
 }
 
@@ -3375,6 +3627,13 @@ window.clearFinishedDownloads = clearFinishedDownloads;
 window.matchedDownloadTrack = matchedDownloadTrack;
 window.matchedDownloadAlbum = matchedDownloadAlbum;
 window.matchedDownloadAlbumTrack = matchedDownloadAlbumTrack;
+
+// Download Missing Tracks Modal functions
+window.openDownloadMissingModal = openDownloadMissingModal;
+window.closeDownloadMissingModal = closeDownloadMissingModal;
+window.startTrackAnalysis = startTrackAnalysis;
+window.cancelAllOperations = cancelAllOperations;
+window.cancelTrackDownload = cancelTrackDownload;
 
 // APPEND THIS JAVASCRIPT SNIPPET (B)
 
