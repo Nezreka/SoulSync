@@ -2018,24 +2018,21 @@ function startModalDownloadPolling() {
             let failedCount = 0;
             let totalTasks = tasks.length;
             
-            // Update each track's status - but only for missing tracks
+            // Update each track's status in the modal
             for (const task of tasks) {
                 const trackIndex = task.track_index;
                 const row = document.querySelector(`tr[data-track-index="${trackIndex}"]`);
                 
-                // Only update if this is a missing track (has a matching entry in missingTracks array)
                 const isMissingTrack = missingTracks.some(mt => mt.track_index === trackIndex);
-                
                 
                 if (row && isMissingTrack) {
                     const statusElement = row.querySelector('.track-download-status');
                     const actionsElement = row.querySelector('.track-actions');
-                    
-                    // Store task ID for cancellation
                     row.dataset.taskId = task.task_id;
                     
                     const status = task.status;
-                    
+                    const progress = task.progress || 0; // Get live progress from backend
+
                     switch (status) {
                         case 'pending':
                             statusElement.textContent = '⏸️ Pending';
@@ -2048,15 +2045,9 @@ function startModalDownloadPolling() {
                             actionsElement.innerHTML = `<button class="cancel-track-btn" onclick="cancelTrackDownload(${trackIndex})">Cancel</button>`;
                             break;
                         case 'downloading':
-                            statusElement.textContent = '⏬ Downloading...';
+                            statusElement.textContent = `⏬ Downloading... ${Math.round(progress)}%`;
                             statusElement.className = 'track-download-status download-downloading';
                             actionsElement.innerHTML = `<button class="cancel-track-btn" onclick="cancelTrackDownload(${trackIndex})">Cancel</button>`;
-                            
-                            // Start live download polling when we detect actual downloads have begun
-                            if (!isDownloadPollingActive) {
-                                console.log('🔄 Download detected - starting live download polling integration');
-                                startDownloadPolling();
-                            }
                             break;
                         case 'completed':
                             statusElement.textContent = '✅ Completed';
@@ -2084,13 +2075,11 @@ function startModalDownloadPolling() {
                 }
             }
             
-            // Update progress
+            // Update progress bar and stats
             const progressPercent = totalTasks > 0 ? ((completedCount + failedCount) / totalTasks) * 100 : 0;
             document.getElementById('download-progress-fill').style.width = `${progressPercent}%`;
             document.getElementById('download-progress-text').textContent = 
                 `${completedCount}/${totalTasks} completed (${progressPercent.toFixed(0)}%)`;
-            
-            // Update downloaded count
             document.getElementById('stat-downloaded').textContent = completedCount;
             
             // Stop polling when all tasks are complete
@@ -2099,26 +2088,16 @@ function startModalDownloadPolling() {
                 modalDownloadPoller = null;
                 document.getElementById('cancel-all-btn').style.display = 'none';
                 console.log('✅ All download tasks completed, stopping polling');
-                
-                // Also stop live download polling if we started it
-                if (isDownloadPollingActive) {
-                    stopDownloadPolling();
-                }
-                
                 if (completedCount > 0) {
                     showToast(`Download completed: ${completedCount} tracks downloaded successfully!`, 'success');
                 }
             }
-            
-            // Update modal tracks with live download progress from the actual download queue
-            updateModalWithLiveDownloadProgress();
             
         } catch (error) {
             console.error('Error polling download status:', error);
         }
     }, 2000); // Poll every 2 seconds
 }
-
 async function updateModalWithLiveDownloadProgress() {
     try {
         if (!currentDownloadBatchId) return;
@@ -3794,6 +3773,165 @@ function calculateRelevanceScore(result, query) {
     
     return score;
 }
+// APPEND THIS JAVASCRIPT SNIPPET (B)
+
+function initializeFilters() {
+    const toggleBtn = document.getElementById('filter-toggle-btn');
+    const container = document.getElementById('filters-container');
+    const content = document.getElementById('filter-content');
+
+    if (toggleBtn && container && content) {
+        // Using .onclick ensures we only ever have one click handler
+        toggleBtn.onclick = () => {
+            const isExpanded = container.classList.contains('expanded');
+            
+            if (isExpanded) {
+                // Collapse the container
+                container.classList.remove('expanded');
+                toggleBtn.textContent = '⏷ Filters';
+            } else {
+                // Expand the container
+                content.classList.remove('hidden'); // Make sure content is visible for animation
+                container.classList.add('expanded');
+                toggleBtn.textContent = '⏶ Filters';
+            }
+        };
+    }
+
+    // This part is correct and doesn't need to change
+    document.querySelectorAll('.filter-btn').forEach(button => {
+        button.addEventListener('click', handleFilterClick);
+    });
+}
+
+function handleFilterClick(event) {
+    const button = event.target;
+    const filterType = button.dataset.filterType;
+    const value = button.dataset.value;
+
+    if (filterType === 'type') currentFilterType = value;
+    if (filterType === 'format') currentFilterFormat = value;
+    if (filterType === 'sort') currentSortBy = value;
+
+    if (button.id === 'sort-order-btn') {
+        isSortReversed = !isSortReversed;
+        button.textContent = isSortReversed ? '↑' : '↓';
+    }
+
+    document.querySelectorAll(`.filter-btn[data-filter-type="${filterType}"]`).forEach(btn => {
+        btn.classList.remove('active');
+    });
+    if (filterType) { // Don't try to activate the sort order button
+        button.classList.add('active');
+    }
+
+    applyFiltersAndSort();
+}
+
+function resetFilters() {
+    currentFilterType = 'all';
+    currentFilterFormat = 'all';
+    currentSortBy = 'quality_score';
+    isSortReversed = false;
+    
+    document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
+    document.querySelector('.filter-btn[data-filter-type="type"][data-value="all"]').classList.add('active');
+    document.querySelector('.filter-btn[data-filter-type="format"][data-value="all"]').classList.add('active');
+    document.querySelector('.filter-btn[data-filter-type="sort"][data-value="quality_score"]').classList.add('active');
+    document.getElementById('sort-order-btn').textContent = '↓';
+}
+
+function applyFiltersAndSort() {
+    let processedResults = [...allSearchResults];
+    const query = document.getElementById('downloads-search-input').value.trim().toLowerCase();
+
+    // 1. Filter by Type
+    if (currentFilterType !== 'all') {
+        processedResults = processedResults.filter(r => r.result_type === currentFilterType);
+    }
+
+    // 2. Filter by Format
+    if (currentFilterFormat !== 'all') {
+        processedResults = processedResults.filter(r => {
+            const quality = (r.dominant_quality || r.quality || '').toLowerCase();
+            return quality === currentFilterFormat;
+        });
+    }
+
+    // 3. Sort Results
+    processedResults.sort((a, b) => {
+        let valA, valB;
+
+        // Special handling for relevance sort
+        if (currentSortBy === 'relevance') {
+            valA = calculateRelevanceScore(a, query);
+            valB = calculateRelevanceScore(b, query);
+            return valB - valA; // Higher score is better
+        }
+        
+        // Special handling for availability
+        if (currentSortBy === 'availability') {
+            valA = (a.free_upload_slots || 0) - (a.queue_length || 0) * 0.1;
+            valB = (b.free_upload_slots || 0) - (b.queue_length || 0) * 0.1;
+            return valB - valA;
+        }
+
+        valA = a[currentSortBy] || 0;
+        valB = b[currentSortBy] || 0;
+
+        if (typeof valA === 'string') {
+            // For name/title sort, use the correct property
+            const titleA = (a.album_title || a.title || '').toLowerCase();
+            const titleB = (b.album_title || b.title || '').toLowerCase();
+            return titleA.localeCompare(titleB);
+        }
+        
+        // Default numeric sort (descending)
+        return valB - valA;
+    });
+
+    // Handle sort direction toggle
+    const sortDefaults = {
+        relevance: 'desc', quality_score: 'desc', size: 'desc', bitrate: 'desc', 
+        upload_speed: 'desc', duration: 'desc', availability: 'desc',
+        title: 'asc', username: 'asc'
+    };
+    
+    const defaultOrder = sortDefaults[currentSortBy] || 'desc';
+    if ((defaultOrder === 'asc' && isSortReversed) || (defaultOrder === 'desc' && !isSortReversed)) {
+        processedResults.reverse();
+    }
+    
+    displayDownloadsResults(processedResults);
+}
+
+function calculateRelevanceScore(result, query) {
+    let score = 0.0;
+    const queryTerms = query.split(' ').filter(t => t.length > 1);
+
+    // 1. Search Term Matching (40%)
+    let searchableText = `${result.title || ''} ${result.artist || ''} ${result.album || ''} ${result.album_title || ''}`.toLowerCase();
+    let termMatches = 0;
+    for (const term of queryTerms) {
+        if (searchableText.includes(term)) {
+            termMatches++;
+        }
+    }
+    score += (termMatches / queryTerms.length) * 0.40;
+
+    // 2. Quality Score (25%)
+    score += (result.quality_score || 0) * 0.25;
+
+    // 3. User Reliability (Availability & Speed) (20%)
+    const reliability = ((result.free_upload_slots || 0) > 0 ? 0.5 : 0) + Math.min(1, (result.upload_speed || 0) / 500) * 0.5;
+    score += reliability * 0.20;
+
+    // 4. File Completeness (Bitrate & Duration) (15%)
+    const completeness = (Math.min(1, (result.bitrate || 0) / 320) * 0.5) + (result.duration > 0 ? 0.5 : 0);
+    score += completeness * 0.15;
+    
+    return score;
+}
 
 // Add to global scope for onclick
 window.handleFilterClick = handleFilterClick;
@@ -4329,6 +4467,8 @@ async function confirmMatch() {
         confirmBtn.textContent = originalText;
     }
 }
+
+
 
 
 function matchedDownloadTrack(trackIndex) {

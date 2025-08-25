@@ -874,6 +874,15 @@ def start_download():
         return jsonify({"error": str(e)}), 500
 
 
+
+
+
+
+
+
+
+
+
 def _find_completed_file_robust(download_dir, api_filename):
     """
     Robustly finds a completed file on disk, accounting for name variations and
@@ -927,6 +936,8 @@ def _find_completed_file_robust(download_dir, api_filename):
     
     print(f"Could not find a confident match for '{target_basename}'. Highest similarity was {highest_similarity:.2f}.")
     return None
+
+
 
 
 @app.route('/api/downloads/status')
@@ -1017,6 +1028,7 @@ def get_download_status():
     except Exception as e:
         print(f"Error fetching download status: {e}")
         return jsonify({"error": str(e)}), 500
+
 
 
 
@@ -1780,6 +1792,8 @@ def _search_track_in_album_context(original_search: dict, artist: dict) -> dict:
         return None
 
 
+
+
 def _detect_album_info_web(context: dict, artist: dict) -> dict:
     """
     This is the final, corrected version that ensures the official Spotify track
@@ -2022,6 +2036,8 @@ def _download_cover_art(album_info: dict, target_dir: str):
         print(f"❌ Error downloading cover.jpg: {e}")
 
 
+
+
 def _get_spotify_album_tracks(spotify_album: dict) -> list:
     """Fetches all tracks for a given Spotify album ID."""
     if not spotify_album or not spotify_album.get('id'):
@@ -2084,6 +2100,7 @@ def _match_track_to_spotify_title(slsk_track_meta: dict, spotify_tracks: list) -
 
     print(f"⚠️ Could not confidently match track '{slsk_track_meta['title']}'. Using original metadata.")
     return slsk_track_meta # Fallback to original
+
 
 
 # --- Post-Processing Logic ---
@@ -2200,9 +2217,6 @@ def _post_process_matched_download(context_key, context, file_path):
             if context_key not in matched_downloads_context:
                 matched_downloads_context[context_key] = context
                 print(f"♻️ Re-added {context_key} to context for retry")
-
-
-
 
 # Keep track of processed downloads to avoid re-processing
 _processed_download_ids = set()
@@ -2771,31 +2785,90 @@ def start_playlist_missing_downloads(playlist_id):
 @app.route('/api/playlists/<batch_id>/download_status', methods=['GET'])
 def get_batch_download_status(batch_id):
     """
-    This endpoint returns real-time status for all tasks in a batch,
-    enabling live progress tracking in the modal.
+    Returns real-time status for all tasks in a batch. This version correctly
+    parses the live 'state' from slskd to report 'completed' status, fixing
+    the UI issue where downloads would get stuck at 100%.
     """
     try:
+        # --- Fetch live transfer data from slskd ---
+        live_transfers_lookup = {}
+        try:
+            transfers_data = asyncio.run(soulseek_client._make_request('GET', 'transfers/downloads'))
+            if transfers_data:
+                all_transfers = []
+                for user_data in transfers_data:
+                    username = user_data.get('username', 'Unknown')
+                    if 'directories' in user_data:
+                        for directory in user_data['directories']:
+                            if 'files' in directory:
+                                for file_info in directory['files']:
+                                    file_info['username'] = username
+                                    all_transfers.append(file_info)
+                
+                # Create a lookup dictionary using a reliable composite key
+                for transfer in all_transfers:
+                    key = f"{transfer.get('username')}::{os.path.basename(transfer.get('filename', ''))}"
+                    live_transfers_lookup[key] = transfer
+        except Exception as e:
+            print(f"⚠️ Could not fetch live transfers for modal status: {e}")
+
+        # --- Process tasks and enrich with live data ---
         with tasks_lock:
             batch_tasks = []
-            for task_id, task in download_tasks.items():
-                if task.get('batch_id') == batch_id:
-                    task_status = {
-                        'task_id': task_id,
-                        'track_index': task['track_index'],
-                        'status': task['status'],
-                        'track_info': task['track_info'],
-                        'download_id': task.get('download_id'),
-                        'username': task.get('username')
-                    }
-                    batch_tasks.append(task_status)
-                    print(f"🔧 [Status API] Task {task_id} track_index {task['track_index']} status: {task['status']}")
-            
-            # Sort by track_index to maintain order
+            if batch_id not in download_batches:
+                return jsonify({"tasks": []})
+
+            for task_id in download_batches[batch_id].get('queue', []):
+                task = download_tasks.get(task_id)
+                if not task:
+                    continue
+
+                task_status = {
+                    'task_id': task_id,
+                    'track_index': task['track_index'],
+                    'status': task['status'],
+                    'track_info': task['track_info'],
+                    'progress': 0
+                }
+
+                # --- USE THE RELIABLE KEY FOR MATCHING ---
+                task_filename = task.get('filename') or task['track_info'].get('filename')
+                task_username = task.get('username') or task['track_info'].get('username')
+
+                if task_filename and task_username:
+                    lookup_key = f"{task_username}::{os.path.basename(task_filename)}"
+                    
+                    if lookup_key in live_transfers_lookup:
+                        live_info = live_transfers_lookup[lookup_key]
+                        
+                        # --- THIS IS THE KEY FIX ---
+                        # Correctly parse the live state string from the API
+                        state_str = live_info.get('state', 'Unknown')
+                        
+                        if 'Completed' in state_str or 'Succeeded' in state_str:
+                            task_status['status'] = 'completed'
+                        elif 'Cancelled' in state_str or 'Canceled' in state_str:
+                            task_status['status'] = 'cancelled'
+                        elif 'Failed' in state_str or 'Errored' in state_str:
+                            task_status['status'] = 'failed'
+                        elif 'InProgress' in state_str:
+                            task_status['status'] = 'downloading'
+                        else:
+                            task_status['status'] = 'queued'
+                        # --- END OF FIX ---
+                        
+                        task_status['progress'] = live_info.get('percentComplete', 0)
+                        print(f"🔧 [Status API] Live Update for Task {task_id}: Status '{task_status['status']}', Progress {task_status['progress']}%")
+
+                batch_tasks.append(task_status)
+
             batch_tasks.sort(key=lambda x: x['track_index'])
             
         return jsonify({"tasks": batch_tasks})
         
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         print(f"❌ Error getting batch status: {e}")
         return jsonify({"error": str(e)}), 500
 
