@@ -1578,6 +1578,7 @@ function showPlaylistDetailsModal(playlist) {
             
             <div class="playlist-modal-footer">
                 <button class="playlist-modal-btn playlist-modal-btn-secondary" onclick="closePlaylistDetailsModal()">Close</button>
+                <button class="playlist-modal-btn playlist-modal-btn-tertiary" onclick="openDownloadMissingModal('${playlist.id}')">📥 Download Missing Tracks</button>
                 <button class="playlist-modal-btn playlist-modal-btn-primary" onclick="startPlaylistSync('${playlist.id}')">Sync Playlist</button>
             </div>
         </div>
@@ -1597,6 +1598,466 @@ function formatDuration(ms) {
     const minutes = Math.floor(ms / 60000);
     const seconds = Math.floor((ms % 60000) / 1000);
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}
+
+// ===============================
+// DOWNLOAD MISSING TRACKS MODAL
+// ===============================
+
+let activeAnalysisTaskId = null;
+let currentPlaylistTracks = [];
+let analysisResults = [];
+let missingTracks = [];
+
+async function openDownloadMissingModal(playlistId) {
+    console.log(`📥 Opening Download Missing Tracks modal for playlist: ${playlistId}`);
+    
+    // Close the playlist details modal first
+    closePlaylistDetailsModal();
+    
+    // Find playlist data
+    const playlist = spotifyPlaylists.find(p => p.id === playlistId);
+    if (!playlist) {
+        console.error(`❌ Could not find playlist data for ID: ${playlistId}`);
+        showToast('Could not find playlist data.', 'error');
+        return;
+    }
+    
+    // Ensure we have track data
+    let tracks = playlistTrackCache[playlistId];
+    if (!tracks) {
+        console.log(`🔄 Cache miss - fetching tracks for download analysis`);
+        try {
+            const response = await fetch(`/api/spotify/playlist/${playlistId}`);
+            const fullPlaylist = await response.json();
+            if (fullPlaylist.error) throw new Error(fullPlaylist.error);
+            tracks = fullPlaylist.tracks;
+            playlistTrackCache[playlistId] = tracks; // Cache it
+        } catch (error) {
+            console.error(`❌ Failed to fetch tracks:`, error);
+            showToast(`Failed to fetch tracks: ${error.message}`, 'error');
+            return;
+        }
+    }
+    
+    currentPlaylistTracks = tracks;
+    console.log(`✅ Loaded ${tracks.length} tracks for analysis`);
+    
+    // Create or get modal
+    let modal = document.getElementById('download-missing-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'download-missing-modal';
+        document.body.appendChild(modal);
+    }
+    
+    // Build modal HTML
+    modal.innerHTML = `
+        <div class="download-missing-modal-content">
+            <div class="download-missing-modal-header">
+                <h2 class="download-missing-modal-title">Download Missing Tracks - ${escapeHtml(playlist.name)}</h2>
+                <span class="download-missing-modal-close" onclick="closeDownloadMissingModal()">&times;</span>
+            </div>
+            
+            <div class="download-missing-modal-body">
+                <!-- Dashboard Stats -->
+                <div class="download-dashboard-stats">
+                    <div class="dashboard-stat stat-total">
+                        <div class="dashboard-stat-number" id="stat-total">${tracks.length}</div>
+                        <div class="dashboard-stat-label">Total Tracks</div>
+                    </div>
+                    <div class="dashboard-stat stat-found">
+                        <div class="dashboard-stat-number" id="stat-found">-</div>
+                        <div class="dashboard-stat-label">Found in Library</div>
+                    </div>
+                    <div class="dashboard-stat stat-missing">
+                        <div class="dashboard-stat-number" id="stat-missing">-</div>
+                        <div class="dashboard-stat-label">Missing Tracks</div>
+                    </div>
+                    <div class="dashboard-stat stat-downloaded">
+                        <div class="dashboard-stat-number" id="stat-downloaded">0</div>
+                        <div class="dashboard-stat-label">Downloaded</div>
+                    </div>
+                </div>
+                
+                <!-- Progress Section -->
+                <div class="download-progress-section">
+                    <div class="progress-item">
+                        <div class="progress-label">
+                            🔍 Library Analysis
+                            <span id="analysis-progress-text">Ready to start</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill analysis" id="analysis-progress-fill"></div>
+                        </div>
+                    </div>
+                    <div class="progress-item">
+                        <div class="progress-label">
+                            ⏬ Downloads
+                            <span id="download-progress-text">Waiting for analysis</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill download" id="download-progress-fill"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Track Table -->
+                <div class="download-tracks-section">
+                    <div class="download-tracks-header">
+                        <h3 class="download-tracks-title">📋 Track Analysis & Download Status</h3>
+                    </div>
+                    <div class="download-tracks-table-container">
+                        <table class="download-tracks-table">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Track</th>
+                                    <th>Artist</th>
+                                    <th>Duration</th>
+                                    <th>Library Match</th>
+                                    <th>Download Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="download-tracks-tbody">
+                                ${tracks.map((track, index) => `
+                                    <tr data-track-index="${index}">
+                                        <td class="track-number">${index + 1}</td>
+                                        <td class="track-name">${escapeHtml(track.name)}</td>
+                                        <td class="track-artist">${track.artists.join(', ')}</td>
+                                        <td class="track-duration">${formatDuration(track.duration_ms)}</td>
+                                        <td class="track-match-status match-checking" id="match-${index}">🔍 Pending</td>
+                                        <td class="track-download-status" id="download-${index}">-</td>
+                                        <td class="track-actions" id="actions-${index}">-</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="download-missing-modal-footer">
+                <div class="download-phase-controls">
+                    <button class="download-control-btn primary" id="begin-analysis-btn" onclick="startTrackAnalysis()">
+                        Begin Analysis
+                    </button>
+                    <button class="download-control-btn primary" id="start-downloads-btn" onclick="startMissingDownloads()" style="display: none;">
+                        Start Downloads
+                    </button>
+                    <button class="download-control-btn danger" id="cancel-all-btn" onclick="cancelAllOperations()" style="display: none;">
+                        Cancel All
+                    </button>
+                </div>
+                <div class="modal-close-section">
+                    <button class="download-control-btn secondary" onclick="closeDownloadMissingModal()">Close</button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Reset state
+    activeAnalysisTaskId = null;
+    analysisResults = [];
+    missingTracks = [];
+    
+    // Show modal
+    modal.style.display = 'flex';
+}
+
+function closeDownloadMissingModal() {
+    // Clean up any active tasks
+    if (activeAnalysisTaskId) {
+        fetch(`/api/tracks/analyze/cancel/${activeAnalysisTaskId}`, { method: 'POST' })
+            .catch(e => console.warn('Failed to cancel analysis task:', e));
+    }
+    
+    const modal = document.getElementById('download-missing-modal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+    
+    // Reset state
+    activeAnalysisTaskId = null;
+    currentPlaylistTracks = [];
+    analysisResults = [];
+    missingTracks = [];
+}
+
+async function startTrackAnalysis() {
+    console.log(`🔍 Starting track analysis for ${currentPlaylistTracks.length} tracks`);
+    
+    try {
+        // Update UI to analysis mode
+        document.getElementById('begin-analysis-btn').style.display = 'none';
+        document.getElementById('cancel-all-btn').style.display = 'inline-block';
+        document.getElementById('analysis-progress-text').textContent = 'Starting analysis...';
+        
+        // Start analysis
+        const response = await fetch('/api/tracks/analyze', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                tracks: currentPlaylistTracks
+            })
+        });
+        
+        const data = await response.json();
+        if (!data.success) throw new Error(data.error);
+        
+        activeAnalysisTaskId = data.task_id;
+        console.log(`✅ Analysis started with task ID: ${activeAnalysisTaskId}`);
+        
+        // Start polling for results
+        startAnalysisPolling();
+        
+    } catch (error) {
+        console.error('❌ Failed to start analysis:', error);
+        showToast(`Failed to start analysis: ${error.message}`, 'error');
+        
+        // Reset UI
+        document.getElementById('begin-analysis-btn').style.display = 'inline-block';
+        document.getElementById('cancel-all-btn').style.display = 'none';
+        document.getElementById('analysis-progress-text').textContent = 'Ready to start';
+    }
+}
+
+function startAnalysisPolling() {
+    if (!activeAnalysisTaskId) return;
+    
+    const pollInterval = setInterval(async () => {
+        try {
+            const response = await fetch(`/api/tracks/analyze/status/${activeAnalysisTaskId}`);
+            const status = await response.json();
+            
+            if (response.status === 404 || status.error) {
+                console.error('❌ Analysis task not found or error:', status.error);
+                clearInterval(pollInterval);
+                return;
+            }
+            
+            // Update progress bar
+            const progressPercent = status.progress || 0;
+            document.getElementById('analysis-progress-fill').style.width = `${progressPercent}%`;
+            document.getElementById('analysis-progress-text').textContent = 
+                `${status.processed || 0}/${status.total || 0} tracks analyzed (${progressPercent}%)`;
+            
+            // Update table with individual results
+            if (status.results && status.results.length > 0) {
+                updateTrackAnalysisResults(status.results);
+            }
+            
+            // Check if complete
+            if (status.status === 'complete') {
+                console.log(`✅ Analysis complete: ${status.total_found} found, ${status.total_missing} missing`);
+                clearInterval(pollInterval);
+                onAnalysisComplete(status);
+            } else if (status.status === 'error') {
+                console.error('❌ Analysis failed:', status.error);
+                clearInterval(pollInterval);
+                showToast(`Analysis failed: ${status.error}`, 'error');
+                resetToInitialState();
+            } else if (status.status === 'cancelled') {
+                console.log('⚠️ Analysis was cancelled');
+                clearInterval(pollInterval);
+                resetToInitialState();
+            }
+            
+        } catch (error) {
+            console.error('❌ Error polling analysis status:', error);
+            clearInterval(pollInterval);
+            showToast('Failed to get analysis status', 'error');
+        }
+    }, 1000); // Poll every second
+}
+
+function updateTrackAnalysisResults(results) {
+    for (const result of results) {
+        const trackIndex = result.track_index;
+        const matchElement = document.getElementById(`match-${trackIndex}`);
+        
+        if (matchElement) {
+            if (result.found) {
+                matchElement.textContent = '✅ Found';
+                matchElement.className = 'track-match-status match-found';
+            } else {
+                matchElement.textContent = '❌ Missing';
+                matchElement.className = 'track-match-status match-missing';
+            }
+        }
+    }
+}
+
+function onAnalysisComplete(status) {
+    // Update dashboard stats
+    document.getElementById('stat-found').textContent = status.total_found || 0;
+    document.getElementById('stat-missing').textContent = status.total_missing || 0;
+    
+    // Update progress text
+    document.getElementById('analysis-progress-text').textContent = 'Analysis complete!';
+    document.getElementById('download-progress-text').textContent = 'Ready to download missing tracks';
+    
+    // Store results
+    analysisResults = status.results || [];
+    missingTracks = analysisResults.filter(r => !r.found);
+    
+    console.log(`📊 Analysis results: ${analysisResults.length} total, ${missingTracks.length} missing`);
+    
+    // Update UI for download phase
+    document.getElementById('cancel-all-btn').style.display = 'none';
+    if (missingTracks.length > 0) {
+        document.getElementById('start-downloads-btn').style.display = 'inline-block';
+    } else {
+        showToast('All tracks were found in your library!', 'success');
+        document.getElementById('download-progress-text').textContent = 'No downloads needed - all tracks found!';
+    }
+}
+
+async function startMissingDownloads() {
+    if (missingTracks.length === 0) {
+        showToast('No missing tracks to download', 'info');
+        return;
+    }
+    
+    console.log(`⏬ Starting downloads for ${missingTracks.length} missing tracks`);
+    
+    try {
+        // Update UI
+        document.getElementById('start-downloads-btn').style.display = 'none';
+        document.getElementById('cancel-all-btn').style.display = 'inline-block';
+        document.getElementById('download-progress-text').textContent = 'Queueing downloads...';
+        
+        // Add cancel buttons to missing tracks
+        for (const result of missingTracks) {
+            const actionsElement = document.getElementById(`actions-${result.track_index}`);
+            if (actionsElement) {
+                actionsElement.innerHTML = `<button class="cancel-track-btn" onclick="cancelTrackDownload(${result.track_index})">Cancel</button>`;
+            }
+            
+            // Update download status
+            const statusElement = document.getElementById(`download-${result.track_index}`);
+            if (statusElement) {
+                statusElement.textContent = '🔍 Queueing...';
+                statusElement.className = 'track-download-status download-searching';
+            }
+        }
+        
+        // Queue downloads
+        const response = await fetch('/api/tracks/download_missing', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                missing_tracks: missingTracks
+            })
+        });
+        
+        const data = await response.json();
+        if (!data.success) throw new Error(data.error);
+        
+        console.log(`✅ Queued ${data.queued} downloads`);
+        showToast(`Queued ${data.queued} downloads. Check the download queue for progress.`, 'success');
+        
+        // Update UI
+        document.getElementById('download-progress-text').textContent = 
+            `${data.queued} downloads queued. Check download queue for live progress.`;
+        
+        // Update download status for queued tracks
+        for (const result of missingTracks) {
+            const statusElement = document.getElementById(`download-${result.track_index}`);
+            if (statusElement) {
+                statusElement.textContent = '📥 Queued';
+                statusElement.className = 'track-download-status download-searching';
+            }
+        }
+        
+        // Hide cancel button since downloads are now handled by the main download system
+        document.getElementById('cancel-all-btn').style.display = 'none';
+        
+    } catch (error) {
+        console.error('❌ Failed to start downloads:', error);
+        showToast(`Failed to start downloads: ${error.message}`, 'error');
+        
+        // Reset UI
+        document.getElementById('start-downloads-btn').style.display = 'inline-block';
+        document.getElementById('cancel-all-btn').style.display = 'none';
+        document.getElementById('download-progress-text').textContent = 'Ready to download missing tracks';
+    }
+}
+
+function cancelAllOperations() {
+    console.log('🛑 Cancelling all operations');
+    
+    // Cancel analysis if running
+    if (activeAnalysisTaskId) {
+        fetch(`/api/tracks/analyze/cancel/${activeAnalysisTaskId}`, { method: 'POST' })
+            .catch(e => console.warn('Failed to cancel analysis:', e));
+    }
+    
+    resetToInitialState();
+    showToast('Operations cancelled', 'info');
+}
+
+function resetToInitialState() {
+    // Reset UI
+    document.getElementById('begin-analysis-btn').style.display = 'inline-block';
+    document.getElementById('start-downloads-btn').style.display = 'none';
+    document.getElementById('cancel-all-btn').style.display = 'none';
+    
+    // Reset progress bars
+    document.getElementById('analysis-progress-fill').style.width = '0%';
+    document.getElementById('download-progress-fill').style.width = '0%';
+    document.getElementById('analysis-progress-text').textContent = 'Ready to start';
+    document.getElementById('download-progress-text').textContent = 'Waiting for analysis';
+    
+    // Reset stats
+    document.getElementById('stat-found').textContent = '-';
+    document.getElementById('stat-missing').textContent = '-';
+    document.getElementById('stat-downloaded').textContent = '0';
+    
+    // Reset track table
+    const tbody = document.getElementById('download-tracks-tbody');
+    if (tbody) {
+        const rows = tbody.querySelectorAll('tr');
+        rows.forEach((row, index) => {
+            const matchElement = row.querySelector('.track-match-status');
+            const downloadElement = row.querySelector('.track-download-status');
+            const actionsElement = row.querySelector('.track-actions');
+            
+            if (matchElement) {
+                matchElement.textContent = '🔍 Pending';
+                matchElement.className = 'track-match-status match-checking';
+            }
+            if (downloadElement) {
+                downloadElement.textContent = '-';
+                downloadElement.className = 'track-download-status';
+            }
+            if (actionsElement) {
+                actionsElement.textContent = '-';
+            }
+        });
+    }
+    
+    // Reset state
+    activeAnalysisTaskId = null;
+    analysisResults = [];
+    missingTracks = [];
+}
+
+function cancelTrackDownload(trackIndex) {
+    console.log(`🛑 Cancelling download for track ${trackIndex}`);
+    // Individual track cancellation would need to be implemented in the download system
+    // For now, just update the UI
+    const statusElement = document.getElementById(`download-${trackIndex}`);
+    const actionsElement = document.getElementById(`actions-${trackIndex}`);
+    
+    if (statusElement) {
+        statusElement.textContent = '❌ Cancelled';
+        statusElement.className = 'track-download-status download-failed';
+    }
+    if (actionsElement) {
+        actionsElement.textContent = '-';
+    }
 }
 
 // Find and REPLACE the old startPlaylistSyncFromModal function
