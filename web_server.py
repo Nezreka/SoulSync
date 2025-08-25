@@ -2393,13 +2393,65 @@ def stop_database_update():
 
 def _load_sync_status_file():
     """Helper function to read the sync status JSON file."""
-    status_file = os.path.join(project_root, 'storage', 'sync_status.json')
-    if not os.path.exists(status_file): return {}
+    # Storage folder is at the same level as web_server.py
+    status_file = os.path.join(os.path.dirname(__file__), 'storage', 'sync_status.json')
+    print(f"🔍 Loading sync status from: {status_file}")
+    
+    if not os.path.exists(status_file): 
+        print(f"❌ Sync status file does not exist: {status_file}")
+        return {}
+    
     try:
         with open(status_file, 'r') as f:
             content = f.read()
-            return json.loads(content) if content else {}
-    except (json.JSONDecodeError, FileNotFoundError): return {}
+            if not content:
+                print(f"⚠️ Sync status file is empty")
+                return {}
+            
+            data = json.loads(content)
+            print(f"✅ Loaded {len(data)} sync statuses from file")
+            for playlist_id, status in list(data.items())[:3]:  # Show first 3
+                print(f"   - {playlist_id}: {status.get('name', 'N/A')} -> {status.get('last_synced', 'N/A')}")
+            return data
+    except (json.JSONDecodeError, FileNotFoundError) as e:
+        print(f"❌ Error loading sync status: {e}")
+        return {}
+
+def _save_sync_status_file(sync_statuses):
+    """Helper function to save the sync status JSON file."""
+    try:
+        # Storage folder is at the same level as web_server.py
+        storage_dir = os.path.join(os.path.dirname(__file__), 'storage')
+        os.makedirs(storage_dir, exist_ok=True)
+        status_file = os.path.join(storage_dir, 'sync_status.json')
+        with open(status_file, 'w') as f:
+            json.dump(sync_statuses, f, indent=4)
+        print(f"✅ Sync status saved to {status_file}")
+    except Exception as e:
+        print(f"❌ Error saving sync status: {e}")
+
+def _update_and_save_sync_status(playlist_id, playlist_name, playlist_owner, snapshot_id):
+    """Updates the sync status for a given playlist and saves to file (same logic as GUI)."""
+    try:
+        # Load existing sync statuses
+        sync_statuses = _load_sync_status_file()
+        
+        # Update this playlist's sync status
+        from datetime import datetime
+        now = datetime.now()
+        sync_statuses[playlist_id] = {
+            'name': playlist_name,
+            'owner': playlist_owner,
+            'snapshot_id': snapshot_id,
+            'last_synced': now.isoformat()
+        }
+        
+        # Save to file
+        _save_sync_status_file(sync_statuses)
+        print(f"🔄 Updated sync status for playlist '{playlist_name}' (ID: {playlist_id})")
+        
+    except Exception as e:
+        print(f"❌ Error updating sync status for {playlist_id}: {e}")
 
 @app.route('/api/spotify/playlists', methods=['GET'])
 def get_spotify_playlists():
@@ -2416,11 +2468,25 @@ def get_spotify_playlists():
             sync_status = "Never Synced"
             # Handle snapshot_id safely - may not exist in core Playlist class
             playlist_snapshot = getattr(p, 'snapshot_id', '')
+            
+            print(f"🔍 Processing playlist: {p.name} (ID: {p.id})")
+            print(f"   - Playlist snapshot: '{playlist_snapshot}'")
+            print(f"   - Status info: {status_info}")
+            
             if 'last_synced' in status_info:
-                if playlist_snapshot != status_info.get('snapshot_id'):
-                    sync_status = "Needs Sync"
+                stored_snapshot = status_info.get('snapshot_id')
+                last_sync_time = datetime.fromisoformat(status_info['last_synced']).strftime('%b %d, %H:%M')
+                print(f"   - Stored snapshot: '{stored_snapshot}'")
+                print(f"   - Snapshots match: {playlist_snapshot == stored_snapshot}")
+                
+                if playlist_snapshot != stored_snapshot:
+                    sync_status = f"Last Sync: {last_sync_time}"
+                    print(f"   - Result: Needs Sync (showing: {sync_status})")
                 else:
-                    sync_status = f"Synced: {datetime.fromisoformat(status_info['last_synced']).strftime('%b %d, %H:%M')}"
+                    sync_status = f"Synced: {last_sync_time}"
+                    print(f"   - Result: {sync_status}")
+            else:
+                print(f"   - No last_synced found - Never Synced")
 
             playlist_data.append({
                 "id": p.id, "name": p.name, "owner": p.owner,
@@ -2631,6 +2697,11 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json):
                 "result": result.__dict__ # Convert dataclass to dict
             }
         print(f"🏁 Sync finished for {playlist_id} - state updated")
+        
+        # Save sync status to storage/sync_status.json (same as GUI)
+        # Handle snapshot_id safely - may not exist in all playlist objects
+        snapshot_id = getattr(playlist, 'snapshot_id', None)
+        _update_and_save_sync_status(playlist_id, playlist_name, playlist.owner, snapshot_id)
 
     except Exception as e:
         print(f"❌ SYNC FAILED for {playlist_id}: {e}")
