@@ -4467,6 +4467,18 @@ body {
     box-shadow: 0 6px 20px rgba(29, 185, 84, 0.4);
 }
 
+.playlist-modal-btn-tertiary {
+    background: #404040;
+    color: #ffffff;
+    border: 1px solid #666666;
+}
+
+.playlist-modal-btn-tertiary:hover {
+    background: #505050;
+    border-color: #777777;
+    transform: translateY(-1px);
+}
+
 /* Add these styles to the end of style.css */
 
 .sync-progress-indicator {
@@ -4549,4 +4561,357 @@ body {
     gap: 6px;
     font-size: 11px;
     font-weight: 500;
+}
+
+/* ==============================================
+   DOWNLOAD MISSING TRACKS MODAL STYLES
+   ============================================== */
+
+#download-missing-modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.8);
+    backdrop-filter: blur(8px);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+}
+
+.download-missing-modal-content {
+    background: #1e1e1e;
+    border-radius: 16px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    width: 1200px;
+    height: 900px;
+    max-width: 90vw;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.download-missing-modal-header {
+    background: linear-gradient(135deg, #2d2d2d 0%, #1a1a1a 100%);
+    border-bottom: 1px solid #404040;
+    padding: 20px 25px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.download-missing-modal-title {
+    color: #1db954;
+    font-size: 18px;
+    font-weight: 700;
+    margin: 0;
+}
+
+.download-missing-modal-close {
+    color: #cccccc;
+    font-size: 32px;
+    font-weight: 300;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    line-height: 1;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+}
+
+.download-missing-modal-close:hover {
+    color: #ffffff;
+    background: rgba(255, 255, 255, 0.1);
+    transform: scale(1.1);
+}
+
+.download-missing-modal-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 25px;
+    gap: 20px;
+    overflow: hidden;
+}
+
+/* Dashboard Stats Section */
+.download-dashboard-stats {
+    background: #2d2d2d;
+    border: 1px solid #444444;
+    border-radius: 12px;
+    padding: 20px;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 20px;
+}
+
+.dashboard-stat {
+    text-align: center;
+}
+
+.dashboard-stat-number {
+    font-size: 28px;
+    font-weight: 700;
+    margin-bottom: 5px;
+}
+
+.dashboard-stat-label {
+    font-size: 13px;
+    color: #cccccc;
+    font-weight: 500;
+}
+
+.stat-total .dashboard-stat-number { color: #1db954; }
+.stat-found .dashboard-stat-number { color: #4CAF50; }
+.stat-missing .dashboard-stat-number { color: #FF6B35; }
+.stat-downloaded .dashboard-stat-number { color: #2196F3; }
+
+/* Progress Section */
+.download-progress-section {
+    background: #2d2d2d;
+    border: 1px solid #444444;
+    border-radius: 12px;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.progress-item {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.progress-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: #cccccc;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.progress-bar {
+    background: #404040;
+    border-radius: 8px;
+    height: 8px;
+    overflow: hidden;
+}
+
+.progress-fill {
+    background: linear-gradient(90deg, #1db954, #1ed760);
+    height: 100%;
+    border-radius: 8px;
+    transition: width 0.3s ease;
+    width: 0%;
+}
+
+.progress-fill.analysis { background: linear-gradient(90deg, #2196F3, #21CBF3); }
+.progress-fill.download { background: linear-gradient(90deg, #FF6B35, #FF8A35); }
+
+/* Track Table Section */
+.download-tracks-section {
+    background: #2d2d2d;
+    border: 1px solid #444444;
+    border-radius: 12px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.download-tracks-header {
+    padding: 15px 20px;
+    border-bottom: 1px solid #444444;
+    background: #333333;
+}
+
+.download-tracks-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: #ffffff;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.download-tracks-table-container {
+    flex: 1;
+    overflow-y: auto;
+}
+
+.download-tracks-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.download-tracks-table th {
+    background: #404040;
+    color: #ffffff;
+    font-weight: 600;
+    font-size: 12px;
+    text-align: left;
+    padding: 12px 15px;
+    border-bottom: 1px solid #555555;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+.download-tracks-table td {
+    padding: 12px 15px;
+    border-bottom: 1px solid #333333;
+    color: #e0e0e0;
+    font-size: 13px;
+}
+
+.download-tracks-table tr:hover {
+    background: rgba(29, 185, 84, 0.05);
+}
+
+.track-number {
+    color: #888888;
+    font-weight: 500;
+    width: 50px;
+    text-align: center;
+}
+
+.track-name {
+    font-weight: 600;
+    color: #ffffff;
+    max-width: 200px;
+}
+
+.track-artist {
+    color: #cccccc;
+    max-width: 150px;
+}
+
+.track-duration {
+    color: #999999;
+    text-align: center;
+    width: 80px;
+}
+
+.track-match-status {
+    text-align: center;
+    width: 100px;
+    font-weight: 600;
+}
+
+.match-found { color: #4CAF50; }
+.match-missing { color: #FF6B35; }
+.match-checking { color: #2196F3; }
+
+.track-download-status {
+    text-align: center;
+    width: 120px;
+    font-weight: 500;
+}
+
+.download-searching { color: #2196F3; }
+.download-downloading { color: #FF6B35; }
+.download-complete { color: #4CAF50; }
+.download-failed { color: #f44336; }
+
+.track-actions {
+    text-align: center;
+    width: 80px;
+}
+
+.cancel-track-btn {
+    background: #f44336;
+    color: #ffffff;
+    border: none;
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.cancel-track-btn:hover {
+    background: #d32f2f;
+    transform: scale(1.05);
+}
+
+/* Modal Footer */
+.download-missing-modal-footer {
+    background: #2a2a2a;
+    border-top: 1px solid #404040;
+    padding: 20px 25px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.download-phase-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.download-control-btn {
+    padding: 12px 20px;
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border: none;
+    min-width: 120px;
+}
+
+.download-control-btn.primary {
+    background: linear-gradient(135deg, #1db954, #1ed760);
+    color: #000000;
+    box-shadow: 0 4px 16px rgba(29, 185, 84, 0.3);
+}
+
+.download-control-btn.primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(29, 185, 84, 0.4);
+}
+
+.download-control-btn.secondary {
+    background: #404040;
+    color: #ffffff;
+    border: 1px solid #666666;
+}
+
+.download-control-btn.secondary:hover {
+    background: #505050;
+    border-color: #777777;
+    transform: translateY(-1px);
+}
+
+.download-control-btn.danger {
+    background: #f44336;
+    color: #ffffff;
+}
+
+.download-control-btn.danger:hover {
+    background: #d32f2f;
+    transform: translateY(-1px);
+}
+
+.download-control-btn:disabled {
+    background: #333333;
+    color: #666666;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+.modal-close-section {
+    display: flex;
+    align-items: center;
 }

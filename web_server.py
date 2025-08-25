@@ -2388,6 +2388,205 @@ def stop_database_update():
             return jsonify({"success": False, "error": "No update is currently running."}), 404
 
 # ===============================
+# == TRACK ANALYSIS API        ==
+# ===============================
+
+# Global state for track analysis tasks
+analysis_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="AnalysisWorker")
+analysis_tasks = {}  # task_id -> analysis state
+analysis_lock = threading.Lock()
+
+def _run_track_analysis_task(task_id, tracks_json):
+    """Run track analysis in background thread (same logic as GUI's PlaylistTrackAnalysisWorker)"""
+    import uuid
+    from database.music_database import MusicDatabase
+    from config.settings import config_manager
+    
+    print(f"🔍 Starting track analysis task {task_id} for {len(tracks_json)} tracks")
+    
+    try:
+        # Initialize database connection
+        db = MusicDatabase()
+        active_server = config_manager.get_active_media_server()
+        
+        results = []
+        total_tracks = len(tracks_json)
+        
+        for i, track_data in enumerate(tracks_json):
+            with analysis_lock:
+                # Check if task was cancelled
+                if analysis_tasks.get(task_id, {}).get('status') == 'cancelled':
+                    print(f"❌ Analysis task {task_id} was cancelled")
+                    return
+                
+            track_name = track_data.get('name', '')
+            artists = track_data.get('artists', [])
+            
+            # Try each artist for matching (same as GUI logic)
+            found = False
+            confidence = 0.0
+            
+            for artist in artists:
+                artist_name = artist if isinstance(artist, str) else str(artist)
+                
+                # Check database for track existence
+                db_track, track_confidence = db.check_track_exists(
+                    track_name, artist_name,
+                    confidence_threshold=0.7,
+                    server_source=active_server
+                )
+                
+                if db_track and track_confidence >= 0.7:
+                    found = True
+                    confidence = track_confidence
+                    print(f"✅ Found: '{track_name}' by {artist_name} (confidence: {confidence:.2f})")
+                    break
+            
+            if not found:
+                print(f"❌ Missing: '{track_name}' by {artists}")
+            
+            # Store result
+            result = {
+                'track_index': i,
+                'track': track_data,
+                'found': found,
+                'confidence': confidence
+            }
+            results.append(result)
+            
+            # Update progress
+            progress = int((i + 1) / total_tracks * 100)
+            with analysis_lock:
+                if task_id in analysis_tasks:
+                    analysis_tasks[task_id].update({
+                        'progress': progress,
+                        'processed': i + 1,
+                        'results': results.copy()  # Store current results
+                    })
+        
+        # Mark as complete
+        with analysis_lock:
+            if task_id in analysis_tasks:
+                analysis_tasks[task_id].update({
+                    'status': 'complete',
+                    'progress': 100,
+                    'results': results,
+                    'total_found': len([r for r in results if r['found']]),
+                    'total_missing': len([r for r in results if not r['found']])
+                })
+        
+        print(f"✅ Analysis complete: {len([r for r in results if r['found']])} found, {len([r for r in results if not r['found']])} missing")
+        
+    except Exception as e:
+        print(f"❌ Analysis task {task_id} failed: {e}")
+        with analysis_lock:
+            if task_id in analysis_tasks:
+                analysis_tasks[task_id].update({
+                    'status': 'error',
+                    'error': str(e)
+                })
+
+@app.route('/api/tracks/analyze', methods=['POST'])
+def start_track_analysis():
+    """Start track analysis to check which tracks exist in media server library"""
+    data = request.get_json()
+    tracks = data.get('tracks', [])
+    
+    if not tracks:
+        return jsonify({"success": False, "error": "No tracks provided"}), 400
+    
+    # Generate unique task ID
+    import uuid
+    task_id = str(uuid.uuid4())
+    
+    # Initialize task state
+    with analysis_lock:
+        analysis_tasks[task_id] = {
+            'status': 'running',
+            'progress': 0,
+            'total': len(tracks),
+            'processed': 0,
+            'results': [],
+            'total_found': 0,
+            'total_missing': 0
+        }
+    
+    # Submit analysis task
+    future = analysis_executor.submit(_run_track_analysis_task, task_id, tracks)
+    
+    return jsonify({
+        "success": True,
+        "task_id": task_id,
+        "total_tracks": len(tracks)
+    })
+
+@app.route('/api/tracks/analyze/status/<task_id>', methods=['GET'])
+def get_analysis_status(task_id):
+    """Get status of track analysis task"""
+    with analysis_lock:
+        task = analysis_tasks.get(task_id)
+        if not task:
+            return jsonify({"error": "Task not found"}), 404
+        
+        return jsonify(task)
+
+@app.route('/api/tracks/analyze/cancel/<task_id>', methods=['POST'])
+def cancel_analysis_task(task_id):
+    """Cancel a running analysis task"""
+    with analysis_lock:
+        if task_id in analysis_tasks:
+            analysis_tasks[task_id]['status'] = 'cancelled'
+            return jsonify({"success": True, "message": "Task cancelled"})
+        else:
+            return jsonify({"success": False, "error": "Task not found"}), 404
+
+@app.route('/api/tracks/download_missing', methods=['POST'])
+def start_missing_downloads():
+    """Queue missing tracks for Soulseek download"""
+    data = request.get_json()
+    missing_tracks = data.get('missing_tracks', [])
+    
+    if not missing_tracks:
+        return jsonify({"success": False, "error": "No missing tracks provided"}), 400
+    
+    try:
+        queued_downloads = 0
+        
+        for track_data in missing_tracks:
+            track = track_data.get('track', {})
+            track_name = track.get('name', '')
+            artists = track.get('artists', [])
+            
+            if not track_name or not artists:
+                continue
+            
+            # Generate search query (simplified version of GUI logic)
+            artist_name = artists[0] if artists else 'Unknown Artist'
+            search_query = f"{track_name} {artist_name}".strip()
+            
+            print(f"📥 Queuing download: '{search_query}'")
+            
+            # Queue download using existing soulseek client
+            try:
+                asyncio.run(soulseek_client.queue_search_and_download(
+                    query=search_query,
+                    preferred_format='flac'  # Use user's preferred format
+                ))
+                queued_downloads += 1
+            except Exception as e:
+                print(f"❌ Failed to queue download for '{search_query}': {e}")
+        
+        return jsonify({
+            "success": True,
+            "queued": queued_downloads,
+            "message": f"Queued {queued_downloads} downloads"
+        })
+        
+    except Exception as e:
+        print(f"❌ Error queueing downloads: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+# ===============================
 # == SYNC PAGE API             ==
 # ===============================
 
