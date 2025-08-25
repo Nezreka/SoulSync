@@ -1758,17 +1758,16 @@ function updateCardToSyncing(playlistId, percent, progress = null) {
     let actualPercent = percent || 0;
     
     if (progress) {
-        // Use the actual progress percentage from the sync service
-        actualPercent = progress.progress || 0;
-        
         // Create detailed progress text like the GUI
         const matched = progress.matched_tracks || 0;
         const failed = progress.failed_tracks || 0;
         const total = progress.total_tracks || 0;
         const currentStep = progress.current_step || 'Processing';
         
+        // Calculate actual progress as processed/total, not just successful/total
         if (total > 0) {
             const processed = matched + failed;
+            actualPercent = Math.round((processed / total) * 100);
             progressText = `${currentStep}: ${processed}/${total} (${matched} matched, ${failed} failed)`;
         } else {
             progressText = currentStep;
@@ -1780,7 +1779,29 @@ function updateCardToSyncing(playlistId, percent, progress = null) {
         }
     }
     
+    // Build live status counter HTML (same as modal)
+    let statusCounterHTML = '';
+    if (progress && progress.total_tracks > 0) {
+        const matched = progress.matched_tracks || 0;
+        const failed = progress.failed_tracks || 0;
+        const total = progress.total_tracks || 0;
+        const processed = matched + failed;
+        const percentage = total > 0 ? Math.round((processed / total) * 100) : 0;
+        
+        statusCounterHTML = `
+            <div class="playlist-card-sync-status">
+                <span class="sync-stat total-tracks">♪ ${total}</span>
+                <span class="sync-separator">/</span>
+                <span class="sync-stat matched-tracks">✓ ${matched}</span>
+                <span class="sync-separator">/</span>
+                <span class="sync-stat failed-tracks">✗ ${failed}</span>
+                <span class="sync-stat percentage">(${percentage}%)</span>
+            </div>
+        `;
+    }
+    
     progressBar.innerHTML = `
+        ${statusCounterHTML}
         <div class="progress-bar-sync">
             <div class="progress-fill-sync" style="width: ${actualPercent}%;"></div>
         </div>
