@@ -10,6 +10,8 @@ import threading
 import time
 import shutil
 import glob
+import uuid
+import re
 from pathlib import Path
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -110,6 +112,13 @@ db_update_lock = threading.Lock()
 # Key: slskd download ID, Value: dict containing Spotify artist/album data
 matched_downloads_context = {}
 matched_context_lock = threading.Lock()
+
+# --- Download Missing Tracks Modal State Management ---
+# Thread-safe state tracking for modal download functionality with batch management
+missing_download_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="MissingTrackWorker")
+download_tasks = {}  # task_id -> task state dict
+download_batches = {}  # batch_id -> {queue, active_count, max_concurrent}
+tasks_lock = threading.Lock()
 
 def _prepare_stream_task(track_data):
     """
@@ -2388,6 +2397,442 @@ def stop_database_update():
             return jsonify({"success": False, "error": "No update is currently running."}), 404
 
 # ===============================
+# == DOWNLOAD MISSING TRACKS   ==
+# ===============================
+
+def get_valid_candidates(results, spotify_track, query):
+    """
+    This function is a direct port from sync.py. It scores and filters
+    Soulseek search results against a Spotify track to find the best, most
+    accurate download candidates.
+    """
+    if not results: 
+        return []
+    # Uses the existing, powerful matching engine for scoring
+    initial_candidates = matching_engine.find_best_slskd_matches_enhanced(spotify_track, results)
+    if not initial_candidates: 
+        return []
+
+    verified_candidates = []
+    spotify_artist_name = spotify_track.artists[0] if spotify_track.artists else ""
+    normalized_spotify_artist = re.sub(r'[^a-zA-Z0-9]', '', spotify_artist_name).lower()
+
+    for candidate in initial_candidates:
+        # This check is critical: it ensures the artist's name is in the file path,
+        # preventing downloads from the wrong artist.
+        normalized_slskd_path = re.sub(r'[^a-zA-Z0-9]', '', candidate.filename).lower()
+        if normalized_spotify_artist in normalized_slskd_path:
+            verified_candidates.append(candidate)
+    return verified_candidates
+
+def _start_next_batch_of_downloads(batch_id):
+    """Start the next batch of downloads up to the concurrent limit (like GUI)"""
+    with tasks_lock:
+        if batch_id not in download_batches:
+            return
+            
+        batch = download_batches[batch_id]
+        max_concurrent = batch['max_concurrent']
+        queue = batch['queue']
+        queue_index = batch['queue_index']
+        active_count = batch['active_count']
+        
+        # Start downloads up to the concurrent limit
+        while active_count < max_concurrent and queue_index < len(queue):
+            task_id = queue[queue_index]
+            
+            # IMPORTANT: Set status to 'searching' BEFORE starting worker (like GUI)
+            # Must be done INSIDE the lock to prevent race conditions with status polling
+            if task_id in download_tasks:
+                download_tasks[task_id]['status'] = 'searching'
+                print(f"🔧 [Batch Manager] Set task {task_id} status to 'searching'")
+            
+            # Update counters
+            download_batches[batch_id]['active_count'] += 1
+            download_batches[batch_id]['queue_index'] += 1
+            
+            print(f"🔄 [Batch Manager] Starting download {queue_index + 1}/{len(queue)} - Active: {active_count + 1}/{max_concurrent}")
+            
+            # Submit to executor
+            missing_download_executor.submit(_download_track_worker, task_id, batch_id)
+            
+            # Update local counters for next iteration
+            active_count += 1
+            queue_index += 1
+
+def _on_download_completed(batch_id, task_id, success=True):
+    """Called when a download completes to start the next one in queue"""
+    with tasks_lock:
+        if batch_id not in download_batches:
+            return
+            
+        # Decrement active count
+        download_batches[batch_id]['active_count'] -= 1
+        
+        print(f"🔄 [Batch Manager] Download completed. Active: {download_batches[batch_id]['active_count']}/{download_batches[batch_id]['max_concurrent']}")
+    
+    # Start next downloads in queue
+    _start_next_batch_of_downloads(batch_id)
+
+def _download_track_worker(task_id, batch_id=None):
+    """
+    Enhanced download worker that matches the GUI's exact retry logic.
+    Implements sequential query retry, fallback candidates, and download failure retry.
+    """
+    try:
+        # Retrieve task details from global state
+        with tasks_lock:
+            if task_id not in download_tasks:
+                print(f"❌ [Modal Worker] Task {task_id} not found in download_tasks")
+                return
+            task = download_tasks[task_id].copy()
+            
+        # Cancellation Checkpoint 1: Before doing anything
+        with tasks_lock:
+            if download_tasks[task_id]['status'] == 'cancelled':
+                print(f"❌ [Modal Worker] Task {task_id} cancelled before starting")
+                return
+
+        track_data = task['track_info']
+        
+        # Recreate a SpotifyTrack object for the matching engine
+        track = SpotifyTrack(
+            id=track_data.get('id', ''),
+            name=track_data.get('name', ''),
+            artists=track_data.get('artists', []),
+            album=track_data.get('album', ''),
+            duration_ms=track_data.get('duration_ms', 0),
+            popularity=track_data.get('popularity', 0)
+        )
+        print(f"📥 [Modal Worker] Starting download task for: {track.name} by {track.artists[0] if track.artists else 'Unknown'}")
+
+        # Initialize task state tracking (like GUI's parallel_search_tracking)
+        with tasks_lock:
+            if task_id in download_tasks:
+                download_tasks[task_id]['status'] = 'searching'  # Now actively being processed
+                download_tasks[task_id]['current_query_index'] = 0
+                download_tasks[task_id]['current_candidate_index'] = 0
+                download_tasks[task_id]['retry_count'] = 0
+                download_tasks[task_id]['candidates'] = []
+                download_tasks[task_id]['used_sources'] = set()
+
+        # 1. Generate multiple search queries (like GUI's generate_smart_search_queries)
+        artist_name = track.artists[0] if track.artists else None
+        track_name = track.name
+        
+        # Start with matching engine queries
+        search_queries = matching_engine.generate_download_queries(track)
+        
+        # Add legacy fallback queries (like GUI does)
+        legacy_queries = []
+        
+        if artist_name:
+            # Add first word of artist approach (legacy compatibility)
+            artist_words = artist_name.split()
+            if artist_words:
+                first_word = artist_words[0]
+                if first_word.lower() == 'the' and len(artist_words) > 1:
+                    first_word = artist_words[1]
+                
+                if len(first_word) > 1:
+                    legacy_queries.append(f"{track_name} {first_word}".strip())
+        
+        # Add track-only query
+        if track_name.strip():
+            legacy_queries.append(track_name.strip())
+        
+        # Add traditional cleaned queries
+        cleaned_name = re.sub(r'\s*\([^)]*\)', '', track_name).strip()
+        cleaned_name = re.sub(r'\s*\[[^\]]*\]', '', cleaned_name).strip()
+        
+        if cleaned_name and cleaned_name.lower() != track_name.lower():
+            legacy_queries.append(cleaned_name.strip())
+        
+        # Combine enhanced queries with legacy fallbacks
+        all_queries = search_queries + legacy_queries
+        
+        # Remove duplicates while preserving order
+        unique_queries = []
+        seen = set()
+        for query in all_queries:
+            if query and query.lower() not in seen:
+                unique_queries.append(query)
+                seen.add(query.lower())
+        
+        search_queries = unique_queries
+        print(f"🔍 [Modal Worker] Generated {len(search_queries)} smart search queries for '{track.name}': {search_queries}")
+
+        # 2. Sequential Query Search (matches GUI's start_search_worker_parallel logic)
+        for query_index, query in enumerate(search_queries):
+            # Cancellation check before each query
+            with tasks_lock:
+                if download_tasks[task_id]['status'] == 'cancelled':
+                    print(f"❌ [Modal Worker] Task {task_id} cancelled during query {query_index + 1}")
+                    return
+                download_tasks[task_id]['current_query_index'] = query_index
+                    
+            print(f"🔍 [Modal Worker] Query {query_index + 1}/{len(search_queries)}: '{query}'")
+            
+            try:
+                # Perform search with timeout
+                tracks_result, _ = asyncio.run(soulseek_client.search(query, timeout=30))
+                if tracks_result:
+                    # Validate candidates using GUI's get_valid_candidates logic
+                    candidates = get_valid_candidates(tracks_result, track, query)
+                    if candidates:
+                        print(f"✅ [Modal Worker] Found {len(candidates)} valid candidates for query '{query}'")
+                        
+                        # Store candidates and attempt download (like GUI)
+                        with tasks_lock:
+                            if task_id in download_tasks:
+                                download_tasks[task_id]['candidates'] = candidates
+                        
+                        # Try to download with these candidates
+                        success = _attempt_download_with_candidates(task_id, candidates, track)
+                        if success:
+                            # Notify batch manager that this task completed (success)
+                            if batch_id:
+                                _on_download_completed(batch_id, task_id, success=True)
+                            return  # Success, exit the worker
+                            
+            except Exception as e:
+                print(f"⚠️ [Modal Worker] Search failed for query '{query}': {e}")
+                continue
+
+        # If we get here, all search queries failed
+        print(f"❌ [Modal Worker] No valid candidates found for '{track.name}' after trying all {len(search_queries)} queries.")
+        with tasks_lock:
+            if task_id in download_tasks:
+                download_tasks[task_id]['status'] = 'failed'
+        
+        # Notify batch manager that this task completed (failed)
+        if batch_id:
+            _on_download_completed(batch_id, task_id, success=False)
+
+    except Exception as e:
+        import traceback
+        print(f"❌ CRITICAL ERROR in download task for '{track_data.get('name')}': {e}")
+        traceback.print_exc()
+        with tasks_lock:
+            if task_id in download_tasks:
+                download_tasks[task_id]['status'] = 'failed'
+        
+        # Notify batch manager that this task completed (failed)
+        if batch_id:
+            _on_download_completed(batch_id, task_id, success=False)
+
+def _attempt_download_with_candidates(task_id, candidates, track):
+    """
+    Attempts to download with fallback candidate logic (matches GUI's retry_parallel_download_with_fallback).
+    Returns True if successful, False if all candidates fail.
+    """
+    # Sort candidates by confidence (best first)
+    candidates.sort(key=lambda r: r.confidence, reverse=True)
+    
+    with tasks_lock:
+        task = download_tasks.get(task_id)
+        if not task:
+            return False
+        used_sources = task.get('used_sources', set())
+    
+    # Try each candidate until one succeeds (like GUI's fallback logic)
+    for candidate_index, candidate in enumerate(candidates):
+        # Check cancellation before each attempt
+        with tasks_lock:
+            if download_tasks[task_id]['status'] == 'cancelled':
+                print(f"❌ [Modal Worker] Task {task_id} cancelled during candidate {candidate_index + 1}")
+                return False
+            download_tasks[task_id]['current_candidate_index'] = candidate_index
+            
+        # Create source key to avoid duplicate attempts (like GUI)
+        source_key = f"{candidate.username}_{candidate.filename}"
+        if source_key in used_sources:
+            print(f"⏭️ [Modal Worker] Skipping already tried source: {source_key}")
+            continue
+            
+        print(f"🎯 [Modal Worker] Trying candidate {candidate_index + 1}/{len(candidates)}: {candidate.filename} (Confidence: {candidate.confidence:.2f})")
+        
+        try:
+            # Update task status to downloading
+            with tasks_lock:
+                if task_id in download_tasks:
+                    download_tasks[task_id]['status'] = 'downloading'
+                    download_tasks[task_id]['used_sources'].add(source_key)
+            
+            # Prepare download (using existing infrastructure)
+            spotify_artist_context = {'id': 'from_sync_modal', 'name': track.artists[0] if track.artists else 'Unknown', 'genres': []}
+            spotify_album_context = {'id': 'from_sync_modal', 'name': track.album, 'release_date': '', 'image_url': None}
+            download_payload = candidate.__dict__
+
+            username = download_payload.get('username')
+            filename = download_payload.get('filename')
+            size = download_payload.get('size', 0)
+
+            if not username or not filename:
+                print(f"❌ [Modal Worker] Invalid candidate data: missing username or filename")
+                continue
+
+            # Initiate download
+            download_id = asyncio.run(soulseek_client.download(username, filename, size))
+
+            if download_id:
+                # Store context for post-processing
+                context_key = f"{username}::{filename}"
+                with matched_context_lock:
+                    matched_downloads_context[context_key] = {
+                        "spotify_artist": spotify_artist_context,
+                        "spotify_album": spotify_album_context,
+                        "original_search_result": download_payload,
+                        "is_album_download": False
+                    }
+                
+                # Update task with successful download info
+                with tasks_lock:
+                    if task_id in download_tasks:
+                        download_tasks[task_id]['download_id'] = download_id
+                        download_tasks[task_id]['username'] = username
+                        download_tasks[task_id]['filename'] = filename
+                        
+                print(f"✅ [Modal Worker] Download started successfully for '{filename}'. Download ID: {download_id}")
+                return True  # Success!
+            else:
+                print(f"❌ [Modal Worker] Failed to start download for '{filename}'")
+                # Reset status back to searching for next attempt
+                with tasks_lock:
+                    if task_id in download_tasks:
+                        download_tasks[task_id]['status'] = 'searching'
+                continue
+                
+        except Exception as e:
+            print(f"❌ [Modal Worker] Error attempting download for '{candidate.filename}': {e}")
+            # Reset status back to searching for next attempt
+            with tasks_lock:
+                if task_id in download_tasks:
+                    download_tasks[task_id]['status'] = 'searching'
+            continue
+
+    # All candidates failed
+    print(f"❌ [Modal Worker] All {len(candidates)} candidates failed for '{track.name}'")
+    return False
+
+@app.route('/api/playlists/<playlist_id>/download_missing', methods=['POST'])
+def start_playlist_missing_downloads(playlist_id):
+    """
+    This endpoint receives the list of missing tracks and manages them with batch processing
+    like the GUI, maintaining exactly 3 concurrent downloads.
+    """
+    data = request.get_json()
+    missing_tracks = data.get('missing_tracks', [])
+    if not missing_tracks:
+        return jsonify({"success": False, "error": "No missing tracks provided"}), 400
+
+    try:
+        batch_id = str(uuid.uuid4())
+        
+        # Create task queue for this batch
+        task_queue = []
+        with tasks_lock:
+            # Initialize batch management
+            download_batches[batch_id] = {
+                'queue': [],
+                'active_count': 0,
+                'max_concurrent': 3,
+                'queue_index': 0
+            }
+            
+            for i, track_entry in enumerate(missing_tracks):
+                task_id = str(uuid.uuid4())
+                # Extract track data and original track index from frontend
+                track_data = track_entry.get('track', track_entry)  # Support both old and new format
+                original_track_index = track_entry.get('track_index', i)  # Use original index or fallback to enumeration
+                
+                download_tasks[task_id] = {
+                    'status': 'pending',
+                    'track_info': track_data,
+                    'playlist_id': playlist_id,
+                    'batch_id': batch_id,
+                    'track_index': original_track_index,  # Use original playlist track index
+                    'download_id': None,
+                    'username': None
+                }
+                
+                # Add to batch queue instead of submitting immediately
+                download_batches[batch_id]['queue'].append(task_id)
+        
+        # Start the first batch of downloads (up to 3)
+        _start_next_batch_of_downloads(batch_id)
+        
+        return jsonify({"success": True, "batch_id": batch_id, "message": f"Queued {len(missing_tracks)} downloads for processing."})
+        
+    except Exception as e:
+        print(f"❌ Error starting missing downloads: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/playlists/<batch_id>/download_status', methods=['GET'])
+def get_batch_download_status(batch_id):
+    """
+    This endpoint returns real-time status for all tasks in a batch,
+    enabling live progress tracking in the modal.
+    """
+    try:
+        with tasks_lock:
+            batch_tasks = []
+            for task_id, task in download_tasks.items():
+                if task.get('batch_id') == batch_id:
+                    task_status = {
+                        'task_id': task_id,
+                        'track_index': task['track_index'],
+                        'status': task['status'],
+                        'track_info': task['track_info'],
+                        'download_id': task.get('download_id'),
+                        'username': task.get('username')
+                    }
+                    batch_tasks.append(task_status)
+                    print(f"🔧 [Status API] Task {task_id} track_index {task['track_index']} status: {task['status']}")
+            
+            # Sort by track_index to maintain order
+            batch_tasks.sort(key=lambda x: x['track_index'])
+            
+        return jsonify({"tasks": batch_tasks})
+        
+    except Exception as e:
+        print(f"❌ Error getting batch status: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/downloads/cancel_task', methods=['POST'])
+def cancel_download_task():
+    """Cancels a single, specific download task."""
+    data = request.get_json()
+    task_id = data.get('task_id')
+    if not task_id:
+        return jsonify({"success": False, "error": "Missing task_id"}), 400
+
+    try:
+        with tasks_lock:
+            if task_id not in download_tasks:
+                return jsonify({"success": False, "error": "Task not found"}), 404
+            
+            task = download_tasks[task_id]
+            task['status'] = 'cancelled'
+            
+            download_id = task.get('download_id')
+            username = task.get('username')
+            
+        # If the download has actually started on Soulseek, cancel it there too
+        if download_id and username:
+            try:
+                success = asyncio.run(soulseek_client.cancel_download(download_id, username, remove=True))
+                return jsonify({"success": success})
+            except Exception as e:
+                print(f"❌ Error cancelling Soulseek download: {e}")
+                return jsonify({"success": True, "note": "Task cancelled locally, but Soulseek cancellation failed"})
+        else:
+            return jsonify({"success": True, "note": "Task cancelled before download started"})
+
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+# ===============================
 # == TRACK ANALYSIS API        ==
 # ===============================
 
@@ -2542,48 +2987,53 @@ def cancel_analysis_task(task_id):
 
 @app.route('/api/tracks/download_missing', methods=['POST'])
 def start_missing_downloads():
-    """Queue missing tracks for Soulseek download"""
+    """Legacy endpoint - redirect to new playlist-based endpoint"""
     data = request.get_json()
     missing_tracks = data.get('missing_tracks', [])
     
     if not missing_tracks:
         return jsonify({"success": False, "error": "No missing tracks provided"}), 400
     
+    # Use a default playlist_id for legacy compatibility
+    playlist_id = "legacy_modal"
+    
+    # Call the new endpoint logic directly
     try:
-        queued_downloads = 0
+        batch_id = str(uuid.uuid4())
         
-        for track_data in missing_tracks:
-            track = track_data.get('track', {})
-            track_name = track.get('name', '')
-            artists = track.get('artists', [])
+        # Create task queue for this batch
+        task_queue = []
+        with tasks_lock:
+            # Initialize batch management
+            download_batches[batch_id] = {
+                'queue': [],
+                'active_count': 0,
+                'max_concurrent': 3,
+                'queue_index': 0
+            }
             
-            if not track_name or not artists:
-                continue
-            
-            # Generate search query (simplified version of GUI logic)
-            artist_name = artists[0] if artists else 'Unknown Artist'
-            search_query = f"{track_name} {artist_name}".strip()
-            
-            print(f"📥 Queuing download: '{search_query}'")
-            
-            # Queue download using existing soulseek client
-            try:
-                asyncio.run(soulseek_client.queue_search_and_download(
-                    query=search_query,
-                    preferred_format='flac'  # Use user's preferred format
-                ))
-                queued_downloads += 1
-            except Exception as e:
-                print(f"❌ Failed to queue download for '{search_query}': {e}")
+            for track_index, track_data in enumerate(missing_tracks):
+                task_id = str(uuid.uuid4())
+                download_tasks[task_id] = {
+                    'status': 'pending',
+                    'track_info': track_data,
+                    'playlist_id': playlist_id,
+                    'batch_id': batch_id,
+                    'track_index': track_index,
+                    'download_id': None,
+                    'username': None
+                }
+                
+                # Add to batch queue instead of submitting immediately
+                download_batches[batch_id]['queue'].append(task_id)
         
-        return jsonify({
-            "success": True,
-            "queued": queued_downloads,
-            "message": f"Queued {queued_downloads} downloads"
-        })
+        # Start the first batch of downloads (up to 3)
+        _start_next_batch_of_downloads(batch_id)
+
+        return jsonify({"success": True, "batch_id": batch_id, "message": f"Queued {len(missing_tracks)} downloads for processing."})
         
     except Exception as e:
-        print(f"❌ Error queueing downloads: {e}")
+        print(f"❌ Error starting missing downloads: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 # ===============================
