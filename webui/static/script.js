@@ -3556,6 +3556,7 @@ function updateDbProgressUI(state) {
 // ===============================
 
 function initializeSyncPage() {
+    // Logic for tab switching
     const tabButtons = document.querySelectorAll('.sync-tab-button');
     tabButtons.forEach(button => {
         button.addEventListener('click', () => {
@@ -3572,6 +3573,14 @@ function initializeSyncPage() {
             document.getElementById(`${tabId}-tab-content`).classList.add('active');
         });
     });
+
+    // Logic for the Spotify refresh button
+    const refreshBtn = document.getElementById('spotify-refresh-btn');
+    if (refreshBtn) {
+        // Remove any old listeners to be safe, then add the new one
+        refreshBtn.removeEventListener('click', loadSpotifyPlaylists);
+        refreshBtn.addEventListener('click', loadSpotifyPlaylists);
+    }
 }
 
 
