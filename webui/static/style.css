@@ -4827,6 +4827,10 @@ body {
     width: 80px;
 }
 
+.track-result-card .track-actions{
+    width: auto;
+}
+
 .cancel-track-btn {
     background: #f44336;
     color: #ffffff;
