@@ -25,6 +25,11 @@ let searchAbortController = null;
 let dbStatsInterval = null;
 let dbUpdateStatusInterval = null;
 
+// --- Add these globals for the Sync Page ---
+let spotifyPlaylists = [];
+let selectedPlaylists = new Set();
+let activeSyncPollers = {}; // Key: playlist_id, Value: intervalId
+
 // API endpoints
 const API = {
     status: '/status',
@@ -55,6 +60,7 @@ document.addEventListener('DOMContentLoaded', function() {
     initializeNavigation();
     initializeMediaPlayer();
     initializeDonationWidget();
+    initializeSyncPage();
 
     
     // Start periodic updates
@@ -1393,25 +1399,201 @@ async function loadDashboardData() {
     }
 }
 
+// ===========================================
+// == SYNC PAGE SPOTIFY FUNCTIONALITY       ==
+// ===========================================
+
 async function loadSyncData() {
+    // This is called when the sync page is navigated to.
+    await loadSpotifyPlaylists();
+}
+
+async function loadSpotifyPlaylists() {
+    const container = document.getElementById('spotify-playlist-container');
+    const refreshBtn = document.getElementById('spotify-refresh-btn');
+    
+    container.innerHTML = `<div class="playlist-placeholder">🔄 Loading playlists...</div>`;
+    refreshBtn.disabled = true;
+    refreshBtn.textContent = '🔄 Loading...';
+
     try {
-        const response = await fetch(API.playlists);
-        const data = await response.json();
-        
-        const playlistSelector = document.getElementById('playlist-selector');
-        if (data.playlists && data.playlists.length) {
-            playlistSelector.innerHTML = [
-                '<option value="">Select a playlist...</option>',
-                ...data.playlists.map(playlist => 
-                    `<option value="${playlist.id}">${escapeHtml(playlist.name)}</option>`
-                )
-            ].join('');
-        } else {
-            playlistSelector.innerHTML = '<option value="">No playlists available</option>';
+        const response = await fetch('/api/spotify/playlists');
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to fetch playlists');
         }
+        spotifyPlaylists = await response.json();
+        renderSpotifyPlaylists();
     } catch (error) {
-        console.error('Error loading sync data:', error);
-        document.getElementById('playlist-selector').innerHTML = '<option value="">Error loading playlists</option>';
+        container.innerHTML = `<div class="playlist-placeholder">❌ Error: ${error.message}</div>`;
+        showToast(`Error loading playlists: ${error.message}`, 'error');
+    } finally {
+        refreshBtn.disabled = false;
+        refreshBtn.textContent = '🔄 Refresh';
+    }
+}
+
+function renderSpotifyPlaylists() {
+    const container = document.getElementById('spotify-playlist-container');
+    if (spotifyPlaylists.length === 0) {
+        container.innerHTML = `<div class="playlist-placeholder">No Spotify playlists found.</div>`;
+        return;
+    }
+
+    container.innerHTML = spotifyPlaylists.map(p => {
+        let statusClass = 'status-never-synced';
+        if (p.sync_status.startsWith('Synced')) statusClass = 'status-synced';
+        if (p.sync_status === 'Needs Sync') statusClass = 'status-needs-sync';
+
+        // This HTML structure creates the interactive playlist cards
+        return `
+        <div class="playlist-card" data-playlist-id="${p.id}" onclick="togglePlaylistSelection(event)">
+            <div class="playlist-card-main">
+                <div class="playlist-card-content">
+                    <div class="playlist-card-name">${escapeHtml(p.name)}</div>
+                    <div class="playlist-card-info">
+                        <span>${p.track_count} tracks</span> • 
+                        <span class="playlist-card-status ${statusClass}">${p.sync_status}</span>
+                    </div>
+                    <div class="sync-progress-indicator" id="progress-${p.id}"></div>
+                </div>
+                <div class="playlist-card-actions">
+                    <button onclick="openPlaylistDetailsModal(event, '${p.id}')">Sync / Download</button>
+                </div>
+            </div>
+        </div>
+        `;
+    }).join('');
+}
+
+function togglePlaylistSelection(event) {
+    const card = event.currentTarget;
+    const playlistId = card.dataset.playlistId;
+
+    // Don't toggle if clicking the button
+    if (event.target.tagName === 'BUTTON') return;
+    
+    const isSelected = !card.classList.contains('selected');
+    card.classList.toggle('selected', isSelected);
+
+    if (isSelected) {
+        selectedPlaylists.add(playlistId);
+    } else {
+        selectedPlaylists.delete(playlistId);
+    }
+    updateSyncActionsUI();
+}
+
+function updateSyncActionsUI() {
+    const selectionInfo = document.getElementById('selection-info');
+    const startSyncBtn = document.getElementById('start-sync-btn');
+    const count = selectedPlaylists.size;
+
+    if (count === 0) {
+        if (selectionInfo) selectionInfo.textContent = 'Select playlists to sync';
+        if (startSyncBtn) startSyncBtn.disabled = true;
+    } else {
+        if (selectionInfo) selectionInfo.textContent = `${count} playlist${count > 1 ? 's' : ''} selected`;
+        if (startSyncBtn) startSyncBtn.disabled = false;
+    }
+}
+
+async function openPlaylistDetailsModal(event, playlistId) {
+    event.stopPropagation();
+    
+    const playlist = spotifyPlaylists.find(p => p.id === playlistId);
+    if (!playlist) return;
+
+    showLoadingOverlay(`Fetching tracks for ${playlist.name}...`);
+    try {
+        const response = await fetch(`/api/spotify/playlist/${playlistId}`);
+        const fullPlaylist = await response.json();
+        if (fullPlaylist.error) throw new Error(fullPlaylist.error);
+        
+        showPlaylistDetailsModal(fullPlaylist);
+
+    } catch (error) {
+        showToast(`Error: ${error.message}`, 'error');
+    } finally {
+        hideLoadingOverlay();
+    }
+}
+
+function showPlaylistDetailsModal(playlist) {
+    // Create modal if it doesn't exist
+    let modal = document.getElementById('playlist-details-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'playlist-details-modal';
+        modal.className = 'modal-overlay';
+        document.body.appendChild(modal);
+    }
+    
+    modal.innerHTML = `
+        <div class="modal-container playlist-modal">
+            <div class="playlist-modal-header">
+                <div class="playlist-header-content">
+                    <h2>${escapeHtml(playlist.name)}</h2>
+                    <div class="playlist-quick-info">
+                        <span class="playlist-track-count">${playlist.track_count} tracks</span>
+                        <span class="playlist-owner">by ${escapeHtml(playlist.owner)}</span>
+                    </div>
+                </div>
+                <span class="playlist-modal-close" onclick="closePlaylistDetailsModal()">&times;</span>
+            </div>
+            
+            <div class="playlist-modal-body">
+                ${playlist.description ? `<div class="playlist-description">${escapeHtml(playlist.description)}</div>` : ''}
+                
+                <div class="playlist-tracks-container">
+                    <div class="playlist-tracks-list">
+                        ${playlist.tracks.map((track, index) => `
+                            <div class="playlist-track-item">
+                                <span class="playlist-track-number">${index + 1}</span>
+                                <div class="playlist-track-info">
+                                    <div class="playlist-track-name">${escapeHtml(track.name)}</div>
+                                    <div class="playlist-track-artists">${track.artists.join(', ')}</div>
+                                </div>
+                                <div class="playlist-track-duration">${formatDuration(track.duration_ms)}</div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            </div>
+            
+            <div class="playlist-modal-footer">
+                <button class="playlist-modal-btn playlist-modal-btn-secondary" onclick="closePlaylistDetailsModal()">Close</button>
+                <button class="playlist-modal-btn playlist-modal-btn-primary" onclick="startPlaylistSyncFromModal('${playlist.id}')">Sync Playlist</button>
+            </div>
+        </div>
+    `;
+    
+    modal.style.display = 'flex';
+}
+
+function closePlaylistDetailsModal() {
+    const modal = document.getElementById('playlist-details-modal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+function formatDuration(ms) {
+    const minutes = Math.floor(ms / 60000);
+    const seconds = Math.floor((ms % 60000) / 1000);
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}
+
+function startPlaylistSyncFromModal(playlistId) {
+    closePlaylistDetailsModal();
+    showToast('Sync functionality will be implemented next!', 'info');
+}
+
+function initializeSyncPage() {
+    // Initialize refresh button
+    const refreshBtn = document.getElementById('spotify-refresh-btn');
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', loadSpotifyPlaylists);
     }
 }
 

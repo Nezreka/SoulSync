@@ -18,7 +18,7 @@ from flask import Flask, render_template, request, jsonify, redirect, send_file
 # --- Core Application Imports ---
 # Import the same core clients and config manager used by the GUI app
 from config.settings import config_manager
-from core.spotify_client import SpotifyClient
+from core.spotify_client import SpotifyClient, Playlist as SpotifyPlaylist
 from core.plex_client import PlexClient
 from core.jellyfin_client import JellyfinClient
 from core.soulseek_client import SoulseekClient
@@ -26,6 +26,8 @@ from core.tidal_client import TidalClient # Added import for Tidal
 from core.matching_engine import MusicMatchingEngine
 from core.database_update_worker import DatabaseUpdateWorker, DatabaseStatsWorker
 from database.music_database import get_database
+from services.sync_service import PlaylistSyncService
+from datetime import datetime
 
 # --- Flask App Setup ---
 base_dir = os.path.abspath(os.path.dirname(__file__))
@@ -65,10 +67,11 @@ try:
     soulseek_client = SoulseekClient()
     tidal_client = TidalClient()
     matching_engine = MusicMatchingEngine()
+    sync_service = PlaylistSyncService(spotify_client, plex_client, soulseek_client, jellyfin_client)
     print("✅ Core service clients initialized.")
 except Exception as e:
     print(f"🔴 FATAL: Error initializing service clients: {e}")
-    spotify_client = plex_client = jellyfin_client = soulseek_client = tidal_client = matching_engine = None
+    spotify_client = plex_client = jellyfin_client = soulseek_client = tidal_client = matching_engine = sync_service = None
 
 # --- Global Streaming State Management ---
 # Thread-safe state tracking for streaming functionality
@@ -95,6 +98,12 @@ db_update_state = {
     "error_message": ""
 }
 db_update_lock = threading.Lock()
+
+# --- Add these globals for the Sync Page ---
+sync_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="SyncWorker")
+active_sync_workers = {}  # Key: playlist_id, Value: Future object
+sync_states = {}          # Key: playlist_id, Value: dict with progress info
+sync_lock = threading.Lock()
 
 # --- Global Matched Downloads Context Management ---
 # Thread-safe storage for matched download contexts
@@ -2378,9 +2387,79 @@ def stop_database_update():
         else:
             return jsonify({"success": False, "error": "No update is currently running."}), 404
 
+# ===============================
+# == SYNC PAGE API             ==
+# ===============================
 
-    
+def _load_sync_status_file():
+    """Helper function to read the sync status JSON file."""
+    status_file = os.path.join(project_root, 'storage', 'sync_status.json')
+    if not os.path.exists(status_file): return {}
+    try:
+        with open(status_file, 'r') as f:
+            content = f.read()
+            return json.loads(content) if content else {}
+    except (json.JSONDecodeError, FileNotFoundError): return {}
 
+@app.route('/api/spotify/playlists', methods=['GET'])
+def get_spotify_playlists():
+    """Fetches all user playlists from Spotify and enriches them with local sync status."""
+    if not spotify_client or not spotify_client.is_authenticated():
+        return jsonify({"error": "Spotify not authenticated."}), 401
+    try:
+        playlists = spotify_client.get_user_playlists_metadata_only()
+        sync_statuses = _load_sync_status_file()
+        
+        playlist_data = []
+        for p in playlists:
+            status_info = sync_statuses.get(p.id, {})
+            sync_status = "Never Synced"
+            # Handle snapshot_id safely - may not exist in core Playlist class
+            playlist_snapshot = getattr(p, 'snapshot_id', '')
+            if 'last_synced' in status_info:
+                if playlist_snapshot != status_info.get('snapshot_id'):
+                    sync_status = "Needs Sync"
+                else:
+                    sync_status = f"Synced: {datetime.fromisoformat(status_info['last_synced']).strftime('%b %d, %H:%M')}"
+
+            playlist_data.append({
+                "id": p.id, "name": p.name, "owner": p.owner,
+                "track_count": p.total_tracks, 
+                "image_url": getattr(p, 'image_url', None),
+                "sync_status": sync_status, 
+                "snapshot_id": playlist_snapshot
+            })
+        return jsonify(playlist_data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/spotify/playlist/<playlist_id>', methods=['GET'])
+def get_playlist_tracks(playlist_id):
+    """Fetches full track details for a specific playlist."""
+    if not spotify_client or not spotify_client.is_authenticated():
+        return jsonify({"error": "Spotify not authenticated."}), 401
+    try:
+        # This reuses the robust track fetching logic from your GUI's sync.py
+        full_playlist = spotify_client.get_playlist_by_id(playlist_id)
+        if not full_playlist:
+            return jsonify({})
+        
+        # Convert playlist to dict manually since core class doesn't have to_dict method
+        playlist_dict = {
+            'id': full_playlist.id,
+            'name': full_playlist.name,
+            'description': full_playlist.description,
+            'owner': full_playlist.owner,
+            'public': full_playlist.public,
+            'collaborative': full_playlist.collaborative,
+            'track_count': full_playlist.total_tracks,
+            'image_url': getattr(full_playlist, 'image_url', None),
+            'snapshot_id': getattr(full_playlist, 'snapshot_id', ''),
+            'tracks': [{'name': t.name, 'artists': t.artists, 'album': t.album, 'duration_ms': t.duration_ms} for t in full_playlist.tracks]
+        }
+        return jsonify(playlist_dict)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 # --- Main Execution ---
 
