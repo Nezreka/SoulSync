@@ -1593,13 +1593,7 @@ function startPlaylistSyncFromModal(playlistId) {
     showToast('Sync functionality will be implemented next!', 'info');
 }
 
-function initializeSyncPage() {
-    // Initialize refresh button
-    const refreshBtn = document.getElementById('spotify-refresh-btn');
-    if (refreshBtn) {
-        refreshBtn.addEventListener('click', loadSpotifyPlaylists);
-    }
-}
+
 
 // Download tracking state management - matching GUI functionality
 let activeDownloads = {};
