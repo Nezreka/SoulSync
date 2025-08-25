@@ -18,7 +18,7 @@ from flask import Flask, render_template, request, jsonify, redirect, send_file
 # --- Core Application Imports ---
 # Import the same core clients and config manager used by the GUI app
 from config.settings import config_manager
-from core.spotify_client import SpotifyClient, Playlist as SpotifyPlaylist
+from core.spotify_client import SpotifyClient, Playlist as SpotifyPlaylist, Track as SpotifyTrack
 from core.plex_client import PlexClient
 from core.jellyfin_client import JellyfinClient
 from core.soulseek_client import SoulseekClient
@@ -97,13 +97,13 @@ db_update_state = {
     "total": 0,
     "error_message": ""
 }
-db_update_lock = threading.Lock()
 
-# --- Add these globals for the Sync Page ---
+# --- Sync Page Globals ---
 sync_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="SyncWorker")
 active_sync_workers = {}  # Key: playlist_id, Value: Future object
 sync_states = {}          # Key: playlist_id, Value: dict with progress info
 sync_lock = threading.Lock()
+db_update_lock = threading.Lock()
 
 # --- Global Matched Downloads Context Management ---
 # Thread-safe storage for matched download contexts
@@ -2455,11 +2455,325 @@ def get_playlist_tracks(playlist_id):
             'track_count': full_playlist.total_tracks,
             'image_url': getattr(full_playlist, 'image_url', None),
             'snapshot_id': getattr(full_playlist, 'snapshot_id', ''),
-            'tracks': [{'name': t.name, 'artists': t.artists, 'album': t.album, 'duration_ms': t.duration_ms} for t in full_playlist.tracks]
+            'tracks': [{'id': t.id, 'name': t.name, 'artists': t.artists, 'album': t.album, 'duration_ms': t.duration_ms, 'popularity': t.popularity} for t in full_playlist.tracks]
         }
         return jsonify(playlist_dict)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+# Add these new endpoints to the end of web_server.py
+
+def _run_sync_task(playlist_id, playlist_name, tracks_json):
+    """The actual sync function that runs in the background thread."""
+    global sync_states, sync_service
+    
+    print(f"🚀 _run_sync_task STARTED for playlist '{playlist_name}' (ID: {playlist_id})")
+    print(f"📊 Received {len(tracks_json)} tracks from frontend")
+
+    try:
+        # Recreate a Playlist object from the JSON data sent by the frontend
+        # This avoids needing to re-fetch it from Spotify
+        print(f"🔄 Converting JSON tracks to SpotifyTrack objects...")
+        tracks = []
+        for i, t in enumerate(tracks_json):
+            # Create SpotifyTrack objects with proper default values for missing fields
+            track = SpotifyTrack(
+                id=t.get('id', ''),  # Provide default empty string
+                name=t.get('name', ''),
+                artists=t.get('artists', []),
+                album=t.get('album', ''),
+                duration_ms=t.get('duration_ms', 0),
+                popularity=t.get('popularity', 0),  # Default value
+                preview_url=t.get('preview_url'),
+                external_urls=t.get('external_urls')
+            )
+            tracks.append(track)
+            if i < 3:  # Log first 3 tracks for debugging
+                print(f"  Track {i+1}: '{track.name}' by {track.artists}")
+        
+        print(f"✅ Created {len(tracks)} SpotifyTrack objects")
+        
+        playlist = SpotifyPlaylist(
+            id=playlist_id, 
+            name=playlist_name, 
+            description=None,  # Not needed for sync
+            owner="web_user",  # Placeholder  
+            public=False,      # Default
+            collaborative=False,  # Default
+            tracks=tracks, 
+            total_tracks=len(tracks)
+        )
+        print(f"✅ Created SpotifyPlaylist object: '{playlist.name}' with {playlist.total_tracks} tracks")
+
+        def progress_callback(progress):
+            """Callback to update the shared state."""
+            print(f"⚡ PROGRESS CALLBACK: {progress.current_step} - {progress.current_track}")
+            print(f"   📊 Progress: {progress.progress}% ({progress.matched_tracks}/{progress.total_tracks} matched, {progress.failed_tracks} failed)")
+            
+            with sync_lock:
+                sync_states[playlist_id] = {
+                    "status": "syncing",
+                    "progress": progress.__dict__ # Convert dataclass to dict
+                }
+                print(f"   ✅ Updated sync_states for {playlist_id}")
+                
+    except Exception as setup_error:
+        print(f"❌ SETUP ERROR in _run_sync_task: {setup_error}")
+        import traceback
+        traceback.print_exc()
+        with sync_lock:
+            sync_states[playlist_id] = {
+                "status": "error",
+                "error": f"Setup error: {str(setup_error)}"
+            }
+        return
+
+    try:
+        print(f"🔧 Setting up sync service...")
+        print(f"   sync_service available: {sync_service is not None}")
+        
+        if sync_service is None:
+            raise Exception("sync_service is None - not initialized properly")
+            
+        # Check sync service components
+        print(f"   spotify_client: {sync_service.spotify_client is not None}")
+        print(f"   plex_client: {sync_service.plex_client is not None}")
+        print(f"   jellyfin_client: {sync_service.jellyfin_client is not None}")
+        
+        # Check media server connection before starting
+        from config.settings import config_manager
+        active_server = config_manager.get_active_media_server()
+        print(f"   Active media server: {active_server}")
+        
+        media_client, server_type = sync_service._get_active_media_client()
+        print(f"   Media client available: {media_client is not None}")
+        
+        if media_client:
+            is_connected = media_client.is_connected()
+            print(f"   Media client connected: {is_connected}")
+        
+        # Check database access
+        try:
+            from database.music_database import MusicDatabase
+            db = MusicDatabase()
+            print(f"   Database initialized: {db is not None}")
+        except Exception as db_error:
+            print(f"   ❌ Database initialization failed: {db_error}")
+        
+        print(f"🔄 Attaching progress callback...")
+        # Attach the progress callback
+        sync_service.set_progress_callback(progress_callback, playlist.name)
+        print(f"✅ Progress callback attached for playlist: {playlist.name}")
+
+        # CRITICAL FIX: Add database-only fallback for web context
+        # If media client is not connected, patch the sync service to use database-only matching
+        if media_client is None or not media_client.is_connected():
+            print(f"⚠️ Media client not connected - patching sync service for database-only matching")
+            
+            # Store original method
+            original_find_track = sync_service._find_track_in_media_server
+            
+            # Create database-only replacement method
+            async def database_only_find_track(spotify_track):
+                print(f"🗃️ Database-only search for: '{spotify_track.name}' by {spotify_track.artists}")
+                try:
+                    from database.music_database import MusicDatabase
+                    from config.settings import config_manager
+                    
+                    db = MusicDatabase()
+                    active_server = config_manager.get_active_media_server()
+                    original_title = spotify_track.name
+                    
+                    # Try each artist (same logic as original)
+                    for artist in spotify_track.artists:
+                        artist_name = artist if isinstance(artist, str) else str(artist)
+                        
+                        db_track, confidence = db.check_track_exists(
+                            original_title, artist_name, 
+                            confidence_threshold=0.7, 
+                            server_source=active_server
+                        )
+                        
+                        if db_track and confidence >= 0.7:
+                            print(f"✅ Database match: '{db_track.title}' (confidence: {confidence:.2f})")
+                            
+                            # Create mock track object for playlist creation
+                            class DatabaseTrackMock:
+                                def __init__(self, db_track):
+                                    self.ratingKey = db_track.id
+                                    self.title = db_track.title
+                                    self.id = db_track.id
+                                    # Add any other attributes needed for playlist creation
+                            
+                            return DatabaseTrackMock(db_track), confidence
+                    
+                    print(f"❌ No database match found for: '{original_title}'")
+                    return None, 0.0
+                    
+                except Exception as e:
+                    print(f"❌ Database search error: {e}")
+                    return None, 0.0
+            
+            # Patch the method
+            sync_service._find_track_in_media_server = database_only_find_track
+            print(f"✅ Patched sync service to use database-only matching")
+
+        print(f"🚀 Starting actual sync process with asyncio.run()...")
+        # Run the sync (this is a blocking call within this thread)
+        result = asyncio.run(sync_service.sync_playlist(playlist, download_missing=False))
+        print(f"✅ Sync process completed! Result type: {type(result)}")
+        print(f"   Result details: matched={getattr(result, 'matched_tracks', 'N/A')}, total={getattr(result, 'total_tracks', 'N/A')}")
+
+        # Update final state on completion
+        with sync_lock:
+            sync_states[playlist_id] = {
+                "status": "finished",
+                "result": result.__dict__ # Convert dataclass to dict
+            }
+        print(f"🏁 Sync finished for {playlist_id} - state updated")
+
+    except Exception as e:
+        print(f"❌ SYNC FAILED for {playlist_id}: {e}")
+        import traceback
+        traceback.print_exc()
+        with sync_lock:
+            sync_states[playlist_id] = {
+                "status": "error",
+                "error": str(e)
+            }
+    finally:
+        print(f"🧹 Cleaning up progress callback for {playlist.name}")
+        # Clean up the callback
+        if sync_service:
+            sync_service.clear_progress_callback(playlist.name)
+        print(f"✅ Cleanup completed for {playlist_id}")
+
+
+@app.route('/api/sync/start', methods=['POST'])
+def start_playlist_sync():
+    """Starts a new sync process for a given playlist."""
+    data = request.get_json()
+    playlist_id = data.get('playlist_id')
+    playlist_name = data.get('playlist_name')
+    tracks_json = data.get('tracks') # Pass the full track list
+
+    if not all([playlist_id, playlist_name, tracks_json]):
+        return jsonify({"success": False, "error": "Missing playlist_id, name, or tracks."}), 400
+
+    with sync_lock:
+        if playlist_id in active_sync_workers and not active_sync_workers[playlist_id].done():
+            return jsonify({"success": False, "error": "Sync is already in progress for this playlist."}), 409
+
+        # Initial state
+        sync_states[playlist_id] = {"status": "starting", "progress": {}}
+
+        # Submit the task to the thread pool
+        future = sync_executor.submit(_run_sync_task, playlist_id, playlist_name, tracks_json)
+        active_sync_workers[playlist_id] = future
+
+    return jsonify({"success": True, "message": "Sync started."})
+
+
+@app.route('/api/sync/status/<playlist_id>', methods=['GET'])
+def get_sync_status(playlist_id):
+    """Polls for the status of an ongoing sync."""
+    with sync_lock:
+        state = sync_states.get(playlist_id)
+        if not state:
+            return jsonify({"status": "not_found"}), 404
+
+        # If the task is finished but the state hasn't been updated, check the future
+        if state['status'] not in ['finished', 'error'] and playlist_id in active_sync_workers:
+            if active_sync_workers[playlist_id].done():
+                # The task might have finished between polls, trigger final state update
+                # This is handled by the _run_sync_task itself
+                pass
+
+        return jsonify(state)
+
+
+@app.route('/api/sync/cancel', methods=['POST'])
+def cancel_playlist_sync():
+    """Cancels an ongoing sync process."""
+    data = request.get_json()
+    playlist_id = data.get('playlist_id')
+
+    if not playlist_id:
+        return jsonify({"success": False, "error": "Missing playlist_id."}), 400
+
+    with sync_lock:
+        future = active_sync_workers.get(playlist_id)
+        if not future or future.done():
+            return jsonify({"success": False, "error": "Sync not running or already complete."}), 404
+
+        # The GUI's sync_service has a cancel_sync method. We'll replicate that idea.
+        # Since we can't easily stop the thread, we'll set a flag.
+        # The elegant solution is to have the sync_service check for a cancellation flag.
+        # Your `sync_service.py` already has this logic with `self._cancelled`.
+        sync_service.cancel_sync()
+
+        # We can't guarantee immediate stop, but we can update the state
+        sync_states[playlist_id] = {"status": "cancelled"}
+
+        # It's best practice to let the task finish and clean itself up.
+        # We don't use future.cancel() as it may not work if the task is already running.
+
+    return jsonify({"success": True, "message": "Sync cancellation requested."})
+
+@app.route('/api/sync/test-database', methods=['GET'])
+def test_database_access():
+    """Test endpoint to verify database connectivity for sync operations"""
+    try:
+        print(f"🧪 Testing database access for sync operations...")
+        
+        # Test database initialization
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+        print(f"   ✅ Database initialized: {db is not None}")
+        
+        # Test basic database query
+        stats = db.get_database_info_for_server()
+        print(f"   ✅ Database stats retrieved: {stats}")
+        
+        # Test track existence check (like sync service does)
+        db_track, confidence = db.check_track_exists("test track", "test artist", confidence_threshold=0.7)
+        print(f"   ✅ Track existence check works: found={db_track is not None}, confidence={confidence}")
+        
+        # Test config manager
+        from config.settings import config_manager
+        active_server = config_manager.get_active_media_server()
+        print(f"   ✅ Active media server: {active_server}")
+        
+        # Test media clients 
+        print(f"   Media clients status:")
+        print(f"     plex_client: {plex_client is not None}")
+        if plex_client:
+            print(f"     plex_client.is_connected(): {plex_client.is_connected()}")
+        print(f"     jellyfin_client: {jellyfin_client is not None}")
+        if jellyfin_client:
+            print(f"     jellyfin_client.is_connected(): {jellyfin_client.is_connected()}")
+        
+        return jsonify({
+            "success": True, 
+            "message": "Database access test successful",
+            "details": {
+                "database_initialized": db is not None,
+                "database_stats": stats,
+                "active_server": active_server,
+                "plex_connected": plex_client.is_connected() if plex_client else False,
+                "jellyfin_connected": jellyfin_client.is_connected() if jellyfin_client else False,
+            }
+        })
+        
+    except Exception as e:
+        print(f"   ❌ Database test failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            "success": False, 
+            "error": str(e),
+            "message": "Database access test failed"
+        }), 500
 
 # --- Main Execution ---
 

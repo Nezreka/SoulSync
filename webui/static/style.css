@@ -4466,3 +4466,72 @@ body {
     transform: translateY(-1px);
     box-shadow: 0 6px 20px rgba(29, 185, 84, 0.4);
 }
+
+/* Add these styles to the end of style.css */
+
+.sync-progress-indicator {
+    margin-top: 10px;
+    display: none; /* Hidden by default */
+}
+
+.progress-bar-sync {
+    height: 8px;
+    background-color: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.progress-fill-sync {
+    height: 100%;
+    background-color: #1ed760;
+    width: 0%;
+    border-radius: 4px;
+    transition: width 0.5s ease-in-out;
+}
+
+.progress-text-sync {
+    font-size: 11px;
+    color: #b3b3b3;
+    text-align: center;
+    margin-top: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+    line-height: 1.2;
+}
+
+/* Modal sync status display (matches GUI) */
+.playlist-modal-sync-status {
+    background: rgba(29, 185, 84, 0.1);
+    border: 1px solid rgba(29, 185, 84, 0.3);
+    border-radius: 12px;
+    padding: 8px 12px;
+    margin-top: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.sync-stat.total-tracks {
+    color: #ffa500;
+}
+
+.sync-stat.matched-tracks {
+    color: #1db954;
+}
+
+.sync-stat.failed-tracks {
+    color: #e22134;
+}
+
+.sync-stat.percentage {
+    color: #1db954;
+    font-weight: 700;
+}
+
+.sync-separator {
+    color: #666666;
+}

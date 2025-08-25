@@ -29,6 +29,7 @@ let dbUpdateStatusInterval = null;
 let spotifyPlaylists = [];
 let selectedPlaylists = new Set();
 let activeSyncPollers = {}; // Key: playlist_id, Value: intervalId
+let playlistTrackCache = {}; // Key: playlist_id, Value: tracks array
 let spotifyPlaylistsLoaded = false; 
 
 // API endpoints
@@ -1504,17 +1505,33 @@ function updateSyncActionsUI() {
 
 async function openPlaylistDetailsModal(event, playlistId) {
     event.stopPropagation();
-    
+
     const playlist = spotifyPlaylists.find(p => p.id === playlistId);
     if (!playlist) return;
 
-    showLoadingOverlay(`Fetching tracks for ${playlist.name}...`);
+    showLoadingOverlay(`Loading playlist: ${playlist.name}...`);
+
     try {
-        const response = await fetch(`/api/spotify/playlist/${playlistId}`);
-        const fullPlaylist = await response.json();
-        if (fullPlaylist.error) throw new Error(fullPlaylist.error);
-        
-        showPlaylistDetailsModal(fullPlaylist);
+        // --- CACHING LOGIC START ---
+        if (playlistTrackCache[playlistId]) {
+            console.log(`Cache HIT for playlist ${playlistId}. Using cached tracks.`);
+            // Use the cached tracks instead of fetching
+            const fullPlaylist = { ...playlist, tracks: playlistTrackCache[playlistId] };
+            showPlaylistDetailsModal(fullPlaylist);
+        } else {
+            console.log(`Cache MISS for playlist ${playlistId}. Fetching from server...`);
+            // Fetch from the server if not in cache
+            const response = await fetch(`/api/spotify/playlist/${playlistId}`);
+            const fullPlaylist = await response.json();
+            if (fullPlaylist.error) throw new Error(fullPlaylist.error);
+
+            // Store the fetched tracks in the cache
+            playlistTrackCache[playlistId] = fullPlaylist.tracks;
+            console.log(`Cached ${fullPlaylist.tracks.length} tracks for playlist ${playlistId}.`);
+
+            showPlaylistDetailsModal(fullPlaylist);
+        }
+        // --- CACHING LOGIC END ---
 
     } catch (error) {
         showToast(`Error: ${error.message}`, 'error');
@@ -1542,6 +1559,15 @@ function showPlaylistDetailsModal(playlist) {
                         <span class="playlist-track-count">${playlist.track_count} tracks</span>
                         <span class="playlist-owner">by ${escapeHtml(playlist.owner)}</span>
                     </div>
+                    <!-- Sync status display (hidden by default, matches GUI) -->
+                    <div class="playlist-modal-sync-status" id="modal-sync-status-${playlist.id}" style="display: none;">
+                        <span class="sync-stat total-tracks">♪ <span id="modal-total-${playlist.id}">0</span></span>
+                        <span class="sync-separator">/</span>
+                        <span class="sync-stat matched-tracks">✓ <span id="modal-matched-${playlist.id}">0</span></span>
+                        <span class="sync-separator">/</span>
+                        <span class="sync-stat failed-tracks">✗ <span id="modal-failed-${playlist.id}">0</span></span>
+                        <span class="sync-stat percentage">(<span id="modal-percentage-${playlist.id}">0</span>%)</span>
+                    </div>
                 </div>
                 <span class="playlist-modal-close" onclick="closePlaylistDetailsModal()">&times;</span>
             </div>
@@ -1567,7 +1593,7 @@ function showPlaylistDetailsModal(playlist) {
             
             <div class="playlist-modal-footer">
                 <button class="playlist-modal-btn playlist-modal-btn-secondary" onclick="closePlaylistDetailsModal()">Close</button>
-                <button class="playlist-modal-btn playlist-modal-btn-primary" onclick="startPlaylistSyncFromModal('${playlist.id}')">Sync Playlist</button>
+                <button class="playlist-modal-btn playlist-modal-btn-primary" onclick="startPlaylistSync('${playlist.id}')">Sync Playlist</button>
             </div>
         </div>
     `;
@@ -1588,11 +1614,242 @@ function formatDuration(ms) {
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
 
-function startPlaylistSyncFromModal(playlistId) {
-    closePlaylistDetailsModal();
-    showToast('Sync functionality will be implemented next!', 'info');
+// Find and REPLACE the old startPlaylistSyncFromModal function
+async function startPlaylistSync(playlistId) {
+    console.log(`🚀 Starting sync for playlist: ${playlistId}`);
+    const playlist = spotifyPlaylists.find(p => p.id === playlistId);
+    if (!playlist) {
+        console.error(`❌ Could not find playlist data for ID: ${playlistId}`);
+        showToast('Could not find playlist data.', 'error');
+        return;
+    }
+    console.log(`✅ Found playlist: ${playlist.name} with ${playlist.track_count || 'unknown'} tracks`);
+
+    // Ensure we have the full track list before starting
+    let tracks = playlistTrackCache[playlistId];
+    if (!tracks) {
+        console.log(`🔄 Cache miss - fetching tracks for playlist ${playlistId}`);
+        try {
+            const response = await fetch(`/api/spotify/playlist/${playlistId}`);
+            const fullPlaylist = await response.json();
+            if (fullPlaylist.error) throw new Error(fullPlaylist.error);
+            tracks = fullPlaylist.tracks;
+            playlistTrackCache[playlistId] = tracks; // Cache it
+            console.log(`✅ Fetched and cached ${tracks.length} tracks`);
+        } catch (error) {
+            console.error(`❌ Failed to fetch tracks:`, error);
+            showToast(`Failed to fetch tracks for sync: ${error.message}`, 'error');
+            return;
+        }
+    } else {
+        console.log(`✅ Using cached tracks: ${tracks.length} tracks`);
+    }
+
+    // DON'T close the modal - let it show live progress like the GUI
+
+    try {
+        // First test database access
+        console.log(`🧪 Testing database access before sync...`);
+        try {
+            const testResponse = await fetch('/api/sync/test-database');
+            const testData = await testResponse.json();
+            console.log(`🧪 Database test result:`, testData);
+        } catch (testError) {
+            console.warn(`⚠️ Database test failed:`, testError);
+        }
+        
+        console.log(`🔄 Making API call to /api/sync/start with ${tracks.length} tracks`);
+        const response = await fetch('/api/sync/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                playlist_id: playlist.id,
+                playlist_name: playlist.name,
+                tracks: tracks // Send the full track list
+            })
+        });
+
+        console.log(`📡 API response status: ${response.status}`);
+        const data = await response.json();
+        console.log(`📡 API response data:`, data);
+        
+        if (!data.success) throw new Error(data.error);
+
+        console.log(`✅ Sync started successfully for "${playlist.name}"`);
+        showToast(`Sync started for "${playlist.name}"`, 'success');
+        
+        // Show initial sync state in modal if open
+        const modal = document.getElementById('playlist-details-modal');
+        if (modal && modal.style.display !== 'none') {
+            const statusDisplay = document.getElementById(`modal-sync-status-${playlist.id}`);
+            if (statusDisplay) {
+                statusDisplay.style.display = 'flex';
+                console.log(`📊 Showing modal sync status for ${playlist.id}`);
+            }
+        }
+        
+        updateCardToSyncing(playlist.id, 0); // Initial state
+        startSyncPolling(playlist.id);
+
+    } catch (error) {
+        console.error(`❌ Failed to start sync:`, error);
+        showToast(`Failed to start sync: ${error.message}`, 'error');
+        updateCardToDefault(playlist.id);
+    }
 }
 
+// Add these new helper functions to script.js
+
+function startSyncPolling(playlistId) {
+    // Clear any existing poller for this playlist
+    if (activeSyncPollers[playlistId]) {
+        clearInterval(activeSyncPollers[playlistId]);
+    }
+
+    // Start a new poller that checks every 2 seconds
+    console.log(`🔄 Starting sync polling for playlist: ${playlistId}`);
+    activeSyncPollers[playlistId] = setInterval(async () => {
+        try {
+            console.log(`📊 Polling sync status for: ${playlistId}`);
+            const response = await fetch(`/api/sync/status/${playlistId}`);
+            const state = await response.json();
+            console.log(`📊 Poll response:`, state);
+
+            if (state.status === 'syncing') {
+                const progress = state.progress;
+                console.log(`📊 Sync progress:`, progress);
+                console.log(`   📊 Progress values: ${progress.progress}% | Total: ${progress.total_tracks} | Matched: ${progress.matched_tracks} | Failed: ${progress.failed_tracks}`);
+                console.log(`   📊 Current step: "${progress.current_step}" | Current track: "${progress.current_track}"`);
+                
+                // Use the actual progress percentage from the sync service
+                updateCardToSyncing(playlistId, progress.progress, progress);
+                // Also update the modal if it's open
+                updateModalSyncProgress(playlistId, progress);
+            } else if (state.status === 'finished' || state.status === 'error' || state.status === 'cancelled') {
+                console.log(`🏁 Sync completed with status: ${state.status}`);
+                stopSyncPolling(playlistId);
+                updateCardToDefault(playlistId, state);
+                // Also update the modal if it's open
+                closePlaylistDetailsModal(); // Close modal on completion/error
+            }
+        } catch (error) {
+            console.error(`❌ Error polling sync status for ${playlistId}:`, error);
+            stopSyncPolling(playlistId);
+            updateCardToDefault(playlistId, { status: 'error', error: 'Polling failed' });
+        }
+    }, 2000); // Poll every 2 seconds
+}
+
+function stopSyncPolling(playlistId) {
+    if (activeSyncPollers[playlistId]) {
+        clearInterval(activeSyncPollers[playlistId]);
+        delete activeSyncPollers[playlistId];
+    }
+}
+
+function updateCardToSyncing(playlistId, percent, progress = null) {
+    const card = document.querySelector(`.playlist-card[data-playlist-id="${playlistId}"]`);
+    if (!card) return;
+
+    const progressBar = card.querySelector('.sync-progress-indicator');
+    progressBar.style.display = 'block';
+
+    let progressText = 'Starting...';
+    let actualPercent = percent || 0;
+    
+    if (progress) {
+        // Use the actual progress percentage from the sync service
+        actualPercent = progress.progress || 0;
+        
+        // Create detailed progress text like the GUI
+        const matched = progress.matched_tracks || 0;
+        const failed = progress.failed_tracks || 0;
+        const total = progress.total_tracks || 0;
+        const currentStep = progress.current_step || 'Processing';
+        
+        if (total > 0) {
+            const processed = matched + failed;
+            progressText = `${currentStep}: ${processed}/${total} (${matched} matched, ${failed} failed)`;
+        } else {
+            progressText = currentStep;
+        }
+        
+        // If there's a current track being processed, show it
+        if (progress.current_track) {
+            progressText += ` - ${progress.current_track}`;
+        }
+    }
+    
+    progressBar.innerHTML = `
+        <div class="progress-bar-sync">
+            <div class="progress-fill-sync" style="width: ${actualPercent}%;"></div>
+        </div>
+        <div class="progress-text-sync">${progressText}</div>
+    `;
+}
+
+function updateCardToDefault(playlistId, finalState = null) {
+    const card = document.querySelector(`.playlist-card[data-playlist-id="${playlistId}"]`);
+    if (!card) return;
+
+    const progressBar = card.querySelector('.sync-progress-indicator');
+    progressBar.style.display = 'none';
+    progressBar.innerHTML = '';
+
+    const statusEl = card.querySelector('.playlist-card-status');
+    if (finalState) {
+        if (finalState.status === 'finished') {
+            statusEl.textContent = `Synced: Just now`;
+            statusEl.className = 'playlist-card-status status-synced';
+            showToast(`Sync complete for "${card.querySelector('.playlist-card-name').textContent}"`, 'success');
+        } else {
+            statusEl.textContent = `Sync Failed`;
+            statusEl.className = 'playlist-card-status status-needs-sync'; // Or a new error class
+            showToast(`Sync failed: ${finalState.error || 'Unknown error'}`, 'error');
+        }
+    }
+}
+
+// Update the modal's sync progress display (matches GUI functionality)
+function updateModalSyncProgress(playlistId, progress) {
+    const modal = document.getElementById('playlist-details-modal');
+    if (modal && modal.style.display !== 'none') {
+        console.log(`📊 Updating modal sync progress for ${playlistId}:`, progress);
+        
+        // Show sync status display
+        const statusDisplay = document.getElementById(`modal-sync-status-${playlistId}`);
+        if (statusDisplay) {
+            statusDisplay.style.display = 'flex';
+            
+            // Update counters (matching GUI exactly)
+            const totalEl = document.getElementById(`modal-total-${playlistId}`);
+            const matchedEl = document.getElementById(`modal-matched-${playlistId}`);
+            const failedEl = document.getElementById(`modal-failed-${playlistId}`);
+            const percentageEl = document.getElementById(`modal-percentage-${playlistId}`);
+            
+            const total = progress.total_tracks || 0;
+            const matched = progress.matched_tracks || 0;
+            const failed = progress.failed_tracks || 0;
+            
+            if (totalEl) totalEl.textContent = total;
+            if (matchedEl) matchedEl.textContent = matched;
+            if (failedEl) failedEl.textContent = failed;
+            
+            // Calculate percentage like GUI
+            if (total > 0) {
+                const processed = matched + failed;
+                const percentage = Math.round((processed / total) * 100);
+                if (percentageEl) percentageEl.textContent = percentage;
+            }
+            
+            console.log(`📊 Modal updated: ♪ ${total} / ✓ ${matched} / ✗ ${failed} (${Math.round((matched + failed) / total * 100)}%)`);
+        } else {
+            console.warn(`❌ Modal sync status display not found for ${playlistId}`);
+        }
+    } else {
+        console.log(`📊 Modal not open for ${playlistId}, skipping update`);
+    }
+}
 
 
 // Download tracking state management - matching GUI functionality
