@@ -2874,7 +2874,11 @@ def get_batch_download_status(batch_id):
 
 @app.route('/api/downloads/cancel_task', methods=['POST'])
 def cancel_download_task():
-    """Cancels a single, specific download task."""
+    """
+    Cancels a single, specific download task.
+    This version is now identical to the GUI, adding the cancelled track to
+    the wishlist for future automatic retries.
+    """
     data = request.get_json()
     task_id = data.get('task_id')
     if not task_id:
@@ -2886,6 +2890,8 @@ def cancel_download_task():
                 return jsonify({"success": False, "error": "Task not found"}), 404
             
             task = download_tasks[task_id]
+            
+            # Immediately mark as cancelled to prevent race conditions
             task['status'] = 'cancelled'
             
             download_id = task.get('download_id')
@@ -2894,13 +2900,52 @@ def cancel_download_task():
         # If the download has actually started on Soulseek, cancel it there too
         if download_id and username:
             try:
-                success = asyncio.run(soulseek_client.cancel_download(download_id, username, remove=True))
-                return jsonify({"success": success})
+                # This is an async call, so we run it and wait
+                asyncio.run(soulseek_client.cancel_download(download_id, username, remove=True))
             except Exception as e:
-                print(f"❌ Error cancelling Soulseek download: {e}")
-                return jsonify({"success": True, "note": "Task cancelled locally, but Soulseek cancellation failed"})
-        else:
-            return jsonify({"success": True, "note": "Task cancelled before download started"})
+                print(f"⚠️ Warning: Failed to cancel download on slskd, but marking as cancelled locally. Error: {e}")
+
+        ### NEW LOGIC START: Add cancelled track to wishlist ###
+        try:
+            from core.wishlist_service import get_wishlist_service
+            wishlist_service = get_wishlist_service()
+            
+            # The task dictionary contains all the necessary info
+            track_info = task.get('track_info', {})
+            
+            # The wishlist service expects a dictionary with specific keys
+            # We can construct it from the track_info
+            spotify_track_data = {
+                'id': track_info.get('id'),
+                'name': track_info.get('name'),
+                'artists': [{'name': artist} for artist in track_info.get('artists', [])],
+                'album': {'name': track_info.get('album')},
+                'duration_ms': track_info.get('duration_ms')
+            }
+            
+            source_context = {
+                'playlist_name': task.get('playlist_name', 'Unknown Playlist'),
+                'playlist_id': task.get('playlist_id'),
+                'added_from': 'modal_cancellation'
+            }
+
+            # Add to wishlist, treating cancellation as a failure
+            success = wishlist_service.add_to_wishlist(
+                spotify_track_data=spotify_track_data,
+                failure_reason="Cancelled by user",
+                source_type="playlist",
+                source_info=source_context
+            )
+            
+            if success:
+                print(f"✅ Added cancelled track '{track_info.get('name')}' to wishlist.")
+            else:
+                print(f"❌ Failed to add cancelled track '{track_info.get('name')}' to wishlist.")
+        except Exception as e:
+            print(f"❌ CRITICAL ERROR adding cancelled track to wishlist: {e}")
+        ### NEW LOGIC END ###
+
+        return jsonify({"success": True, "message": "Task cancelled and added to wishlist for retry."})
 
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
