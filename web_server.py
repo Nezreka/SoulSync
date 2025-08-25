@@ -2533,7 +2533,9 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json):
     """The actual sync function that runs in the background thread."""
     global sync_states, sync_service
     
-    print(f"🚀 _run_sync_task STARTED for playlist '{playlist_name}' (ID: {playlist_id})")
+    import time
+    task_start_time = time.time()
+    print(f"🚀 [TIMING] _run_sync_task STARTED for playlist '{playlist_name}' at {time.strftime('%H:%M:%S')}")
     print(f"📊 Received {len(tracks_json)} tracks from frontend")
 
     try:
@@ -2571,8 +2573,15 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json):
         )
         print(f"✅ Created SpotifyPlaylist object: '{playlist.name}' with {playlist.total_tracks} tracks")
 
+        first_callback_time = [None]  # Use list to allow modification in nested function
+        
         def progress_callback(progress):
             """Callback to update the shared state."""
+            if first_callback_time[0] is None:
+                first_callback_time[0] = time.time()
+                first_callback_duration = (first_callback_time[0] - task_start_time) * 1000
+                print(f"⏱️ [TIMING] FIRST progress callback at {time.strftime('%H:%M:%S')} (took {first_callback_duration:.1f}ms from start)")
+            
             print(f"⚡ PROGRESS CALLBACK: {progress.current_step} - {progress.current_track}")
             print(f"   📊 Progress: {progress.progress}% ({progress.matched_tracks}/{progress.total_tracks} matched, {progress.failed_tracks} failed)")
             
@@ -2684,9 +2693,17 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json):
             sync_service._find_track_in_media_server = database_only_find_track
             print(f"✅ Patched sync service to use database-only matching")
 
+        sync_start_time = time.time()
+        setup_duration = (sync_start_time - task_start_time) * 1000
+        print(f"⏱️ [TIMING] Setup completed at {time.strftime('%H:%M:%S')} (took {setup_duration:.1f}ms)")
         print(f"🚀 Starting actual sync process with asyncio.run()...")
+        
         # Run the sync (this is a blocking call within this thread)
         result = asyncio.run(sync_service.sync_playlist(playlist, download_missing=False))
+        
+        sync_duration = (time.time() - sync_start_time) * 1000
+        total_duration = (time.time() - task_start_time) * 1000
+        print(f"⏱️ [TIMING] Sync completed at {time.strftime('%H:%M:%S')} (sync: {sync_duration:.1f}ms, total: {total_duration:.1f}ms)")
         print(f"✅ Sync process completed! Result type: {type(result)}")
         print(f"   Result details: matched={getattr(result, 'matched_tracks', 'N/A')}, total={getattr(result, 'total_tracks', 'N/A')}")
 
@@ -2723,6 +2740,10 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json):
 @app.route('/api/sync/start', methods=['POST'])
 def start_playlist_sync():
     """Starts a new sync process for a given playlist."""
+    import time
+    request_start_time = time.time()
+    print(f"⏱️ [TIMING] Sync request received at {time.strftime('%H:%M:%S')}")
+    
     data = request.get_json()
     playlist_id = data.get('playlist_id')
     playlist_name = data.get('playlist_name')
@@ -2730,6 +2751,8 @@ def start_playlist_sync():
 
     if not all([playlist_id, playlist_name, tracks_json]):
         return jsonify({"success": False, "error": "Missing playlist_id, name, or tracks."}), 400
+    
+    print(f"⏱️ [TIMING] Request parsed at {time.strftime('%H:%M:%S')} (took {(time.time()-request_start_time)*1000:.1f}ms)")
 
     with sync_lock:
         if playlist_id in active_sync_workers and not active_sync_workers[playlist_id].done():
@@ -2739,9 +2762,14 @@ def start_playlist_sync():
         sync_states[playlist_id] = {"status": "starting", "progress": {}}
 
         # Submit the task to the thread pool
+        thread_submit_time = time.time()
         future = sync_executor.submit(_run_sync_task, playlist_id, playlist_name, tracks_json)
         active_sync_workers[playlist_id] = future
+        thread_submit_duration = (time.time() - thread_submit_time) * 1000
+        print(f"⏱️ [TIMING] Thread submitted at {time.strftime('%H:%M:%S')} (took {thread_submit_duration:.1f}ms)")
 
+    total_request_time = (time.time() - request_start_time) * 1000
+    print(f"⏱️ [TIMING] Request completed at {time.strftime('%H:%M:%S')} (total: {total_request_time:.1f}ms)")
     return jsonify({"success": True, "message": "Sync started."})
 
 
