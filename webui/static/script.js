@@ -1616,7 +1616,8 @@ function formatDuration(ms) {
 
 // Find and REPLACE the old startPlaylistSyncFromModal function
 async function startPlaylistSync(playlistId) {
-    console.log(`🚀 Starting sync for playlist: ${playlistId}`);
+    const startTime = Date.now();
+    console.log(`🚀 [${new Date().toTimeString().split(' ')[0]}] Starting sync for playlist: ${playlistId}`);
     const playlist = spotifyPlaylists.find(p => p.id === playlistId);
     if (!playlist) {
         console.error(`❌ Could not find playlist data for ID: ${playlistId}`);
@@ -1628,37 +1629,30 @@ async function startPlaylistSync(playlistId) {
     // Ensure we have the full track list before starting
     let tracks = playlistTrackCache[playlistId];
     if (!tracks) {
-        console.log(`🔄 Cache miss - fetching tracks for playlist ${playlistId}`);
+        const trackFetchStart = Date.now();
+        console.log(`🔄 [${new Date().toTimeString().split(' ')[0]}] Cache miss - fetching tracks for playlist ${playlistId}`);
         try {
             const response = await fetch(`/api/spotify/playlist/${playlistId}`);
             const fullPlaylist = await response.json();
             if (fullPlaylist.error) throw new Error(fullPlaylist.error);
             tracks = fullPlaylist.tracks;
             playlistTrackCache[playlistId] = tracks; // Cache it
-            console.log(`✅ Fetched and cached ${tracks.length} tracks`);
+            const trackFetchTime = Date.now() - trackFetchStart;
+            console.log(`✅ [${new Date().toTimeString().split(' ')[0]}] Fetched and cached ${tracks.length} tracks (took ${trackFetchTime}ms)`);
         } catch (error) {
             console.error(`❌ Failed to fetch tracks:`, error);
             showToast(`Failed to fetch tracks for sync: ${error.message}`, 'error');
             return;
         }
     } else {
-        console.log(`✅ Using cached tracks: ${tracks.length} tracks`);
+        console.log(`✅ [${new Date().toTimeString().split(' ')[0]}] Using cached tracks: ${tracks.length} tracks`);
     }
 
     // DON'T close the modal - let it show live progress like the GUI
 
     try {
-        // First test database access
-        console.log(`🧪 Testing database access before sync...`);
-        try {
-            const testResponse = await fetch('/api/sync/test-database');
-            const testData = await testResponse.json();
-            console.log(`🧪 Database test result:`, testData);
-        } catch (testError) {
-            console.warn(`⚠️ Database test failed:`, testError);
-        }
-        
-        console.log(`🔄 Making API call to /api/sync/start with ${tracks.length} tracks`);
+        const syncStartTime = Date.now();
+        console.log(`🔄 [${new Date().toTimeString().split(' ')[0]}] Making API call to /api/sync/start with ${tracks.length} tracks`);
         const response = await fetch('/api/sync/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1669,13 +1663,15 @@ async function startPlaylistSync(playlistId) {
             })
         });
 
-        console.log(`📡 API response status: ${response.status}`);
+        const syncRequestTime = Date.now() - syncStartTime;
+        console.log(`📡 [${new Date().toTimeString().split(' ')[0]}] API response status: ${response.status} (took ${syncRequestTime}ms)`);
         const data = await response.json();
-        console.log(`📡 API response data:`, data);
+        console.log(`📡 [${new Date().toTimeString().split(' ')[0]}] API response data:`, data);
         
         if (!data.success) throw new Error(data.error);
 
-        console.log(`✅ Sync started successfully for "${playlist.name}"`);
+        const totalTime = Date.now() - startTime;
+        console.log(`✅ [${new Date().toTimeString().split(' ')[0]}] Sync started successfully for "${playlist.name}" (total time: ${totalTime}ms)`);
         showToast(`Sync started for "${playlist.name}"`, 'success');
         
         // Show initial sync state in modal if open
@@ -1684,7 +1680,7 @@ async function startPlaylistSync(playlistId) {
             const statusDisplay = document.getElementById(`modal-sync-status-${playlist.id}`);
             if (statusDisplay) {
                 statusDisplay.style.display = 'flex';
-                console.log(`📊 Showing modal sync status for ${playlist.id}`);
+                console.log(`📊 [${new Date().toTimeString().split(' ')[0]}] Showing modal sync status for ${playlist.id}`);
             }
         }
         
