@@ -29,6 +29,7 @@ let dbUpdateStatusInterval = null;
 let spotifyPlaylists = [];
 let selectedPlaylists = new Set();
 let activeSyncPollers = {}; // Key: playlist_id, Value: intervalId
+let spotifyPlaylistsLoaded = false; 
 
 // API endpoints
 const API = {
@@ -1405,7 +1406,9 @@ async function loadDashboardData() {
 
 async function loadSyncData() {
     // This is called when the sync page is navigated to.
-    await loadSpotifyPlaylists();
+    if (!spotifyPlaylistsLoaded) {
+        await loadSpotifyPlaylists();
+    }
 }
 
 async function loadSpotifyPlaylists() {
@@ -1424,6 +1427,7 @@ async function loadSpotifyPlaylists() {
         }
         spotifyPlaylists = await response.json();
         renderSpotifyPlaylists();
+        spotifyPlaylistsLoaded = true;
     } catch (error) {
         container.innerHTML = `<div class="playlist-placeholder">❌ Error: ${error.message}</div>`;
         showToast(`Error loading playlists: ${error.message}`, 'error');
