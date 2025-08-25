@@ -913,22 +913,7 @@ function initializeSettings() {
     }
 
     // Test connection buttons
-    const testSpotifyBtn = document.querySelector('.api-test-buttons button[onclick="testConnection(\'spotify\')"]');
-    if (testSpotifyBtn) {
-        testSpotifyBtn.addEventListener('click', () => testConnection('spotify'));
-    }
-     const testTidalBtn = document.querySelector('.api-test-buttons button[onclick="testConnection(\'tidal\')"]');
-    if (testTidalBtn) {
-        testTidalBtn.addEventListener('click', () => testConnection('tidal'));
-    }
-    const testSoulseekBtn = document.querySelector('.api-test-buttons button[onclick="testConnection(\'soulseek\')"]');
-    if (testSoulseekBtn) {
-        testSoulseekBtn.addEventListener('click', () => testConnection('soulseek'));
-    }
-    const testServerBtn = document.querySelector('.server-test-btn');
-    if (testServerBtn) {
-        testServerBtn.addEventListener('click', () => testConnection('server'));
-    }
+    // Test button event listeners removed - they use onclick attributes in HTML to avoid double firing
 }
 
 async function loadSettingsData() {
