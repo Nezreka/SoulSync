@@ -1816,7 +1816,16 @@ def _detect_album_info_web(context: dict, artist: dict) -> dict:
     (Updated to match GUI downloads.py logic exactly)
     """
     try:
+        # Log available data for debugging (GUI PARITY)
         original_search = context.get("original_search_result", {})
+        print(f"\n🔍 [Album Detection] Starting for track: '{original_search.get('title', 'Unknown')}'")
+        print(f"📊 [Data Available]:")
+        print(f"   - Clean Spotify title: '{original_search.get('spotify_clean_title', 'None')}'")
+        print(f"   - Clean Spotify album: '{original_search.get('spotify_clean_album', 'None')}'")
+        print(f"   - Filename album: '{original_search.get('album', 'None')}'")
+        print(f"   - Artist: '{artist.get('name', 'Unknown')}'")
+        print(f"   - Context has clean data: {context.get('has_clean_spotify_data', False)}")
+        print(f"   - Is album download: {context.get('is_album_download', False)}")
         spotify_album_context = context.get("spotify_album")
         is_album_download = context.get("is_album_download", False)
         artist_name = artist['name']
@@ -1847,23 +1856,51 @@ def _detect_album_info_web(context: dict, artist: dict) -> dict:
                 'album_image_url': spotify_album_context.get('image_url')
             }
 
-        # PRIORITY 1: Try album-aware search if we have album context (GUI PARITY - MORE AGGRESSIVE)
-        if original_search.get('album') and original_search.get('album').strip() and original_search.get('album') != "Unknown Album":
-            print(f"🎯 ALBUM-AWARE SEARCH (HIGH PRIORITY): Looking for '{original_search.get('title')}' in album '{original_search.get('album')}'")
-            album_result = _search_track_in_album_context_web(context, artist)
-            if album_result:
-                print(f"✅ PRIORITY 1 SUCCESS: Found track in album context - FORCING album classification")
-                return album_result
-            else:
-                print(f"⚠️ PRIORITY 1 FAILED: Track not found in album context")
-                # Still continue to Priority 2, but with logging to show we tried album first
+        # PRIORITY 1: Try album-aware search using clean Spotify album name (GUI PARITY)
+        # Prioritize clean Spotify album name over filename-parsed album
+        clean_album_name = original_search.get('spotify_clean_album')
+        fallback_album_name = original_search.get('album')
+        
+        album_name_to_use = None
+        album_source = None
+        
+        if clean_album_name and clean_album_name.strip() and clean_album_name != "Unknown Album":
+            album_name_to_use = clean_album_name
+            album_source = "CLEAN_SPOTIFY"
+        elif fallback_album_name and fallback_album_name.strip() and fallback_album_name != "Unknown Album":
+            album_name_to_use = fallback_album_name
+            album_source = "FILENAME_PARSED"
+        
+        if album_name_to_use:
+            track_title = original_search.get('spotify_clean_title') or original_search.get('title', 'Unknown')
+            print(f"🎯 ALBUM-AWARE SEARCH ({album_source}): Looking for '{track_title}' in album '{album_name_to_use}'")
+            
+            # Temporarily set the album for the search
+            original_album = original_search.get('album')
+            original_search['album'] = album_name_to_use
+            
+            try:
+                album_result = _search_track_in_album_context_web(context, artist)
+                if album_result:
+                    print(f"✅ PRIORITY 1 SUCCESS: Found track using {album_source} album name - FORCING album classification")
+                    return album_result
+                else:
+                    print(f"⚠️ PRIORITY 1 FAILED: Track not found using {album_source} album name")
+            finally:
+                # Restore original album value
+                if original_album is not None:
+                    original_search['album'] = original_album
+                else:
+                    original_search.pop('album', None)
 
         # PRIORITY 2: Fallback to individual track search for clean metadata
         print(f"🔍 Searching Spotify for individual track info (PRIORITY 2)...")
         
-        # Clean the track title before searching - remove artist prefix
-        clean_title = _clean_track_title_web(original_search.get('title', ''), artist_name)
-        print(f"🧹 Cleaned title: '{original_search.get('title')}' -> '{clean_title}'")
+        # Clean the track title before searching - remove artist prefix  
+        # Prioritize clean Spotify title over filename-parsed title
+        track_title_to_use = original_search.get('spotify_clean_title') or original_search.get('title', '')
+        clean_title = _clean_track_title_web(track_title_to_use, artist_name)
+        print(f"🧹 Cleaned title: '{track_title_to_use}' -> '{clean_title}'")
         
         # Search for the track by artist and cleaned title
         query = f"artist:{artist_name} track:{clean_title}"
@@ -2567,21 +2604,44 @@ def _post_process_matched_download(context_key, context, file_path):
             return
 
         is_album_download = context.get("is_album_download", False)
-        if is_album_download:
-            # For matched album downloads, we build album_info directly from the
-            # trusted context, bypassing the problematic _detect_album_info_web function.
-            print("✅ Matched Album context found. Building info directly from context.")
+        has_clean_spotify_data = context.get("has_clean_spotify_data", False)
+        
+        if is_album_download and has_clean_spotify_data:
+            # Build album_info directly from clean Spotify metadata (GUI PARITY)
+            print("✅ Album context with clean Spotify data found - using direct album info")
             original_search = context.get("original_search_result", {})
             spotify_album = context.get("spotify_album", {})
-            # Use Spotify clean title if available (GUI parity)
+            
+            # Use clean Spotify metadata (matches GUI's SpotifyBasedSearchResult approach)
+            clean_track_name = original_search.get('spotify_clean_title', 'Unknown Track')
+            clean_album_name = original_search.get('spotify_clean_album', 'Unknown Album')
+            
+            album_info = {
+                'is_album': True,
+                'album_name': clean_album_name,  # Use clean Spotify album name
+                'track_number': original_search.get('track_number', 1),
+                'clean_track_name': clean_track_name,
+                'album_image_url': spotify_album.get('image_url'),
+                'confidence': 1.0,  # High confidence since we have clean Spotify data
+                'source': 'clean_spotify_metadata'
+            }
+            
+            print(f"🎯 Using clean Spotify album: '{clean_album_name}' for track: '{clean_track_name}'")
+        elif is_album_download:
+            # Fallback for album context without clean Spotify data
+            print("⚠️ Album context found but no clean Spotify data - using fallback")
+            original_search = context.get("original_search_result", {})
+            spotify_album = context.get("spotify_album", {})
             clean_track_name = original_search.get('spotify_clean_title') or original_search.get('title', 'Unknown Track')
             
             album_info = {
                 'is_album': True,
-                'album_name': spotify_album.get('name'),
+                'album_name': spotify_album.get('name') or 'Unknown Album',
                 'track_number': original_search.get('track_number', 1),
                 'clean_track_name': clean_track_name,
-                'album_image_url': spotify_album.get('image_url')
+                'album_image_url': spotify_album.get('image_url'),
+                'confidence': 0.8,
+                'source': 'fallback_album_context'
             }
         else:
             # For singles, we still need to detect if they belong to an album.
@@ -3204,23 +3264,45 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
             download_id = asyncio.run(soulseek_client.download(username, filename, size))
 
             if download_id:
-                # Store context for post-processing
+                # Store context for post-processing with complete Spotify metadata (GUI PARITY)
                 context_key = f"{username}::{filename}"
                 with matched_context_lock:
-                    # Enhanced context storage with Spotify clean titles (GUI parity)
+                    # Create WebUI equivalent of GUI's SpotifyBasedSearchResult data structure
                     enhanced_payload = download_payload.copy()
-                    # Try to get clean title from track object if available
-                    if track and hasattr(track, 'name'):
+                    
+                    # Extract clean Spotify metadata from track object (same as GUI)
+                    has_clean_spotify_data = track and hasattr(track, 'name') and hasattr(track, 'album')
+                    if has_clean_spotify_data:
+                        # Use clean Spotify metadata (matches GUI's SpotifyBasedSearchResult)
                         enhanced_payload['spotify_clean_title'] = track.name
+                        enhanced_payload['spotify_clean_album'] = track.album
+                        enhanced_payload['spotify_clean_artist'] = track.artists[0] if track.artists else enhanced_payload.get('artist', '')
+                        print(f"✨ [Context] Using clean Spotify metadata - Album: '{track.album}', Title: '{track.name}'")
+                        
+                        # Determine if this should be treated as album download based on clean data
+                        is_album_context = (
+                            track.album and 
+                            track.album.strip() and 
+                            track.album != "Unknown Album" and
+                            track.album.lower() != track.name.lower()  # Album different from track
+                        )
                     else:
+                        # Fallback to original data
                         enhanced_payload['spotify_clean_title'] = enhanced_payload.get('title', '')
+                        enhanced_payload['spotify_clean_album'] = enhanced_payload.get('album', '')
+                        enhanced_payload['spotify_clean_artist'] = enhanced_payload.get('artist', '')
+                        is_album_context = False
+                        print(f"⚠️ [Context] Using fallback data - no clean Spotify metadata available")
                     
                     matched_downloads_context[context_key] = {
                         "spotify_artist": spotify_artist_context,
                         "spotify_album": spotify_album_context,
                         "original_search_result": enhanced_payload,
-                        "is_album_download": False
+                        "is_album_download": is_album_context,  # Critical fix: Use actual album context
+                        "has_clean_spotify_data": has_clean_spotify_data  # Flag for post-processing
                     }
+                    
+                    print(f"🎯 [Context] Set is_album_download: {is_album_context} (has clean data: {has_clean_spotify_data})")
                 
                 # Update task with successful download info
                 with tasks_lock:
