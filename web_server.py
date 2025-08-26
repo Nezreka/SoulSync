@@ -2227,7 +2227,6 @@ def _search_track_in_album_context_web(context: dict, spotify_artist: dict) -> d
     (Ported from GUI downloads.py)
     """
     try:
-        from core.spotify_client import spotify_client
         from core.matching_engine import matching_engine
         
         # Get album and track info from context
@@ -2616,6 +2615,12 @@ def _post_process_matched_download(context_key, context, file_path):
             clean_track_name = original_search.get('spotify_clean_title', 'Unknown Track')
             clean_album_name = original_search.get('spotify_clean_album', 'Unknown Album')
             
+            # DEBUG: Check what's in original_search
+            print(f"🔍 [DEBUG] Path 1 - Clean Spotify data path:")
+            print(f"   original_search keys: {list(original_search.keys())}")
+            print(f"   track_number in original_search: {'track_number' in original_search}")
+            print(f"   track_number value: {original_search.get('track_number', 'NOT_FOUND')}")
+            
             album_info = {
                 'is_album': True,
                 'album_name': clean_album_name,  # Use clean Spotify album name
@@ -2633,6 +2638,12 @@ def _post_process_matched_download(context_key, context, file_path):
             original_search = context.get("original_search_result", {})
             spotify_album = context.get("spotify_album", {})
             clean_track_name = original_search.get('spotify_clean_title') or original_search.get('title', 'Unknown Track')
+            
+            # DEBUG: Check what's in original_search for path 2
+            print(f"🔍 [DEBUG] Path 2 - Fallback album context path:")
+            print(f"   original_search keys: {list(original_search.keys())}")
+            print(f"   track_number in original_search: {'track_number' in original_search}")
+            print(f"   track_number value: {original_search.get('track_number', 'NOT_FOUND')}")
             
             album_info = {
                 'is_album': True,
@@ -2697,6 +2708,12 @@ def _post_process_matched_download(context_key, context, file_path):
             final_track_name_sanitized = _sanitize_filename(clean_track_name)
             track_number = album_info['track_number']
             
+            # DEBUG: Check final track_number values
+            print(f"🔍 [DEBUG] Final track_number processing:")
+            print(f"   album_info source: {album_info.get('source', 'unknown')}")
+            print(f"   album_info track_number: {album_info.get('track_number', 'NOT_FOUND')}")
+            print(f"   track_number variable: {track_number}")
+            
             # Fix: Handle None track_number
             if track_number is None:
                 print(f"⚠️ Track number is None, extracting from filename: {os.path.basename(file_path)}")
@@ -2707,6 +2724,8 @@ def _post_process_matched_download(context_key, context, file_path):
             if not isinstance(track_number, int) or track_number < 1:
                 print(f"⚠️ Invalid track number ({track_number}), defaulting to 1")
                 track_number = 1
+                
+            print(f"🎯 [DEBUG] FINAL track_number used for filename: {track_number}")
 
             album_folder_name = f"{artist_name_sanitized} - {album_name_sanitized}"
             album_dir = os.path.join(artist_dir, album_folder_name)
@@ -3279,6 +3298,23 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
                         enhanced_payload['spotify_clean_artist'] = track.artists[0] if track.artists else enhanced_payload.get('artist', '')
                         print(f"✨ [Context] Using clean Spotify metadata - Album: '{track.album}', Title: '{track.name}'")
                         
+                        # CRITICAL FIX: Get track_number from Spotify API like GUI does
+                        if hasattr(track, 'id') and track.id:
+                            try:
+                                detailed_track = spotify_client.get_track_details(track.id)
+                                if detailed_track and 'track_number' in detailed_track:
+                                    enhanced_payload['track_number'] = detailed_track['track_number']
+                                    print(f"🔢 [Context] Added Spotify track_number: {detailed_track['track_number']}")
+                                else:
+                                    enhanced_payload['track_number'] = 1
+                                    print(f"⚠️ [Context] No track_number in detailed_track, using fallback: 1")
+                            except Exception as e:
+                                enhanced_payload['track_number'] = 1
+                                print(f"❌ [Context] Error getting track_number, using fallback: {e}")
+                        else:
+                            enhanced_payload['track_number'] = 1
+                            print(f"⚠️ [Context] No track.id available, using fallback track_number: 1")
+                        
                         # Determine if this should be treated as album download based on clean data
                         is_album_context = (
                             track.album and 
@@ -3291,8 +3327,9 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
                         enhanced_payload['spotify_clean_title'] = enhanced_payload.get('title', '')
                         enhanced_payload['spotify_clean_album'] = enhanced_payload.get('album', '')
                         enhanced_payload['spotify_clean_artist'] = enhanced_payload.get('artist', '')
+                        enhanced_payload['track_number'] = 1  # Fallback when no clean Spotify data
                         is_album_context = False
-                        print(f"⚠️ [Context] Using fallback data - no clean Spotify metadata available")
+                        print(f"⚠️ [Context] Using fallback data - no clean Spotify metadata available, track_number=1")
                     
                     matched_downloads_context[context_key] = {
                         "spotify_artist": spotify_artist_context,
