@@ -1730,8 +1730,8 @@ async function openDownloadMissingModal(playlistId) {
                                 ${tracks.map((track, index) => `
                                     <tr data-track-index="${index}">
                                         <td class="track-number">${index + 1}</td>
-                                        <td class="track-name">${escapeHtml(track.name)}</td>
-                                        <td class="track-artist">${track.artists.join(', ')}</td>
+                                        <td class="track-name" title="${escapeHtml(track.name)}">${escapeHtml(track.name)}</td>
+                                        <td class="track-artist" title="${escapeHtml(track.artists.join(', '))}">${track.artists.join(', ')}</td>
                                         <td class="track-duration">${formatDuration(track.duration_ms)}</td>
                                         <td class="track-match-status match-checking" id="match-${index}">🔍 Pending</td>
                                         <td class="track-download-status" id="download-${index}">-</td>
