@@ -2478,14 +2478,18 @@ def _on_download_completed(batch_id, task_id, success=True):
     """Called when a download completes to start the next one in queue"""
     with tasks_lock:
         if batch_id not in download_batches:
+            print(f"⚠️ [Batch Manager] Batch {batch_id} not found for completed task {task_id}")
             return
             
         # Decrement active count
+        old_active = download_batches[batch_id]['active_count']
         download_batches[batch_id]['active_count'] -= 1
+        new_active = download_batches[batch_id]['active_count']
         
-        print(f"🔄 [Batch Manager] Download completed. Active: {download_batches[batch_id]['active_count']}/{download_batches[batch_id]['max_concurrent']}")
+        print(f"🔄 [Batch Manager] Task {task_id} completed ({'success' if success else 'failed/cancelled'}). Active workers: {old_active} → {new_active}/{download_batches[batch_id]['max_concurrent']}")
     
     # Start next downloads in queue
+    print(f"🔄 [Batch Manager] Starting next batch for {batch_id}")
     _start_next_batch_of_downloads(batch_id)
 
 def _download_track_worker(task_id, batch_id=None):
@@ -2505,6 +2509,9 @@ def _download_track_worker(task_id, batch_id=None):
         with tasks_lock:
             if download_tasks[task_id]['status'] == 'cancelled':
                 print(f"❌ [Modal Worker] Task {task_id} cancelled before starting")
+                # Free worker slot when cancelled
+                if batch_id:
+                    _on_download_completed(batch_id, task_id, success=False)
                 return
 
         track_data = task['track_info']
@@ -2582,6 +2589,9 @@ def _download_track_worker(task_id, batch_id=None):
             with tasks_lock:
                 if download_tasks[task_id]['status'] == 'cancelled':
                     print(f"❌ [Modal Worker] Task {task_id} cancelled during query {query_index + 1}")
+                    # Free worker slot when cancelled
+                    if batch_id:
+                        _on_download_completed(batch_id, task_id, success=False)
                     return
                 download_tasks[task_id]['current_query_index'] = query_index
                     
@@ -2602,7 +2612,7 @@ def _download_track_worker(task_id, batch_id=None):
                                 download_tasks[task_id]['candidates'] = candidates
                         
                         # Try to download with these candidates
-                        success = _attempt_download_with_candidates(task_id, candidates, track)
+                        success = _attempt_download_with_candidates(task_id, candidates, track, batch_id)
                         if success:
                             # Notify batch manager that this task completed (success)
                             if batch_id:
@@ -2635,7 +2645,7 @@ def _download_track_worker(task_id, batch_id=None):
         if batch_id:
             _on_download_completed(batch_id, task_id, success=False)
 
-def _attempt_download_with_candidates(task_id, candidates, track):
+def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None):
     """
     Attempts to download with fallback candidate logic (matches GUI's retry_parallel_download_with_fallback).
     Returns True if successful, False if all candidates fail.
@@ -2655,6 +2665,9 @@ def _attempt_download_with_candidates(task_id, candidates, track):
         with tasks_lock:
             if download_tasks[task_id]['status'] == 'cancelled':
                 print(f"❌ [Modal Worker] Task {task_id} cancelled during candidate {candidate_index + 1}")
+                # Free worker slot when cancelled
+                if batch_id:
+                    _on_download_completed(batch_id, task_id, success=False)
                 return False
             download_tasks[task_id]['current_candidate_index'] = candidate_index
             
@@ -2891,19 +2904,40 @@ def cancel_download_task():
             
             task = download_tasks[task_id]
             
+            # Log current task state for debugging
+            current_status = task.get('status', 'unknown')
+            download_id = task.get('download_id')
+            username = task.get('username')
+            print(f"🔍 [Cancel Debug] Task {task_id} - Current status: '{current_status}', download_id: {download_id}, username: {username}")
+            
             # Immediately mark as cancelled to prevent race conditions
             task['status'] = 'cancelled'
             
-            download_id = task.get('download_id')
-            username = task.get('username')
-            
-        # If the download has actually started on Soulseek, cancel it there too
+        # CRITICAL FIX: Only free worker slot if task is still being actively worked on
+        # Avoid double-decrementing active count for downloads that already started
+        batch_id = task.get('batch_id')
+        should_free_worker = False
+        
+        if batch_id:
+            # Only free worker slot if task is pending/searching (worker hasn't completed yet)
+            # Tasks with status 'downloading'/'queued' have already had their worker freed
+            if current_status in ['pending', 'searching']:
+                should_free_worker = True
+                print(f"🔄 [Cancel] Task {task_id} (status: {current_status}) - freeing worker slot for batch {batch_id}")
+                _on_download_completed(batch_id, task_id, success=False)
+            else:
+                print(f"🚫 [Cancel] Task {task_id} (status: {current_status}) - worker already completed, not freeing slot")
+        else:
+            print(f"🚫 [Cancel] Task {task_id} cancelled (no batch_id - likely already completed)")
+
+        # Optionally try to cancel the Soulseek download (don't block worker progression)
         if download_id and username:
             try:
                 # This is an async call, so we run it and wait
                 asyncio.run(soulseek_client.cancel_download(download_id, username, remove=True))
+                print(f"✅ Successfully cancelled Soulseek download {download_id} for task {task_id}")
             except Exception as e:
-                print(f"⚠️ Warning: Failed to cancel download on slskd, but marking as cancelled locally. Error: {e}")
+                print(f"⚠️ Warning: Failed to cancel download on slskd, but worker already moved on. Error: {e}")
 
         ### NEW LOGIC START: Add cancelled track to wishlist ###
         try:
