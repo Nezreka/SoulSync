@@ -156,6 +156,11 @@ class WebUIDownloadMonitor:
                 self._check_all_downloads()
                 time.sleep(5)  # Match GUI's polling interval
             except Exception as e:
+                # If we get shutdown errors, stop monitoring gracefully
+                if "interpreter shutdown" in str(e) or "cannot schedule new futures" in str(e):
+                    print(f"🛑 Monitor detected shutdown, stopping gracefully")
+                    self.monitoring = False
+                    break
                 print(f"❌ Download monitor error: {e}")
                 
         print(f"🔍 Download monitor loop ended")
@@ -192,6 +197,10 @@ class WebUIDownloadMonitor:
     def _get_live_transfers(self):
         """Get current transfer status from slskd API"""
         try:
+            # Check if we should stop due to shutdown
+            if not self.monitoring:
+                return {}
+                
             transfers_data = asyncio.run(soulseek_client._make_request('GET', 'transfers/downloads'))
             if not transfers_data:
                 return {}
@@ -207,7 +216,15 @@ class WebUIDownloadMonitor:
                                 live_transfers[key] = file_info
             return live_transfers
         except Exception as e:
-            print(f"⚠️ Monitor: Could not fetch live transfers: {e}")
+            # If we get shutdown-related errors, stop monitoring immediately
+            if ("interpreter shutdown" in str(e) or 
+                "cannot schedule new futures" in str(e) or
+                "Event loop is closed" in str(e)):
+                print(f"🛑 Monitor detected shutdown, stopping immediately")
+                self.monitoring = False
+                return {}
+            else:
+                print(f"⚠️ Monitor: Could not fetch live transfers: {e}")
             return {}
     
     def _should_retry_task(self, task, live_transfers_lookup, current_time):
@@ -236,7 +253,7 @@ class WebUIDownloadMonitor:
                 task['queued_start_time'] = current_time
                 return False
             elif current_time - task['queued_start_time'] > 90:
-                print(f"⚠️ Task {task.get('task_id')} stuck in queue for 90+ seconds")
+                print(f"⚠️ Task stuck in queue for 90+ seconds")
                 return True
                 
         # Check for downloading at 0% timeout (90 seconds like GUI) 
@@ -245,7 +262,7 @@ class WebUIDownloadMonitor:
                 task['downloading_start_time'] = current_time
                 return False
             elif current_time - task['downloading_start_time'] > 90:
-                print(f"⚠️ Task {task.get('task_id')} stuck at 0% for 90+ seconds")
+                print(f"⚠️ Task stuck at 0% for 90+ seconds")
                 return True
         else:
             # Progress being made, reset timers
@@ -286,17 +303,25 @@ class WebUIDownloadMonitor:
         try:
             download_id = task.get('download_id')
             username = task.get('username') or task['track_info'].get('username')
+            filename = task.get('filename') or task['track_info'].get('filename')
             
-            if download_id and username:
-                print(f"🚫 Cancelling stuck download: {download_id} from {username}")
-                success = asyncio.run(soulseek_client.cancel_download(download_id, username, remove=False))
-                if success:
-                    print(f"✅ Successfully cancelled download {download_id}")
-                else:
-                    print(f"⚠️ Failed to cancel download {download_id}")
+            # Only attempt cancellation if we have what looks like a proper download ID
+            # (not a filename fallback which would be much longer)
+            if download_id and username and len(download_id) < 100:
+                print(f"🚫 Attempting to cancel stuck download: {os.path.basename(download_id)} from {username}")
+                try:
+                    success = asyncio.run(soulseek_client.cancel_download(download_id, username, remove=False))
+                    if success:
+                        print(f"✅ Successfully cancelled download")
+                    else:
+                        print(f"⚠️ Cancel request failed, proceeding with retry anyway")
+                except Exception as e:
+                    print(f"⚠️ Cancel error: {str(e)[:100]}, proceeding with retry anyway")
+            else:
+                print(f"⚠️ No valid download ID for cancellation, proceeding with retry")
                     
         except Exception as e:
-            print(f"❌ Error cancelling download before retry: {e}")
+            print(f"⚠️ Error in cancellation logic, proceeding with retry: {e}")
     
     def _retry_task_with_fallback(self, batch_id, task_id, task):
         """Retry task with next candidate (matches GUI retry logic)"""
@@ -331,6 +356,32 @@ class WebUIDownloadMonitor:
 
 # Global download monitor instance
 download_monitor = WebUIDownloadMonitor()
+
+# Cleanup handler for Flask shutdown/reload
+import atexit
+import signal
+import sys
+
+def cleanup_monitor():
+    """Clean up background monitor on shutdown"""
+    if download_monitor.monitoring:
+        print("🛑 Flask shutdown detected, stopping download monitor...")
+        download_monitor.monitoring = False
+        download_monitor.monitored_batches.clear()
+        # Give the thread a moment to exit cleanly
+        import time
+        time.sleep(0.5)
+
+def signal_handler(signum, frame):
+    """Handle SIGINT (Ctrl+C) and SIGTERM"""
+    print(f"🛑 Signal {signum} received, cleaning up...")
+    cleanup_monitor()
+    sys.exit(0)
+
+# Register cleanup handlers
+atexit.register(cleanup_monitor)
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
 
 def _update_task_status(task_id, new_status):
     """Helper to update task status and timestamp for timeout tracking"""
