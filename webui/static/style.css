@@ -4751,6 +4751,7 @@ body {
 .download-tracks-table {
     width: 100%;
     border-collapse: collapse;
+    table-layout: fixed; /* Enable fixed layout for even column distribution */
 }
 
 .download-tracks-table th {
@@ -4758,7 +4759,7 @@ body {
     color: #ffffff;
     font-weight: 600;
     font-size: 12px;
-    text-align: left;
+    text-align: center;
     padding: 12px 15px;
     border-bottom: 1px solid #555555;
     position: sticky;
@@ -4780,31 +4781,40 @@ body {
 .track-number {
     color: #888888;
     font-weight: 500;
-    width: 50px;
+    width: 5%; /* 5% for track numbers */
     text-align: center;
 }
 
 .track-name {
     font-weight: 600;
     color: #ffffff;
-    max-width: 200px;
+    width: 25%; /* 25% for track names */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .track-artist {
     color: #cccccc;
-    max-width: 150px;
+    width: 20%; /* 20% for artist names */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .track-duration {
     color: #999999;
     text-align: center;
-    width: 80px;
+    width: 8%; /* 8% for duration */
 }
 
 .track-match-status {
     text-align: center;
-    width: 100px;
+    width: 15%; /* 15% for library match status */
     font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .match-found { color: #4CAF50; }
@@ -4813,8 +4823,11 @@ body {
 
 .track-download-status {
     text-align: center;
-    width: 120px;
+    width: 20%; /* 20% for download status with progress */
     font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .download-searching { color: #2196F3; }
@@ -4824,7 +4837,7 @@ body {
 
 .track-actions {
     text-align: center;
-    width: 80px;
+    width: 7%; /* 7% for action buttons */
 }
 
 .track-result-card .track-actions{
