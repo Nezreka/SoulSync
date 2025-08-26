@@ -1847,15 +1847,16 @@ def _detect_album_info_web(context: dict, artist: dict) -> dict:
                 'album_image_url': spotify_album_context.get('image_url')
             }
 
-        # PRIORITY 1: Try album-aware search if we have album context
+        # PRIORITY 1: Try album-aware search if we have album context (GUI PARITY - MORE AGGRESSIVE)
         if original_search.get('album') and original_search.get('album').strip() and original_search.get('album') != "Unknown Album":
-            print(f"🎯 ALBUM-AWARE SEARCH: Looking for '{original_search.get('title')}' in album '{original_search.get('album')}'")
+            print(f"🎯 ALBUM-AWARE SEARCH (HIGH PRIORITY): Looking for '{original_search.get('title')}' in album '{original_search.get('album')}'")
             album_result = _search_track_in_album_context_web(context, artist)
             if album_result:
-                print(f"✅ Found track in album context - using album classification")
+                print(f"✅ PRIORITY 1 SUCCESS: Found track in album context - FORCING album classification")
                 return album_result
             else:
-                print(f"⚠️ Track not found in album context, falling back to individual search")
+                print(f"⚠️ PRIORITY 1 FAILED: Track not found in album context")
+                # Still continue to Priority 2, but with logging to show we tried album first
 
         # PRIORITY 2: Fallback to individual track search for clean metadata
         print(f"🔍 Searching Spotify for individual track info (PRIORITY 2)...")
@@ -1913,14 +1914,16 @@ def _detect_album_info_web(context: dict, artist: dict) -> dict:
                 print(f"📀 Spotify album info: '{album_name}' (type: {album_type}, total_tracks: {total_tracks}, track#: {spotify_track_number})")
                 print(f"🎵 Clean track name from Spotify: '{clean_track_name}'")
                 
-                # Enhanced album detection using detailed API data
+                # Enhanced album detection using detailed API data (GUI PARITY)
                 is_album = (
                     # Album type is 'album' (not 'single')
                     album_type == 'album' and
                     # Album has multiple tracks
                     total_tracks > 1 and
-                    # Album name is different from track name (avoid self-titled singles)
-                    matching_engine.similarity_score(album_name.lower(), clean_track_name.lower()) < 0.9
+                    # Album name different from track name
+                    matching_engine.normalize_string(album_name) != matching_engine.normalize_string(clean_track_name) and
+                    # Album name is not just the artist name
+                    matching_engine.normalize_string(album_name) != matching_engine.normalize_string(artist_name)
                 )
                 
                 album_image_url = None
@@ -2236,9 +2239,9 @@ def _search_track_in_album_context_web(context: dict, spotify_artist: dict) -> d
                     matching_engine.normalize_string(track_name)
                 )
                 
-                # Use higher threshold for remix matching to ensure precision
+                # Use higher threshold for remix matching to ensure precision (GUI PARITY)
                 is_remix = any(word in clean_track.lower() for word in ['remix', 'mix', 'edit', 'version'])
-                threshold = 0.9 if is_remix else 0.7  # Much stricter for remixes
+                threshold = 0.9 if is_remix else 0.65  # Lower threshold to favor album matches over singles
                 
                 if similarity > threshold:
                     print(f"✅ FOUND: '{track_name}' (track #{track_number}) matches '{clean_track}' (similarity: {similarity:.2f})")
@@ -2374,7 +2377,18 @@ def _extract_spotify_metadata(context: dict, artist: dict, album_info: dict) -> 
     original_search = context.get("original_search_result", {})
     spotify_album = context.get("spotify_album")
 
-    metadata['title'] = album_info.get('clean_track_name', original_search.get('title', ''))
+    # Priority 1: Spotify clean title from context
+    if original_search.get('spotify_clean_title'):
+        metadata['title'] = original_search['spotify_clean_title']
+        print(f"🎵 Metadata: Using Spotify clean title: '{metadata['title']}'")
+    # Priority 2: Album info clean name
+    elif album_info.get('clean_track_name'):
+        metadata['title'] = album_info['clean_track_name']
+        print(f"🎵 Metadata: Using album info clean name: '{metadata['title']}'")
+    # Priority 3: Original title as fallback
+    else:
+        metadata['title'] = original_search.get('title', '')
+        print(f"🎵 Metadata: Using original title as fallback: '{metadata['title']}'")
     metadata['artist'] = artist.get('name', '')
     metadata['album_artist'] = artist.get('name', '') # Crucial for library organization
 
