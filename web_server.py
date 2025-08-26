@@ -120,6 +120,225 @@ download_tasks = {}  # task_id -> task state dict
 download_batches = {}  # batch_id -> {queue, active_count, max_concurrent}
 tasks_lock = threading.Lock()
 
+# --- Background Download Monitoring (GUI Parity) ---
+class WebUIDownloadMonitor:
+    """
+    Background monitor for download progress and retry logic, matching GUI's SyncStatusProcessingWorker.
+    Implements identical timeout detection and automatic retry functionality.
+    """
+    def __init__(self):
+        self.monitoring = False
+        self.monitor_thread = None
+        self.monitored_batches = set()
+        
+    def start_monitoring(self, batch_id):
+        """Start monitoring a download batch"""
+        self.monitored_batches.add(batch_id)
+        if not self.monitoring:
+            self.monitoring = True
+            self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
+            self.monitor_thread.start()
+            print(f"🔍 Started download monitor for batch {batch_id}")
+    
+    def stop_monitoring(self, batch_id):
+        """Stop monitoring a specific batch"""
+        self.monitored_batches.discard(batch_id)
+        if not self.monitored_batches:
+            self.monitoring = False
+            print(f"🛑 Stopped download monitor (no active batches)")
+    
+    def _monitor_loop(self):
+        """Main monitoring loop - checks downloads every 5 seconds like GUI"""
+        import time
+        
+        while self.monitoring and self.monitored_batches:
+            try:
+                self._check_all_downloads()
+                time.sleep(5)  # Match GUI's polling interval
+            except Exception as e:
+                print(f"❌ Download monitor error: {e}")
+                
+        print(f"🔍 Download monitor loop ended")
+    
+    def _check_all_downloads(self):
+        """Check all active downloads for timeouts and failures"""
+        current_time = time.time()
+        
+        # Get live transfer data from slskd
+        live_transfers_lookup = self._get_live_transfers()
+        
+        with tasks_lock:
+            tasks_to_retry = []
+            
+            for batch_id in list(self.monitored_batches):
+                if batch_id not in download_batches:
+                    self.monitored_batches.discard(batch_id)
+                    continue
+                    
+                for task_id in download_batches[batch_id].get('queue', []):
+                    task = download_tasks.get(task_id)
+                    if not task or task['status'] not in ['downloading', 'queued']:
+                        continue
+                        
+                    # Check if task needs retry due to timeout
+                    if self._should_retry_task(task, live_transfers_lookup, current_time):
+                        tasks_to_retry.append((batch_id, task_id, task))
+            
+            # Process retries outside the lock to avoid deadlocks
+            for batch_id, task_id, task in tasks_to_retry:
+                print(f"🔄 Monitor triggered retry for task {task_id}")
+                self._trigger_retry(batch_id, task_id, task)
+    
+    def _get_live_transfers(self):
+        """Get current transfer status from slskd API"""
+        try:
+            transfers_data = asyncio.run(soulseek_client._make_request('GET', 'transfers/downloads'))
+            if not transfers_data:
+                return {}
+                
+            live_transfers = {}
+            for user_data in transfers_data:
+                username = user_data.get('username', 'Unknown')
+                if 'directories' in user_data:
+                    for directory in user_data['directories']:
+                        if 'files' in directory:
+                            for file_info in directory['files']:
+                                key = f"{username}::{os.path.basename(file_info.get('filename', ''))}"
+                                live_transfers[key] = file_info
+            return live_transfers
+        except Exception as e:
+            print(f"⚠️ Monitor: Could not fetch live transfers: {e}")
+            return {}
+    
+    def _should_retry_task(self, task, live_transfers_lookup, current_time):
+        """Determine if a task should be retried due to timeout (matches GUI logic)"""
+        task_filename = task.get('filename') or task['track_info'].get('filename')
+        task_username = task.get('username') or task['track_info'].get('username')
+        
+        if not task_filename or not task_username:
+            return False
+            
+        lookup_key = f"{task_username}::{os.path.basename(task_filename)}"
+        live_info = live_transfers_lookup.get(lookup_key)
+        
+        if not live_info:
+            # Task not in live transfers but status is downloading/queued - likely stuck
+            if current_time - task.get('status_change_time', current_time) > 90:
+                return True
+            return False
+        
+        state_str = live_info.get('state', '')
+        progress = live_info.get('percentComplete', 0)
+        
+        # Check for queued timeout (90 seconds like GUI)
+        if 'Queued' in state_str or task['status'] == 'queued':
+            if 'queued_start_time' not in task:
+                task['queued_start_time'] = current_time
+                return False
+            elif current_time - task['queued_start_time'] > 90:
+                print(f"⚠️ Task {task.get('task_id')} stuck in queue for 90+ seconds")
+                return True
+                
+        # Check for downloading at 0% timeout (90 seconds like GUI) 
+        elif 'InProgress' in state_str and progress < 1:
+            if 'downloading_start_time' not in task:
+                task['downloading_start_time'] = current_time
+                return False
+            elif current_time - task['downloading_start_time'] > 90:
+                print(f"⚠️ Task {task.get('task_id')} stuck at 0% for 90+ seconds")
+                return True
+        else:
+            # Progress being made, reset timers
+            task.pop('queued_start_time', None)
+            task.pop('downloading_start_time', None)
+            
+        return False
+    
+    def _trigger_retry(self, batch_id, task_id, task):
+        """Trigger retry for a stuck/failed task"""
+        try:
+            # Cancel the stuck download first (like GUI)
+            self._cancel_download_before_retry(task)
+            
+            # Update task for retry
+            with tasks_lock:
+                if task_id in download_tasks:
+                    task['retry_count'] = task.get('retry_count', 0) + 1
+                    if task['retry_count'] > 2:  # Max 3 attempts total like GUI
+                        task['status'] = 'failed'
+                        print(f"❌ Task {task_id} failed after 3 retry attempts")
+                        return
+                    
+                    # Reset for retry
+                    task['status'] = 'pending'
+                    task.pop('queued_start_time', None)
+                    task.pop('downloading_start_time', None)
+                    task['status_change_time'] = time.time()
+                    
+            # Submit retry to executor
+            missing_download_executor.submit(self._retry_task_with_fallback, batch_id, task_id, task)
+            
+        except Exception as e:
+            print(f"❌ Error triggering retry for task {task_id}: {e}")
+    
+    def _cancel_download_before_retry(self, task):
+        """Cancel current download before retry (matches GUI cancel_download_before_retry)"""
+        try:
+            download_id = task.get('download_id')
+            username = task.get('username') or task['track_info'].get('username')
+            
+            if download_id and username:
+                print(f"🚫 Cancelling stuck download: {download_id} from {username}")
+                success = asyncio.run(soulseek_client.cancel_download(download_id, username, remove=False))
+                if success:
+                    print(f"✅ Successfully cancelled download {download_id}")
+                else:
+                    print(f"⚠️ Failed to cancel download {download_id}")
+                    
+        except Exception as e:
+            print(f"❌ Error cancelling download before retry: {e}")
+    
+    def _retry_task_with_fallback(self, batch_id, task_id, task):
+        """Retry task with next candidate (matches GUI retry logic)"""
+        try:
+            candidates = task.get('cached_candidates', [])
+            used_sources = task.get('used_sources', set())
+            
+            # Find next unused candidate
+            next_candidate = None
+            for candidate in candidates:
+                source_key = f"{candidate.username}_{candidate.filename}"
+                if source_key not in used_sources:
+                    next_candidate = candidate
+                    break
+            
+            if not next_candidate:
+                with tasks_lock:
+                    if task_id in download_tasks:
+                        download_tasks[task_id]['status'] = 'failed'
+                print(f"❌ No alternative candidates for task {task_id}")
+                return
+            
+            print(f"🔄 Retrying task {task_id} with candidate: {next_candidate.filename}")
+            
+            # Use the existing retry logic from _attempt_download_with_candidates
+            track = task['track_info'].get('spotify_track')
+            if track:
+                _attempt_download_with_candidates(task_id, [next_candidate], track, batch_id)
+                
+        except Exception as e:
+            print(f"❌ Error in retry with fallback for task {task_id}: {e}")
+
+# Global download monitor instance
+download_monitor = WebUIDownloadMonitor()
+
+def _update_task_status(task_id, new_status):
+    """Helper to update task status and timestamp for timeout tracking"""
+    with tasks_lock:
+        if task_id in download_tasks:
+            download_tasks[task_id]['status'] = new_status
+            download_tasks[task_id]['status_change_time'] = time.time()
+
 # --- Album Grouping State Management (Ported from GUI) ---
 # Thread-safe album grouping for consistent naming across tracks
 album_cache_lock = threading.Lock()
@@ -3039,6 +3258,7 @@ def _start_next_batch_of_downloads(batch_id):
             # Must be done INSIDE the lock to prevent race conditions with status polling
             if task_id in download_tasks:
                 download_tasks[task_id]['status'] = 'searching'
+                download_tasks[task_id]['status_change_time'] = time.time()
                 print(f"🔧 [Batch Manager] Set task {task_id} status to 'searching'")
             
             # Update counters
@@ -3067,6 +3287,16 @@ def _on_download_completed(batch_id, task_id, success=True):
         new_active = download_batches[batch_id]['active_count']
         
         print(f"🔄 [Batch Manager] Task {task_id} completed ({'success' if success else 'failed/cancelled'}). Active workers: {old_active} → {new_active}/{download_batches[batch_id]['max_concurrent']}")
+        
+        # Check if batch is fully complete (all downloads processed and no active workers)
+        batch = download_batches[batch_id]
+        all_processed = batch['queue_index'] >= len(batch['queue'])
+        no_active = batch['active_count'] == 0
+        
+        if all_processed and no_active:
+            print(f"🎉 [Batch Manager] Batch {batch_id} fully complete - stopping monitor")
+            download_monitor.stop_monitoring(batch_id)
+            return  # Don't start next batch if we're done
     
     # Start next downloads in queue
     print(f"🔄 [Batch Manager] Starting next batch for {batch_id}")
@@ -3186,10 +3416,10 @@ def _download_track_worker(task_id, batch_id=None):
                     if candidates:
                         print(f"✅ [Modal Worker] Found {len(candidates)} valid candidates for query '{query}'")
                         
-                        # Store candidates and attempt download (like GUI)
+                        # Store candidates for retry fallback (like GUI)
                         with tasks_lock:
                             if task_id in download_tasks:
-                                download_tasks[task_id]['candidates'] = candidates
+                                download_tasks[task_id]['cached_candidates'] = candidates
                         
                         # Try to download with these candidates
                         success = _attempt_download_with_candidates(task_id, candidates, track, batch_id)
@@ -3261,9 +3491,9 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
         
         try:
             # Update task status to downloading
+            _update_task_status(task_id, 'downloading')
             with tasks_lock:
                 if task_id in download_tasks:
-                    download_tasks[task_id]['status'] = 'downloading'
                     download_tasks[task_id]['used_sources'].add(source_key)
             
             # Prepare download (using existing infrastructure)
@@ -3423,11 +3653,20 @@ def start_playlist_missing_downloads(playlist_id):
                     'batch_id': batch_id,
                     'track_index': original_track_index,  # Use original playlist track index
                     'download_id': None,
-                    'username': None
+                    'username': None,
+                    'filename': None,
+                    # Retry-related fields (GUI parity)
+                    'retry_count': 0,
+                    'cached_candidates': [],
+                    'used_sources': set(),
+                    'status_change_time': time.time()
                 }
                 
                 # Add to batch queue instead of submitting immediately
                 download_batches[batch_id]['queue'].append(task_id)
+        
+        # Start background monitoring for timeouts and retries (GUI parity)
+        download_monitor.start_monitoring(batch_id)
         
         # Start the first batch of downloads (up to 3)
         _start_next_batch_of_downloads(batch_id)
