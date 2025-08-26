@@ -120,6 +120,14 @@ download_tasks = {}  # task_id -> task state dict
 download_batches = {}  # batch_id -> {queue, active_count, max_concurrent}
 tasks_lock = threading.Lock()
 
+# --- Album Grouping State Management (Ported from GUI) ---
+# Thread-safe album grouping for consistent naming across tracks
+album_cache_lock = threading.Lock()
+album_groups = {}  # album_key -> final_album_name
+album_artists = {}  # album_key -> artist_name  
+album_editions = {}  # album_key -> "standard" or "deluxe"
+album_name_cache = {}  # album_key -> cached_final_name
+
 def _prepare_stream_task(track_data):
     """
     Background streaming task that downloads track to Stream folder and updates global state.
@@ -1551,10 +1559,14 @@ def _start_album_download_tasks(album_result, spotify_artist, spotify_album):
             if download_id:
                 context_key = f"{username}::{filename}"
                 with matched_context_lock:
+                    # Enhanced context storage with Spotify clean titles (GUI parity)
+                    enhanced_context = individual_track_context.copy()
+                    enhanced_context['spotify_clean_title'] = individual_track_context.get('title', '')
+                    
                     matched_downloads_context[context_key] = {
                         "spotify_artist": spotify_artist,
                         "spotify_album": spotify_album,
-                        "original_search_result": individual_track_context, # Contains corrected data
+                        "original_search_result": enhanced_context, # Contains corrected data + clean title
                         "is_album_download": True
                     }
                 print(f"  + Queued track: {filename} (Matched to: '{corrected_meta.get('title')}')")
@@ -1618,10 +1630,14 @@ def start_matched_download():
                     # THE FIX: We preserve the spotify_album context if it was provided.
                     # For a regular single, spotify_album will be None.
                     # For an album track, it will contain the album's data.
+                    # Enhanced context storage with Spotify clean titles (GUI parity)
+                    enhanced_payload = download_payload.copy()
+                    enhanced_payload['spotify_clean_title'] = download_payload.get('title', '')
+                    
                     matched_downloads_context[context_key] = {
                         "spotify_artist": spotify_artist,
                         "spotify_album": spotify_album, # PRESERVE album context
-                        "original_search_result": download_payload,
+                        "original_search_result": enhanced_payload,
                         "is_album_download": False # It's a single track download, not a full album job.
                     }
                 return jsonify({"success": True, "message": "Matched download started"})
@@ -1796,14 +1812,19 @@ def _search_track_in_album_context(original_search: dict, artist: dict) -> dict:
 
 def _detect_album_info_web(context: dict, artist: dict) -> dict:
     """
-    This is the final, corrected version that ensures the official Spotify track
-    number from the context is always prioritized for matched album downloads,
-    fixing the track numbering issue by mirroring the logic from downloads.py.
+    Enhanced album detection with GUI parity - multi-priority logic.
+    (Updated to match GUI downloads.py logic exactly)
     """
     try:
         original_search = context.get("original_search_result", {})
         spotify_album_context = context.get("spotify_album")
         is_album_download = context.get("is_album_download", False)
+        artist_name = artist['name']
+        
+        print(f"🔍 Album detection for '{original_search.get('title', 'Unknown')}' by '{artist_name}':")
+        print(f"    Has album attr: {bool(original_search.get('album'))}")
+        if original_search.get('album'):
+            print(f"    Album value: '{original_search.get('album')}'")
 
         # --- THIS IS THE CRITICAL FIX ---
         # If this is part of a matched album download, we TRUST the context data completely.
@@ -1826,40 +1847,114 @@ def _detect_album_info_web(context: dict, artist: dict) -> dict:
                 'album_image_url': spotify_album_context.get('image_url')
             }
 
-        # This fallback block handles single tracks. It was already working correctly.
-        # It performs a live Spotify search to determine if a single is part of an album.
-        print("ℹ️ Single track context. Performing live Spotify search for album info.")
-        cleaned_title = _clean_track_title(original_search.get('title', ''), artist['name'])
-        query = f"artist:\"{artist['name']}\" track:\"{cleaned_title}\""
-        tracks = spotify_client.search_tracks(query, limit=1)
+        # PRIORITY 1: Try album-aware search if we have album context
+        if original_search.get('album') and original_search.get('album').strip() and original_search.get('album') != "Unknown Album":
+            print(f"🎯 ALBUM-AWARE SEARCH: Looking for '{original_search.get('title')}' in album '{original_search.get('album')}'")
+            album_result = _search_track_in_album_context_web(context, artist)
+            if album_result:
+                print(f"✅ Found track in album context - using album classification")
+                return album_result
+            else:
+                print(f"⚠️ Track not found in album context, falling back to individual search")
 
-        if not tracks:
-            print("⚠️ No Spotify match found, defaulting to single.")
-            return {'is_album': False, 'clean_track_name': cleaned_title, 'album_name': cleaned_title, 'track_number': 1}
+        # PRIORITY 2: Fallback to individual track search for clean metadata
+        print(f"🔍 Searching Spotify for individual track info (PRIORITY 2)...")
+        
+        # Clean the track title before searching - remove artist prefix
+        clean_title = _clean_track_title_web(original_search.get('title', ''), artist_name)
+        print(f"🧹 Cleaned title: '{original_search.get('title')}' -> '{clean_title}'")
+        
+        # Search for the track by artist and cleaned title
+        query = f"artist:{artist_name} track:{clean_title}"
+        tracks = spotify_client.search_tracks(query, limit=5)
+        
+        # Find the best matching track
+        best_match = None
+        best_confidence = 0
+        
+        if tracks:
+            from core.matching_engine import matching_engine
+            for track in tracks:
+                # Calculate confidence based on artist and title similarity
+                artist_confidence = matching_engine.similarity_score(
+                    matching_engine.normalize_string(artist_name),
+                    matching_engine.normalize_string(track.artists[0] if track.artists else '')
+                )
+                title_confidence = matching_engine.similarity_score(
+                    matching_engine.normalize_string(clean_title),
+                    matching_engine.normalize_string(track.name)
+                )
+                
+                combined_confidence = (artist_confidence * 0.6 + title_confidence * 0.4)
+                
+                if combined_confidence > best_confidence and combined_confidence > 0.6:  # Lower threshold for better matches
+                    best_match = track
+                    best_confidence = combined_confidence
 
-        best_match = tracks[0]
-        detailed_track = spotify_client.get_track_details(best_match.id)
+        # If we found a good Spotify match, use it for clean metadata
+        if best_match and best_confidence > 0.6:
+            print(f"✅ Found matching Spotify track: '{best_match.name}' - Album: '{best_match.album}' (confidence: {best_confidence:.2f})")
+            
+            # Get detailed track information using Spotify's track API
+            detailed_track = None
+            if hasattr(best_match, 'id') and best_match.id:
+                print(f"🔍 Getting detailed track info from Spotify API for track ID: {best_match.id}")
+                detailed_track = spotify_client.get_track_details(best_match.id)
+            
+            # Use detailed track data if available
+            if detailed_track:
+                print(f"✅ Got detailed track data from Spotify API")
+                album_name = _clean_album_title_web(detailed_track['album']['name'], artist_name)
+                clean_track_name = detailed_track['name']  # Use Spotify's clean track name
+                album_type = detailed_track['album'].get('album_type', 'album')
+                total_tracks = detailed_track['album'].get('total_tracks', 1)
+                spotify_track_number = detailed_track.get('track_number', 1)
+                
+                print(f"📀 Spotify album info: '{album_name}' (type: {album_type}, total_tracks: {total_tracks}, track#: {spotify_track_number})")
+                print(f"🎵 Clean track name from Spotify: '{clean_track_name}'")
+                
+                # Enhanced album detection using detailed API data
+                is_album = (
+                    # Album type is 'album' (not 'single')
+                    album_type == 'album' and
+                    # Album has multiple tracks
+                    total_tracks > 1 and
+                    # Album name is different from track name (avoid self-titled singles)
+                    matching_engine.similarity_score(album_name.lower(), clean_track_name.lower()) < 0.9
+                )
+                
+                album_image_url = None
+                if detailed_track['album'].get('images'):
+                    album_image_url = detailed_track['album']['images'][0].get('url')
+                
+                print(f"📊 Album classification: {is_album} (type={album_type}, tracks={total_tracks})")
+                
+                return {
+                    'is_album': is_album,
+                    'album_name': album_name,
+                    'track_number': spotify_track_number,
+                    'clean_track_name': clean_track_name,
+                    'album_image_url': album_image_url,
+                    'confidence': best_confidence,
+                    'source': 'spotify_api_detailed'
+                }
 
-        if not detailed_track:
-            print("⚠️ Could not get detailed track info, defaulting to single.")
-            return {'is_album': False, 'clean_track_name': best_match.name, 'album_name': best_match.name, 'track_number': 1}
-
-        api_album = detailed_track.get('album', {})
-        album_type = api_album.get('album_type', 'single')
-        total_tracks = api_album.get('total_tracks', 1)
-        is_album = (album_type == 'album' and total_tracks > 1 and matching_engine.similarity_score(api_album.get('name'), best_match.name) < 0.9)
-        album_image_url = api_album.get('images', [{}])[0].get('url') if api_album.get('images') else None
-
+        # Fallback: Use original data with basic cleaning
+        print("⚠️ No good Spotify match found, using original data")
+        fallback_title = _clean_track_title_web(original_search.get('title', 'Unknown Track'), artist_name)
+        
         return {
-            'is_album': is_album,
-            'album_name': api_album.get('name', best_match.name),
-            'track_number': detailed_track.get('track_number', 1),
-            'clean_track_name': best_match.name,
-            'album_image_url': album_image_url
+            'is_album': False,
+            'clean_track_name': fallback_title,
+            'album_name': fallback_title,
+            'track_number': 1,
+            'confidence': 0.0,
+            'source': 'fallback_original'
         }
+        
     except Exception as e:
         print(f"❌ Error in _detect_album_info_web: {e}")
-        clean_title = _clean_track_title(context.get("original_search_result", {}).get('title', 'Unknown'), artist.get('name', ''))
+        clean_title = _clean_track_title_web(context.get("original_search_result", {}).get('title', 'Unknown'), artist.get('name', ''))
         return {'is_album': False, 'clean_track_name': clean_title, 'album_name': clean_title, 'track_number': 1}
 
 
@@ -1880,6 +1975,333 @@ def _cleanup_empty_directories(download_path, moved_file_path):
                 break
     except Exception as e:
         print(f"Warning: An error occurred during directory cleanup: {e}")
+
+
+# ===================================================================
+# ALBUM GROUPING SYSTEM (Ported from GUI downloads.py)
+# ===================================================================
+
+def _get_base_album_name(album_name: str) -> str:
+    """
+    Extract the base album name without edition indicators.
+    E.g., 'good kid, m.A.A.d city (Deluxe Edition)' -> 'good kid, m.A.A.d city'
+    """
+    import re
+    
+    # Remove common edition suffixes
+    base_name = album_name
+    
+    # Remove edition indicators in parentheses or brackets
+    base_name = re.sub(r'\s*[\[\(](deluxe|special|expanded|extended|bonus|remastered|anniversary|collectors?|limited).*?[\]\)]\s*$', '', base_name, flags=re.IGNORECASE)
+    
+    # Remove standalone edition words at the end
+    base_name = re.sub(r'\s+(deluxe|special|expanded|extended|bonus|remastered|anniversary|collectors?|limited)\s*(edition)?\s*$', '', base_name, flags=re.IGNORECASE)
+    
+    return base_name.strip()
+
+def _detect_deluxe_edition(album_name: str) -> bool:
+    """
+    Detect if an album name indicates a deluxe/special edition.
+    Returns True if it's a deluxe variant, False for standard.
+    """
+    if not album_name:
+        return False
+    
+    album_lower = album_name.lower()
+    
+    # Check for deluxe indicators
+    deluxe_indicators = [
+        'deluxe',
+        'deluxe edition', 
+        'special edition',
+        'expanded edition',
+        'extended edition',
+        'bonus',
+        'remastered',
+        'anniversary',
+        'collectors edition',
+        'limited edition'
+    ]
+    
+    for indicator in deluxe_indicators:
+        if indicator in album_lower:
+            print(f"🎯 Detected deluxe edition: '{album_name}' contains '{indicator}'")
+            return True
+    
+    return False
+
+def _normalize_base_album_name(base_album: str, artist_name: str) -> str:
+    """
+    Normalize the base album name to handle case variations and known corrections.
+    """
+    import re
+    
+    # Apply known album corrections for consistent naming
+    normalized_lower = base_album.lower().strip()
+    
+    # Handle common album title variations
+    known_corrections = {
+        # Add specific album name corrections here as needed
+        # Example: "good kid maad city": "good kid, m.A.A.d city"
+    }
+    
+    # Check for exact matches in our corrections
+    for variant, correction in known_corrections.items():
+        if normalized_lower == variant.lower():
+            print(f"📀 Album correction applied: '{base_album}' -> '{correction}'")
+            return correction
+    
+    # Handle punctuation variations 
+    normalized = base_album
+    
+    # Normalize common punctuation patterns
+    normalized = re.sub(r'\s*&\s*', ' & ', normalized)  # Standardize & spacing
+    normalized = re.sub(r'\s+', ' ', normalized)  # Clean multiple spaces
+    normalized = normalized.strip()
+    
+    print(f"📀 Album variant normalization: '{base_album}' -> '{normalized}'")
+    return normalized
+
+def _resolve_album_group(spotify_artist: dict, album_info: dict, original_album: str = None) -> str:
+    """
+    Smart album grouping: Start with standard, upgrade to deluxe if ANY track is deluxe.
+    This ensures all tracks from the same album get the same folder name.
+    (Adapted from GUI downloads.py)
+    """
+    try:
+        with album_cache_lock:
+            artist_name = spotify_artist["name"]
+            detected_album = album_info.get('album_name', '')
+            
+            # Extract base album name (without edition indicators)
+            if detected_album:
+                base_album = _get_base_album_name(detected_album)
+            elif original_album:
+                # Clean the original Soulseek album name 
+                cleaned_original = _clean_album_title_web(original_album, artist_name)
+                base_album = _get_base_album_name(cleaned_original)
+            else:
+                base_album = _get_base_album_name(detected_album)
+            
+            # Normalize the base name (handle case variations, etc.)
+            base_album = _normalize_base_album_name(base_album, artist_name)
+            
+            # Create a key for this album group (artist + base album)
+            album_key = f"{artist_name}::{base_album}"
+            
+            # Check if we already have a cached result for this album
+            if album_key in album_name_cache:
+                cached_name = album_name_cache[album_key]
+                print(f"🔍 Using cached album name for '{album_key}': '{cached_name}'")
+                return cached_name
+            
+            print(f"🔍 Album grouping - Key: '{album_key}', Detected: '{detected_album}'")
+            
+            # Check if this track indicates a deluxe edition
+            is_deluxe_track = False
+            if detected_album:
+                is_deluxe_track = _detect_deluxe_edition(detected_album)
+            elif original_album:
+                is_deluxe_track = _detect_deluxe_edition(original_album)
+            
+            # Get current edition level for this album group (default to standard)
+            current_edition = album_editions.get(album_key, "standard")
+            
+            # SMART ALGORITHM: Upgrade to deluxe if this track is deluxe
+            if is_deluxe_track and current_edition == "standard":
+                print(f"🎯 UPGRADE: Album '{base_album}' upgraded from standard to deluxe!")
+                album_editions[album_key] = "deluxe"
+                current_edition = "deluxe"
+            
+            # Build final album name based on edition level
+            if current_edition == "deluxe":
+                final_album_name = f"{base_album} (Deluxe Edition)"
+            else:
+                final_album_name = base_album
+            
+            # Store the resolution in both caches
+            album_groups[album_key] = final_album_name
+            album_name_cache[album_key] = final_album_name
+            album_artists[album_key] = artist_name
+            
+            print(f"🔗 Album resolution: '{detected_album}' -> '{final_album_name}' (edition: {current_edition})")
+            
+            return final_album_name
+        
+    except Exception as e:
+        print(f"❌ Error resolving album group: {e}")
+        return album_info.get('album_name', 'Unknown Album')
+
+def _clean_album_title_web(album_title: str, artist_name: str) -> str:
+    """Clean up album title by removing common prefixes, suffixes, and artist redundancy"""
+    import re
+    
+    # Start with the original title
+    original = album_title.strip()
+    cleaned = original
+    print(f"🧹 Album Title Cleaning: '{original}' (artist: '{artist_name}')")
+    
+    # Remove "Album - " prefix
+    cleaned = re.sub(r'^Album\s*-\s*', '', cleaned, flags=re.IGNORECASE)
+    
+    # Remove artist name prefix if it appears at the beginning
+    # This handles cases like "Kendrick Lamar - good kid, m.A.A.d city"
+    artist_pattern = re.escape(artist_name) + r'\s*-\s*'
+    cleaned = re.sub(f'^{artist_pattern}', '', cleaned, flags=re.IGNORECASE)
+    
+    # Remove common Soulseek suffixes in square brackets and parentheses
+    # Examples: [Deluxe Edition] [2012] [320 Kbps] [Album+iTunes+Bonus Tracks] [F10]
+    #           (Deluxe Edition) (2012) (320 Kbps) etc.
+    # Remove year patterns like [2012], (2020), etc.
+    cleaned = re.sub(r'\s*[\[\(]\d{4}[\]\)]\s*', ' ', cleaned)
+    
+    # Remove quality/format indicators
+    quality_patterns = [
+        r'\s*[\[\(].*?320.*?kbps.*?[\]\)]\s*',
+        r'\s*[\[\(].*?256.*?kbps.*?[\]\)]\s*',
+        r'\s*[\[\(].*?flac.*?[\]\)]\s*',
+        r'\s*[\[\(].*?mp3.*?[\]\)]\s*',
+        r'\s*[\[\(].*?itunes.*?[\]\)]\s*',
+        r'\s*[\[\(].*?web.*?[\]\)]\s*',
+        r'\s*[\[\(].*?cd.*?[\]\)]\s*'
+    ]
+    
+    for pattern in quality_patterns:
+        cleaned = re.sub(pattern, ' ', cleaned, flags=re.IGNORECASE)
+    
+    # Remove common edition indicators (but preserve them for deluxe detection above)
+    # This happens AFTER deluxe detection to avoid interfering with that logic
+    
+    # Clean up spacing
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    
+    # Remove leading/trailing punctuation
+    cleaned = re.sub(r'^[-\s]+|[-\s]+$', '', cleaned)
+    
+    print(f"🧹 Album Title Result: '{original}' -> '{cleaned}'")
+    return cleaned if cleaned else original
+
+def _search_track_in_album_context_web(context: dict, spotify_artist: dict) -> dict:
+    """
+    Search for a track within its album context to avoid promotional single confusion.
+    (Ported from GUI downloads.py)
+    """
+    try:
+        from core.spotify_client import spotify_client
+        from core.matching_engine import matching_engine
+        
+        # Get album and track info from context
+        original_search = context.get("original_search_result", {})
+        album_name = original_search.get("album")
+        track_title = original_search.get("title")
+        artist_name = spotify_artist["name"]
+        
+        if not album_name or not track_title:
+            print(f"❌ Album-aware search failed: Missing album ({album_name}) or track ({track_title})")
+            return None
+        
+        print(f"🎯 Album-aware search: '{track_title}' in album '{album_name}' by '{artist_name}'")
+        
+        # Clean the album name for better search results
+        clean_album = _clean_album_title_web(album_name, artist_name)
+        clean_track = _clean_track_title_web(track_title, artist_name)
+        
+        # Search for the specific album first
+        album_query = f"album:{clean_album} artist:{artist_name}"
+        print(f"🔍 Searching albums: {album_query}")
+        albums = spotify_client.search_albums(album_query, limit=5)
+        
+        if not albums:
+            print(f"❌ No albums found for query: {album_query}")
+            return None
+        
+        # Check each album to see if our track is in it
+        for album in albums:
+            print(f"🎵 Checking album: '{album.name}' ({album.total_tracks} tracks)")
+            
+            # Get tracks from this album
+            album_tracks_data = spotify_client.get_album_tracks(album.id)
+            if not album_tracks_data or 'items' not in album_tracks_data:
+                print(f"❌ Could not get tracks for album: {album.name}")
+                continue
+            
+            # Check if our track is in this album
+            for track_data in album_tracks_data['items']:
+                track_name = track_data['name']
+                track_number = track_data['track_number']
+                
+                # Calculate similarity between our track and this album track
+                similarity = matching_engine.similarity_score(
+                    matching_engine.normalize_string(clean_track),
+                    matching_engine.normalize_string(track_name)
+                )
+                
+                # Use higher threshold for remix matching to ensure precision
+                is_remix = any(word in clean_track.lower() for word in ['remix', 'mix', 'edit', 'version'])
+                threshold = 0.9 if is_remix else 0.7  # Much stricter for remixes
+                
+                if similarity > threshold:
+                    print(f"✅ FOUND: '{track_name}' (track #{track_number}) matches '{clean_track}' (similarity: {similarity:.2f})")
+                    print(f"🎯 Forcing album classification for track in '{album.name}'")
+                    
+                    # Return album info - force album classification!
+                    return {
+                        'is_album': True,  # Always true - we found it in an album!
+                        'album_name': album.name,
+                        'track_number': track_number,
+                        'clean_track_name': clean_track,  # Use the ORIGINAL download title, not the database match
+                        'album_image_url': album.image_url,
+                        'confidence': similarity,
+                        'source': 'album_context_search'
+                    }
+            
+            print(f"❌ Track '{clean_track}' not found in album '{album.name}'")
+        
+        print(f"❌ Track '{clean_track}' not found in any matching albums")
+        return None
+        
+    except Exception as e:
+        print(f"❌ Error in album-aware search: {e}")
+        return None
+
+def _clean_track_title_web(track_title: str, artist_name: str) -> str:
+    """Clean up track title by removing artist prefix and common patterns"""
+    import re
+    
+    # Start with the original title
+    original = track_title.strip()
+    cleaned = original
+    print(f"🧹 Track Title Cleaning: '{original}' (artist: '{artist_name}')")
+    
+    # Remove artist name prefix if it appears at the beginning
+    # This handles cases like "Kendrick Lamar - HUMBLE."
+    artist_pattern = re.escape(artist_name) + r'\s*-\s*'
+    cleaned = re.sub(f'^{artist_pattern}', '', cleaned, flags=re.IGNORECASE)
+    
+    # Remove common prefixes
+    cleaned = re.sub(r'^Track\s*\d*\s*-\s*', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'^\d+\.\s*', '', cleaned)  # Remove track numbers like "01. "
+    
+    # Remove quality/format indicators
+    quality_patterns = [
+        r'\s*[\[\(].*?320.*?kbps.*?[\]\)]\s*',
+        r'\s*[\[\(].*?256.*?kbps.*?[\]\)]\s*',
+        r'\s*[\[\(].*?flac.*?[\]\)]\s*',
+        r'\s*[\[\(].*?mp3.*?[\]\)]\s*',
+        r'\s*[\[\(].*?explicit.*?[\]\)]\s*'
+    ]
+    
+    for pattern in quality_patterns:
+        cleaned = re.sub(pattern, ' ', cleaned, flags=re.IGNORECASE)
+    
+    # Clean up spacing
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    
+    # Remove leading/trailing punctuation
+    cleaned = re.sub(r'^[-\s]+|[-\s]+$', '', cleaned)
+    
+    print(f"🧹 Track Title Result: '{original}' -> '{cleaned}'")
+    return cleaned if cleaned else original
 
 
 
@@ -2137,16 +2559,37 @@ def _post_process_matched_download(context_key, context, file_path):
             print("✅ Matched Album context found. Building info directly from context.")
             original_search = context.get("original_search_result", {})
             spotify_album = context.get("spotify_album", {})
+            # Use Spotify clean title if available (GUI parity)
+            clean_track_name = original_search.get('spotify_clean_title') or original_search.get('title', 'Unknown Track')
+            
             album_info = {
                 'is_album': True,
                 'album_name': spotify_album.get('name'),
                 'track_number': original_search.get('track_number', 1),
-                'clean_track_name': original_search.get('title', 'Unknown Track'),
+                'clean_track_name': clean_track_name,
                 'album_image_url': spotify_album.get('image_url')
             }
         else:
             # For singles, we still need to detect if they belong to an album.
             album_info = _detect_album_info_web(context, spotify_artist)
+
+        # --- CRITICAL FIX: Add GUI album grouping resolution ---
+        # This ensures consistent album naming across tracks like the GUI
+        if album_info and album_info['is_album']:
+            print(f"\n🎯 SMART ALBUM GROUPING for track: '{album_info.get('clean_track_name', 'Unknown')}'")
+            print(f"   Original album: '{album_info.get('album_name', 'None')}'")
+            
+            # Get original album name from context if available
+            original_album = None
+            if context.get("original_search_result", {}).get("album"):
+                original_album = context["original_search_result"]["album"]
+            
+            # Use the GUI's smart album grouping algorithm
+            consistent_album_name = _resolve_album_group(spotify_artist, album_info, original_album)
+            album_info['album_name'] = consistent_album_name
+            
+            print(f"   Final album name: '{consistent_album_name}'")
+            print(f"🔗 ✅ Album grouping complete!\n")
 
         # 1. Get transfer path and create artist directory
         transfer_dir = config_manager.get('soulseek.transfer_path', './Transfer')
@@ -2156,10 +2599,28 @@ def _post_process_matched_download(context_key, context, file_path):
         
         file_ext = os.path.splitext(file_path)[1]
 
-        # 2. Build the final path (this logic is now correct because album_info is correct)
+        # 2. Build the final path using GUI-style track naming with multiple fallback sources
         if album_info and album_info['is_album']:
             album_name_sanitized = _sanitize_filename(album_info['album_name'])
-            final_track_name_sanitized = _sanitize_filename(album_info['clean_track_name'])
+            
+            # --- GUI PARITY: Use multiple sources for clean track name ---
+            original_search = context.get("original_search_result", {})
+            clean_track_name = album_info['clean_track_name']
+            
+            # Priority 1: Spotify clean title from context
+            if original_search.get('spotify_clean_title'):
+                clean_track_name = original_search['spotify_clean_title']
+                print(f"🎵 Using Spotify clean title: '{clean_track_name}'")
+            # Priority 2: Album info clean name
+            elif album_info.get('clean_track_name'):
+                clean_track_name = album_info['clean_track_name']
+                print(f"🎵 Using album info clean name: '{clean_track_name}'")
+            # Priority 3: Original title as fallback
+            else:
+                clean_track_name = original_search.get('title', 'Unknown Track')
+                print(f"🎵 Using original title as fallback: '{clean_track_name}'")
+            
+            final_track_name_sanitized = _sanitize_filename(clean_track_name)
             track_number = album_info['track_number']
             
             # Fix: Handle None track_number
@@ -2177,15 +2638,41 @@ def _post_process_matched_download(context_key, context, file_path):
             album_dir = os.path.join(artist_dir, album_folder_name)
             os.makedirs(album_dir, exist_ok=True)
             
+            # Create track filename with number (just track number + clean title, NO artist)
             new_filename = f"{track_number:02d} - {final_track_name_sanitized}{file_ext}"
             final_path = os.path.join(album_dir, new_filename)
+            
+            print(f"📁 Album folder created: '{album_folder_name}'")
+            print(f"🎵 Track filename: '{new_filename}'")
         else:
-            final_track_name_sanitized = _sanitize_filename(album_info['clean_track_name'])
+            # Single track structure: Transfer/ARTIST/ARTIST - SINGLE/SINGLE.ext
+            # --- GUI PARITY: Use multiple sources for clean track name ---
+            original_search = context.get("original_search_result", {})
+            clean_track_name = album_info['clean_track_name']
+            
+            # Priority 1: Spotify clean title from context  
+            if original_search.get('spotify_clean_title'):
+                clean_track_name = original_search['spotify_clean_title']
+                print(f"🎵 Using Spotify clean title: '{clean_track_name}'")
+            # Priority 2: Album info clean name
+            elif album_info and album_info.get('clean_track_name'):
+                clean_track_name = album_info['clean_track_name']
+                print(f"🎵 Using album info clean name: '{clean_track_name}'")
+            # Priority 3: Original title as fallback
+            else:
+                clean_track_name = original_search.get('title', 'Unknown Track')
+                print(f"🎵 Using original title as fallback: '{clean_track_name}'")
+            
+            final_track_name_sanitized = _sanitize_filename(clean_track_name)
             single_folder_name = f"{artist_name_sanitized} - {final_track_name_sanitized}"
             single_dir = os.path.join(artist_dir, single_folder_name) 
             os.makedirs(single_dir, exist_ok=True)
+            
+            # Create single filename with clean track name
             new_filename = f"{final_track_name_sanitized}{file_ext}"
             final_path = os.path.join(single_dir, new_filename)
+            
+            print(f"📁 Single track: {single_folder_name}/{new_filename}")
 
         # 3. Enhance metadata, move file, download art, and cleanup
         _enhance_file_metadata(file_path, context, spotify_artist, album_info)
@@ -2706,10 +3193,18 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
                 # Store context for post-processing
                 context_key = f"{username}::{filename}"
                 with matched_context_lock:
+                    # Enhanced context storage with Spotify clean titles (GUI parity)
+                    enhanced_payload = download_payload.copy()
+                    # Try to get clean title from track object if available
+                    if track and hasattr(track, 'name'):
+                        enhanced_payload['spotify_clean_title'] = track.name
+                    else:
+                        enhanced_payload['spotify_clean_title'] = enhanced_payload.get('title', '')
+                    
                     matched_downloads_context[context_key] = {
                         "spotify_artist": spotify_artist_context,
                         "spotify_album": spotify_album_context,
-                        "original_search_result": download_payload,
+                        "original_search_result": enhanced_payload,
                         "is_album_download": False
                     }
                 
