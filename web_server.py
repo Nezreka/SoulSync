@@ -3307,6 +3307,21 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
                 # Update task with successful download info
                 with tasks_lock:
                     if task_id in download_tasks:
+                        # PHASE 3: Final cancellation check after download started (GUI PARITY)
+                        if download_tasks[task_id]['status'] == 'cancelled':
+                            print(f"🚫 [Modal Worker] Task {task_id} cancelled after download {download_id} started - attempting to cancel download")
+                            # Try to cancel the download immediately
+                            try:
+                                asyncio.run(soulseek_client.cancel_download(download_id, username, remove=True))
+                                print(f"✅ Successfully cancelled active download {download_id}")
+                            except Exception as cancel_error:
+                                print(f"⚠️ Warning: Failed to cancel active download {download_id}: {cancel_error}")
+                            
+                            # Free worker slot
+                            if batch_id:
+                                _on_download_completed(batch_id, task_id, success=False)
+                            return False
+                        
                         download_tasks[task_id]['download_id'] = download_id
                         download_tasks[task_id]['username'] = username
                         download_tasks[task_id]['filename'] = filename

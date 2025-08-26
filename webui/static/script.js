@@ -1614,6 +1614,9 @@ let currentDownloadBatchId = null;
 let modalDownloadPoller = null;
 let currentModalPlaylistId = null;
 
+// PHASE 2: Local cancelled track management (GUI PARITY)
+let cancelledTracks = new Set(); // Track cancelled track indices like GUI's cancelled_tracks
+
 async function openDownloadMissingModal(playlistId) {
     console.log(`📥 Opening Download Missing Tracks modal for playlist: ${playlistId}`);
     
@@ -1973,7 +1976,15 @@ async function initiateMissingDownloads() {
         
         // Store batch ID for polling
         currentDownloadBatchId = data.batch_id;
-        console.log(`✅ Started download batch: ${currentDownloadBatchId}`);
+        
+        // PHASE 2: Clear cancelled tracks for new session (GUI PARITY)
+        cancelledTracks.clear();
+        console.log(`✅ Started download batch: ${currentDownloadBatchId}, cleared cancelled tracks`);
+        
+        // Clear any locally cancelled flags from previous sessions
+        document.querySelectorAll('tr[data-locally-cancelled="true"]').forEach(row => {
+            row.removeAttribute('data-locally-cancelled');
+        });
         
         // Start live polling
         startModalDownloadPolling();
@@ -2026,6 +2037,26 @@ function startModalDownloadPolling() {
                 const isMissingTrack = missingTracks.some(mt => mt.track_index === trackIndex);
                 
                 if (row && isMissingTrack) {
+                    // PHASE 2 & 5: Respect local cancellation with recovery (GUI PARITY)
+                    // Skip polling updates for tracks that were cancelled locally
+                    if (row.dataset.locallyCancelled === 'true') {
+                        console.log(`⏭️ Skipping polling update for locally cancelled track ${trackIndex}`);
+                        
+                        // PHASE 5: Recovery check - ensure cancelled status is maintained
+                        const statusElement = row.querySelector('.track-download-status');
+                        if (statusElement && !statusElement.textContent.includes('🚫 Cancelled')) {
+                            console.warn(`🔧 Recovering cancelled status for track ${trackIndex}`);
+                            statusElement.textContent = '🚫 Cancelled';
+                            statusElement.className = 'track-download-status download-cancelled';
+                            
+                            const actionsElement = row.querySelector('.track-actions');
+                            if (actionsElement) {
+                                actionsElement.innerHTML = '-';
+                            }
+                        }
+                        continue;
+                    }
+                    
                     const statusElement = row.querySelector('.track-download-status');
                     const actionsElement = row.querySelector('.track-actions');
                     row.dataset.taskId = task.task_id;
@@ -2075,15 +2106,18 @@ function startModalDownloadPolling() {
                 }
             }
             
-            // Update progress bar and stats
-            const progressPercent = totalTasks > 0 ? ((completedCount + failedCount) / totalTasks) * 100 : 0;
+            // PHASE 2: Include locally cancelled tracks in progress calculation (GUI PARITY)
+            const locallyCancelledCount = cancelledTracks.size;
+            const totalFinished = completedCount + failedCount + locallyCancelledCount;
+            const progressPercent = totalTasks > 0 ? (totalFinished / totalTasks) * 100 : 0;
+            
             document.getElementById('download-progress-fill').style.width = `${progressPercent}%`;
             document.getElementById('download-progress-text').textContent = 
                 `${completedCount}/${totalTasks} completed (${progressPercent.toFixed(0)}%)`;
             document.getElementById('stat-downloaded').textContent = completedCount;
             
-            // Stop polling when all tasks are complete
-            if (completedCount + failedCount >= totalTasks && totalTasks > 0) {
+            // Stop polling when all tasks are complete (including locally cancelled)
+            if (totalFinished >= totalTasks && totalTasks > 0) {
                 clearInterval(modalDownloadPoller);
                 modalDownloadPoller = null;
                 document.getElementById('cancel-all-btn').style.display = 'none';
@@ -2224,70 +2258,82 @@ async function cancelTrackDownload(trackIndex) {
             return;
         }
         
-        // Get the task ID that was stored by the polling function
-        const taskId = row.dataset.taskId;
-        if (!taskId) {
-            console.warn(`No task ID found for track ${trackIndex}, cancelling locally only`);
-            // Update UI immediately for local cancellation
-            const statusElement = row.querySelector('.track-download-status');
-            const actionsElement = row.querySelector('.track-actions');
-            
-            if (statusElement) {
-                statusElement.textContent = '❌ Cancelled';
-                statusElement.className = 'track-download-status download-cancelled';
-            }
-            if (actionsElement) {
-                actionsElement.innerHTML = '-';
-            }
+        // PHASE 5: Prevent double cancellation and check terminal states (GUI PARITY)
+        if (row.dataset.locallyCancelled === 'true') {
+            console.warn(`Track ${trackIndex} is already cancelled locally`);
+            showToast('Track is already cancelled', 'info');
             return;
         }
         
-        // Update UI immediately to show cancellation in progress
         const statusElement = row.querySelector('.track-download-status');
+        const currentStatus = statusElement?.textContent || '';
+        
+        // Check if track is in a terminal state where cancellation doesn't make sense
+        if (currentStatus.includes('✅ Completed') || currentStatus.includes('❌ Failed')) {
+            console.warn(`Cannot cancel track ${trackIndex} - already in terminal state: ${currentStatus}`);
+            showToast(`Cannot cancel - track is already ${currentStatus.includes('✅') ? 'completed' : 'failed'}`, 'warning');
+            return;
+        }
+        
+        // PHASE 1: Immediate UI response (GUI PARITY)
+        // Update UI immediately to show definitive cancellation like GUI
         const actionsElement = row.querySelector('.track-actions');
         
         if (statusElement) {
-            statusElement.textContent = '⏹️ Cancelling...';
-            statusElement.className = 'track-download-status download-cancelling';
+            statusElement.textContent = '🚫 Cancelled';
+            statusElement.className = 'track-download-status download-cancelled';
         }
         if (actionsElement) {
             actionsElement.innerHTML = '-';
         }
         
-        // Call the backend cancel endpoint
+        // PHASE 2: Add to cancelled tracks Set and mark locally cancelled (GUI PARITY)
+        cancelledTracks.add(trackIndex);
+        row.dataset.locallyCancelled = 'true';
+        console.log(`✅ Track ${trackIndex} added to cancelledTracks Set and marked locally cancelled (immediate UI response)`);
+        
+        // Get the task ID for backend cancellation
+        const taskId = row.dataset.taskId;
+        if (!taskId) {
+            console.warn(`No task ID found for track ${trackIndex}, using local cancellation only`);
+            showToast('Track cancelled (local only)', 'info');
+            return;
+        }
+        
+        // PHASE 5: Call backend with timeout to avoid hanging (GUI PARITY)
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+        
         const response = await fetch('/api/downloads/cancel_task', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ task_id: taskId })
+            body: JSON.stringify({ task_id: taskId }),
+            signal: controller.signal
         });
+        
+        clearTimeout(timeoutId);
         
         const data = await response.json();
         if (data.success) {
-            console.log(`✅ Successfully cancelled task ${taskId}`);
-            // The polling function will update the UI with the final cancelled state
+            console.log(`✅ Successfully cancelled task ${taskId} on backend`);
             showToast('Download cancelled successfully', 'info');
         } else {
-            throw new Error(data.error || 'Failed to cancel download');
+            console.warn(`Backend cancellation failed for task ${taskId}: ${data.error}`);
+            // Don't change UI - we already showed cancelled status immediately
+            showToast('Download cancelled (backend error, but stopped locally)', 'warning');
         }
         
     } catch (error) {
-        console.error('❌ Error cancelling download:', error);
-        showToast(`Failed to cancel download: ${error.message}`, 'error');
-        
-        // Reset UI on error
-        const row = document.querySelector(`tr[data-track-index="${trackIndex}"]`);
-        if (row) {
-            const statusElement = row.querySelector('.track-download-status');
-            const actionsElement = row.querySelector('.track-actions');
-            
-            if (statusElement && statusElement.textContent === '⏹️ Cancelling...') {
-                statusElement.textContent = '❌ Cancel Failed';
-                statusElement.className = 'track-download-status download-failed';
-            }
-            if (actionsElement) {
-                actionsElement.innerHTML = `<button class="cancel-track-btn" onclick="cancelTrackDownload(${trackIndex})">Cancel</button>`;
-            }
+        // PHASE 5: Handle different error types appropriately (GUI PARITY)
+        if (error.name === 'AbortError') {
+            console.warn('⏱️ Backend cancellation timed out after 5 seconds');
+            showToast('Download cancelled (backend timeout, but stopped locally)', 'warning');
+        } else {
+            console.error('❌ Error with backend cancellation:', error);
+            showToast('Download cancelled (network error, but stopped locally)', 'warning');
         }
+        // Don't revert UI - track is still cancelled locally like GUI behavior
+        console.log(`Track ${trackIndex} remains cancelled locally despite backend error`);
     }
 }
 
