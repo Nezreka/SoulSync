@@ -31,6 +31,7 @@ let selectedPlaylists = new Set();
 let activeSyncPollers = {}; // Key: playlist_id, Value: intervalId
 let playlistTrackCache = {}; // Key: playlist_id, Value: tracks array
 let spotifyPlaylistsLoaded = false; 
+let activeDownloadProcesses = {};
 
 // API endpoints
 const API = {
@@ -1448,12 +1449,70 @@ function renderSpotifyPlaylists() {
                     <div class="sync-progress-indicator" id="progress-${p.id}"></div>
                 </div>
                 <div class="playlist-card-actions">
-                    <button onclick="openPlaylistDetailsModal(event, '${p.id}')">Sync / Download</button>
+                    <button id="action-btn-${p.id}" onclick="handleCardActionClick(event, '${p.id}')">Sync / Download</button>
+                    <button id="progress-btn-${p.id}" class="view-progress-btn hidden" onclick="handleCardActionClick(event, '${p.id}')">
+                        View Progress
+                    </button>
                 </div>
             </div>
         </div>
         `;
     }).join('');
+}
+
+function handleCardActionClick(event, playlistId) {
+    event.stopPropagation();
+    const process = activeDownloadProcesses[playlistId];
+
+    if (process && process.modalElement) {
+        // If a process is active, show its modal
+        console.log(`Re-opening active download modal for playlist ${playlistId}`);
+        process.modalElement.style.display = 'flex';
+    } else {
+        // Otherwise, open the details modal as normal
+        openPlaylistDetailsModal(event, playlistId);
+    }
+}
+
+function updatePlaylistCardUI(playlistId) {
+    const process = activeDownloadProcesses[playlistId];
+    const defaultBtn = document.getElementById(`action-btn-${playlistId}`);
+    const progressBtn = document.getElementById(`progress-btn-${playlistId}`);
+
+    if (!defaultBtn || !progressBtn) return;
+
+    if (process && process.status === 'running') {
+        // A process is running: show progress button, hide default
+        defaultBtn.classList.add('hidden');
+        progressBtn.classList.remove('hidden');
+    } else {
+        // No process or it's finished: show default, hide progress
+        defaultBtn.classList.remove('hidden');
+        progressBtn.classList.add('hidden');
+    }
+}
+
+function cleanupDownloadProcess(playlistId) {
+    if (!activeDownloadProcesses[playlistId]) return;
+
+    console.log(`Cleaning up download process for playlist ${playlistId}`);
+    const process = activeDownloadProcesses[playlistId];
+
+    // Stop polling
+    if (process.poller) {
+        clearInterval(process.poller);
+    }
+
+    // Remove modal from DOM
+    if (process.modalElement && process.modalElement.parentElement) {
+        process.modalElement.parentElement.removeChild(process.modalElement);
+    }
+
+    // Remove from global state
+    delete activeDownloadProcesses[playlistId];
+
+    // Restore card UI
+    updatePlaylistCardUI(playlistId);
 }
 
 function togglePlaylistSelection(event) {
@@ -1618,100 +1677,106 @@ let currentModalPlaylistId = null;
 let cancelledTracks = new Set(); // Track cancelled track indices like GUI's cancelled_tracks
 
 async function openDownloadMissingModal(playlistId) {
+    // **NEW**: Check if a process is already active for this playlist
+    if (activeDownloadProcesses[playlistId]) {
+        console.log(`Modal for ${playlistId} already exists. Showing it.`);
+        const process = activeDownloadProcesses[playlistId];
+        if (process.modalElement) {
+            process.modalElement.style.display = 'flex';
+        }
+        return; // Don't create a new one
+    }
+
     console.log(`📥 Opening Download Missing Tracks modal for playlist: ${playlistId}`);
     
-    // Close the playlist details modal first
     closePlaylistDetailsModal();
-    
-    // Find playlist data
     const playlist = spotifyPlaylists.find(p => p.id === playlistId);
     if (!playlist) {
-        console.error(`❌ Could not find playlist data for ID: ${playlistId}`);
         showToast('Could not find playlist data.', 'error');
         return;
     }
     
-    // Ensure we have track data
     let tracks = playlistTrackCache[playlistId];
     if (!tracks) {
-        console.log(`🔄 Cache miss - fetching tracks for download analysis`);
         try {
             const response = await fetch(`/api/spotify/playlist/${playlistId}`);
             const fullPlaylist = await response.json();
             if (fullPlaylist.error) throw new Error(fullPlaylist.error);
             tracks = fullPlaylist.tracks;
-            playlistTrackCache[playlistId] = tracks; // Cache it
+            playlistTrackCache[playlistId] = tracks;
         } catch (error) {
-            console.error(`❌ Failed to fetch tracks:`, error);
             showToast(`Failed to fetch tracks: ${error.message}`, 'error');
             return;
         }
     }
     
     currentPlaylistTracks = tracks;
-    currentModalPlaylistId = playlistId; // Store playlist ID for new endpoints
-    console.log(`✅ Loaded ${tracks.length} tracks for analysis`);
+    currentModalPlaylistId = playlistId;
     
-    // Create or get modal
-    let modal = document.getElementById('download-missing-modal');
-    if (!modal) {
-        modal = document.createElement('div');
-        modal.id = 'download-missing-modal';
-        document.body.appendChild(modal);
-    }
+    let modal = document.createElement('div');
+    modal.id = `download-missing-modal-${playlistId}`; // **NEW**: Unique ID
+    modal.className = 'download-missing-modal'; // **NEW**: Use class for styling
+    modal.style.display = 'none'; // Start hidden
+    document.body.appendChild(modal);
+
+    // **NEW**: Register the new process in our global state tracker
+    activeDownloadProcesses[playlistId] = {
+        status: 'idle', // idle, running, complete, cancelled
+        modalElement: modal,
+        poller: null,
+        batchId: null,
+        playlist: playlist,
+        tracks: tracks
+    };
     
-    // Build modal HTML
     modal.innerHTML = `
         <div class="download-missing-modal-content">
             <div class="download-missing-modal-header">
                 <h2 class="download-missing-modal-title">Download Missing Tracks - ${escapeHtml(playlist.name)}</h2>
-                <span class="download-missing-modal-close" onclick="closeDownloadMissingModal()">&times;</span>
+                <span class="download-missing-modal-close" onclick="closeDownloadMissingModal('${playlistId}')">&times;</span>
             </div>
             
             <div class="download-missing-modal-body">
-                <!-- Dashboard Stats -->
                 <div class="download-dashboard-stats">
                     <div class="dashboard-stat stat-total">
-                        <div class="dashboard-stat-number" id="stat-total">${tracks.length}</div>
+                        <div class="dashboard-stat-number" id="stat-total-${playlistId}">${tracks.length}</div>
                         <div class="dashboard-stat-label">Total Tracks</div>
                     </div>
                     <div class="dashboard-stat stat-found">
-                        <div class="dashboard-stat-number" id="stat-found">-</div>
+                        <div class="dashboard-stat-number" id="stat-found-${playlistId}">-</div>
                         <div class="dashboard-stat-label">Found in Library</div>
                     </div>
                     <div class="dashboard-stat stat-missing">
-                        <div class="dashboard-stat-number" id="stat-missing">-</div>
+                        <div class="dashboard-stat-number" id="stat-missing-${playlistId}">-</div>
                         <div class="dashboard-stat-label">Missing Tracks</div>
                     </div>
                     <div class="dashboard-stat stat-downloaded">
-                        <div class="dashboard-stat-number" id="stat-downloaded">0</div>
+                        <div class="dashboard-stat-number" id="stat-downloaded-${playlistId}">0</div>
                         <div class="dashboard-stat-label">Downloaded</div>
                     </div>
                 </div>
                 
-                <!-- Progress Section -->
                 <div class="download-progress-section">
                     <div class="progress-item">
                         <div class="progress-label">
                             🔍 Library Analysis
-                            <span id="analysis-progress-text">Ready to start</span>
+                            <span id="analysis-progress-text-${playlistId}">Ready to start</span>
                         </div>
                         <div class="progress-bar">
-                            <div class="progress-fill analysis" id="analysis-progress-fill"></div>
+                            <div class="progress-fill analysis" id="analysis-progress-fill-${playlistId}"></div>
                         </div>
                     </div>
                     <div class="progress-item">
                         <div class="progress-label">
                             ⏬ Downloads
-                            <span id="download-progress-text">Waiting for analysis</span>
+                            <span id="download-progress-text-${playlistId}">Waiting for analysis</span>
                         </div>
                         <div class="progress-bar">
-                            <div class="progress-fill download" id="download-progress-fill"></div>
+                            <div class="progress-fill download" id="download-progress-fill-${playlistId}"></div>
                         </div>
                     </div>
                 </div>
                 
-                <!-- Track Table -->
                 <div class="download-tracks-section">
                     <div class="download-tracks-header">
                         <h3 class="download-tracks-title">📋 Track Analysis & Download Status</h3>
@@ -1729,16 +1794,16 @@ async function openDownloadMissingModal(playlistId) {
                                     <th>Actions</th>
                                 </tr>
                             </thead>
-                            <tbody id="download-tracks-tbody">
+                            <tbody id="download-tracks-tbody-${playlistId}">
                                 ${tracks.map((track, index) => `
                                     <tr data-track-index="${index}">
                                         <td class="track-number">${index + 1}</td>
                                         <td class="track-name" title="${escapeHtml(track.name)}">${escapeHtml(track.name)}</td>
                                         <td class="track-artist" title="${escapeHtml(track.artists.join(', '))}">${track.artists.join(', ')}</td>
                                         <td class="track-duration">${formatDuration(track.duration_ms)}</td>
-                                        <td class="track-match-status match-checking" id="match-${index}">🔍 Pending</td>
-                                        <td class="track-download-status" id="download-${index}">-</td>
-                                        <td class="track-actions" id="actions-${index}">-</td>
+                                        <td class="track-match-status match-checking" id="match-${playlistId}-${index}">🔍 Pending</td>
+                                        <td class="track-download-status" id="download-${playlistId}-${index}">-</td>
+                                        <td class="track-actions" id="actions-${playlistId}-${index}">-</td>
                                     </tr>
                                 `).join('')}
                             </tbody>
@@ -1749,388 +1814,257 @@ async function openDownloadMissingModal(playlistId) {
             
             <div class="download-missing-modal-footer">
                 <div class="download-phase-controls">
-                    <button class="download-control-btn primary" id="begin-analysis-btn" onclick="startTrackAnalysis()">
+                    <button class="download-control-btn primary" id="begin-analysis-btn-${playlistId}" onclick="startTrackAnalysis('${playlistId}')">
                         Begin Analysis
                     </button>
-                    <button class="download-control-btn danger" id="cancel-all-btn" onclick="cancelAllOperations()" style="display: none;">
+                    <button class="download-control-btn danger" id="cancel-all-btn-${playlistId}" onclick="cancelAllOperations('${playlistId}')" style="display: none;">
                         Cancel All
                     </button>
                 </div>
                 <div class="modal-close-section">
-                    <button class="download-control-btn secondary" onclick="closeDownloadMissingModal()">Close</button>
+                    <button class="download-control-btn secondary" onclick="closeDownloadMissingModal('${playlistId}')">Close</button>
                 </div>
             </div>
         </div>
     `;
-    
-    // Reset state
-    activeAnalysisTaskId = null;
-    analysisResults = [];
-    missingTracks = [];
-    currentDownloadBatchId = null;
-    if (modalDownloadPoller) {
-        clearInterval(modalDownloadPoller);
-        modalDownloadPoller = null;
-    }
-    
-    // Show modal
+
     modal.style.display = 'flex';
 }
 
-function closeDownloadMissingModal() {
-    // Clean up any active tasks
-    if (activeAnalysisTaskId) {
-        fetch(`/api/tracks/analyze/cancel/${activeAnalysisTaskId}`, { method: 'POST' })
-            .catch(e => console.warn('Failed to cancel analysis task:', e));
+
+
+function closeDownloadMissingModal(playlistId) {
+    const process = activeDownloadProcesses[playlistId];
+    if (!process) {
+        // If somehow called without a process, try to find and remove the element
+        const modal = document.getElementById(`download-missing-modal-${playlistId}`);
+        if (modal && modal.parentElement) {
+            modal.parentElement.removeChild(modal);
+        }
+        return;
     }
-    
-    const modal = document.getElementById('download-missing-modal');
-    if (modal) {
-        modal.style.display = 'none';
-    }
-    
-    // Reset state
-    activeAnalysisTaskId = null;
-    currentPlaylistTracks = [];
-    analysisResults = [];
-    missingTracks = [];
-    currentDownloadBatchId = null;
-    currentModalPlaylistId = null;
-    if (modalDownloadPoller) {
-        clearInterval(modalDownloadPoller);
-        modalDownloadPoller = null;
+
+    // If the process is running, just hide the modal.
+    // If it's idle, complete, or cancelled, perform a full cleanup.
+    if (process.status === 'running') {
+        console.log(`Hiding active download modal for playlist ${playlistId}.`);
+        process.modalElement.style.display = 'none';
+    } else {
+        console.log(`Closing and cleaning up download modal for playlist ${playlistId}.`);
+        cleanupDownloadProcess(playlistId);
     }
 }
 
-async function startTrackAnalysis() {
-    console.log(`🔍 Starting track analysis for ${currentPlaylistTracks.length} tracks`);
+async function startTrackAnalysis(playlistId) {
+    const process = activeDownloadProcesses[playlistId];
+    if (!process) return;
+
+    console.log(`🔍 Starting track analysis for ${process.tracks.length} tracks in playlist ${playlistId}`);
     
     try {
-        // Update UI to analysis mode
-        document.getElementById('begin-analysis-btn').style.display = 'none';
-        document.getElementById('cancel-all-btn').style.display = 'inline-block';
-        document.getElementById('analysis-progress-text').textContent = 'Starting analysis...';
+        process.status = 'running';
+        updatePlaylistCardUI(playlistId);
+
+        document.getElementById(`begin-analysis-btn-${playlistId}`).style.display = 'none';
+        document.getElementById(`cancel-all-btn-${playlistId}`).style.display = 'inline-block';
+        document.getElementById(`analysis-progress-text-${playlistId}`).textContent = 'Starting analysis...';
         
-        // Start analysis
         const response = await fetch('/api/tracks/analyze', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                tracks: currentPlaylistTracks
-            })
+            body: JSON.stringify({ tracks: process.tracks })
         });
         
         const data = await response.json();
         if (!data.success) throw new Error(data.error);
         
-        activeAnalysisTaskId = data.task_id;
-        console.log(`✅ Analysis started with task ID: ${activeAnalysisTaskId}`);
-        
-        // Start polling for results
-        startAnalysisPolling();
+        process.analysisTaskId = data.task_id;
+        startAnalysisPolling(playlistId);
         
     } catch (error) {
-        console.error('❌ Failed to start analysis:', error);
         showToast(`Failed to start analysis: ${error.message}`, 'error');
-        
-        // Reset UI
-        document.getElementById('begin-analysis-btn').style.display = 'inline-block';
-        document.getElementById('cancel-all-btn').style.display = 'none';
-        document.getElementById('analysis-progress-text').textContent = 'Ready to start';
+        process.status = 'cancelled';
+        cleanupDownloadProcess(playlistId);
     }
 }
 
-function startAnalysisPolling() {
-    if (!activeAnalysisTaskId) return;
-    
-    const pollInterval = setInterval(async () => {
+function startAnalysisPolling(playlistId) {
+    const process = activeDownloadProcesses[playlistId];
+    if (!process || !process.analysisTaskId) return;
+
+    const poller = setInterval(async () => {
+        // If process is gone, stop polling
+        if (!activeDownloadProcesses[playlistId]) {
+            clearInterval(poller);
+            return;
+        }
+
         try {
-            const response = await fetch(`/api/tracks/analyze/status/${activeAnalysisTaskId}`);
+            const response = await fetch(`/api/tracks/analyze/status/${process.analysisTaskId}`);
             const status = await response.json();
             
-            if (response.status === 404 || status.error) {
-                console.error('❌ Analysis task not found or error:', status.error);
-                clearInterval(pollInterval);
-                return;
+            if (status.error) throw new Error(status.error);
+
+            document.getElementById(`analysis-progress-fill-${playlistId}`).style.width = `${status.progress || 0}%`;
+            document.getElementById(`analysis-progress-text-${playlistId}`).textContent = 
+                `${status.processed || 0}/${status.total || 0} tracks analyzed (${status.progress || 0}%)`;
+            
+            if (status.results) {
+                updateTrackAnalysisResults(playlistId, status.results);
             }
             
-            // Update progress bar
-            const progressPercent = status.progress || 0;
-            document.getElementById('analysis-progress-fill').style.width = `${progressPercent}%`;
-            document.getElementById('analysis-progress-text').textContent = 
-                `${status.processed || 0}/${status.total || 0} tracks analyzed (${progressPercent}%)`;
-            
-            // Update table with individual results
-            if (status.results && status.results.length > 0) {
-                updateTrackAnalysisResults(status.results);
-            }
-            
-            // Check if complete
             if (status.status === 'complete') {
-                console.log(`✅ Analysis complete: ${status.total_found} found, ${status.total_missing} missing`);
-                clearInterval(pollInterval);
-                onAnalysisComplete(status);
-            } else if (status.status === 'error') {
-                console.error('❌ Analysis failed:', status.error);
-                clearInterval(pollInterval);
-                showToast(`Analysis failed: ${status.error}`, 'error');
-                resetToInitialState();
-            } else if (status.status === 'cancelled') {
-                console.log('⚠️ Analysis was cancelled');
-                clearInterval(pollInterval);
-                resetToInitialState();
+                clearInterval(poller);
+                onAnalysisComplete(playlistId, status);
+            } else if (status.status === 'error' || status.status === 'cancelled') {
+                clearInterval(poller);
+                throw new Error(status.error || 'Analysis was cancelled');
             }
-            
         } catch (error) {
-            console.error('❌ Error polling analysis status:', error);
-            clearInterval(pollInterval);
-            showToast('Failed to get analysis status', 'error');
+            clearInterval(poller);
+            showToast(`Analysis failed: ${error.message}`, 'error');
+            process.status = 'cancelled';
+            cleanupDownloadProcess(playlistId);
         }
-    }, 1000); // Poll every second
+    }, 1000);
 }
 
-function updateTrackAnalysisResults(results) {
+function updateTrackAnalysisResults(playlistId, results) {
     for (const result of results) {
-        const trackIndex = result.track_index;
-        const matchElement = document.getElementById(`match-${trackIndex}`);
-        
+        const matchElement = document.getElementById(`match-${playlistId}-${result.track_index}`);
         if (matchElement) {
-            if (result.found) {
-                matchElement.textContent = '✅ Found';
-                matchElement.className = 'track-match-status match-found';
-            } else {
-                matchElement.textContent = '❌ Missing';
-                matchElement.className = 'track-match-status match-missing';
-            }
+            matchElement.textContent = result.found ? '✅ Found' : '❌ Missing';
+            matchElement.className = `track-match-status ${result.found ? 'match-found' : 'match-missing'}`;
         }
     }
 }
 
-function onAnalysisComplete(status) {
-    // Update dashboard stats
-    document.getElementById('stat-found').textContent = status.total_found || 0;
-    document.getElementById('stat-missing').textContent = status.total_missing || 0;
+function onAnalysisComplete(playlistId, status) {
+    const process = activeDownloadProcesses[playlistId];
+    if (!process) return;
+
+    document.getElementById(`stat-found-${playlistId}`).textContent = status.total_found || 0;
+    document.getElementById(`stat-missing-${playlistId}`).textContent = status.total_missing || 0;
+    document.getElementById(`analysis-progress-text-${playlistId}`).textContent = 'Analysis complete!';
     
-    // Update progress text
-    document.getElementById('analysis-progress-text').textContent = 'Analysis complete!';
-    document.getElementById('download-progress-text').textContent = 'Ready to download missing tracks';
+    process.analysisResults = status.results || [];
+    process.missingTracks = process.analysisResults.filter(r => !r.found);
     
-    // Store results
-    analysisResults = status.results || [];
-    missingTracks = analysisResults.filter(r => !r.found);
-    
-    console.log(`📊 Analysis results: ${analysisResults.length} total, ${missingTracks.length} missing`);
-    
-    // Update UI and automatically start downloads if there are missing tracks
-    document.getElementById('cancel-all-btn').style.display = 'none';
-    
-    if (missingTracks.length > 0) {
-        console.log(`🚀 Analysis complete - automatically starting downloads for ${missingTracks.length} missing tracks`);
-        // Automatically initiate downloads - no button needed, just like the GUI
-        initiateMissingDownloads();
+    if (process.missingTracks.length > 0) {
+        initiateMissingDownloads(playlistId);
     } else {
         showToast('All tracks were found in your library!', 'success');
-        document.getElementById('download-progress-text').textContent = 'No downloads needed - all tracks found!';
+        process.status = 'complete';
+        document.getElementById(`cancel-all-btn-${playlistId}`).style.display = 'none';
+        // Don't auto-close, let user close it.
     }
 }
 
-async function initiateMissingDownloads() {
-    if (missingTracks.length === 0) {
-        showToast('No missing tracks to download', 'info');
-        return;
-    }
-    
-    console.log(`⏬ Starting enhanced downloads for ${missingTracks.length} missing tracks`);
-    
+async function initiateMissingDownloads(playlistId) {
+    const process = activeDownloadProcesses[playlistId];
+    if (!process || process.missingTracks.length === 0) return;
+
     try {
-        // Update UI - Cancel button should already be visible from analysis
-        document.getElementById('download-progress-text').textContent = 'Initiating downloads...';
+        document.getElementById(`download-progress-text-${playlistId}`).textContent = 'Initiating downloads...';
         
-        // Set initial status for all missing tracks
-        for (const result of missingTracks) {
-            const statusElement = document.getElementById(`download-${result.track_index}`);
-            const actionsElement = document.getElementById(`actions-${result.track_index}`);
-            if (statusElement) {
-                statusElement.textContent = '⏸️ Pending';
-                statusElement.className = 'track-download-status download-pending';
-            }
-            if (actionsElement) {
-                actionsElement.innerHTML = `<button class="cancel-track-btn" onclick="cancelTrackDownload(${result.track_index})">Cancel</button>`;
-            }
+        for (const result of process.missingTracks) {
+            const statusElement = document.getElementById(`download-${playlistId}-${result.track_index}`);
+            const actionsElement = document.getElementById(`actions-${playlistId}-${result.track_index}`);
+            if (statusElement) statusElement.textContent = '⏸️ Pending';
+            if (actionsElement) actionsElement.innerHTML = `<button class="cancel-track-btn" onclick="cancelTrackDownload('${playlistId}', ${result.track_index})">Cancel</button>`;
         }
         
-        // Call new playlist-specific endpoint
-        const response = await fetch(`/api/playlists/${currentModalPlaylistId}/download_missing`, {
+        const response = await fetch(`/api/playlists/${playlistId}/download_missing`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                missing_tracks: missingTracks.map(track => ({
-                    track: track.track,
-                    track_index: track.track_index
-                })) // Include both track data and original index
+                missing_tracks: process.missingTracks.map(r => ({ track: r.track, track_index: r.track_index }))
             })
         });
         
         const data = await response.json();
         if (!data.success) throw new Error(data.error);
         
-        // Store batch ID for polling
-        currentDownloadBatchId = data.batch_id;
-        
-        // PHASE 2: Clear cancelled tracks for new session (GUI PARITY)
-        cancelledTracks.clear();
-        console.log(`✅ Started download batch: ${currentDownloadBatchId}, cleared cancelled tracks`);
-        
-        // Clear any locally cancelled flags from previous sessions
-        document.querySelectorAll('tr[data-locally-cancelled="true"]').forEach(row => {
-            row.removeAttribute('data-locally-cancelled');
-        });
-        
-        // Start live polling
-        startModalDownloadPolling();
-        
-        showToast(`Started downloads for ${missingTracks.length} tracks with live progress tracking.`, 'success');
+        process.batchId = data.batch_id;
+        startModalDownloadPolling(playlistId);
+        showToast(`Started downloads for ${process.missingTracks.length} tracks.`, 'success');
         
     } catch (error) {
-        console.error('❌ Failed to start downloads:', error);
         showToast(`Failed to start downloads: ${error.message}`, 'error');
-        
-        // Reset UI on error - show the begin analysis button again
-        document.getElementById('begin-analysis-btn').style.display = 'inline-block';
-        document.getElementById('cancel-all-btn').style.display = 'none';
-        document.getElementById('download-progress-text').textContent = 'Download initiation failed';
+        process.status = 'cancelled';
+        cleanupDownloadProcess(playlistId);
     }
 }
 
-function startModalDownloadPolling() {
-    if (!currentDownloadBatchId) {
-        console.warn('No batch ID available for polling');
-        return;
-    }
-    
-    if (modalDownloadPoller) {
-        clearInterval(modalDownloadPoller);
-    }
-    
-    console.log(`📊 Starting download status polling for batch: ${currentDownloadBatchId}`);
-    
-    modalDownloadPoller = setInterval(async () => {
-        try {
-            const response = await fetch(`/api/playlists/${currentDownloadBatchId}/download_status`);
-            const data = await response.json();
-            
-            if (data.error) {
-                console.error('Polling error:', data.error);
-                return;
-            }
-            
-            const tasks = data.tasks || [];
-            let completedCount = 0;
-            let failedCount = 0;
-            let totalTasks = tasks.length;
-            
-            // Update each track's status in the modal
-            for (const task of tasks) {
-                const trackIndex = task.track_index;
-                const row = document.querySelector(`tr[data-track-index="${trackIndex}"]`);
-                
-                const isMissingTrack = missingTracks.some(mt => mt.track_index === trackIndex);
-                
-                if (row && isMissingTrack) {
-                    // PHASE 2 & 5: Respect local cancellation with recovery (GUI PARITY)
-                    // Skip polling updates for tracks that were cancelled locally
-                    if (row.dataset.locallyCancelled === 'true') {
-                        console.log(`⏭️ Skipping polling update for locally cancelled track ${trackIndex}`);
-                        
-                        // PHASE 5: Recovery check - ensure cancelled status is maintained
-                        const statusElement = row.querySelector('.track-download-status');
-                        if (statusElement && !statusElement.textContent.includes('🚫 Cancelled')) {
-                            console.warn(`🔧 Recovering cancelled status for track ${trackIndex}`);
-                            statusElement.textContent = '🚫 Cancelled';
-                            statusElement.className = 'track-download-status download-cancelled';
-                            
-                            const actionsElement = row.querySelector('.track-actions');
-                            if (actionsElement) {
-                                actionsElement.innerHTML = '-';
-                            }
-                        }
-                        continue;
-                    }
-                    
-                    const statusElement = row.querySelector('.track-download-status');
-                    const actionsElement = row.querySelector('.track-actions');
-                    row.dataset.taskId = task.task_id;
-                    
-                    const status = task.status;
-                    const progress = task.progress || 0; // Get live progress from backend
+function startModalDownloadPolling(playlistId) {
+    const process = activeDownloadProcesses[playlistId];
+    if (!process || !process.batchId) return;
 
-                    switch (status) {
-                        case 'pending':
-                            statusElement.textContent = '⏸️ Pending';
-                            statusElement.className = 'track-download-status download-pending';
-                            actionsElement.innerHTML = `<button class="cancel-track-btn" onclick="cancelTrackDownload(${trackIndex})">Cancel</button>`;
-                            break;
-                        case 'searching':
-                            statusElement.textContent = '🔍 Searching...';
-                            statusElement.className = 'track-download-status download-searching';
-                            actionsElement.innerHTML = `<button class="cancel-track-btn" onclick="cancelTrackDownload(${trackIndex})">Cancel</button>`;
-                            break;
-                        case 'downloading':
-                            statusElement.textContent = `⏬ Downloading... ${Math.round(progress)}%`;
-                            statusElement.className = 'track-download-status download-downloading';
-                            actionsElement.innerHTML = `<button class="cancel-track-btn" onclick="cancelTrackDownload(${trackIndex})">Cancel</button>`;
-                            break;
-                        case 'completed':
-                            statusElement.textContent = '✅ Completed';
-                            statusElement.className = 'track-download-status download-complete';
-                            actionsElement.innerHTML = '-';
-                            completedCount++;
-                            break;
-                        case 'failed':
-                            statusElement.textContent = '❌ Failed';
-                            statusElement.className = 'track-download-status download-failed';
-                            actionsElement.innerHTML = '-';
-                            failedCount++;
-                            break;
-                        case 'cancelled':
-                            statusElement.textContent = '❌ Cancelled';
-                            statusElement.className = 'track-download-status download-cancelled';
-                            actionsElement.innerHTML = '-';
-                            failedCount++;
-                            break;
-                        default:
-                            statusElement.textContent = `⚪ ${status}`;
-                            statusElement.className = 'track-download-status';
-                            break;
-                    }
-                }
-            }
-            
-            // PHASE 2: Include locally cancelled tracks in progress calculation (GUI PARITY)
-            const locallyCancelledCount = cancelledTracks.size;
-            const totalFinished = completedCount + failedCount + locallyCancelledCount;
-            const progressPercent = totalTasks > 0 ? (totalFinished / totalTasks) * 100 : 0;
-            
-            document.getElementById('download-progress-fill').style.width = `${progressPercent}%`;
-            document.getElementById('download-progress-text').textContent = 
-                `${completedCount}/${totalTasks} completed (${progressPercent.toFixed(0)}%)`;
-            document.getElementById('stat-downloaded').textContent = completedCount;
-            
-            // Stop polling when all tasks are complete (including locally cancelled)
-            if (totalFinished >= totalTasks && totalTasks > 0) {
-                clearInterval(modalDownloadPoller);
-                modalDownloadPoller = null;
-                document.getElementById('cancel-all-btn').style.display = 'none';
-                console.log('✅ All download tasks completed, stopping polling');
-                if (completedCount > 0) {
-                    showToast(`Download completed: ${completedCount} tracks downloaded successfully!`, 'success');
-                }
-            }
-            
-        } catch (error) {
-            console.error('Error polling download status:', error);
+    if (process.poller) clearInterval(process.poller);
+
+    process.poller = setInterval(async () => {
+        if (!activeDownloadProcesses[playlistId]) {
+            clearInterval(process.poller);
+            return;
         }
-    }, 2000); // Poll every 2 seconds
+
+        try {
+            const response = await fetch(`/api/playlists/${process.batchId}/download_status`);
+            const data = await response.json();
+            if (data.error) throw new Error(data.error);
+
+            let completedCount = 0;
+            let failedOrCancelledCount = 0;
+            
+            (data.tasks || []).forEach(task => {
+                const statusElement = document.getElementById(`download-${playlistId}-${task.track_index}`);
+                const row = statusElement ? statusElement.closest('tr') : null;
+                if (!row) return;
+
+                if (row.dataset.locallyCancelled === 'true') {
+                    failedOrCancelledCount++;
+                    return;
+                }
+                
+                row.dataset.taskId = task.task_id;
+                let statusText = '';
+                switch (task.status) {
+                    case 'pending': statusText = '⏸️ Pending'; break;
+                    case 'searching': statusText = '🔍 Searching...'; break;
+                    case 'downloading': statusText = `⏬ Downloading... ${Math.round(task.progress || 0)}%`; break;
+                    case 'completed': statusText = '✅ Completed'; completedCount++; break;
+                    case 'failed': statusText = '❌ Failed'; failedOrCancelledCount++; break;
+                    case 'cancelled': statusText = '🚫 Cancelled'; failedOrCancelledCount++; break;
+                    default: statusText = `⚪ ${task.status}`; break;
+                }
+                statusElement.textContent = statusText;
+                if (['completed', 'failed', 'cancelled'].includes(task.status)) {
+                    document.getElementById(`actions-${playlistId}-${task.track_index}`).innerHTML = '-';
+                }
+            });
+
+            const totalMissing = process.missingTracks.length;
+            const totalFinished = completedCount + failedOrCancelledCount;
+            const progressPercent = totalMissing > 0 ? (totalFinished / totalMissing) * 100 : 0;
+
+            document.getElementById(`download-progress-fill-${playlistId}`).style.width = `${progressPercent}%`;
+            document.getElementById(`download-progress-text-${playlistId}`).textContent = 
+                `${completedCount}/${totalMissing} completed (${progressPercent.toFixed(0)}%)`;
+            document.getElementById(`stat-downloaded-${playlistId}`).textContent = completedCount;
+
+            if (totalFinished >= totalMissing) {
+                process.status = 'complete';
+                showToast(`Downloads complete for ${process.playlist.name}!`, 'success');
+                document.getElementById(`cancel-all-btn-${playlistId}`).style.display = 'none';
+                clearInterval(process.poller);
+                process.poller = null;
+                updatePlaylistCardUI(playlistId); // Final card update
+            }
+        } catch (error) {
+            console.error(`Polling error for ${playlistId}:`, error);
+            // Don't stop polling on transient errors
+        }
+    }, 2000);
 }
 async function updateModalWithLiveDownloadProgress() {
     try {
@@ -2188,16 +2122,17 @@ async function updateModalWithLiveDownloadProgress() {
     }
 }
 
-function cancelAllOperations() {
-    console.log('🛑 Cancelling all operations');
-    
-    // Cancel analysis if running
-    if (activeAnalysisTaskId) {
-        fetch(`/api/tracks/analyze/cancel/${activeAnalysisTaskId}`, { method: 'POST' })
-            .catch(e => console.warn('Failed to cancel analysis:', e));
+async function cancelAllOperations(playlistId) {
+    const process = activeDownloadProcesses[playlistId];
+    if (!process) return;
+
+    if (process.analysisTaskId) {
+        await fetch(`/api/tracks/analyze/cancel/${process.analysisTaskId}`, { method: 'POST' });
     }
-    
-    resetToInitialState();
+    // Note: Batch cancellation isn't implemented on the backend yet,
+    // but cleaning up the process will stop polling and allow individual cancellations.
+    process.status = 'cancelled';
+    cleanupDownloadProcess(playlistId);
     showToast('Operations cancelled', 'info');
 }
 
@@ -2247,93 +2182,38 @@ function resetToInitialState() {
     missingTracks = [];
 }
 
-async function cancelTrackDownload(trackIndex) {
-    console.log(`🛑 Cancelling download for track ${trackIndex}`);
+async function cancelTrackDownload(playlistId, trackIndex) {
+    const process = activeDownloadProcesses[playlistId];
+    if (!process) return;
+
+    const row = document.querySelector(`#download-missing-modal-${playlistId} tr[data-track-index="${trackIndex}"]`);
+    if (!row) return;
+
+    const taskId = row.dataset.taskId;
+    if (!taskId) {
+        showToast('Task not started yet, cannot cancel.', 'warning');
+        return;
+    }
+    
+    // UI update for immediate feedback
+    row.dataset.locallyCancelled = 'true';
+    document.getElementById(`download-${playlistId}-${trackIndex}`).textContent = '🚫 Cancelled';
+    document.getElementById(`actions-${playlistId}-${trackIndex}`).innerHTML = '-';
     
     try {
-        // Find the table row for this track
-        const row = document.querySelector(`tr[data-track-index="${trackIndex}"]`);
-        if (!row) {
-            console.error(`Could not find row for track index ${trackIndex}`);
-            return;
-        }
-        
-        // PHASE 5: Prevent double cancellation and check terminal states (GUI PARITY)
-        if (row.dataset.locallyCancelled === 'true') {
-            console.warn(`Track ${trackIndex} is already cancelled locally`);
-            showToast('Track is already cancelled', 'info');
-            return;
-        }
-        
-        const statusElement = row.querySelector('.track-download-status');
-        const currentStatus = statusElement?.textContent || '';
-        
-        // Check if track is in a terminal state where cancellation doesn't make sense
-        if (currentStatus.includes('✅ Completed') || currentStatus.includes('❌ Failed')) {
-            console.warn(`Cannot cancel track ${trackIndex} - already in terminal state: ${currentStatus}`);
-            showToast(`Cannot cancel - track is already ${currentStatus.includes('✅') ? 'completed' : 'failed'}`, 'warning');
-            return;
-        }
-        
-        // PHASE 1: Immediate UI response (GUI PARITY)
-        // Update UI immediately to show definitive cancellation like GUI
-        const actionsElement = row.querySelector('.track-actions');
-        
-        if (statusElement) {
-            statusElement.textContent = '🚫 Cancelled';
-            statusElement.className = 'track-download-status download-cancelled';
-        }
-        if (actionsElement) {
-            actionsElement.innerHTML = '-';
-        }
-        
-        // PHASE 2: Add to cancelled tracks Set and mark locally cancelled (GUI PARITY)
-        cancelledTracks.add(trackIndex);
-        row.dataset.locallyCancelled = 'true';
-        console.log(`✅ Track ${trackIndex} added to cancelledTracks Set and marked locally cancelled (immediate UI response)`);
-        
-        // Get the task ID for backend cancellation
-        const taskId = row.dataset.taskId;
-        if (!taskId) {
-            console.warn(`No task ID found for track ${trackIndex}, using local cancellation only`);
-            showToast('Track cancelled (local only)', 'info');
-            return;
-        }
-        
-        // PHASE 5: Call backend with timeout to avoid hanging (GUI PARITY)
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
-        
         const response = await fetch('/api/downloads/cancel_task', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ task_id: taskId }),
-            signal: controller.signal
+            body: JSON.stringify({ task_id: taskId })
         });
-        
-        clearTimeout(timeoutId);
-        
         const data = await response.json();
         if (data.success) {
-            console.log(`✅ Successfully cancelled task ${taskId} on backend`);
-            showToast('Download cancelled successfully', 'info');
+            showToast('Download cancelled and added to wishlist.', 'info');
         } else {
-            console.warn(`Backend cancellation failed for task ${taskId}: ${data.error}`);
-            // Don't change UI - we already showed cancelled status immediately
-            showToast('Download cancelled (backend error, but stopped locally)', 'warning');
+            throw new Error(data.error);
         }
-        
     } catch (error) {
-        // PHASE 5: Handle different error types appropriately (GUI PARITY)
-        if (error.name === 'AbortError') {
-            console.warn('⏱️ Backend cancellation timed out after 5 seconds');
-            showToast('Download cancelled (backend timeout, but stopped locally)', 'warning');
-        } else {
-            console.error('❌ Error with backend cancellation:', error);
-            showToast('Download cancelled (network error, but stopped locally)', 'warning');
-        }
-        // Don't revert UI - track is still cancelled locally like GUI behavior
-        console.log(`Track ${trackIndex} remains cancelled locally despite backend error`);
+        showToast(`Could not cancel task: ${error.message}`, 'error');
     }
 }
 
