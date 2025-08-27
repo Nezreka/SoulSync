@@ -4964,6 +4964,11 @@ body {
     transition: all 0.2s ease;
 }
 
+.playlist-card-actions .view-progress-btn {
+    background: #1db954;
+    color: #000000;
+}
+
 .playlist-card-actions button:hover {
     background: #1db954;
     color: #000000;
