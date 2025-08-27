@@ -1398,6 +1398,53 @@ async function loadSyncData() {
     }
 }
 
+async function checkForActiveProcesses() {
+    try {
+        const response = await fetch('/api/active-processes');
+        if (!response.ok) return;
+
+        const data = await response.json();
+        const processes = data.active_processes || [];
+
+        if (processes.length > 0) {
+            console.log(`🔄 Found ${processes.length} active process(es) from backend. Rehydrating UI...`);
+            for (const processInfo of processes) {
+                if (!activeDownloadProcesses[processInfo.playlist_id]) {
+                    rehydrateModal(processInfo);
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Failed to check for active processes:', error);
+    }
+}
+
+async function rehydrateModal(processInfo) {
+    const { playlist_id, playlist_name, batch_id } = processInfo;
+    console.log(`💧 Rehydrating modal for playlist "${playlist_name}" (batch: ${batch_id})`);
+
+    let playlistData = spotifyPlaylists.find(p => p.id === playlist_id);
+    if (!playlistData) {
+        console.warn(`Cannot rehydrate modal: Playlist data for ${playlist_id} not loaded.`);
+        return;
+    }
+    await openDownloadMissingModal(playlist_id);
+    const process = activeDownloadProcesses[playlist_id];
+    if (!process) return;
+
+    process.status = 'running';
+    process.batchId = batch_id;
+    updatePlaylistCardUI(playlist_id);
+    updateRefreshButtonState();
+
+    document.getElementById(`begin-analysis-btn-${playlist_id}`).style.display = 'none';
+    document.getElementById(`cancel-all-btn-${playlist_id}`).style.display = 'inline-block';
+
+    startModalDownloadPolling(playlist_id);
+
+    process.modalElement.style.display = 'none';
+}
+
 async function loadSpotifyPlaylists() {
     const container = document.getElementById('spotify-playlist-container');
     const refreshBtn = document.getElementById('spotify-refresh-btn');
@@ -1415,6 +1462,9 @@ async function loadSpotifyPlaylists() {
         spotifyPlaylists = await response.json();
         renderSpotifyPlaylists();
         spotifyPlaylistsLoaded = true;
+
+        await checkForActiveProcesses();
+
     } catch (error) {
         container.innerHTML = `<div class="playlist-placeholder">❌ Error: ${error.message}</div>`;
         showToast(`Error loading playlists: ${error.message}`, 'error');
@@ -1675,6 +1725,7 @@ async function openDownloadMissingModal(playlistId) {
     // **NEW**: Check if a process is already active for this playlist
     if (activeDownloadProcesses[playlistId]) {
         console.log(`Modal for ${playlistId} already exists. Showing it.`);
+        closePlaylistDetailsModal(); // Close playlist details modal even when reusing existing modal
         const process = activeDownloadProcesses[playlistId];
         if (process.modalElement) {
             process.modalElement.style.display = 'flex';
@@ -1809,7 +1860,7 @@ async function openDownloadMissingModal(playlistId) {
             
             <div class="download-missing-modal-footer">
                 <div class="download-phase-controls">
-                    <button class="download-control-btn primary" id="begin-analysis-btn-${playlistId}" onclick="startTrackAnalysis('${playlistId}')">
+                    <button class="download-control-btn primary" id="begin-analysis-btn-${playlistId}" onclick="startMissingTracksProcess('${playlistId}')">
                         Begin Analysis
                     </button>
                     <button class="download-control-btn danger" id="cancel-all-btn-${playlistId}" onclick="cancelAllOperations('${playlistId}')" style="display: none;">
@@ -1850,80 +1901,45 @@ function closeDownloadMissingModal(playlistId) {
     }
 }
 
-async function startTrackAnalysis(playlistId) {
+async function startMissingTracksProcess(playlistId) {
     const process = activeDownloadProcesses[playlistId];
     if (!process) return;
 
-    console.log(`🔍 Starting track analysis for ${process.tracks.length} tracks in playlist ${playlistId}`);
-    
+    console.log(`🚀 Kicking off unified missing tracks process for playlist: ${playlistId}`);
     try {
         process.status = 'running';
         updatePlaylistCardUI(playlistId);
         updateRefreshButtonState();
-
         document.getElementById(`begin-analysis-btn-${playlistId}`).style.display = 'none';
         document.getElementById(`cancel-all-btn-${playlistId}`).style.display = 'inline-block';
-        document.getElementById(`analysis-progress-text-${playlistId}`).textContent = 'Starting analysis...';
-        
-        const response = await fetch('/api/tracks/analyze', {
+
+        const response = await fetch(`/api/playlists/${playlistId}/start-missing-process`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ tracks: process.tracks })
+            body: JSON.stringify({ 
+                tracks: process.tracks,
+                playlist_name: process.playlist.name 
+            })
         });
-        
+
         const data = await response.json();
-        if (!data.success) throw new Error(data.error);
-        
-        process.analysisTaskId = data.task_id;
-        startAnalysisPolling(playlistId);
-        
+        if (!data.success) {
+            // Special handling for rate limit
+            if (response.status === 429) {
+                throw new Error(`${data.error} Try closing some other download processes first.`);
+            }
+            throw new Error(data.error);
+        }
+
+        process.batchId = data.batch_id;
+        startModalDownloadPolling(playlistId);
     } catch (error) {
-        showToast(`Failed to start analysis: ${error.message}`, 'error');
+        showToast(`Failed to start process: ${error.message}`, 'error');
         process.status = 'cancelled';
         cleanupDownloadProcess(playlistId);
     }
 }
 
-function startAnalysisPolling(playlistId) {
-    const process = activeDownloadProcesses[playlistId];
-    if (!process || !process.analysisTaskId) return;
-
-    const poller = setInterval(async () => {
-        // If process is gone, stop polling
-        if (!activeDownloadProcesses[playlistId]) {
-            clearInterval(poller);
-            return;
-        }
-
-        try {
-            const response = await fetch(`/api/tracks/analyze/status/${process.analysisTaskId}`);
-            const status = await response.json();
-            
-            if (status.error) throw new Error(status.error);
-
-            document.getElementById(`analysis-progress-fill-${playlistId}`).style.width = `${status.progress || 0}%`;
-            document.getElementById(`analysis-progress-text-${playlistId}`).textContent = 
-                `${status.processed || 0}/${status.total || 0} tracks analyzed (${status.progress || 0}%)`;
-            
-            if (status.results) {
-                updateTrackAnalysisResults(playlistId, status.results);
-            }
-            
-            if (status.status === 'complete') {
-                clearInterval(poller);
-                onAnalysisComplete(playlistId, status);
-            } else if (status.status === 'error' || status.status === 'cancelled') {
-                clearInterval(poller);
-                throw new Error(status.error || 'Analysis was cancelled');
-            }
-        } catch (error) {
-            clearInterval(poller);
-            showToast(`Analysis failed: ${error.message}`, 'error');
-            process.status = 'cancelled';
-            cleanupDownloadProcess(playlistId);
-        }
-    }, 1000);
-}
 
 function updateTrackAnalysisResults(playlistId, results) {
     for (const result of results) {
@@ -1935,67 +1951,11 @@ function updateTrackAnalysisResults(playlistId, results) {
     }
 }
 
-function onAnalysisComplete(playlistId, status) {
-    const process = activeDownloadProcesses[playlistId];
-    if (!process) return;
 
-    document.getElementById(`stat-found-${playlistId}`).textContent = status.total_found || 0;
-    document.getElementById(`stat-missing-${playlistId}`).textContent = status.total_missing || 0;
-    document.getElementById(`analysis-progress-text-${playlistId}`).textContent = 'Analysis complete!';
-    
-    process.analysisResults = status.results || [];
-    process.missingTracks = process.analysisResults.filter(r => !r.found);
-    
-    if (process.missingTracks.length > 0) {
-        initiateMissingDownloads(playlistId);
-    } else {
-        showToast('All tracks were found in your library!', 'success');
-        process.status = 'complete';
-        document.getElementById(`cancel-all-btn-${playlistId}`).style.display = 'none';
-        // Don't auto-close, let user close it.
-    }
-}
-
-async function initiateMissingDownloads(playlistId) {
-    const process = activeDownloadProcesses[playlistId];
-    if (!process || process.missingTracks.length === 0) return;
-
-    try {
-        document.getElementById(`download-progress-text-${playlistId}`).textContent = 'Initiating downloads...';
-        
-        for (const result of process.missingTracks) {
-            const statusElement = document.getElementById(`download-${playlistId}-${result.track_index}`);
-            const actionsElement = document.getElementById(`actions-${playlistId}-${result.track_index}`);
-            if (statusElement) statusElement.textContent = '⏸️ Pending';
-            if (actionsElement) actionsElement.innerHTML = `<button class="cancel-track-btn" onclick="cancelTrackDownload('${playlistId}', ${result.track_index})">Cancel</button>`;
-        }
-        
-        const response = await fetch(`/api/playlists/${playlistId}/download_missing`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                missing_tracks: process.missingTracks.map(r => ({ track: r.track, track_index: r.track_index }))
-            })
-        });
-        
-        const data = await response.json();
-        if (!data.success) throw new Error(data.error);
-        
-        process.batchId = data.batch_id;
-        startModalDownloadPolling(playlistId);
-        showToast(`Started downloads for ${process.missingTracks.length} tracks.`, 'success');
-        
-    } catch (error) {
-        showToast(`Failed to start downloads: ${error.message}`, 'error');
-        process.status = 'cancelled';
-        cleanupDownloadProcess(playlistId);
-    }
-}
 
 function startModalDownloadPolling(playlistId) {
     const process = activeDownloadProcesses[playlistId];
     if (!process || !process.batchId) return;
-
     if (process.poller) clearInterval(process.poller);
 
     process.poller = setInterval(async () => {
@@ -2003,62 +1963,85 @@ function startModalDownloadPolling(playlistId) {
             clearInterval(process.poller);
             return;
         }
-
         try {
             const response = await fetch(`/api/playlists/${process.batchId}/download_status`);
             const data = await response.json();
             if (data.error) throw new Error(data.error);
 
-            let completedCount = 0;
-            let failedOrCancelledCount = 0;
-            
-            (data.tasks || []).forEach(task => {
-                const statusElement = document.getElementById(`download-${playlistId}-${task.track_index}`);
-                const row = statusElement ? statusElement.closest('tr') : null;
-                if (!row) return;
-
-                if (row.dataset.locallyCancelled === 'true') {
-                    failedOrCancelledCount++;
-                    return;
+            if (data.phase === 'analysis') {
+                const progress = data.analysis_progress;
+                const percent = progress.total > 0 ? (progress.processed / progress.total) * 100 : 0;
+                document.getElementById(`analysis-progress-fill-${playlistId}`).style.width = `${percent}%`;
+                document.getElementById(`analysis-progress-text-${playlistId}`).textContent = 
+                    `${progress.processed}/${progress.total} tracks analyzed`;
+                if (data.analysis_results) {
+                    updateTrackAnalysisResults(playlistId, data.analysis_results);
+                    // Update stats when we first get analysis results
+                    const foundCount = data.analysis_results.filter(r => r.found).length;
+                    const missingCount = data.analysis_results.filter(r => !r.found).length;
+                    document.getElementById(`stat-found-${playlistId}`).textContent = foundCount;
+                    document.getElementById(`stat-missing-${playlistId}`).textContent = missingCount;
                 }
-                
-                row.dataset.taskId = task.task_id;
-                let statusText = '';
-                switch (task.status) {
-                    case 'pending': statusText = '⏸️ Pending'; break;
-                    case 'searching': statusText = '🔍 Searching...'; break;
-                    case 'downloading': statusText = `⏬ Downloading... ${Math.round(task.progress || 0)}%`; break;
-                    case 'completed': statusText = '✅ Completed'; completedCount++; break;
-                    case 'failed': statusText = '❌ Failed'; failedOrCancelledCount++; break;
-                    case 'cancelled': statusText = '🚫 Cancelled'; failedOrCancelledCount++; break;
-                    default: statusText = `⚪ ${task.status}`; break;
+            } else if (data.phase === 'downloading' || data.phase === 'complete' || data.phase === 'error') {
+                if (document.getElementById(`analysis-progress-fill-${playlistId}`).style.width !== '100%') {
+                     document.getElementById(`analysis-progress-fill-${playlistId}`).style.width = '100%';
+                     document.getElementById(`analysis-progress-text-${playlistId}`).textContent = 'Analysis complete!';
+                     if(data.analysis_results) {
+                         updateTrackAnalysisResults(playlistId, data.analysis_results);
+                         const foundCount = data.analysis_results.filter(r => r.found).length;
+                         const missingCount = data.analysis_results.filter(r => !r.found).length;
+                         document.getElementById(`stat-found-${playlistId}`).textContent = foundCount;
+                         document.getElementById(`stat-missing-${playlistId}`).textContent = missingCount;
+                     }
                 }
-                statusElement.textContent = statusText;
-                if (['completed', 'failed', 'cancelled'].includes(task.status)) {
-                    document.getElementById(`actions-${playlistId}-${task.track_index}`).innerHTML = '-';
+                const missingTracks = (data.analysis_results || []).filter(r => !r.found);
+                const missingCount = missingTracks.length;
+                let completedCount = 0;
+                let failedOrCancelledCount = 0;
+
+                (data.tasks || []).forEach(task => {
+                    const row = document.querySelector(`#download-missing-modal-${playlistId} tr[data-track-index="${task.track_index}"]`);
+                    if (!row) return;
+                    if (row.dataset.locallyCancelled === 'true') {
+                        failedOrCancelledCount++;
+                        return;
+                    }
+                    row.dataset.taskId = task.task_id;
+                    const statusEl = document.getElementById(`download-${playlistId}-${task.track_index}`);
+                    const actionsEl = document.getElementById(`actions-${playlistId}-${task.track_index}`);
+                    let statusText = '';
+                    switch (task.status) {
+                        case 'pending': statusText = '⏸️ Pending'; break;
+                        case 'searching': statusText = '🔍 Searching...'; break;
+                        case 'downloading': statusText = `⏬ Downloading... ${Math.round(task.progress || 0)}%`; break;
+                        case 'completed': statusText = '✅ Completed'; completedCount++; break;
+                        case 'failed': statusText = '❌ Failed'; failedOrCancelledCount++; break;
+                        case 'cancelled': statusText = '🚫 Cancelled'; failedOrCancelledCount++; break;
+                        default: statusText = `⚪ ${task.status}`; break;
+                    }
+                    if(statusEl) statusEl.textContent = statusText;
+                    if (actionsEl && ['completed', 'failed', 'cancelled'].includes(task.status)) {
+                        actionsEl.innerHTML = '-';
+                    }
+                });
+
+                const totalFinished = completedCount + failedOrCancelledCount;
+                const progressPercent = missingCount > 0 ? (totalFinished / missingCount) * 100 : 0;
+                document.getElementById(`download-progress-fill-${playlistId}`).style.width = `${progressPercent}%`;
+                document.getElementById(`download-progress-text-${playlistId}`).textContent = `${completedCount}/${missingCount} completed (${progressPercent.toFixed(0)}%)`;
+                document.getElementById(`stat-downloaded-${playlistId}`).textContent = completedCount;
+
+                if (data.phase === 'complete' || data.phase === 'error' || (missingCount > 0 && totalFinished >= missingCount)) {
+                    process.status = 'complete';
+                    showToast(`Process complete for ${process.playlist.name}!`, 'success');
+                    document.getElementById(`cancel-all-btn-${playlistId}`).style.display = 'none';
+                    clearInterval(process.poller);
+                    process.poller = null;
+                    updatePlaylistCardUI(playlistId);
                 }
-            });
-
-            const totalMissing = process.missingTracks.length;
-            const totalFinished = completedCount + failedOrCancelledCount;
-            const progressPercent = totalMissing > 0 ? (totalFinished / totalMissing) * 100 : 0;
-
-            document.getElementById(`download-progress-fill-${playlistId}`).style.width = `${progressPercent}%`;
-            document.getElementById(`download-progress-text-${playlistId}`).textContent = 
-                `${completedCount}/${totalMissing} completed (${progressPercent.toFixed(0)}%)`;
-            document.getElementById(`stat-downloaded-${playlistId}`).textContent = completedCount;
-
-            if (totalFinished >= totalMissing) {
-                process.status = 'complete';
-                showToast(`Downloads complete for ${process.playlist.name}!`, 'success');
-                document.getElementById(`cancel-all-btn-${playlistId}`).style.display = 'none';
-                clearInterval(process.poller);
-                process.poller = null;
-                updatePlaylistCardUI(playlistId); // Final card update
             }
         } catch (error) {
             console.error(`Polling error for ${playlistId}:`, error);
-            // Don't stop polling on transient errors
         }
     }, 2000);
 }
@@ -2122,14 +2105,72 @@ async function cancelAllOperations(playlistId) {
     const process = activeDownloadProcesses[playlistId];
     if (!process) return;
 
-    if (process.analysisTaskId) {
-        await fetch(`/api/tracks/analyze/cancel/${process.analysisTaskId}`, { method: 'POST' });
+    console.log(`🚫 Cancelling all operations for playlist ${playlistId}`);
+    
+    try {
+        // First, try to cancel the entire batch if we have a batch ID
+        if (process.batchId) {
+            try {
+                const batchResponse = await fetch(`/api/playlists/${process.batchId}/cancel_batch`, {
+                    method: 'POST'
+                });
+                const batchData = await batchResponse.json();
+                if (batchData.success) {
+                    console.log(`✅ Cancelled batch ${process.batchId} with ${batchData.cancelled_tasks} tasks`);
+                }
+            } catch (error) {
+                console.warn('Failed to cancel batch, falling back to individual cancellation:', error);
+            }
+        }
+        
+        // Also cancel individual download tasks for immediate UI feedback
+        const modal = document.getElementById(`download-missing-modal-${playlistId}`);
+        if (modal) {
+            const taskRows = modal.querySelectorAll('tr[data-task-id]');
+            const cancellationPromises = [];
+            
+            taskRows.forEach(row => {
+                const taskId = row.dataset.taskId;
+                const trackIndex = row.dataset.trackIndex;
+                
+                if (taskId && row.dataset.locallyCancelled !== 'true') {
+                    // Mark as locally cancelled for immediate UI feedback
+                    row.dataset.locallyCancelled = 'true';
+                    const statusElement = document.getElementById(`download-${playlistId}-${trackIndex}`);
+                    const actionsElement = document.getElementById(`actions-${playlistId}-${trackIndex}`);
+                    if (statusElement) statusElement.textContent = '🚫 Cancelled';
+                    if (actionsElement) actionsElement.innerHTML = '-';
+                    
+                    // Add to cancellation promises
+                    cancellationPromises.push(
+                        fetch('/api/downloads/cancel_task', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ task_id: taskId })
+                        }).catch(error => {
+                            console.warn(`Failed to cancel task ${taskId}:`, error);
+                        })
+                    );
+                }
+            });
+            
+            // Wait for all cancellations to complete
+            if (cancellationPromises.length > 0) {
+                await Promise.allSettled(cancellationPromises);
+                console.log(`✅ Cancelled ${cancellationPromises.length} individual download tasks`);
+            }
+        }
+        
+        process.status = 'cancelled';
+        cleanupDownloadProcess(playlistId);
+        showToast('All operations cancelled', 'info');
+        
+    } catch (error) {
+        console.error('Error during cancellation:', error);
+        process.status = 'cancelled';
+        cleanupDownloadProcess(playlistId);
+        showToast('Operations cancelled (with errors)', 'warning');
     }
-    // Note: Batch cancellation isn't implemented on the backend yet,
-    // but cleaning up the process will stop polling and allow individual cancellations.
-    process.status = 'cancelled';
-    cleanupDownloadProcess(playlistId);
-    showToast('Operations cancelled', 'info');
 }
 
 function resetToInitialState() {
@@ -3560,7 +3601,7 @@ window.matchedDownloadAlbumTrack = matchedDownloadAlbumTrack;
 // Download Missing Tracks Modal functions
 window.openDownloadMissingModal = openDownloadMissingModal;
 window.closeDownloadMissingModal = closeDownloadMissingModal;
-window.startTrackAnalysis = startTrackAnalysis;
+window.startMissingTracksProcess = startMissingTracksProcess;
 window.cancelAllOperations = cancelAllOperations;
 window.cancelTrackDownload = cancelTrackDownload;
 window.handleViewProgressClick = handleViewProgressClick;
