@@ -1507,6 +1507,7 @@ function cleanupDownloadProcess(playlistId) {
 
     // Restore card UI
     updatePlaylistCardUI(playlistId);
+    updateRefreshButtonState();
 }
 
 function togglePlaylistSelection(event) {
@@ -1858,6 +1859,7 @@ async function startTrackAnalysis(playlistId) {
     try {
         process.status = 'running';
         updatePlaylistCardUI(playlistId);
+        updateRefreshButtonState();
 
         document.getElementById(`begin-analysis-btn-${playlistId}`).style.display = 'none';
         document.getElementById(`cancel-all-btn-${playlistId}`).style.display = 'inline-block';
@@ -2331,12 +2333,40 @@ function startSyncPolling(playlistId) {
             updateCardToDefault(playlistId, { status: 'error', error: 'Polling failed' });
         }
     }, 2000); // Poll every 2 seconds
+    updateRefreshButtonState();
 }
 
 function stopSyncPolling(playlistId) {
     if (activeSyncPollers[playlistId]) {
         clearInterval(activeSyncPollers[playlistId]);
         delete activeSyncPollers[playlistId];
+    }
+    updateRefreshButtonState();
+}
+
+function hasActiveOperations() {
+    const hasActiveSyncs = Object.keys(activeSyncPollers).length > 0;
+    const hasActiveDownloads = Object.values(activeDownloadProcesses).some(p => p.status === 'running');
+    return hasActiveSyncs || hasActiveDownloads;
+}
+
+
+function updateRefreshButtonState() {
+    const refreshBtn = document.getElementById('spotify-refresh-btn');
+    if (!refreshBtn) return;
+
+    if (hasActiveOperations()) {
+        refreshBtn.disabled = true;
+        // Provide context-specific text
+        const hasActiveSyncs = Object.keys(activeSyncPollers).length > 0;
+        if (hasActiveSyncs) {
+            refreshBtn.textContent = '🔄 Syncing...';
+        } else {
+            refreshBtn.textContent = '📥 Downloading...';
+        }
+    } else {
+        refreshBtn.disabled = false;
+        refreshBtn.textContent = '🔄 Refresh';
     }
 }
 
