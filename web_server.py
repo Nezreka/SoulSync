@@ -126,7 +126,7 @@ transfer_data_cache = {
     'data': {},
     'last_update': 0,
     'update_lock': threading.Lock(),
-    'cache_duration': 1.5  # Cache for 1.5 seconds to reduce API calls
+    'cache_duration': 0.75  # Cache for 0.75 seconds for faster updates
 }
 
 def get_cached_transfer_data():
