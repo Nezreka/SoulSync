@@ -1639,6 +1639,10 @@ function showPlaylistDetailsModal(playlist) {
         document.body.appendChild(modal);
     }
     
+    // Check if there's a completed download missing tracks process for this playlist
+    const activeProcess = activeDownloadProcesses[playlist.id];
+    const hasCompletedProcess = activeProcess && activeProcess.status === 'complete';
+    
     modal.innerHTML = `
         <div class="modal-container playlist-modal">
             <div class="playlist-modal-header">
@@ -1682,7 +1686,11 @@ function showPlaylistDetailsModal(playlist) {
             
             <div class="playlist-modal-footer">
                 <button class="playlist-modal-btn playlist-modal-btn-secondary" onclick="closePlaylistDetailsModal()">Close</button>
-                <button class="playlist-modal-btn playlist-modal-btn-tertiary" onclick="openDownloadMissingModal('${playlist.id}')">📥 Download Missing Tracks</button>
+                <button class="playlist-modal-btn playlist-modal-btn-tertiary" onclick="openDownloadMissingModal('${playlist.id}')">
+                    ${hasCompletedProcess 
+                        ? '📊 View Download Results' 
+                        : '📥 Download Missing Tracks'}
+                </button>
                 <button class="playlist-modal-btn playlist-modal-btn-primary" onclick="startPlaylistSync('${playlist.id}')">Sync Playlist</button>
             </div>
         </div>
@@ -1728,6 +1736,10 @@ async function openDownloadMissingModal(playlistId) {
         closePlaylistDetailsModal(); // Close playlist details modal even when reusing existing modal
         const process = activeDownloadProcesses[playlistId];
         if (process.modalElement) {
+            // Show helpful message if it's a completed process
+            if (process.status === 'complete') {
+                showToast('Showing previous results. Close this modal to start a new analysis.', 'info');
+            }
             process.modalElement.style.display = 'flex';
         }
         return; // Don't create a new one
