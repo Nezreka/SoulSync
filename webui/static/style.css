@@ -4318,6 +4318,7 @@ body {
 .playlist-modal-body {
     flex: 1;
     padding: 0 28px;
+    padding-left: 0;
     overflow: hidden;
     display: flex;
     flex-direction: column;
