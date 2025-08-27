@@ -2055,7 +2055,7 @@ function startModalDownloadPolling(playlistId) {
         } catch (error) {
             console.error(`Polling error for ${playlistId}:`, error);
         }
-    }, 2000);
+    }, 500);
 }
 async function updateModalWithLiveDownloadProgress() {
     try {
