@@ -4932,3 +4932,52 @@ body {
     display: flex;
     align-items: center;
 }
+
+
+/* ==============================================
+   PERSISTENT DOWNLOAD MODAL STYLES
+   ============================================== */
+
+.download-missing-modal {
+    display: none; /* Hidden by default */
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.8);
+    backdrop-filter: blur(8px);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+}
+
+.playlist-card-actions button {
+    background: transparent;
+    border: 1px solid #1db954;
+    border-radius: 15px;
+    color: #1db954;
+    font-size: 10px;
+    font-weight: bold;
+    padding: 8px 16px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.playlist-card-actions button:hover {
+    background: #1db954;
+    color: #000000;
+}
+
+.playlist-card-actions .view-progress-btn {
+    background: #1db954;
+    color: #000000;
+}
+
+.playlist-card-actions .view-progress-btn:hover {
+    background: #1ed760;
+}
+
+.hidden {
+    display: none !important;
+}
