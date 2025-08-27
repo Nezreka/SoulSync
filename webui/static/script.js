@@ -1449,8 +1449,8 @@ function renderSpotifyPlaylists() {
                     <div class="sync-progress-indicator" id="progress-${p.id}"></div>
                 </div>
                 <div class="playlist-card-actions">
-                    <button id="action-btn-${p.id}" onclick="handleCardActionClick(event, '${p.id}')">Sync / Download</button>
-                    <button id="progress-btn-${p.id}" class="view-progress-btn hidden" onclick="handleCardActionClick(event, '${p.id}')">
+                    <button id="action-btn-${p.id}" onclick="openPlaylistDetailsModal(event, '${p.id}')">Sync / Download</button>
+                    <button id="progress-btn-${p.id}" class="view-progress-btn hidden" onclick="handleViewProgressClick(event, '${p.id}')">
                         View Progress
                     </button>
                 </div>
@@ -1460,34 +1460,28 @@ function renderSpotifyPlaylists() {
     }).join('');
 }
 
-function handleCardActionClick(event, playlistId) {
-    event.stopPropagation();
+function handleViewProgressClick(event, playlistId) {
+    event.stopPropagation(); // Prevent the card selection from toggling
     const process = activeDownloadProcesses[playlistId];
 
     if (process && process.modalElement) {
-        // If a process is active, show its modal
+        // If a process is active, just show its modal
         console.log(`Re-opening active download modal for playlist ${playlistId}`);
         process.modalElement.style.display = 'flex';
-    } else {
-        // Otherwise, open the details modal as normal
-        openPlaylistDetailsModal(event, playlistId);
     }
 }
 
 function updatePlaylistCardUI(playlistId) {
     const process = activeDownloadProcesses[playlistId];
-    const defaultBtn = document.getElementById(`action-btn-${playlistId}`);
     const progressBtn = document.getElementById(`progress-btn-${playlistId}`);
 
-    if (!defaultBtn || !progressBtn) return;
+    if (!progressBtn) return;
 
     if (process && process.status === 'running') {
-        // A process is running: show progress button, hide default
-        defaultBtn.classList.add('hidden');
+        // A process is running: show the progress button
         progressBtn.classList.remove('hidden');
     } else {
-        // No process or it's finished: show default, hide progress
-        defaultBtn.classList.remove('hidden');
+        // No process or it's finished: hide the progress button
         progressBtn.classList.add('hidden');
     }
 }
@@ -3539,6 +3533,8 @@ window.closeDownloadMissingModal = closeDownloadMissingModal;
 window.startTrackAnalysis = startTrackAnalysis;
 window.cancelAllOperations = cancelAllOperations;
 window.cancelTrackDownload = cancelTrackDownload;
+window.handleViewProgressClick = handleViewProgressClick;
+
 
 // APPEND THIS JAVASCRIPT SNIPPET (B)
 
