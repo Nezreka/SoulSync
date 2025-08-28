@@ -1536,13 +1536,29 @@ function updatePlaylistCardUI(playlistId) {
     }
 }
 
-function cleanupDownloadProcess(playlistId) {
-    if (!activeDownloadProcesses[playlistId]) return;
+async function cleanupDownloadProcess(playlistId) {
+    const process = activeDownloadProcesses[playlistId];
+    if (!process) return;
 
     console.log(`Cleaning up download process for playlist ${playlistId}`);
-    const process = activeDownloadProcesses[playlistId];
 
-    // Stop polling
+    // --- THIS IS THE FIX ---
+    // If the process has a batchId, tell the server to clean it up.
+    if (process.batchId) {
+        try {
+            console.log(`🚀 Sending cleanup request to server for batch: ${process.batchId}`);
+            await fetch('/api/playlists/cleanup_batch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ batch_id: process.batchId })
+            });
+        } catch (error) {
+            console.error('Failed to send cleanup request to server:', error);
+        }
+    }
+    // --- END OF FIX ---
+
+    // Stop client-side polling
     if (process.poller) {
         clearInterval(process.poller);
     }
@@ -1552,7 +1568,7 @@ function cleanupDownloadProcess(playlistId) {
         process.modalElement.parentElement.removeChild(process.modalElement);
     }
 
-    // Remove from global state
+    // Remove from client-side global state
     delete activeDownloadProcesses[playlistId];
 
     // Restore card UI

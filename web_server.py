@@ -4079,6 +4079,44 @@ def cancel_batch(batch_id):
         print(f"❌ Error cancelling batch {batch_id}: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+# NEW ENDPOINT: Add this function to web_server.py
+@app.route('/api/playlists/cleanup_batch', methods=['POST'])
+def cleanup_batch():
+    """
+    Cleans up a completed or cancelled batch from the server's in-memory state.
+    This is called by the client after the user closes a finished modal.
+    """
+    data = request.get_json()
+    batch_id = data.get('batch_id')
+    if not batch_id:
+        return jsonify({"success": False, "error": "Missing batch_id"}), 400
+
+    try:
+        with tasks_lock:
+            # Check if the batch exists before trying to delete
+            if batch_id in download_batches:
+                # Get the list of task IDs before deleting the batch
+                task_ids_to_remove = download_batches[batch_id].get('queue', [])
+                
+                # Delete the batch record
+                del download_batches[batch_id]
+                
+                # Clean up the associated tasks from the tasks dictionary
+                for task_id in task_ids_to_remove:
+                    if task_id in download_tasks:
+                        del download_tasks[task_id]
+                
+                print(f"✅ Cleaned up batch '{batch_id}' and its associated tasks from server state.")
+                return jsonify({"success": True, "message": f"Batch {batch_id} cleaned up."})
+            else:
+                # It's not an error if the batch is already gone
+                print(f"⚠️ Cleanup requested for non-existent batch '{batch_id}'. Already cleaned up?")
+                return jsonify({"success": True, "message": "Batch already cleaned up."})
+
+    except Exception as e:
+        print(f"❌ Error during batch cleanup for '{batch_id}': {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
 # ===============================
 # == UNIFIED MISSING TRACKS API ==
 # ===============================
