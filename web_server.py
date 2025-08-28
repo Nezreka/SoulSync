@@ -3939,15 +3939,33 @@ def get_batch_download_status(batch_id):
                     task_username = task.get('username') or task['track_info'].get('username')
                     if task_filename and task_username:
                         lookup_key = f"{task_username}::{os.path.basename(task_filename)}"
+                        
                         if lookup_key in live_transfers_lookup:
                             live_info = live_transfers_lookup[lookup_key]
                             state_str = live_info.get('state', 'Unknown')
-                            if 'Completed' in state_str or 'Succeeded' in state_str: task_status['status'] = 'completed'
-                            elif 'Cancelled' in state_str or 'Canceled' in state_str: task_status['status'] = 'cancelled'
-                            elif 'Failed' in state_str or 'Errored' in state_str: task_status['status'] = 'failed'
-                            elif 'InProgress' in state_str: task_status['status'] = 'downloading'
-                            else: task_status['status'] = 'queued'
-                            task_status['progress'] = live_info.get('percentComplete', 0)
+                            
+                            # Don't override tasks that are already completed/failed/cancelled
+                            if task['status'] not in ['completed', 'failed', 'cancelled']:
+                                if 'Completed' in state_str or 'Succeeded' in state_str: 
+                                    task_status['status'] = 'completed'
+                                    # Permanently update the stored task status
+                                    task['status'] = 'completed'
+                                elif 'Cancelled' in state_str or 'Canceled' in state_str: 
+                                    task_status['status'] = 'cancelled'
+                                    task['status'] = 'cancelled'
+                                elif 'Failed' in state_str or 'Errored' in state_str: 
+                                    task_status['status'] = 'failed'
+                                    task['status'] = 'failed'
+                                elif 'InProgress' in state_str: task_status['status'] = 'downloading'
+                                else: task_status['status'] = 'queued'
+                                task_status['progress'] = live_info.get('percentComplete', 0)
+                            # For completed tasks, keep the existing progress at 100%
+                            elif task['status'] == 'completed':
+                                task_status['progress'] = 100
+                        else:
+                            # If task is completed but not in live transfers, keep it completed with 100%
+                            if task['status'] == 'completed':
+                                task_status['progress'] = 100
                     batch_tasks.append(task_status)
                 batch_tasks.sort(key=lambda x: x['track_index'])
                 response_data['tasks'] = batch_tasks
