@@ -434,6 +434,35 @@ atexit.register(cleanup_monitor)
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
 
+def _handle_failed_download(batch_id, task_id, task, task_status):
+    """Handle failed download by triggering retry logic like GUI"""
+    try:
+        with tasks_lock:
+            if task_id not in download_tasks:
+                return
+                
+            retry_count = task.get('retry_count', 0)
+            task['retry_count'] = retry_count + 1
+            
+            if task['retry_count'] > 2:  # Max 3 attempts total (matches GUI)
+                # All retries exhausted, mark as permanently failed
+                print(f"❌ Task {task_id} failed after 3 retry attempts")
+                task_status['status'] = 'failed'
+                task['status'] = 'failed'
+                return
+            
+            # Show retrying status while we process retry
+            task_status['status'] = 'pending'  # Will show as pending until retry kicks in
+            print(f"🔄 Triggering retry {task['retry_count']}/3 for failed task {task_id}")
+            
+        # Trigger retry with next candidate (matches GUI retry_parallel_download_with_fallback)
+        missing_download_executor.submit(download_monitor._retry_task_with_fallback, batch_id, task_id, task)
+        
+    except Exception as e:
+        print(f"❌ Error handling failed download {task_id}: {e}")
+        task_status['status'] = 'failed'
+        task['status'] = 'failed'
+
 def _update_task_status(task_id, new_status):
     """Helper to update task status and timestamp for timeout tracking"""
     with tasks_lock:
@@ -3954,8 +3983,18 @@ def get_batch_download_status(batch_id):
                                     task_status['status'] = 'cancelled'
                                     task['status'] = 'cancelled'
                                 elif 'Failed' in state_str or 'Errored' in state_str: 
-                                    task_status['status'] = 'failed'
-                                    task['status'] = 'failed'
+                                    # Don't mark as failed immediately - trigger retry like GUI
+                                    batch_id_for_retry = None
+                                    for bid, batch in download_batches.items():
+                                        if task_id in batch.get('queue', []):
+                                            batch_id_for_retry = bid
+                                            break
+                                    if batch_id_for_retry:
+                                        _handle_failed_download(batch_id_for_retry, task_id, task, task_status)
+                                    else:
+                                        # Fallback if batch not found
+                                        task_status['status'] = 'failed'
+                                        task['status'] = 'failed'
                                 elif 'InProgress' in state_str: task_status['status'] = 'downloading'
                                 else: task_status['status'] = 'queued'
                                 task_status['progress'] = live_info.get('percentComplete', 0)
