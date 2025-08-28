@@ -2048,6 +2048,9 @@ function startModalDownloadPolling(playlistId) {
                         default: statusText = `⚪ ${task.status}`; break;
                     }
                     if(statusEl) statusEl.textContent = statusText;
+                    if (actionsEl && !['completed', 'failed', 'cancelled'].includes(task.status) && actionsEl.innerHTML === '-') {
+                        actionsEl.innerHTML = `<button class="cancel-track-btn" title="Cancel this download" onclick="cancelTrackDownload('${playlistId}', ${task.track_index})">×</button>`;
+                    } 
                     if (actionsEl && ['completed', 'failed', 'cancelled'].includes(task.status)) {
                         actionsEl.innerHTML = '-';
                     }
@@ -2060,12 +2063,23 @@ function startModalDownloadPolling(playlistId) {
                 document.getElementById(`stat-downloaded-${playlistId}`).textContent = completedCount;
 
                 if (data.phase === 'complete' || data.phase === 'error' || (missingCount > 0 && totalFinished >= missingCount)) {
-                    process.status = 'complete';
-                    showToast(`Process complete for ${process.playlist.name}!`, 'success');
+                    // --- REPLACE THE INSIDE OF THIS IF BLOCK with the following ---
+                    if (data.phase === 'cancelled') {
+                        process.status = 'cancelled';
+                        showToast(`Process cancelled for ${process.playlist.name}.`, 'info');
+                    } else if (data.phase === 'error') {
+                        process.status = 'complete'; // Treat as complete to allow cleanup
+                        showToast(`Process for ${process.playlist.name} failed!`, 'error');
+                    } else {
+                        process.status = 'complete';
+                        showToast(`Process complete for ${process.playlist.name}!`, 'success');
+                    }
+                    
                     document.getElementById(`cancel-all-btn-${playlistId}`).style.display = 'none';
                     clearInterval(process.poller);
                     process.poller = null;
                     updatePlaylistCardUI(playlistId);
+                    // --- END OF REPLACEMENT BLOCK ---
                 }
             }
         } catch (error) {
@@ -2133,72 +2147,46 @@ async function cancelAllOperations(playlistId) {
     const process = activeDownloadProcesses[playlistId];
     if (!process) return;
 
-    console.log(`🚫 Cancelling all operations for playlist ${playlistId}`);
-    
-    try {
-        // First, try to cancel the entire batch if we have a batch ID
-        if (process.batchId) {
-            try {
-                const batchResponse = await fetch(`/api/playlists/${process.batchId}/cancel_batch`, {
-                    method: 'POST'
-                });
-                const batchData = await batchResponse.json();
-                if (batchData.success) {
-                    console.log(`✅ Cancelled batch ${process.batchId} with ${batchData.cancelled_tasks} tasks`);
-                }
-            } catch (error) {
-                console.warn('Failed to cancel batch, falling back to individual cancellation:', error);
-            }
-        }
-        
-        // Also cancel individual download tasks for immediate UI feedback
-        const modal = document.getElementById(`download-missing-modal-${playlistId}`);
-        if (modal) {
-            const taskRows = modal.querySelectorAll('tr[data-task-id]');
-            const cancellationPromises = [];
-            
-            taskRows.forEach(row => {
-                const taskId = row.dataset.taskId;
-                const trackIndex = row.dataset.trackIndex;
-                
-                if (taskId && row.dataset.locallyCancelled !== 'true') {
-                    // Mark as locally cancelled for immediate UI feedback
-                    row.dataset.locallyCancelled = 'true';
-                    const statusElement = document.getElementById(`download-${playlistId}-${trackIndex}`);
-                    const actionsElement = document.getElementById(`actions-${playlistId}-${trackIndex}`);
-                    if (statusElement) statusElement.textContent = '🚫 Cancelled';
-                    if (actionsElement) actionsElement.innerHTML = '-';
-                    
-                    // Add to cancellation promises
-                    cancellationPromises.push(
-                        fetch('/api/downloads/cancel_task', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ task_id: taskId })
-                        }).catch(error => {
-                            console.warn(`Failed to cancel task ${taskId}:`, error);
-                        })
-                    );
-                }
-            });
-            
-            // Wait for all cancellations to complete
-            if (cancellationPromises.length > 0) {
-                await Promise.allSettled(cancellationPromises);
-                console.log(`✅ Cancelled ${cancellationPromises.length} individual download tasks`);
-            }
-        }
-        
-        process.status = 'cancelled';
-        cleanupDownloadProcess(playlistId);
-        showToast('All operations cancelled', 'info');
-        
-    } catch (error) {
-        console.error('Error during cancellation:', error);
-        process.status = 'cancelled';
-        cleanupDownloadProcess(playlistId);
-        showToast('Operations cancelled (with errors)', 'warning');
+    // Prevent multiple cancel all operations
+    if (process.cancellingAll) {
+        console.log(`⚠️ Cancel All already in progress for ${playlistId}`);
+        return;
     }
+    process.cancellingAll = true;
+
+    console.log(`🚫 Cancel All clicked for playlist ${playlistId} - closing modal and cleaning up server`);
+    
+    showToast('Cancelling all operations and closing modal...', 'info');
+    
+    // Mark process as complete immediately so polling stops
+    process.status = 'complete';
+    
+    // Stop any active polling
+    if (process.poller) {
+        clearInterval(process.poller);
+        process.poller = null;
+    }
+    
+    // Tell server to stop starting new downloads and clean up the batch
+    if (process.batchId) {
+        try {
+            // Cancel the batch (stops new downloads from starting)
+            const cancelResponse = await fetch(`/api/playlists/${process.batchId}/cancel_batch`, {
+                method: 'POST'
+            });
+            if (cancelResponse.ok) {
+                const cancelData = await cancelResponse.json();
+                console.log(`✅ Server stopped new downloads for batch ${process.batchId}`);
+            }
+        } catch (error) {
+            console.warn('Error during server batch cancel:', error);
+        }
+    }
+    
+    // Close the modal immediately - this will handle cleanup
+    closeDownloadMissingModal(playlistId);
+    
+    showToast('Modal closed. Active downloads will finish in background.', 'success');
 }
 
 function resetToInitialState() {

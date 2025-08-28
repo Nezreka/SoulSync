@@ -3506,6 +3506,9 @@ def _download_track_worker(task_id, batch_id=None):
             
         # Cancellation Checkpoint 1: Before doing anything
         with tasks_lock:
+            if task_id not in download_tasks:
+                print(f"❌ [Modal Worker] Task {task_id} was deleted before starting")
+                return
             if download_tasks[task_id]['status'] == 'cancelled':
                 print(f"❌ [Modal Worker] Task {task_id} cancelled before starting")
                 # Free worker slot when cancelled
@@ -3586,6 +3589,9 @@ def _download_track_worker(task_id, batch_id=None):
         for query_index, query in enumerate(search_queries):
             # Cancellation check before each query
             with tasks_lock:
+                if task_id not in download_tasks:
+                    print(f"❌ [Modal Worker] Task {task_id} was deleted during query {query_index + 1}")
+                    return
                 if download_tasks[task_id]['status'] == 'cancelled':
                     print(f"❌ [Modal Worker] Task {task_id} cancelled during query {query_index + 1}")
                     # Free worker slot when cancelled
@@ -3662,6 +3668,9 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
     for candidate_index, candidate in enumerate(candidates):
         # Check cancellation before each attempt
         with tasks_lock:
+            if task_id not in download_tasks:
+                print(f"❌ [Modal Worker] Task {task_id} was deleted during candidate {candidate_index + 1}")
+                return False
             if download_tasks[task_id]['status'] == 'cancelled':
                 print(f"❌ [Modal Worker] Task {task_id} cancelled during candidate {candidate_index + 1}")
                 # Free worker slot when cancelled
