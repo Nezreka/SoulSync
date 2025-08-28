@@ -32,6 +32,145 @@ let activeSyncPollers = {}; // Key: playlist_id, Value: intervalId
 let playlistTrackCache = {}; // Key: playlist_id, Value: tracks array
 let spotifyPlaylistsLoaded = false; 
 let activeDownloadProcesses = {};
+let sequentialSyncManager = null;
+
+// Sequential Sync Manager Class
+class SequentialSyncManager {
+    constructor() {
+        this.queue = [];
+        this.currentIndex = 0;
+        this.isRunning = false;
+        this.startTime = null;
+    }
+
+    start(playlistIds) {
+        if (this.isRunning) {
+            console.warn('Sequential sync already running');
+            return;
+        }
+
+        // Convert playlist IDs to ordered array (maintain display order)
+        this.queue = Array.from(playlistIds);
+        this.currentIndex = 0;
+        this.isRunning = true;
+        this.startTime = Date.now();
+
+        console.log(`🚀 Starting sequential sync for ${this.queue.length} playlists:`, this.queue);
+        this.updateUI();
+        this.syncNext();
+    }
+
+    async syncNext() {
+        if (this.currentIndex >= this.queue.length) {
+            this.complete();
+            return;
+        }
+
+        const playlistId = this.queue[this.currentIndex];
+        const playlist = spotifyPlaylists.find(p => p.id === playlistId);
+        console.log(`🔄 Sequential sync: Processing playlist ${this.currentIndex + 1}/${this.queue.length}: ${playlist?.name || playlistId}`);
+
+        this.updateUI();
+
+        try {
+            // Use existing single sync function
+            await startPlaylistSync(playlistId);
+            
+            // Wait for sync to complete by monitoring the poller
+            await this.waitForSyncCompletion(playlistId);
+            
+        } catch (error) {
+            console.error(`❌ Sequential sync: Failed to sync playlist ${playlistId}:`, error);
+            showToast(`Failed to sync "${playlist?.name || playlistId}": ${error.message}`, 'error');
+        }
+
+        // Move to next playlist
+        this.currentIndex++;
+        setTimeout(() => this.syncNext(), 1000); // Small delay between syncs
+    }
+
+    async waitForSyncCompletion(playlistId) {
+        return new Promise((resolve) => {
+            // Monitor the existing sync poller for completion
+            const checkCompletion = () => {
+                if (!activeSyncPollers[playlistId]) {
+                    // Poller stopped = sync completed
+                    resolve();
+                    return;
+                }
+                // Check again in 1 second
+                setTimeout(checkCompletion, 1000);
+            };
+            checkCompletion();
+        });
+    }
+
+    complete() {
+        const duration = ((Date.now() - this.startTime) / 1000).toFixed(1);
+        const completedCount = this.queue.length;
+        console.log(`🏁 Sequential sync completed in ${duration}s`);
+        
+        this.isRunning = false;
+        this.queue = [];
+        this.currentIndex = 0;
+        this.startTime = null;
+        
+        // Re-enable playlist selection
+        disablePlaylistSelection(false);
+        
+        this.updateUI();
+        updateRefreshButtonState(); // Refresh button state after completion
+        showToast(`Sequential sync completed for ${completedCount} playlists in ${duration}s`, 'success');
+    }
+
+    cancel() {
+        if (!this.isRunning) return;
+        
+        console.log('🛑 Cancelling sequential sync');
+        this.isRunning = false;
+        this.queue = [];
+        this.currentIndex = 0;
+        this.startTime = null;
+        
+        // Re-enable playlist selection
+        disablePlaylistSelection(false);
+        
+        this.updateUI();
+        updateRefreshButtonState(); // Refresh button state after cancellation
+        showToast('Sequential sync cancelled', 'info');
+    }
+
+    updateUI() {
+        const startSyncBtn = document.getElementById('start-sync-btn');
+        const selectionInfo = document.getElementById('selection-info');
+        
+        if (!this.isRunning) {
+            // Reset to normal state
+            if (startSyncBtn) {
+                startSyncBtn.textContent = 'Start Sync';
+                startSyncBtn.disabled = selectedPlaylists.size === 0;
+            }
+            if (selectionInfo) {
+                const count = selectedPlaylists.size;
+                selectionInfo.textContent = count === 0 
+                    ? 'Select playlists to sync' 
+                    : `${count} playlist${count > 1 ? 's' : ''} selected`;
+            }
+        } else {
+            // Show sequential sync status
+            if (startSyncBtn) {
+                startSyncBtn.textContent = 'Cancel Sequential Sync';
+                startSyncBtn.disabled = false;
+            }
+            if (selectionInfo) {
+                const current = this.currentIndex + 1;
+                const total = this.queue.length;
+                const currentPlaylist = spotifyPlaylists.find(p => p.id === this.queue[this.currentIndex]);
+                selectionInfo.textContent = `Syncing ${current}/${total}: ${currentPlaylist?.name || 'Unknown'}`;
+            }
+        }
+    }
+}
 
 // API endpoints
 const API = {
@@ -1595,6 +1734,12 @@ function togglePlaylistSelection(event) {
 }
 
 function updateSyncActionsUI() {
+    // If sequential sync is running, let the manager handle UI updates
+    if (sequentialSyncManager && sequentialSyncManager.isRunning) {
+        sequentialSyncManager.updateUI();
+        return;
+    }
+
     const selectionInfo = document.getElementById('selection-info');
     const startSyncBtn = document.getElementById('start-sync-btn');
     const count = selectedPlaylists.size;
@@ -2401,10 +2546,57 @@ function stopSyncPolling(playlistId) {
     updateRefreshButtonState();
 }
 
+// Sequential Sync Functions
+function startSequentialSync() {
+    // Initialize manager if needed
+    if (!sequentialSyncManager) {
+        sequentialSyncManager = new SequentialSyncManager();
+    }
+
+    // Check if already running - if so, cancel
+    if (sequentialSyncManager.isRunning) {
+        sequentialSyncManager.cancel();
+        return;
+    }
+
+    // Validate selection
+    if (selectedPlaylists.size === 0) {
+        showToast('No playlists selected for sync', 'error');
+        return;
+    }
+
+    // Get playlist order from DOM to maintain display order
+    const playlistCards = document.querySelectorAll('.playlist-card');
+    const orderedPlaylistIds = [];
+    
+    playlistCards.forEach(card => {
+        const playlistId = card.dataset.playlistId;
+        if (selectedPlaylists.has(playlistId)) {
+            orderedPlaylistIds.push(playlistId);
+        }
+    });
+
+    console.log(`🚀 Starting sequential sync for ${orderedPlaylistIds.length} playlists`);
+    
+    // Start sequential sync
+    sequentialSyncManager.start(orderedPlaylistIds);
+    
+    // Disable playlist selection during sync
+    disablePlaylistSelection(true);
+}
+
+function disablePlaylistSelection(disabled) {
+    const checkboxes = document.querySelectorAll('.playlist-checkbox');
+    checkboxes.forEach(checkbox => {
+        checkbox.disabled = disabled;
+    });
+}
+
 function hasActiveOperations() {
     const hasActiveSyncs = Object.keys(activeSyncPollers).length > 0;
     const hasActiveDownloads = Object.values(activeDownloadProcesses).some(p => p.status === 'running');
-    return hasActiveSyncs || hasActiveDownloads;
+    const hasSequentialSync = sequentialSyncManager && sequentialSyncManager.isRunning;
+    return hasActiveSyncs || hasActiveDownloads || hasSequentialSync;
 }
 
 
@@ -2416,7 +2608,8 @@ function updateRefreshButtonState() {
         refreshBtn.disabled = true;
         // Provide context-specific text
         const hasActiveSyncs = Object.keys(activeSyncPollers).length > 0;
-        if (hasActiveSyncs) {
+        const hasSequentialSync = sequentialSyncManager && sequentialSyncManager.isRunning;
+        if (hasActiveSyncs || hasSequentialSync) {
             refreshBtn.textContent = '🔄 Syncing...';
         } else {
             refreshBtn.textContent = '📥 Downloading...';
@@ -4702,6 +4895,12 @@ function initializeSyncPage() {
         // Remove any old listeners to be safe, then add the new one
         refreshBtn.removeEventListener('click', loadSpotifyPlaylists);
         refreshBtn.addEventListener('click', loadSpotifyPlaylists);
+    }
+
+    // Logic for the Start Sync button
+    const startSyncBtn = document.getElementById('start-sync-btn');
+    if (startSyncBtn) {
+        startSyncBtn.addEventListener('click', startSequentialSync);
     }
 }
 
