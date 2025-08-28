@@ -199,13 +199,13 @@ class WebUIDownloadMonitor:
             print(f"🛑 Stopped download monitor (no active batches)")
     
     def _monitor_loop(self):
-        """Main monitoring loop - checks downloads every 5 seconds like GUI"""
+        """Main monitoring loop - checks downloads every 1 second for responsive web UX"""
         import time
         
         while self.monitoring and self.monitored_batches:
             try:
                 self._check_all_downloads()
-                time.sleep(5)  # Match GUI's polling interval
+                time.sleep(1)  # 1-second polling for fast web UI updates
             except Exception as e:
                 # If we get shutdown errors, stop monitoring gracefully
                 if "interpreter shutdown" in str(e) or "cannot schedule new futures" in str(e):
