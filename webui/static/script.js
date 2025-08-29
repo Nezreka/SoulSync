@@ -492,6 +492,18 @@ function checkAndEnableScrolling(element, text) {
 
 
 function clearTrack() {
+    // Force collapse the media player BEFORE clearing currentTrack
+    if (mediaPlayerExpanded) {
+        // Manually collapse since toggleMediaPlayerExpansion() needs currentTrack
+        mediaPlayerExpanded = false;
+        const mediaPlayer = document.getElementById('media-player');
+        const expandedContent = document.getElementById('media-expanded');
+        
+        if (mediaPlayer) mediaPlayer.style.minHeight = '85px';
+        if (expandedContent) expandedContent.classList.add('hidden');
+    }
+    
+    // Now clear track state
     currentTrack = null;
     isPlaying = false;
     
@@ -522,23 +534,8 @@ function clearTrack() {
     // Hide loading animation
     hideLoadingAnimation();
     
-    // Show no track message and collapse media player
+    // Show no track message
     document.getElementById('no-track-message').classList.remove('hidden');
-    
-    // Force collapse the media player when track is cleared
-    if (mediaPlayerExpanded) {
-        toggleMediaPlayerExpansion();
-    }
-    
-    // Ensure media player returns to compact state
-    const mediaPlayer = document.getElementById('media-player');
-    if (mediaPlayer) {
-        mediaPlayer.style.minHeight = '85px';
-        const expandedContent = document.getElementById('media-expanded');
-        if (expandedContent) {
-            expandedContent.classList.add('hidden');
-        }
-    }
     
     console.log('🧹 Track cleared and media player reset');
 }
