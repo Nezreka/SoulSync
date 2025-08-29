@@ -1782,8 +1782,28 @@ async function checkForActiveProcesses() {
 
 async function rehydrateModal(processInfo) {
     const { playlist_id, playlist_name, batch_id } = processInfo;
-    console.log(`💧 Rehydrating modal for playlist "${playlist_name}" (batch: ${batch_id})`);
+    console.log(`💧 Rehydrating modal for "${playlist_name}" (batch: ${batch_id})`);
 
+    // Handle wishlist processes specially
+    if (playlist_id === "wishlist") {
+        await openDownloadMissingWishlistModal();
+        const process = activeDownloadProcesses[playlist_id];
+        if (!process) return;
+
+        process.status = 'running';
+        process.batchId = batch_id;
+        updateRefreshButtonState();
+
+        document.getElementById(`begin-analysis-btn-${playlist_id}`).style.display = 'none';
+        document.getElementById(`cancel-all-btn-${playlist_id}`).style.display = 'inline-block';
+
+        startModalDownloadPolling(playlist_id);
+
+        process.modalElement.style.display = 'none';
+        return;
+    }
+
+    // Handle regular Spotify playlist processes
     let playlistData = spotifyPlaylists.find(p => p.id === playlist_id);
     if (!playlistData) {
         console.warn(`Cannot rehydrate modal: Playlist data for ${playlist_id} not loaded.`);
@@ -2296,6 +2316,210 @@ function closeDownloadMissingModal(playlistId) {
     }
 }
 
+async function openDownloadMissingWishlistModal() {
+    const playlistId = "wishlist"; // Use a consistent ID for wishlist
+    
+    // Check if a process is already active for the wishlist
+    if (activeDownloadProcesses[playlistId]) {
+        console.log(`Modal for wishlist already exists. Showing it.`);
+        const process = activeDownloadProcesses[playlistId];
+        if (process.modalElement) {
+            // Show helpful message if it's a completed process
+            if (process.status === 'complete') {
+                showToast('Showing previous results. Close this modal to start a new analysis.', 'info');
+            }
+            process.modalElement.style.display = 'flex';
+        }
+        return; // Don't create a new one
+    }
+
+    console.log(`📥 Opening Download Missing Tracks modal for wishlist`);
+    
+    // Fetch actual wishlist tracks from the server
+    let tracks;
+    try {
+        const response = await fetch('/api/wishlist/count');
+        const countData = await response.json();
+        if (countData.count === 0) {
+            showToast('Wishlist is empty. No tracks to download.', 'info');
+            return;
+        }
+        
+        // Fetch the actual wishlist tracks for display
+        const tracksResponse = await fetch('/api/wishlist/tracks');
+        if (!tracksResponse.ok) {
+            throw new Error('Failed to fetch wishlist tracks');
+        }
+        const tracksData = await tracksResponse.json();
+        tracks = tracksData.tracks || [];
+        
+    } catch (error) {
+        showToast(`Failed to fetch wishlist data: ${error.message}`, 'error');
+        return;
+    }
+    
+    currentPlaylistTracks = tracks;
+    currentModalPlaylistId = playlistId;
+    
+    let modal = document.createElement('div');
+    modal.id = `download-missing-modal-${playlistId}`; // Unique ID
+    modal.className = 'download-missing-modal'; // Use class for styling
+    modal.style.display = 'none'; // Start hidden
+    document.body.appendChild(modal);
+
+    // Register the new process in our global state tracker
+    activeDownloadProcesses[playlistId] = {
+        status: 'idle', // idle, running, complete, cancelled
+        modalElement: modal,
+        poller: null,
+        batchId: null,
+        playlist: { id: playlistId, name: "Wishlist" }, // Create a pseudo-playlist object
+        tracks: tracks
+    };
+    
+    modal.innerHTML = `
+        <div class="download-missing-modal-content">
+            <div class="download-missing-modal-header">
+                <h2 class="download-missing-modal-title">Download Missing Tracks - Wishlist</h2>
+                <span class="download-missing-modal-close" onclick="closeDownloadMissingModal('${playlistId}')">&times;</span>
+            </div>
+            
+            <div class="download-missing-modal-body">
+                <div class="download-dashboard-stats">
+                    <div class="dashboard-stat stat-total">
+                        <div class="dashboard-stat-number" id="stat-total-${playlistId}">${tracks.length}</div>
+                        <div class="dashboard-stat-label">Total Tracks</div>
+                    </div>
+                    <div class="dashboard-stat stat-found">
+                        <div class="dashboard-stat-number" id="stat-found-${playlistId}">-</div>
+                        <div class="dashboard-stat-label">Found in Library</div>
+                    </div>
+                    <div class="dashboard-stat stat-missing">
+                        <div class="dashboard-stat-number" id="stat-missing-${playlistId}">-</div>
+                        <div class="dashboard-stat-label">Missing Tracks</div>
+                    </div>
+                    <div class="dashboard-stat stat-downloaded">
+                        <div class="dashboard-stat-number" id="stat-downloaded-${playlistId}">0</div>
+                        <div class="dashboard-stat-label">Downloaded</div>
+                    </div>
+                </div>
+                
+                <div class="download-progress-section">
+                    <div class="progress-item">
+                        <div class="progress-label">
+                            🔍 Library Analysis
+                            <span id="analysis-progress-text-${playlistId}">Ready to start</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill analysis" id="analysis-progress-fill-${playlistId}"></div>
+                        </div>
+                    </div>
+                    <div class="progress-item">
+                        <div class="progress-label">
+                            ⏬ Downloads
+                            <span id="download-progress-text-${playlistId}">Waiting for analysis</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill download" id="download-progress-fill-${playlistId}"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="download-tracks-section">
+                    <div class="download-tracks-header">
+                        <h3 class="download-tracks-title">📋 Track Analysis & Download Status</h3>
+                    </div>
+                    <div class="download-tracks-table-container">
+                        <table class="download-tracks-table">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Track</th>
+                                    <th>Artist</th>
+                                    <th>Library Match</th>
+                                    <th>Download Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="download-tracks-tbody-${playlistId}">
+                                ${tracks.map((track, index) => `
+                                    <tr data-track-index="${index}">
+                                        <td class="track-number">${index + 1}</td>
+                                        <td class="track-name" title="${escapeHtml(track.name)}">${escapeHtml(track.name)}</td>
+                                        <td class="track-artist" title="${escapeHtml(formatArtists(track.artists))}">${formatArtists(track.artists)}</td>
+                                        <td class="track-match-status match-checking" id="match-${playlistId}-${index}">🔍 Pending</td>
+                                        <td class="track-download-status" id="download-${playlistId}-${index}">-</td>
+                                        <td class="track-actions" id="actions-${playlistId}-${index}">-</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="download-missing-modal-footer">
+                <div class="download-phase-controls">
+                    <button class="download-control-btn primary" id="begin-analysis-btn-${playlistId}" onclick="startWishlistMissingTracksProcess('${playlistId}')">
+                        Begin Analysis
+                    </button>
+                    <button class="download-control-btn danger" id="cancel-all-btn-${playlistId}" onclick="cancelAllOperations('${playlistId}')" style="display: none;">
+                        Cancel All
+                    </button>
+                </div>
+                <div class="modal-close-section">
+                    <button class="download-control-btn secondary" onclick="closeDownloadMissingModal('${playlistId}')">Close</button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    modal.style.display = 'flex';
+}
+
+async function startWishlistMissingTracksProcess(playlistId) {
+    const process = activeDownloadProcesses[playlistId];
+    if (!process) return;
+
+    console.log(`🚀 Kicking off wishlist missing tracks process`);
+    try {
+        process.status = 'running';
+        updateRefreshButtonState();
+        document.getElementById(`begin-analysis-btn-${playlistId}`).style.display = 'none';
+        document.getElementById(`cancel-all-btn-${playlistId}`).style.display = 'inline-block';
+
+        const response = await fetch('/api/wishlist/download_missing', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        const data = await response.json();
+        if (!data.success) {
+            // Special handling for rate limit
+            if (response.status === 429) {
+                throw new Error(`${data.error} Try closing some other download processes first.`);
+            }
+            throw new Error(data.error);
+        }
+
+        process.batchId = data.batch_id;
+        console.log(`✅ Wishlist process started successfully. Batch ID: ${data.batch_id}`);
+        
+        // Start polling for updates
+        startModalDownloadPolling(playlistId);
+        
+    } catch (error) {
+        console.error('Error starting wishlist missing tracks process:', error);
+        showToast(`Error: ${error.message}`, 'error');
+        
+        // Reset UI state on error
+        process.status = 'idle';
+        updateRefreshButtonState();
+        document.getElementById(`begin-analysis-btn-${playlistId}`).style.display = 'inline-block';
+        document.getElementById(`cancel-all-btn-${playlistId}`).style.display = 'none';
+    }
+}
+
 async function startMissingTracksProcess(playlistId) {
     const process = activeDownloadProcesses[playlistId];
     if (!process) return;
@@ -2337,6 +2561,7 @@ async function startMissingTracksProcess(playlistId) {
 
 
 function updateTrackAnalysisResults(playlistId, results) {
+    // Update match results for all rows (tracks are now pre-populated)
     for (const result of results) {
         const matchElement = document.getElementById(`match-${playlistId}-${result.track_index}`);
         if (matchElement) {
@@ -3728,6 +3953,25 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+function formatArtists(artists) {
+    if (!artists || !Array.isArray(artists)) {
+        return 'Unknown Artist';
+    }
+    
+    // Handle both string arrays and object arrays with 'name' property
+    const artistNames = artists.map(artist => {
+        if (typeof artist === 'string') {
+            return artist;
+        } else if (artist && typeof artist === 'object' && artist.name) {
+            return artist.name;
+        } else {
+            return 'Unknown Artist';
+        }
+    });
+    
+    return artistNames.join(', ') || 'Unknown Artist';
+}
+
 async function showVersionInfo() {
     try {
         console.log('Fetching version info...');
@@ -4036,6 +4280,15 @@ window.startMissingTracksProcess = startMissingTracksProcess;
 window.cancelAllOperations = cancelAllOperations;
 window.cancelTrackDownload = cancelTrackDownload;
 window.handleViewProgressClick = handleViewProgressClick;
+
+// Wishlist Modal functions
+window.openDownloadMissingWishlistModal = openDownloadMissingWishlistModal;
+window.startWishlistMissingTracksProcess = startWishlistMissingTracksProcess;
+window.handleWishlistButtonClick = handleWishlistButtonClick;
+
+// Helper functions
+window.escapeHtml = escapeHtml;
+window.formatArtists = formatArtists;
 
 
 // APPEND THIS JAVASCRIPT SNIPPET (B)
@@ -4970,6 +5223,12 @@ async function loadDashboardData() {
         updateButton.addEventListener('click', handleDbUpdateButtonClick);
     }
 
+    // Attach event listener for the wishlist button
+    const wishlistButton = document.getElementById('wishlist-button');
+    if (wishlistButton) {
+        wishlistButton.addEventListener('click', handleWishlistButtonClick);
+    }
+
     // Initial load of stats
     await fetchAndUpdateDbStats();
     
@@ -4986,6 +5245,9 @@ async function loadDashboardData() {
 
     // Also check the status of any ongoing update when the page loads
     await checkAndUpdateDbProgress();
+    
+    // Check for any active download processes that need rehydration
+    await checkForActiveProcesses();
 }
 
 // --- Data Fetching and UI Updates ---
@@ -5224,5 +5486,25 @@ async function handleDbUpdateButtonClick() {
         } catch (error) {
             showToast('Error sending stop request.', 'error');
         }
+    }
+}
+
+async function handleWishlistButtonClick() {
+    try {
+        // First check if there are any tracks in the wishlist
+        const response = await fetch('/api/wishlist/count');
+        const data = await response.json();
+        
+        if (data.count === 0) {
+            showToast('Wishlist is empty. No tracks to download.', 'info');
+            return;
+        }
+        
+        // Open the wishlist download modal
+        await openDownloadMissingWishlistModal();
+        
+    } catch (error) {
+        console.error('Error handling wishlist button click:', error);
+        showToast(`Error opening wishlist: ${error.message}`, 'error');
     }
 }

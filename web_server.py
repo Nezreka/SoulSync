@@ -3465,6 +3465,67 @@ def get_wishlist_count():
         print(f"Error getting wishlist count: {e}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/wishlist/tracks', methods=['GET'])
+def get_wishlist_tracks():
+    """Endpoint to get wishlist tracks for display in modal."""
+    try:
+        from core.wishlist_service import get_wishlist_service
+        wishlist_service = get_wishlist_service()
+        tracks = wishlist_service.get_wishlist_tracks_for_download()
+        return jsonify({"tracks": tracks})
+    except Exception as e:
+        print(f"Error getting wishlist tracks: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/wishlist/download_missing', methods=['POST'])
+def start_wishlist_missing_downloads():
+    """
+    This endpoint fetches wishlist tracks and manages them with batch processing
+    identical to playlist processing, maintaining exactly 3 concurrent downloads.
+    """
+    try:
+        from core.wishlist_service import get_wishlist_service
+        wishlist_service = get_wishlist_service()
+        
+        # Get wishlist tracks formatted for download modal
+        wishlist_tracks = wishlist_service.get_wishlist_tracks_for_download()
+        if not wishlist_tracks:
+            return jsonify({"success": False, "error": "No tracks in wishlist"}), 400
+
+        batch_id = str(uuid.uuid4())
+        
+        # Use "wishlist" as the playlist_id for consistency in the modal system
+        playlist_id = "wishlist"
+        playlist_name = "Wishlist"
+        
+        # Create task queue for this batch - convert wishlist tracks to the expected format
+        task_queue = []
+        with tasks_lock:
+            download_batches[batch_id] = {
+                'phase': 'analysis',
+                'playlist_id': playlist_id,
+                'playlist_name': playlist_name,
+                'queue': task_queue,
+                'active_count': 0,
+                'max_concurrent': 3,
+                'queue_index': 0,
+                'analysis_total': len(wishlist_tracks),
+                'analysis_processed': 0,
+                'analysis_results': []
+            }
+
+        # Submit the wishlist processing job using the same processing function
+        missing_download_executor.submit(_run_full_missing_tracks_process, batch_id, playlist_id, wishlist_tracks)
+
+        return jsonify({
+            "success": True,
+            "batch_id": batch_id
+        })
+        
+    except Exception as e:
+        print(f"Error starting wishlist download process: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
 @app.route('/api/database/update', methods=['POST'])
 def start_database_update():
     """Endpoint to start the database update process."""
@@ -3625,7 +3686,13 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
             found, confidence = False, 0.0
 
             for artist in artists:
-                artist_name = artist if isinstance(artist, str) else str(artist)
+                # Handle both string format and Spotify API format {'name': 'Artist Name'}
+                if isinstance(artist, str):
+                    artist_name = artist
+                elif isinstance(artist, dict) and 'name' in artist:
+                    artist_name = artist['name']
+                else:
+                    artist_name = str(artist)
                 db_track, track_confidence = db.check_track_exists(
                     track_name, artist_name, confidence_threshold=0.7, server_source=active_server
                 )
@@ -3715,11 +3782,31 @@ def _download_track_worker(task_id, batch_id=None):
         track_data = task['track_info']
         
         # Recreate a SpotifyTrack object for the matching engine
+        # Handle both string format and Spotify API format for artists
+        raw_artists = track_data.get('artists', [])
+        processed_artists = []
+        for artist in raw_artists:
+            if isinstance(artist, str):
+                processed_artists.append(artist)
+            elif isinstance(artist, dict) and 'name' in artist:
+                processed_artists.append(artist['name'])
+            else:
+                processed_artists.append(str(artist))
+        
+        # Handle album field - extract name if it's a dictionary
+        raw_album = track_data.get('album', '')
+        if isinstance(raw_album, dict) and 'name' in raw_album:
+            album_name = raw_album['name']
+        elif isinstance(raw_album, str):
+            album_name = raw_album
+        else:
+            album_name = str(raw_album)
+        
         track = SpotifyTrack(
             id=track_data.get('id', ''),
             name=track_data.get('name', ''),
-            artists=track_data.get('artists', []),
-            album=track_data.get('album', ''),
+            artists=processed_artists,
+            album=album_name,
             duration_ms=track_data.get('duration_ms', 0),
             popularity=track_data.get('popularity', 0)
         )
