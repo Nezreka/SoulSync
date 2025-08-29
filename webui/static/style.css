@@ -161,7 +161,7 @@ body {
     border-radius: 12px;
     margin: 8px 10px;
     padding: 18px 18px 12px 18px;
-    min-height: 85px;
+    min-height: 150px;
     transition: all 0.3s ease;
 }
 
@@ -1705,7 +1705,7 @@ body {
 .download-item__cancel-btn:hover {
     background: rgba(240, 73, 89, 1.0);
 }
-.download-item__status-container { width: 70px; text-align: right; }
+.download-item__status-container { width: auto; text-align: right; }
 .download-item__open-btn {
     width: 60px; height: 35px; background: rgba(40, 167, 69, 0.9);
     color: white; border: 1px solid rgba(29, 185, 84, 0.6);
@@ -2784,14 +2784,16 @@ body {
 
 .download-item__uploader {
     font-size: 10px;
+    padding-left: 15px;
     color: rgba(29, 185, 84, 1.0);
     font-weight: 500;
 }
 
 .download-item__content {
     display: flex;
-    flex-direction: column;
-    gap: 8px;
+    justify-content: center;
+    flex-direction: row;
+    gap: 15px;
 }
 
 /* Progress Bar Styles */
@@ -2834,10 +2836,13 @@ body {
     color: #ffffff;
     font-size: 11px;
     font-weight: 600;
-    padding: 6px 12px;
+    padding: 12px 12px!important;
     cursor: pointer;
     transition: all 0.2s ease;
     align-self: flex-start;
+    width: fit-content!important;
+    height: fit-content!important;
+
 }
 
 .download-item__cancel-btn:hover {
