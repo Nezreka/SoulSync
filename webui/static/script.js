@@ -2622,10 +2622,13 @@ function startModalDownloadPolling(playlistId) {
                 (data.tasks || []).forEach(task => {
                     const row = document.querySelector(`#download-missing-modal-${playlistId} tr[data-track-index="${task.track_index}"]`);
                     if (!row) return;
+                    
+                    // Stronger protection: Don't override locally cancelled tracks with any backend updates
                     if (row.dataset.locallyCancelled === 'true') {
                         failedOrCancelledCount++;
-                        return;
+                        return; // Completely skip processing this task to avoid any UI conflicts
                     }
+                    
                     row.dataset.taskId = task.task_id;
                     const statusEl = document.getElementById(`download-${playlistId}-${task.track_index}`);
                     const actionsEl = document.getElementById(`actions-${playlistId}-${task.track_index}`);
@@ -2834,15 +2837,20 @@ async function cancelTrackDownload(playlistId, trackIndex) {
     const row = document.querySelector(`#download-missing-modal-${playlistId} tr[data-track-index="${trackIndex}"]`);
     if (!row) return;
 
+    // Prevent double cancellation
+    if (row.dataset.locallyCancelled === 'true') {
+        return; // Already cancelled locally
+    }
+
     const taskId = row.dataset.taskId;
     if (!taskId) {
         showToast('Task not started yet, cannot cancel.', 'warning');
         return;
     }
     
-    // UI update for immediate feedback
+    // UI update for immediate feedback - mark as cancelled FIRST to prevent race conditions
     row.dataset.locallyCancelled = 'true';
-    document.getElementById(`download-${playlistId}-${trackIndex}`).textContent = '🚫 Cancelled';
+    document.getElementById(`download-${playlistId}-${trackIndex}`).textContent = '🚫 Cancelling...';
     document.getElementById(`actions-${playlistId}-${trackIndex}`).innerHTML = '-';
     
     try {
@@ -2853,11 +2861,16 @@ async function cancelTrackDownload(playlistId, trackIndex) {
         });
         const data = await response.json();
         if (data.success) {
+            // Update final UI state after successful cancellation
+            document.getElementById(`download-${playlistId}-${trackIndex}`).textContent = '🚫 Cancelled';
             showToast('Download cancelled and added to wishlist.', 'info');
         } else {
             throw new Error(data.error);
         }
     } catch (error) {
+        // Reset UI state if cancellation failed
+        row.dataset.locallyCancelled = 'false';
+        document.getElementById(`download-${playlistId}-${trackIndex}`).textContent = '❌ Cancel Failed';
         showToast(`Could not cancel task: ${error.message}`, 'error');
     }
 }
