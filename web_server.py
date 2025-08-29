@@ -4349,11 +4349,15 @@ def cancel_download_task():
             }
 
             # Add to wishlist, treating cancellation as a failure
-            success = wishlist_service.add_to_wishlist(
-                spotify_track_data=spotify_track_data,
-                failure_reason="Cancelled by user",
+            failed_track_info = {
+                'spotify_track': type('Track', (object,), spotify_track_data)(),
+                'track_info': track_info # Pass the original info
+            }
+
+            success = wishlist_service.add_failed_track_from_modal(
+                track_info=failed_track_info,
                 source_type="playlist",
-                source_info=source_context
+                source_context=source_context
             )
             
             if success:
