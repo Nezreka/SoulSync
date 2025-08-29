@@ -362,9 +362,31 @@ body {
 .progress-bar-container {
     position: relative;
     width: 100%;
+    height: 20px;
+}
+
+.progress-track {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: #4f4f4f;
+    border-radius: 2px;
+    transform: translateY(-50%);
+    z-index: 1;
+}
+
+.progress-fill {
+    height: 100%;
+    background: #1db954; /* Green accent color */
+    border-radius: 2px;
+    width: 0%;
+    transition: width 0.1s ease;
 }
 
 .progress-bar {
+    position: relative;
     width: 100%;
     height: 20px;
     background: transparent;
@@ -372,12 +394,13 @@ body {
     cursor: pointer;
     -webkit-appearance: none;
     appearance: none;
+    z-index: 2;
 }
 
 .progress-bar::-webkit-slider-track {
     width: 100%;
     height: 3px;
-    background: linear-gradient(to right, #1db954 0%, #1db954 var(--progress-percent, 0%), #4f4f4f var(--progress-percent, 0%), #4f4f4f 100%);
+    background: transparent;
     border-radius: 2px;
 }
 
@@ -408,7 +431,7 @@ body {
 .progress-bar::-moz-range-track {
     width: 100%;
     height: 3px;
-    background: linear-gradient(to right, #1db954 0%, #1db954 var(--progress-percent, 0%), #4f4f4f var(--progress-percent, 0%), #4f4f4f 100%);
+    background: transparent;
     border-radius: 2px;
     border: none;
 }
