@@ -574,7 +574,7 @@ function handleProgressBarChange(event) {
     // Handle seeking in the audio track
     if (!audioPlayer || !audioPlayer.duration) return;
     
-    const progress = event.target.value;
+    const progress = parseFloat(event.target.value);
     const newTime = (progress / 100) * audioPlayer.duration;
     
     console.log(`🎯 Seeking to ${formatTime(newTime)} (${progress.toFixed(1)}%)`);
