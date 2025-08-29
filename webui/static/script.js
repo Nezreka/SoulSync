@@ -13,9 +13,12 @@ let currentStream = {
     track: null
 };
 
-// Streaming state management (new functionality)
+// Streaming state management (enhanced functionality)
 let streamStatusPoller = null;
 let audioPlayer = null;
+let streamPollingRetries = 0;
+let streamPollingInterval = 1000; // Start with 1-second polling
+const maxStreamPollingRetries = 10;
 let allSearchResults = [];
 let currentFilterType = 'all';
 let currentFilterFormat = 'all';
@@ -374,6 +377,19 @@ function initializeMediaPlayer() {
     stopButton.addEventListener('click', handleStop);
     volumeSlider.addEventListener('input', handleVolumeChange);
     
+    // Progress bar controls
+    const progressBar = document.getElementById('progress-bar');
+    if (progressBar) {
+        // Handle seeking
+        progressBar.addEventListener('input', handleProgressBarChange);
+        progressBar.addEventListener('mousedown', () => {
+            progressBar.dataset.seeking = 'true';
+        });
+        progressBar.addEventListener('mouseup', () => {
+            delete progressBar.dataset.seeking;
+        });
+    }
+    
     // Update volume slider styling
     volumeSlider.addEventListener('input', updateVolumeSliderAppearance);
 }
@@ -490,6 +506,19 @@ function clearTrack() {
     document.getElementById('play-button').disabled = true;
     document.getElementById('stop-button').disabled = true;
     
+    // Reset progress bar and time displays
+    const progressBar = document.getElementById('progress-bar');
+    if (progressBar) {
+        progressBar.value = 0;
+        progressBar.style.setProperty('--progress-percent', '0%');
+        delete progressBar.dataset.seeking;
+    }
+    
+    const currentTimeElement = document.getElementById('current-time');
+    const totalTimeElement = document.getElementById('total-time');
+    if (currentTimeElement) currentTimeElement.textContent = '0:00';
+    if (totalTimeElement) totalTimeElement.textContent = '0:00';
+    
     // Hide loading animation
     hideLoadingAnimation();
     
@@ -538,6 +567,35 @@ function handleVolumeChange(event) {
     // Update HTML5 audio player volume
     if (audioPlayer) {
         audioPlayer.volume = volume / 100;
+    }
+}
+
+function handleProgressBarChange(event) {
+    // Handle seeking in the audio track
+    if (!audioPlayer || !audioPlayer.duration) return;
+    
+    const progress = event.target.value;
+    const newTime = (progress / 100) * audioPlayer.duration;
+    
+    console.log(`🎯 Seeking to ${formatTime(newTime)} (${progress.toFixed(1)}%)`);
+    
+    try {
+        audioPlayer.currentTime = newTime;
+        
+        // Update visual progress immediately
+        event.target.style.setProperty('--progress-percent', `${progress}%`);
+        
+        // Update time displays immediately
+        const currentTimeElement = document.getElementById('current-time');
+        if (currentTimeElement) {
+            currentTimeElement.textContent = formatTime(newTime);
+        }
+    } catch (error) {
+        console.warn('⚠️ Seek failed:', error.message);
+        // Reset progress bar to current position
+        const actualProgress = (audioPlayer.currentTime / audioPlayer.duration) * 100;
+        event.target.value = actualProgress;
+        event.target.style.setProperty('--progress-percent', `${actualProgress}%`);
     }
 }
 
@@ -638,14 +696,18 @@ async function startStream(searchResult) {
 }
 
 function startStreamStatusPolling() {
-    // Start polling for stream status updates
+    // Start polling for stream status updates with retry logic
     if (streamStatusPoller) {
         clearInterval(streamStatusPoller);
     }
     
-    console.log('🔄 Starting stream status polling (1-second interval)');
+    // Reset polling state
+    streamPollingRetries = 0;
+    streamPollingInterval = 1000; // Reset to 1-second interval
+    
+    console.log('🔄 Starting enhanced stream status polling');
     updateStreamStatus(); // Initial check
-    streamStatusPoller = setInterval(updateStreamStatus, 1000);
+    streamStatusPoller = setInterval(updateStreamStatus, streamPollingInterval);
 }
 
 function stopStreamStatusPolling() {
@@ -653,19 +715,33 @@ function stopStreamStatusPolling() {
     if (streamStatusPoller) {
         clearInterval(streamStatusPoller);
         streamStatusPoller = null;
+        streamPollingRetries = 0;
+        streamPollingInterval = 1000; // Reset interval
         console.log('⏹️ Stopped stream status polling');
     }
 }
 
 async function updateStreamStatus() {
-    // Poll server for streaming progress and handle state changes
+    // Poll server for streaming progress and handle state changes with enhanced error recovery
     try {
-        const response = await fetch(API.stream.status);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10-second timeout
+        
+        const response = await fetch(API.stream.status, {
+            signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+        
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
         
         const data = await response.json();
+        
+        // Reset retry count on successful response
+        streamPollingRetries = 0;
+        streamPollingInterval = 1000; // Reset to normal interval
         
         // Update current stream state
         currentStream.status = data.status;
@@ -674,14 +750,20 @@ async function updateStreamStatus() {
         switch (data.status) {
             case 'loading':
                 setLoadingProgress(data.progress);
+                // Update loading text with progress
+                const loadingText = document.querySelector('.loading-text');
+                if (loadingText && data.progress > 0) {
+                    loadingText.textContent = `Downloading... ${Math.round(data.progress)}%`;
+                }
                 break;
                 
             case 'queued':
-                // Show queue status
-                const loadingText = document.querySelector('.loading-text');
-                if (loadingText) {
-                    loadingText.textContent = 'Queued...';
+                // Show queue status with better messaging
+                const queueText = document.querySelector('.loading-text');
+                if (queueText) {
+                    queueText.textContent = 'Queuing with uploader...';
                 }
+                setLoadingProgress(0); // Reset progress for queue state
                 break;
                 
             case 'ready':
@@ -695,32 +777,102 @@ async function updateStreamStatus() {
                 console.error('❌ Streaming error:', data.error_message);
                 stopStreamStatusPolling();
                 hideLoadingAnimation();
-                showToast(`Streaming error: ${data.error_message}`, 'error');
+                showToast(`Streaming error: ${data.error_message || 'Unknown error'}`, 'error');
+                clearTrack();
+                break;
+                
+            case 'stopped':
+                // Handle stopped state
+                console.log('🛑 Stream stopped');
+                stopStreamStatusPolling();
+                hideLoadingAnimation();
                 clearTrack();
                 break;
         }
         
     } catch (error) {
-        console.error('Error updating stream status:', error);
-        // Don't clear everything on network errors - might be temporary
+        streamPollingRetries++;
+        console.warn(`Stream status polling error (attempt ${streamPollingRetries}):`, error.message);
+        
+        if (streamPollingRetries >= maxStreamPollingRetries) {
+            // Too many consecutive failures - give up
+            console.error('❌ Stream status polling failed after maximum retries');
+            stopStreamStatusPolling();
+            hideLoadingAnimation();
+            showToast('Lost connection to streaming server', 'error');
+            clearTrack();
+        } else {
+            // Implement exponential backoff for retries
+            const backoffMultiplier = Math.min(streamPollingRetries, 5); // Max 5x backoff
+            streamPollingInterval = 1000 * backoffMultiplier;
+            
+            // Restart polling with new interval
+            if (streamStatusPoller) {
+                clearInterval(streamStatusPoller);
+                streamStatusPoller = setInterval(updateStreamStatus, streamPollingInterval);
+                console.log(`🔄 Retrying stream status polling with ${streamPollingInterval}ms interval`);
+            }
+        }
     }
 }
 
 async function startAudioPlayback() {
-    // Start HTML5 audio playback of the streamed file
+    // Start HTML5 audio playback of the streamed file with enhanced state management
     try {
         if (!audioPlayer) {
             throw new Error('Audio player not initialized');
         }
         
+        // Show loading state while preparing audio
+        const loadingText = document.querySelector('.loading-text');
+        if (loadingText) {
+            loadingText.textContent = 'Preparing playback...';
+        }
+        
         // Set audio source with cache-busting timestamp
         const audioUrl = `/stream/audio?t=${new Date().getTime()}`;
-        audioPlayer.src = audioUrl;
-        
         console.log(`🎵 Loading audio from: ${audioUrl}`);
         
-        // Wait a moment for the file to be fully ready
-        await new Promise(resolve => setTimeout(resolve, 500));
+        // Clear any existing source first
+        audioPlayer.pause();
+        audioPlayer.currentTime = 0;
+        audioPlayer.src = '';
+        
+        // Set new source
+        audioPlayer.src = audioUrl;
+        audioPlayer.load(); // Force reload
+        
+        // Wait for audio to be ready with promise-based approach
+        await new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                reject(new Error('Audio loading timeout'));
+            }, 15000); // 15-second timeout
+            
+            const onCanPlay = () => {
+                clearTimeout(timeout);
+                audioPlayer.removeEventListener('canplay', onCanPlay);
+                audioPlayer.removeEventListener('error', onError);
+                resolve();
+            };
+            
+            const onError = (event) => {
+                clearTimeout(timeout);
+                audioPlayer.removeEventListener('canplay', onCanPlay);
+                audioPlayer.removeEventListener('error', onError);
+                const error = event.target.error || new Error('Audio loading failed');
+                reject(error);
+            };
+            
+            audioPlayer.addEventListener('canplay', onCanPlay);
+            audioPlayer.addEventListener('error', onError);
+            
+            // If already ready, resolve immediately
+            if (audioPlayer.readyState >= 3) { // HAVE_FUTURE_DATA
+                onCanPlay();
+            }
+        });
+        
+        console.log('✅ Audio loaded and ready for playback');
         
         // Try to start playback with retry logic
         let retryCount = 0;
@@ -734,6 +886,30 @@ async function startAudioPlayback() {
                 // Update UI to playing state
                 hideLoadingAnimation();
                 setPlayingState(true);
+                
+                // Show media player if hidden
+                const noTrackMessage = document.getElementById('no-track-message');
+                if (noTrackMessage) {
+                    noTrackMessage.classList.add('hidden');
+                }
+                
+                // Ensure media player is expanded when playback starts
+                if (!mediaPlayerExpanded) {
+                    toggleMediaPlayerExpansion();
+                }
+                
+                // Update volume to current slider value
+                const volumeSlider = document.getElementById('volume-slider');
+                if (volumeSlider) {
+                    audioPlayer.volume = volumeSlider.value / 100;
+                }
+                
+                // Enable play/stop buttons
+                const playButton = document.getElementById('play-button');
+                const stopButton = document.getElementById('stop-button');
+                if (playButton) playButton.disabled = false;
+                if (stopButton) stopButton.disabled = false;
+                
                 return; // Success!
                 
             } catch (playError) {
@@ -744,8 +920,8 @@ async function startAudioPlayback() {
                     throw playError; // Re-throw after max retries
                 }
                 
-                // Wait before retry
-                await new Promise(resolve => setTimeout(resolve, 1000));
+                // Wait before retry with exponential backoff
+                await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
             }
         }
         
@@ -761,9 +937,13 @@ async function startAudioPlayback() {
             error.message.includes('MEDIA_ELEMENT_ERROR')) {
             userMessage = 'Audio format not supported by your browser. Try downloading instead.';
         } else if (error.message.includes('network') || error.message.includes('fetch')) {
-            userMessage = 'Network error - please try again';
+            userMessage = 'Network error - please check your connection';
         } else if (error.message.includes('decode')) {
             userMessage = 'Audio file is corrupted or incompatible';
+        } else if (error.message.includes('timeout')) {
+            userMessage = 'Audio loading timeout - file may be too large';
+        } else if (error.message.includes('AbortError')) {
+            userMessage = 'Playback was interrupted';
         }
         
         showToast(userMessage, 'error');
@@ -839,9 +1019,16 @@ function updateAudioProgress() {
     if (!audioPlayer || !audioPlayer.duration) return;
     
     const progress = (audioPlayer.currentTime / audioPlayer.duration) * 100;
-    // TODO: Update progress bar in sidebar when implemented
     
-    // Update time display if elements exist
+    // Update progress bar
+    const progressBar = document.getElementById('progress-bar');
+    if (progressBar && !progressBar.dataset.seeking) {
+        progressBar.value = progress;
+        // Update CSS custom property for visual progress fill
+        progressBar.style.setProperty('--progress-percent', `${progress}%`);
+    }
+    
+    // Update time display
     const currentTimeElement = document.getElementById('current-time');
     const totalTimeElement = document.getElementById('total-time');
     
@@ -857,6 +1044,19 @@ function onAudioEnded() {
     // Handle audio playback completion
     console.log('🏁 Audio playback ended');
     setPlayingState(false);
+    
+    // Reset progress to beginning
+    const progressBar = document.getElementById('progress-bar');
+    if (progressBar) {
+        progressBar.value = 0;
+        progressBar.style.setProperty('--progress-percent', '0%');
+    }
+    
+    const currentTimeElement = document.getElementById('current-time');
+    if (currentTimeElement) {
+        currentTimeElement.textContent = '0:00';
+    }
+    
     // TODO: Auto-advance to next track if queue exists
 }
 
