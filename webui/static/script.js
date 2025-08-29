@@ -520,10 +520,13 @@ function clearTrack() {
     
     // Reset progress bar and time displays
     const progressBar = document.getElementById('progress-bar');
+    const progressFill = document.getElementById('progress-fill');
     if (progressBar) {
         progressBar.value = 0;
-        progressBar.style.setProperty('--progress-percent', '0%');
         delete progressBar.dataset.seeking;
+    }
+    if (progressFill) {
+        progressFill.style.width = '0%';
     }
     
     const currentTimeElement = document.getElementById('current-time');
@@ -580,7 +583,10 @@ function handleProgressBarChange(event) {
         audioPlayer.currentTime = newTime;
         
         // Update visual progress immediately
-        event.target.style.setProperty('--progress-percent', `${progress}%`);
+        const progressFill = document.getElementById('progress-fill');
+        if (progressFill) {
+            progressFill.style.width = `${progress}%`;
+        }
         
         // Update time displays immediately
         const currentTimeElement = document.getElementById('current-time');
@@ -592,7 +598,10 @@ function handleProgressBarChange(event) {
         // Reset progress bar to current position
         const actualProgress = (audioPlayer.currentTime / audioPlayer.duration) * 100;
         event.target.value = actualProgress;
-        event.target.style.setProperty('--progress-percent', `${actualProgress}%`);
+        const progressFill = document.getElementById('progress-fill');
+        if (progressFill) {
+            progressFill.style.width = `${actualProgress}%`;
+        }
     }
 }
 
@@ -1019,10 +1028,13 @@ function updateAudioProgress() {
     
     // Update progress bar
     const progressBar = document.getElementById('progress-bar');
+    const progressFill = document.getElementById('progress-fill');
     if (progressBar && !progressBar.dataset.seeking) {
         progressBar.value = progress;
-        // Update CSS custom property for visual progress fill
-        progressBar.style.setProperty('--progress-percent', `${progress}%`);
+        // Update visual progress fill
+        if (progressFill) {
+            progressFill.style.width = `${progress}%`;
+        }
     }
     
     // Update time display
@@ -1044,9 +1056,12 @@ function onAudioEnded() {
     
     // Reset progress to beginning
     const progressBar = document.getElementById('progress-bar');
+    const progressFill = document.getElementById('progress-fill');
     if (progressBar) {
         progressBar.value = 0;
-        progressBar.style.setProperty('--progress-percent', '0%');
+    }
+    if (progressFill) {
+        progressFill.style.width = '0%';
     }
     
     const currentTimeElement = document.getElementById('current-time');
