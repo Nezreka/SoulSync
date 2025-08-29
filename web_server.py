@@ -3453,6 +3453,18 @@ def get_database_stats():
         print(f"Error getting database stats: {e}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/wishlist/count', methods=['GET'])
+def get_wishlist_count():
+    """Endpoint to get current wishlist count."""
+    try:
+        from core.wishlist_service import get_wishlist_service
+        wishlist_service = get_wishlist_service()
+        count = wishlist_service.get_wishlist_count()
+        return jsonify({"count": count})
+    except Exception as e:
+        print(f"Error getting wishlist count: {e}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/api/database/update', methods=['POST'])
 def start_database_update():
     """Endpoint to start the database update process."""
