@@ -15,7 +15,7 @@ import re
 from pathlib import Path
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from flask import Flask, render_template, request, jsonify, redirect, send_file
+from flask import Flask, render_template, request, jsonify, redirect, send_file, Response
 
 # --- Core Application Imports ---
 # Import the same core clients and config manager used by the GUI app
@@ -481,8 +481,13 @@ album_name_cache = {}  # album_key -> cached_final_name
 def _prepare_stream_task(track_data):
     """
     Background streaming task that downloads track to Stream folder and updates global state.
-    This replicates the logic from StreamingThread.run() in the GUI app.
+    Enhanced version with robust error handling matching the GUI StreamingThread.
     """
+    loop = None
+    queue_start_time = None
+    actively_downloading = False
+    last_progress_sent = 0.0
+    
     try:
         print(f"🎵 Starting stream preparation for: {track_data.get('filename')}")
         
@@ -498,7 +503,7 @@ def _prepare_stream_task(track_data):
         
         # Get paths
         download_path = config_manager.get('soulseek.download_path', './downloads')
-        project_root = os.path.dirname(os.path.abspath(__file__))  # Web server root
+        project_root = os.path.dirname(os.path.abspath(__file__))
         stream_folder = os.path.join(project_root, 'Stream')
         
         # Ensure Stream directory exists
@@ -530,16 +535,26 @@ def _prepare_stream_task(track_data):
                 with stream_lock:
                     stream_state.update({
                         "status": "error",
-                        "error_message": "Failed to initiate download"
+                        "error_message": "Failed to initiate download - uploader may be offline"
                     })
                 return
             
-            # Poll for completion with progress updates
-            max_wait_time = 45  # Wait up to 45 seconds
-            poll_interval = 2   # Check every 2 seconds
+            print(f"✓ Download initiated for streaming")
             
-            for wait_count in range(max_wait_time // poll_interval):
+            # Enhanced monitoring with queue timeout detection (matching GUI)
+            max_wait_time = 60  # Increased timeout
+            poll_interval = 1.5  # More frequent polling
+            queue_timeout = 15   # Queue timeout like GUI
+            wait_count = 0
+            
+            while wait_count * poll_interval < max_wait_time:
+                wait_count += 1
+                
                 # Check download progress via slskd API
+                api_progress = None
+                download_state = None
+                download_status = None
+                
                 try:
                     transfers_data = loop.run_until_complete(soulseek_client._make_request('GET', 'transfers/downloads'))
                     download_status = _find_streaming_download_in_transfers(transfers_data, track_data)
@@ -549,80 +564,159 @@ def _prepare_stream_task(track_data):
                         download_state = download_status.get('state', '').lower()
                         original_state = download_status.get('state', '')
                         
-                        # Update progress
-                        with stream_lock:
-                            stream_state["progress"] = api_progress
-                            if 'queued' in download_state or 'initializing' in download_state:
+                        print(f"API Download - State: {original_state}, Progress: {api_progress:.1f}%")
+                        
+                        # Track queue state timing (matching GUI logic)
+                        is_queued = ('queued' in download_state or 'initializing' in download_state)
+                        is_downloading = ('inprogress' in download_state or 'transferring' in download_state)
+                        is_completed = ('succeeded' in download_state or api_progress >= 100)
+                        
+                        # Handle queue state timing
+                        if is_queued and queue_start_time is None:
+                            queue_start_time = time.time()
+                            print(f"📋 Download entered queue state: {original_state}")
+                            with stream_lock:
                                 stream_state["status"] = "queued"
-                            elif 'inprogress' in download_state:
+                        elif is_downloading and not actively_downloading:
+                            actively_downloading = True
+                            queue_start_time = None  # Reset queue timer
+                            print(f"🚀 Download started actively downloading: {original_state}")
+                            with stream_lock:
                                 stream_state["status"] = "loading"
                         
-                        # Check if download is complete
-                        is_completed = ('Succeeded' in original_state or 
-                                      ('Completed' in original_state and 'Errored' not in original_state) or 
-                                      api_progress >= 100)
+                        # Check for queue timeout (matching GUI)
+                        if is_queued and queue_start_time:
+                            queue_elapsed = time.time() - queue_start_time
+                            if queue_elapsed > queue_timeout:
+                                print(f"⏰ Queue timeout after {queue_elapsed:.1f}s - download stuck in queue")
+                                with stream_lock:
+                                    stream_state.update({
+                                        "status": "error",
+                                        "error_message": "Queue timeout - uploader not responding. Try another source."
+                                    })
+                                return
                         
+                        # Update progress
+                        with stream_lock:
+                            if api_progress != last_progress_sent:
+                                stream_state["progress"] = api_progress
+                                last_progress_sent = api_progress
+                        
+                        # Check if download is complete
                         if is_completed:
                             print(f"✓ Download completed via API status: {original_state}")
-                            # Try to find the actual file
+                            
+                            # Give file system time to sync
+                            time.sleep(1)
+                            
                             found_file = _find_downloaded_file(download_path, track_data)
                             
+                            # Retry file search a few times (matching GUI logic)
+                            retry_attempts = 5
+                            for attempt in range(retry_attempts):
+                                if found_file:
+                                    break
+                                print(f"File not found yet, attempt {attempt + 1}/{retry_attempts}")
+                                time.sleep(1)
+                                found_file = _find_downloaded_file(download_path, track_data)
+                            
                             if found_file:
+                                print(f"✓ Found downloaded file: {found_file}")
+                                
                                 # Move file to Stream folder
                                 original_filename = os.path.basename(found_file)
                                 stream_path = os.path.join(stream_folder, original_filename)
                                 
-                                shutil.move(found_file, stream_path)
-                                print(f"✓ Moved file to stream folder: {stream_path}")
-                                
-                                # Update state to ready
+                                try:
+                                    shutil.move(found_file, stream_path)
+                                    print(f"✓ Moved file to stream folder: {stream_path}")
+                                    
+                                    # Clean up empty directories (matching GUI)
+                                    _cleanup_empty_directories(download_path, found_file)
+                                    
+                                    # Update state to ready
+                                    with stream_lock:
+                                        stream_state.update({
+                                            "status": "ready",
+                                            "progress": 100,
+                                            "file_path": stream_path
+                                        })
+                                    
+                                    # Clean up download from slskd API
+                                    try:
+                                        download_id = download_status.get('id', '')
+                                        if download_id and track_data.get('username'):
+                                            success = loop.run_until_complete(
+                                                soulseek_client.signal_download_completion(
+                                                    download_id, track_data.get('username'), remove=True)
+                                            )
+                                            if success:
+                                                print(f"✓ Cleaned up download {download_id} from API")
+                                    except Exception as e:
+                                        print(f"⚠️ Error cleaning up download: {e}")
+                                    
+                                    print(f"✅ Stream file ready for playback: {stream_path}")
+                                    return  # Success!
+                                    
+                                except Exception as e:
+                                    print(f"❌ Error moving file to stream folder: {e}")
+                                    with stream_lock:
+                                        stream_state.update({
+                                            "status": "error",
+                                            "error_message": f"Failed to prepare stream file: {e}"
+                                        })
+                                    return
+                            else:
+                                print("❌ Could not find downloaded file after completion")
                                 with stream_lock:
                                     stream_state.update({
-                                        "status": "ready",
-                                        "progress": 100,
-                                        "file_path": stream_path
+                                        "status": "error",
+                                        "error_message": "Download completed but file not found"
                                     })
-                                
-                                # Clean up download from slskd API
-                                try:
-                                    download_id = download_status.get('id', '')
-                                    if download_id:
-                                        success = loop.run_until_complete(
-                                            soulseek_client.signal_download_completion(
-                                                download_id, track_data.get('username'), remove=True)
-                                        )
-                                        if success:
-                                            print(f"✓ Cleaned up download {download_id} from API")
-                                except Exception as e:
-                                    print(f"⚠️ Error cleaning up download: {e}")
-                                
-                                return  # Success!
-                            else:
-                                print("❌ Could not find downloaded file")
-                                break
-                    
+                                return
+                    else:
+                        # No transfer found in API - may still be initializing
+                        print(f"No transfer found in API yet... (elapsed: {wait_count * poll_interval}s)")
+                        
                 except Exception as e:
                     print(f"⚠️ Error checking download progress: {e}")
+                    # Continue to next iteration if API call fails
                 
                 # Wait before next poll
                 time.sleep(poll_interval)
             
             # If we get here, download timed out
+            print(f"❌ Download timed out after {max_wait_time}s")
             with stream_lock:
                 stream_state.update({
                     "status": "error", 
-                    "error_message": "Download timed out"
+                    "error_message": "Download timed out - try a different source"
                 })
                 
+        except asyncio.CancelledError:
+            print("🛑 Stream task cancelled")
+            with stream_lock:
+                stream_state.update({
+                    "status": "stopped",
+                    "error_message": None
+                })
         finally:
-            loop.close()
+            if loop:
+                try:
+                    # Clean up any pending tasks
+                    pending = asyncio.all_tasks(loop)
+                    if pending:
+                        loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                    loop.close()
+                except Exception as e:
+                    print(f"⚠️ Error cleaning up streaming event loop: {e}")
             
     except Exception as e:
         print(f"❌ Stream preparation failed: {e}")
         with stream_lock:
             stream_state.update({
                 "status": "error",
-                "error_message": str(e)
+                "error_message": f"Streaming error: {str(e)}"
             })
 
 def _find_streaming_download_in_transfers(transfers_data, track_data):
@@ -1500,7 +1594,7 @@ def stream_status():
 
 @app.route('/stream/audio')
 def stream_audio():
-    """Serve the audio file from the Stream folder"""
+    """Serve the audio file from the Stream folder with range request support"""
     try:
         with stream_lock:
             if stream_state["status"] != "ready" or not stream_state["file_path"]:
@@ -1525,9 +1619,70 @@ def stream_audio():
             '.wma': 'audio/x-ms-wma'
         }
         
-        mimetype = mime_types.get(file_ext, 'audio/mpeg')  # Default to MP3
+        mimetype = mime_types.get(file_ext, 'audio/mpeg')
         
-        return send_file(file_path, as_attachment=False, mimetype=mimetype)
+        # Get file size
+        file_size = os.path.getsize(file_path)
+        
+        # Handle range requests (important for HTML5 audio seeking)
+        range_header = request.headers.get('Range', None)
+        if range_header:
+            byte_start = 0
+            byte_end = file_size - 1
+            
+            # Parse range header (format: "bytes=start-end")
+            try:
+                range_match = re.match(r'bytes=(\d*)-(\d*)', range_header)
+                if range_match:
+                    start_str, end_str = range_match.groups()
+                    if start_str:
+                        byte_start = int(start_str)
+                    if end_str:
+                        byte_end = int(end_str)
+                    else:
+                        # If no end specified, serve from start to end of file
+                        byte_end = file_size - 1
+            except (ValueError, AttributeError):
+                # Invalid range header, serve full file
+                pass
+            
+            # Ensure valid range
+            byte_start = max(0, byte_start)
+            byte_end = min(file_size - 1, byte_end)
+            content_length = byte_end - byte_start + 1
+            
+            # Create response with partial content
+            def generate():
+                with open(file_path, 'rb') as f:
+                    f.seek(byte_start)
+                    remaining = content_length
+                    while remaining:
+                        chunk_size = min(8192, remaining)  # 8KB chunks
+                        chunk = f.read(chunk_size)
+                        if not chunk:
+                            break
+                        remaining -= len(chunk)
+                        yield chunk
+            
+            response = Response(generate(), 
+                              status=206,  # Partial Content
+                              mimetype=mimetype,
+                              direct_passthrough=True)
+            
+            # Set range headers
+            response.headers.add('Content-Range', f'bytes {byte_start}-{byte_end}/{file_size}')
+            response.headers.add('Accept-Ranges', 'bytes')
+            response.headers.add('Content-Length', str(content_length))
+            response.headers.add('Cache-Control', 'no-cache')
+            
+            return response
+        else:
+            # No range request, serve entire file
+            response = send_file(file_path, as_attachment=False, mimetype=mimetype)
+            response.headers.add('Accept-Ranges', 'bytes')
+            response.headers.add('Content-Length', str(file_size))
+            response.headers.add('Cache-Control', 'no-cache')
+            return response
         
     except Exception as e:
         print(f"❌ Error serving audio file: {e}")

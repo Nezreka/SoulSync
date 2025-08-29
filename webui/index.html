@@ -64,6 +64,19 @@
                 <!-- Expanded Content (hidden initially) -->
                 <div class="media-expanded hidden" id="media-expanded">
                     <div class="album-name" id="album-name">Unknown Album</div>
+                    
+                    <!-- Progress Bar and Time Display -->
+                    <div class="progress-section">
+                        <div class="time-display">
+                            <span class="current-time" id="current-time">0:00</span>
+                            <span class="time-separator">/</span>
+                            <span class="total-time" id="total-time">0:00</span>
+                        </div>
+                        <div class="progress-bar-container">
+                            <input type="range" class="progress-bar" id="progress-bar" min="0" max="100" value="0" step="0.1">
+                        </div>
+                    </div>
+                    
                     <div class="media-controls">
                         <div class="volume-control">
                             <span class="volume-icon">🔊</span>

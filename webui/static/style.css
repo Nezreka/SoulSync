@@ -334,6 +334,99 @@ body {
     opacity: 0.8;
 }
 
+/* Progress Section Styling */
+.progress-section {
+    margin-bottom: 12px;
+}
+
+.time-display {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+    font-family: 'Spotify Circular', -apple-system, monospace;
+    font-size: 10px;
+    color: #b3b3b3;
+    font-weight: 400;
+}
+
+.current-time, .total-time {
+    min-width: 32px;
+    text-align: center;
+}
+
+.time-separator {
+    color: #666666;
+}
+
+.progress-bar-container {
+    position: relative;
+    width: 100%;
+}
+
+.progress-bar {
+    width: 100%;
+    height: 20px;
+    background: transparent;
+    outline: none;
+    cursor: pointer;
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+.progress-bar::-webkit-slider-track {
+    width: 100%;
+    height: 3px;
+    background: linear-gradient(to right, #1db954 0%, #1db954 var(--progress-percent, 0%), #4f4f4f var(--progress-percent, 0%), #4f4f4f 100%);
+    border-radius: 2px;
+}
+
+.progress-bar::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 12px;
+    height: 12px;
+    background: #1db954;
+    border-radius: 50%;
+    cursor: pointer;
+    border: none;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    transition: all 0.15s ease;
+}
+
+.progress-bar::-webkit-slider-thumb:hover {
+    background: #1ed760;
+    transform: scale(1.1);
+}
+
+.progress-bar::-webkit-slider-thumb:active {
+    transform: scale(1.15);
+    box-shadow: 0 0 0 3px rgba(29, 185, 84, 0.3);
+}
+
+/* Firefox progress bar styling */
+.progress-bar::-moz-range-track {
+    width: 100%;
+    height: 3px;
+    background: linear-gradient(to right, #1db954 0%, #1db954 var(--progress-percent, 0%), #4f4f4f var(--progress-percent, 0%), #4f4f4f 100%);
+    border-radius: 2px;
+    border: none;
+}
+
+.progress-bar::-moz-range-thumb {
+    width: 12px;
+    height: 12px;
+    background: #1db954;
+    border-radius: 50%;
+    cursor: pointer;
+    border: none;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.progress-bar::-moz-range-thumb:hover {
+    background: #1ed760;
+}
+
 .media-controls {
     display: flex;
     align-items: center;
