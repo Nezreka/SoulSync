@@ -27,6 +27,7 @@ let isSortReversed = false;
 let searchAbortController = null;
 let dbStatsInterval = null;
 let dbUpdateStatusInterval = null;
+let wishlistCountInterval = null;
 
 // --- Add these globals for the Sync Page ---
 let spotifyPlaylists = [];
@@ -273,6 +274,7 @@ async function loadPageData(pageId) {
         // Stop any active polling when navigating away
         stopDbStatsPolling();
         stopDbUpdatePolling();
+        stopWishlistCountPolling();
         switch (pageId) {
             case 'dashboard':
                 stopDownloadPolling();
@@ -1733,6 +1735,14 @@ async function loadDashboardData() {
                 </div>
             `).join('');
         }
+        
+        // Initialize wishlist count when dashboard loads
+        await updateWishlistCount();
+        
+        // Start periodic refresh of wishlist count (every 30 seconds, matching GUI behavior)
+        stopWishlistCountPolling(); // Ensure no duplicates
+        wishlistCountInterval = setInterval(updateWishlistCount, 30000);
+        
     } catch (error) {
         console.error('Error loading dashboard data:', error);
     }
@@ -4946,6 +4956,13 @@ function stopDbUpdatePolling() {
     }
 }
 
+function stopWishlistCountPolling() {
+    if (wishlistCountInterval) {
+        clearInterval(wishlistCountInterval);
+        wishlistCountInterval = null;
+    }
+}
+
 async function loadDashboardData() {
     // Attach event listeners for the DB updater tool
     const updateButton = document.getElementById('db-update-button');
@@ -4959,6 +4976,13 @@ async function loadDashboardData() {
     // Start periodic refresh of stats (every 30 seconds)
     stopDbStatsPolling(); // Ensure no duplicates
     dbStatsInterval = setInterval(fetchAndUpdateDbStats, 30000);
+
+    // Initial load of wishlist count
+    await updateWishlistCount();
+    
+    // Start periodic refresh of wishlist count (every 30 seconds, matching GUI behavior)
+    stopWishlistCountPolling(); // Ensure no duplicates
+    wishlistCountInterval = setInterval(updateWishlistCount, 30000);
 
     // Also check the status of any ongoing update when the page loads
     await checkAndUpdateDbProgress();
@@ -5018,6 +5042,35 @@ function updateDbUpdaterCardInfo(stats) {
     if (toolCardTitle && stats.server_source) {
         const serverName = stats.server_source.charAt(0).toUpperCase() + stats.server_source.slice(1);
         toolCardTitle.textContent = `${serverName} Database Updater`;
+    }
+}
+
+// --- Wishlist Count Functions ---
+
+async function updateWishlistCount() {
+    try {
+        const response = await fetch('/api/wishlist/count');
+        if (!response.ok) return;
+        
+        const data = await response.json();
+        const count = data.count || 0;
+        
+        const wishlistButton = document.getElementById('wishlist-button');
+        if (wishlistButton) {
+            wishlistButton.textContent = `🎵 Wishlist (${count})`;
+            
+            // Update button styling based on count (matching GUI behavior)
+            if (count === 0) {
+                wishlistButton.classList.remove('wishlist-active');
+                wishlistButton.classList.add('wishlist-inactive');
+            } else {
+                wishlistButton.classList.remove('wishlist-inactive');
+                wishlistButton.classList.add('wishlist-active');
+            }
+        }
+        
+    } catch (error) {
+        console.warn('Could not fetch wishlist count:', error);
     }
 }
 

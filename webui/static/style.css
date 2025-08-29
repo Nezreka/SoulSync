@@ -3411,6 +3411,23 @@ body {
     background: linear-gradient(135deg, #1ed760 0%, #22ff6b 100%);
 }
 
+/* Wishlist button states based on count */
+.wishlist-button.wishlist-inactive {
+    background: linear-gradient(135deg, #404040 0%, #505050 100%);
+    color: #888888;
+}
+.wishlist-button.wishlist-inactive:hover {
+    background: linear-gradient(135deg, #505050 0%, #666666 100%);
+    color: #999999;
+}
+.wishlist-button.wishlist-active {
+    background: linear-gradient(135deg, #1db954 0%, #1ed760 100%);
+    color: #000000;
+}
+.wishlist-button.wishlist-active:hover {
+    background: linear-gradient(135deg, #1ed760 0%, #22ff6b 100%);
+}
+
 .watchlist-button {
     background: linear-gradient(135deg, #ffc107 0%, #ffca28 100%);
 }
