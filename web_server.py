@@ -3877,9 +3877,7 @@ def _download_track_worker(task_id, batch_id=None):
                     return
                 if download_tasks[task_id]['status'] == 'cancelled':
                     print(f"❌ [Modal Worker] Task {task_id} cancelled during query {query_index + 1}")
-                    # Free worker slot when cancelled
-                    if batch_id:
-                        _on_download_completed(batch_id, task_id, success=False)
+                    # Don't call _on_download_completed for cancelled tasks as it can stop monitoring
                     return
                 download_tasks[task_id]['current_query_index'] = query_index
                     
@@ -3888,16 +3886,35 @@ def _download_track_worker(task_id, batch_id=None):
             try:
                 # Perform search with timeout
                 tracks_result, _ = asyncio.run(soulseek_client.search(query, timeout=30))
+                
+                # CRITICAL: Check cancellation immediately after search returns
+                with tasks_lock:
+                    if task_id not in download_tasks:
+                        print(f"❌ [Modal Worker] Task {task_id} was deleted after search returned")
+                        return
+                    if download_tasks[task_id]['status'] == 'cancelled':
+                        print(f"❌ [Modal Worker] Task {task_id} cancelled after search returned - ignoring results")
+                        # Don't call _on_download_completed for cancelled tasks as it can stop monitoring
+                        # The cancellation endpoint already handles batch management properly
+                        return
+                
                 if tracks_result:
                     # Validate candidates using GUI's get_valid_candidates logic
                     candidates = get_valid_candidates(tracks_result, track, query)
                     if candidates:
                         print(f"✅ [Modal Worker] Found {len(candidates)} valid candidates for query '{query}'")
                         
-                        # Store candidates for retry fallback (like GUI)
+                        # CRITICAL: Check cancellation before processing candidates  
                         with tasks_lock:
-                            if task_id in download_tasks:
-                                download_tasks[task_id]['cached_candidates'] = candidates
+                            if task_id not in download_tasks:
+                                print(f"❌ [Modal Worker] Task {task_id} was deleted before processing candidates")
+                                return
+                            if download_tasks[task_id]['status'] == 'cancelled':
+                                print(f"❌ [Modal Worker] Task {task_id} cancelled before processing candidates")
+                                # Don't call _on_download_completed for cancelled tasks as it can stop monitoring
+                                return
+                            # Store candidates for retry fallback (like GUI)
+                            download_tasks[task_id]['cached_candidates'] = candidates
                         
                         # Try to download with these candidates
                         success = _attempt_download_with_candidates(task_id, candidates, track, batch_id)
@@ -3956,9 +3973,7 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
                 return False
             if download_tasks[task_id]['status'] == 'cancelled':
                 print(f"❌ [Modal Worker] Task {task_id} cancelled during candidate {candidate_index + 1}")
-                # Free worker slot when cancelled
-                if batch_id:
-                    _on_download_completed(batch_id, task_id, success=False)
+                # Don't call _on_download_completed for cancelled tasks as it can stop monitoring
                 return False
             download_tasks[task_id]['current_candidate_index'] = candidate_index
             
@@ -4349,14 +4364,11 @@ def cancel_download_task():
             }
 
             # Add to wishlist, treating cancellation as a failure
-            failed_track_info = {
-                'spotify_track': type('Track', (object,), spotify_track_data)(),
-                'track_info': track_info # Pass the original info
-            }
-
-            success = wishlist_service.add_failed_track_from_modal(
-                track_info=failed_track_info,
-                source_type="playlist",
+            # Pass the spotify data directly instead of creating a fake Track object
+            success = wishlist_service.add_spotify_track_to_wishlist(
+                spotify_track_data=spotify_track_data,
+                failure_reason="Download cancelled by user",
+                source_type="playlist", 
                 source_context=source_context
             )
             
