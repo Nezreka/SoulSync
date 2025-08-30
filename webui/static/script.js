@@ -29,6 +29,9 @@ let dbStatsInterval = null;
 let dbUpdateStatusInterval = null;
 let wishlistCountInterval = null;
 
+// --- Auto Wishlist Processing (Simple Timer System) ---
+let autoWishlistTimer = null;
+
 // --- Add these globals for the Sync Page ---
 let spotifyPlaylists = [];
 let selectedPlaylists = new Set();
@@ -275,6 +278,7 @@ async function loadPageData(pageId) {
         stopDbStatsPolling();
         stopDbUpdatePolling();
         stopWishlistCountPolling();
+        stopAutoWishlistProcessing();
         switch (pageId) {
             case 'dashboard':
                 stopDownloadPolling();
@@ -2661,6 +2665,12 @@ function startModalDownloadPolling(playlistId) {
                 document.getElementById(`stat-downloaded-${playlistId}`).textContent = completedCount;
 
                 if (data.phase === 'complete' || data.phase === 'error' || (missingCount > 0 && totalFinished >= missingCount)) {
+                    // Enhanced check for background auto-processing for wishlist
+                    const isWishlist = (playlistId === 'wishlist');
+                    const isModalHidden = (process.modalElement && process.modalElement.style.display === 'none');
+                    const hasAutoTimer = (autoWishlistTimer !== null);
+                    const isBackgroundWishlist = isWishlist && (isModalHidden || hasAutoTimer);
+                    
                     if (data.phase === 'cancelled') {
                         process.status = 'cancelled';
                         showToast(`Process cancelled for ${process.playlist.name}.`, 'info');
@@ -2669,6 +2679,22 @@ function startModalDownloadPolling(playlistId) {
                         showToast(`Process for ${process.playlist.name} failed!`, 'error');
                     } else {
                         process.status = 'complete';
+                        
+                        // Handle background wishlist processing completion specially
+                        if (isBackgroundWishlist) {
+                            console.log(`🎉 Background wishlist processing complete: ${completedCount} downloaded, ${failedOrCancelledCount} failed`);
+                            
+                            // Clean up polling first
+                            clearInterval(process.poller);
+                            
+                            // Reset modal to idle state to prevent "complete" phase disruption
+                            setTimeout(() => {
+                                resetWishlistModalToIdleState();
+                                scheduleNextAutoWishlist(); // Schedule next cycle
+                            }, 500);
+                            
+                            return; // Skip normal completion handling
+                        }
                         
                         // Show completion summary with wishlist stats (matching sync.py behavior)
                         let completionMessage = `Process complete for ${process.playlist.name}!`;
@@ -5248,6 +5274,190 @@ function stopWishlistCountPolling() {
     }
 }
 
+// --- Auto Wishlist Processing (Simple Implementation) ---
+
+function startAutoWishlistProcessing() {
+    console.log("🔄 Starting automatic wishlist processing system (1 minute initial delay)");
+    stopAutoWishlistProcessing(); // Prevent duplicates
+    autoWishlistTimer = setTimeout(processWishlistAutomatically, 60000); // 1 minute
+}
+
+function stopAutoWishlistProcessing() {
+    if (autoWishlistTimer) {
+        clearTimeout(autoWishlistTimer);
+        autoWishlistTimer = null;
+        console.log("⏹️ Stopped automatic wishlist processing");
+    }
+}
+
+function scheduleNextAutoWishlist() {
+    console.log("⏰ Scheduling next automatic wishlist processing in 10 minutes");
+    autoWishlistTimer = setTimeout(processWishlistAutomatically, 600000); // 10 minutes
+}
+
+async function processWishlistAutomatically() {
+    console.log("🤖 Starting automatic wishlist processing...");
+    
+    try {
+        // Check if wishlist has tracks
+        const countResponse = await fetch('/api/wishlist/count');
+        if (!countResponse.ok) {
+            console.warn("⚠️ Could not fetch wishlist count, will retry next cycle");
+            scheduleNextAutoWishlist();
+            return;
+        }
+        
+        const countData = await countResponse.json();
+        if (countData.count === 0) {
+            console.log("ℹ️ Wishlist is empty, skipping automatic processing");
+            scheduleNextAutoWishlist();
+            return;
+        }
+        
+        console.log(`🎵 Found ${countData.count} tracks in wishlist, starting automatic processing...`);
+        
+        const playlistId = 'wishlist';
+        
+        // Check if processing is already active
+        if (activeDownloadProcesses[playlistId] && activeDownloadProcesses[playlistId].status === 'running') {
+            console.log("⚠️ Wishlist processing already active, skipping automatic start");
+            scheduleNextAutoWishlist();
+            return;
+        }
+        
+        // Check if modal is currently being viewed by user
+        const existingModal = document.getElementById(`download-missing-modal-${playlistId}`);
+        const userIsViewingModal = existingModal && existingModal.style.display === 'flex';
+        
+        console.log("🤖 Setting up wishlist modal for automatic processing");
+        console.log(`🔍 User currently viewing modal: ${userIsViewingModal}`);
+        
+        // Create modal if it doesn't exist, but keep it hidden for background processing
+        if (!existingModal) {
+            await openDownloadMissingWishlistModal();
+            // Immediately hide the modal since this is background processing
+            const modal = document.getElementById(`download-missing-modal-${playlistId}`);
+            if (modal) {
+                modal.style.display = 'none';
+                console.log("🤖 Modal created and hidden for background processing");
+            }
+        }
+        
+        // Wait a moment for modal to be ready, then programmatically click "Begin Analysis"
+        setTimeout(() => {
+            const beginButton = document.getElementById(`begin-analysis-btn-${playlistId}`);
+            const modal = document.getElementById(`download-missing-modal-${playlistId}`);
+            
+            console.log(`🔍 Looking for button with ID: begin-analysis-btn-${playlistId}`);
+            console.log(`🔍 Button found:`, beginButton);
+            
+            if (beginButton) {
+                // Check if button is visible and clickable
+                const buttonStyle = window.getComputedStyle(beginButton);
+                console.log(`🔍 Button display style:`, buttonStyle.display);
+                console.log(`🔍 Button disabled:`, beginButton.disabled);
+                
+                if (buttonStyle.display === 'none' || beginButton.disabled) {
+                    console.warn("⚠️ Begin Analysis button is hidden or disabled, skipping automatic click");
+                    scheduleNextAutoWishlist();
+                    return;
+                }
+                
+                console.log("🤖 Programmatically clicking 'Begin Analysis' button");
+                beginButton.click();
+                
+                // Only hide modal if user wasn't actively viewing it
+                if (!userIsViewingModal) {
+                    setTimeout(() => {
+                        const modal = document.getElementById(`download-missing-modal-${playlistId}`);
+                        if (modal && modal.style.display !== 'none') {
+                            modal.style.display = 'none';
+                            console.log("🤖 Modal hidden - processing continues in background");
+                        }
+                    }, 500);
+                } else {
+                    console.log("🤖 User is viewing modal - keeping it visible with live updates");
+                }
+                
+            } else {
+                console.warn("⚠️ Could not find Begin Analysis button, will retry next cycle");
+                console.log("🔍 Available buttons with 'begin-analysis' in ID:", 
+                    Array.from(document.querySelectorAll('[id*="begin-analysis"]')).map(el => el.id));
+                scheduleNextAutoWishlist();
+            }
+        }, 1000);
+        
+    } catch (error) {
+        console.error("❌ Error in automatic wishlist processing:", error);
+        scheduleNextAutoWishlist();
+    }
+}
+
+function resetWishlistModalToIdleState() {
+    // Reset wishlist modal to idle state after background processing completes
+    const playlistId = 'wishlist';
+    const process = activeDownloadProcesses[playlistId];
+    
+    if (process) {
+        console.log('🔄 Resetting wishlist modal to idle state...');
+        
+        // Reset button states
+        const beginBtn = document.getElementById(`begin-analysis-btn-${playlistId}`);
+        const cancelBtn = document.getElementById(`cancel-all-btn-${playlistId}`);
+        if (beginBtn) {
+            beginBtn.style.display = 'inline-block';
+            beginBtn.disabled = false;
+            beginBtn.textContent = 'Begin Analysis';
+        }
+        if (cancelBtn) {
+            cancelBtn.style.display = 'none';
+        }
+        
+        // Reset progress displays
+        const analysisText = document.getElementById(`analysis-progress-text-${playlistId}`);
+        const analysisBar = document.getElementById(`analysis-progress-fill-${playlistId}`);
+        const downloadText = document.getElementById(`download-progress-text-${playlistId}`);
+        const downloadBar = document.getElementById(`download-progress-fill-${playlistId}`);
+        
+        if (analysisText) analysisText.textContent = 'Ready to start';
+        if (analysisBar) analysisBar.style.width = '0%';
+        if (downloadText) downloadText.textContent = 'Waiting for analysis';
+        if (downloadBar) downloadBar.style.width = '0%';
+        
+        // Reset all track rows to pending state
+        const trackRows = document.querySelectorAll(`#download-missing-modal-${playlistId} tr[data-track-index]`);
+        trackRows.forEach((row, index) => {
+            const matchCell = row.querySelector(`#match-${playlistId}-${index}`);
+            const downloadCell = row.querySelector(`#download-${playlistId}-${index}`);
+            const actionsCell = row.querySelector(`#actions-${playlistId}-${index}`);
+            
+            if (matchCell) matchCell.textContent = '🔍 Pending';
+            if (downloadCell) downloadCell.textContent = '-';
+            if (actionsCell) actionsCell.innerHTML = '-';
+        });
+        
+        // Reset stats
+        const foundElement = document.getElementById(`stat-found-${playlistId}`);
+        const missingElement = document.getElementById(`stat-missing-${playlistId}`);
+        const downloadedElement = document.getElementById(`stat-downloaded-${playlistId}`);
+        if (foundElement) foundElement.textContent = '-';
+        if (missingElement) missingElement.textContent = '-';
+        if (downloadedElement) downloadedElement.textContent = '0';
+        
+        // Reset process status
+        process.status = 'idle';
+        process.batchId = null;
+        if (process.poller) {
+            clearInterval(process.poller);
+            process.poller = null;
+        }
+        
+        console.log('✅ Wishlist modal fully reset to idle state');
+    } else {
+        console.log('⚠️ No wishlist process found to reset');
+    }
+}
+
 async function loadDashboardData() {
     // Attach event listeners for the DB updater tool
     const updateButton = document.getElementById('db-update-button');
@@ -5280,6 +5490,9 @@ async function loadDashboardData() {
     
     // Check for any active download processes that need rehydration
     await checkForActiveProcesses();
+    
+    // Start automatic wishlist processing (1 minute delay, then every 10 minutes)
+    startAutoWishlistProcessing();
 }
 
 // --- Data Fetching and UI Updates ---
@@ -5597,3 +5810,9 @@ async function clearWishlist(playlistId) {
         }
     }
 }
+
+// --- Global Cleanup on Page Unload ---
+window.addEventListener('beforeunload', function() {
+    console.log("🧹 Page unload - stopping auto wishlist processing");
+    stopAutoWishlistProcessing();
+});
