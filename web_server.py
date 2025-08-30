@@ -3526,6 +3526,23 @@ def start_wishlist_missing_downloads():
         print(f"Error starting wishlist download process: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+@app.route('/api/wishlist/clear', methods=['POST'])
+def clear_wishlist():
+    """Endpoint to clear all tracks from the wishlist."""
+    try:
+        from core.wishlist_service import get_wishlist_service
+        wishlist_service = get_wishlist_service()
+        success = wishlist_service.clear_wishlist()
+        
+        if success:
+            return jsonify({"success": True, "message": "Wishlist cleared successfully"})
+        else:
+            return jsonify({"success": False, "error": "Failed to clear wishlist"}), 500
+            
+    except Exception as e:
+        print(f"Error clearing wishlist: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
 @app.route('/api/database/update', methods=['POST'])
 def start_database_update():
     """Endpoint to start the database update process."""
@@ -4348,11 +4365,33 @@ def cancel_download_task():
             track_info = task.get('track_info', {})
             
             # The wishlist service expects a dictionary with specific keys
-            # We can construct it from the track_info
+            # We need to properly format the artists to avoid nested structures
+            artists_data = track_info.get('artists', [])
+            formatted_artists = []
+            
+            for artist in artists_data:
+                if isinstance(artist, str):
+                    # Already a string, use as-is
+                    formatted_artists.append({'name': artist})
+                elif isinstance(artist, dict):
+                    # Check if it's already in the correct format
+                    if 'name' in artist and isinstance(artist['name'], str):
+                        # Already properly formatted
+                        formatted_artists.append(artist)
+                    elif 'name' in artist and isinstance(artist['name'], dict) and 'name' in artist['name']:
+                        # Nested structure, extract the inner name
+                        formatted_artists.append({'name': artist['name']['name']})
+                    else:
+                        # Fallback: convert to string
+                        formatted_artists.append({'name': str(artist)})
+                else:
+                    # Fallback for any other type
+                    formatted_artists.append({'name': str(artist)})
+            
             spotify_track_data = {
                 'id': track_info.get('id'),
                 'name': track_info.get('name'),
-                'artists': [{'name': artist} for artist in track_info.get('artists', [])],
+                'artists': formatted_artists,
                 'album': {'name': track_info.get('album')},
                 'duration_ms': track_info.get('duration_ms')
             }
