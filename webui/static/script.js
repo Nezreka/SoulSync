@@ -2466,6 +2466,9 @@ async function openDownloadMissingWishlistModal() {
                     <button class="download-control-btn danger" id="cancel-all-btn-${playlistId}" onclick="cancelAllOperations('${playlistId}')" style="display: none;">
                         Cancel All
                     </button>
+                    <button class="download-control-btn danger" id="clear-wishlist-btn-${playlistId}" onclick="clearWishlist('${playlistId}')" style="margin-left: 10px;">
+                        🗑️ Clear Wishlist
+                    </button>
                 </div>
                 <div class="modal-close-section">
                     <button class="download-control-btn secondary" onclick="closeDownloadMissingModal('${playlistId}')">Close</button>
@@ -5519,5 +5522,62 @@ async function handleWishlistButtonClick() {
     } catch (error) {
         console.error('Error handling wishlist button click:', error);
         showToast(`Error opening wishlist: ${error.message}`, 'error');
+    }
+}
+
+async function clearWishlist(playlistId) {
+    try {
+        // Show confirmation dialog
+        const confirmed = confirm(
+            "Clear Wishlist\n\n" +
+            "Are you sure you want to clear the entire wishlist?\n\n" +
+            "This will permanently remove all failed tracks from the wishlist. " +
+            "This action cannot be undone."
+        );
+        
+        if (!confirmed) {
+            return;
+        }
+        
+        // Disable the clear button during the operation
+        const clearBtn = document.getElementById(`clear-wishlist-btn-${playlistId}`);
+        if (clearBtn) {
+            clearBtn.disabled = true;
+            clearBtn.textContent = 'Clearing...';
+        }
+        
+        // Call the clear API endpoint
+        const response = await fetch('/api/wishlist/clear', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showToast('Wishlist cleared successfully', 'success');
+            
+            // Close the modal since there are no more tracks
+            closeDownloadMissingModal(playlistId);
+            
+            // Update the wishlist count in the main dashboard
+            await updateWishlistCount();
+            
+        } else {
+            showToast(`Failed to clear wishlist: ${result.error || 'Unknown error'}`, 'error');
+        }
+        
+    } catch (error) {
+        console.error('Error clearing wishlist:', error);
+        showToast(`Error clearing wishlist: ${error.message}`, 'error');
+    } finally {
+        // Re-enable the clear button
+        const clearBtn = document.getElementById(`clear-wishlist-btn-${playlistId}`);
+        if (clearBtn) {
+            clearBtn.disabled = false;
+            clearBtn.textContent = '🗑️ Clear Wishlist';
+        }
     }
 }
