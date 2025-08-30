@@ -2661,7 +2661,6 @@ function startModalDownloadPolling(playlistId) {
                 document.getElementById(`stat-downloaded-${playlistId}`).textContent = completedCount;
 
                 if (data.phase === 'complete' || data.phase === 'error' || (missingCount > 0 && totalFinished >= missingCount)) {
-                    // --- REPLACE THE INSIDE OF THIS IF BLOCK with the following ---
                     if (data.phase === 'cancelled') {
                         process.status = 'cancelled';
                         showToast(`Process cancelled for ${process.playlist.name}.`, 'info');
@@ -2670,14 +2669,31 @@ function startModalDownloadPolling(playlistId) {
                         showToast(`Process for ${process.playlist.name} failed!`, 'error');
                     } else {
                         process.status = 'complete';
-                        showToast(`Process complete for ${process.playlist.name}!`, 'success');
+                        
+                        // Show completion summary with wishlist stats (matching sync.py behavior)
+                        let completionMessage = `Process complete for ${process.playlist.name}!`;
+                        let messageType = 'success';
+                        
+                        // Check for wishlist summary from backend (added when failed/cancelled tracks are processed)
+                        if (data.wishlist_summary) {
+                            const summary = data.wishlist_summary;
+                            completionMessage = `Download process complete! Downloaded: ${completedCount}, Failed/Cancelled: ${failedOrCancelledCount}.`;
+                            
+                            if (summary.tracks_added > 0) {
+                                completionMessage += ` Added ${summary.tracks_added} failed track${summary.tracks_added !== 1 ? 's' : ''} to wishlist for automatic retry.`;
+                            } else if (summary.total_failed > 0) {
+                                completionMessage += ` ${summary.total_failed} track${summary.total_failed !== 1 ? 's' : ''} could not be added to wishlist.`;
+                                messageType = 'warning';
+                            }
+                        }
+                        
+                        showToast(completionMessage, messageType);
                     }
                     
                     document.getElementById(`cancel-all-btn-${playlistId}`).style.display = 'none';
                     clearInterval(process.poller);
                     process.poller = null;
                     updatePlaylistCardUI(playlistId);
-                    // --- END OF REPLACEMENT BLOCK ---
                 }
             }
         } catch (error) {

@@ -3511,7 +3511,10 @@ def start_wishlist_missing_downloads():
                 'queue_index': 0,
                 'analysis_total': len(wishlist_tracks),
                 'analysis_processed': 0,
-                'analysis_results': []
+                'analysis_results': [],
+                # Track state management (replicating sync.py)
+                'permanently_failed_tracks': [],
+                'cancelled_tracks': set()
             }
 
         # Submit the wishlist processing job using the same processing function
@@ -3650,12 +3653,267 @@ def _start_next_batch_of_downloads(batch_id):
             active_count += 1
             queue_index += 1
 
+def _get_track_artist_name(track_info):
+    """Extract artist name from track info, handling different data formats (replicating sync.py)"""
+    if not track_info:
+        return "Unknown Artist"
+    
+    # Handle Spotify API format with artists array
+    artists = track_info.get('artists', [])
+    if artists and len(artists) > 0:
+        if isinstance(artists[0], dict) and 'name' in artists[0]:
+            return artists[0]['name']
+        elif isinstance(artists[0], str):
+            return artists[0]
+    
+    # Fallback to single artist field
+    artist = track_info.get('artist')
+    if artist:
+        return artist
+        
+    return "Unknown Artist"
+
+def _ensure_spotify_track_format(track_info):
+    """
+    Ensure track_info has proper Spotify track structure for wishlist service.
+    Converts webui track format to match sync.py's spotify_track format.
+    """
+    if not track_info:
+        return {}
+    
+    # If it already has the proper Spotify structure, return as-is
+    if isinstance(track_info.get('artists'), list) and len(track_info.get('artists', [])) > 0:
+        first_artist = track_info['artists'][0]
+        if isinstance(first_artist, dict) and 'name' in first_artist:
+            # Already has proper Spotify format
+            return track_info
+    
+    # Convert to proper Spotify format
+    artists_list = []
+    
+    # Handle different artist formats from webui
+    artists = track_info.get('artists', [])
+    if artists:
+        if isinstance(artists, list):
+            for artist in artists:
+                if isinstance(artist, dict) and 'name' in artist:
+                    artists_list.append({'name': artist['name']})
+                elif isinstance(artist, str):
+                    artists_list.append({'name': artist})
+                else:
+                    artists_list.append({'name': str(artist)})
+        else:
+            # Single artist as string
+            artists_list.append({'name': str(artists)})
+    else:
+        # Fallback: try single artist field
+        artist = track_info.get('artist')
+        if artist:
+            artists_list.append({'name': str(artist)})
+        else:
+            artists_list.append({'name': 'Unknown Artist'})
+    
+    # Build proper Spotify track structure
+    spotify_track = {
+        'id': track_info.get('id', f"webui_{hash(str(track_info))}"),
+        'name': track_info.get('name', 'Unknown Track'),
+        'artists': artists_list,  # Proper Spotify format
+        'album': {
+            'name': track_info.get('album', {}).get('name') if isinstance(track_info.get('album'), dict) 
+                   else track_info.get('album', 'Unknown Album')
+        },
+        'duration_ms': track_info.get('duration_ms', 0),
+        'preview_url': track_info.get('preview_url'),
+        'external_urls': track_info.get('external_urls', {}),
+        'popularity': track_info.get('popularity', 0),
+        'source': 'webui_modal'  # Mark as coming from webui
+    }
+    
+    return spotify_track
+
+def _process_failed_tracks_to_wishlist_exact(batch_id):
+    """
+    Process failed and cancelled tracks to wishlist - EXACT replication of sync.py's on_all_downloads_complete() logic.
+    This matches sync.py's behavior precisely.
+    """
+    try:
+        from core.wishlist_service import get_wishlist_service
+        from datetime import datetime
+        
+        print(f"🔍 [Wishlist Processing] Starting wishlist processing for batch {batch_id}")
+        
+        with tasks_lock:
+            if batch_id not in download_batches:
+                print(f"⚠️ [Wishlist Processing] Batch {batch_id} not found")
+                return {'tracks_added': 0, 'errors': 0}
+        
+        batch = download_batches[batch_id]
+        permanently_failed_tracks = batch.get('permanently_failed_tracks', [])
+        cancelled_tracks = batch.get('cancelled_tracks', set())
+        
+        # STEP 1: Add cancelled tracks that were missing to permanently_failed_tracks (replicating sync.py)
+        # This matches sync.py's logic for adding cancelled missing tracks to the failed list
+        if cancelled_tracks:
+            print(f"🔍 [Wishlist Processing] Processing {len(cancelled_tracks)} cancelled tracks")
+            
+            # Process cancelled tracks with safeguard to prevent infinite loops
+            processed_count = 0
+            max_process = 100  # Safety limit
+            
+            with tasks_lock:
+                for task_id in batch.get('queue', [])[:max_process]:  # Limit processing
+                    if task_id in download_tasks:
+                        task = download_tasks[task_id]
+                        track_index = task.get('track_index', 0)
+                        if track_index in cancelled_tracks:
+                            # Check if track was actually missing (not successfully downloaded)
+                            task_status = task.get('status', 'unknown')
+                            if task_status != 'completed':
+                                # Build cancelled track info matching sync.py format
+                                original_track_info = task.get('track_info', {})
+                                spotify_track_data = _ensure_spotify_track_format(original_track_info)
+                                
+                                cancelled_track_info = {
+                                    'download_index': track_index,
+                                    'table_index': track_index,
+                                    'track_name': original_track_info.get('name', 'Unknown Track'),
+                                    'artist_name': _get_track_artist_name(original_track_info),
+                                    'retry_count': 0,
+                                    'spotify_track': spotify_track_data,  # Properly formatted spotify track
+                                    'failure_reason': 'Download cancelled',
+                                    'candidates': task.get('cached_candidates', [])
+                                }
+                                
+                                # Check if not already in permanently_failed_tracks (sync.py does this check)
+                                if not any(t.get('table_index') == track_index for t in permanently_failed_tracks):
+                                    permanently_failed_tracks.append(cancelled_track_info)
+                                    processed_count += 1
+                                    print(f"🚫 [Wishlist Processing] Added cancelled missing track {cancelled_track_info['track_name']} to failed list for wishlist")
+            
+            print(f"🔍 [Wishlist Processing] Processed {processed_count} cancelled tracks")
+        
+        # STEP 2: Add permanently failed tracks to wishlist (exact sync.py logic)
+        failed_count = len(permanently_failed_tracks)
+        wishlist_added_count = 0
+        error_count = 0
+        
+        print(f"🔍 [Wishlist Processing] Processing {failed_count} failed tracks for wishlist")
+        
+        if permanently_failed_tracks:
+            try:
+                wishlist_service = get_wishlist_service()
+                
+                # Create source_context identical to sync.py
+                source_context = {
+                    'playlist_name': batch.get('playlist_name', 'Unknown Playlist'),
+                    'playlist_id': batch.get('playlist_id', None),
+                    'added_from': 'webui_modal',  # Distinguish from sync_page_modal
+                    'timestamp': datetime.now().isoformat()
+                }
+                
+                # Process each failed track (matching sync.py's loop) with safety limit
+                max_failed_tracks = min(len(permanently_failed_tracks), 50)  # Safety limit
+                for i, failed_track_info in enumerate(permanently_failed_tracks[:max_failed_tracks]):
+                    try:
+                        track_name = failed_track_info.get('track_name', f'Track {i+1}')
+                        print(f"🔍 [Wishlist Processing] Adding track {i+1}/{max_failed_tracks}: {track_name}")
+                        
+                        success = wishlist_service.add_failed_track_from_modal(
+                            track_info=failed_track_info,
+                            source_type='playlist',
+                            source_context=source_context
+                        )
+                        if success:
+                            wishlist_added_count += 1
+                            print(f"✅ [Wishlist Processing] Added {track_name} to wishlist")
+                        else:
+                            print(f"⚠️ [Wishlist Processing] Failed to add {track_name} to wishlist")
+                            
+                    except Exception as e:
+                        error_count += 1
+                        print(f"❌ [Wishlist Processing] Exception adding track to wishlist: {e}")
+                
+                print(f"✨ [Wishlist Processing] Added {wishlist_added_count}/{failed_count} failed tracks to wishlist (errors: {error_count})")
+                        
+            except Exception as e:
+                error_count = len(permanently_failed_tracks)
+                print(f"❌ [Wishlist Processing] Critical error adding failed tracks to wishlist: {e}")
+                import traceback
+                traceback.print_exc()
+        else:
+            print(f"ℹ️ [Wishlist Processing] No failed tracks to add to wishlist")
+        
+        # Store completion summary in batch for API response (matching sync.py pattern)
+        completion_summary = {
+            'tracks_added': wishlist_added_count,
+            'errors': error_count,
+            'total_failed': failed_count
+        }
+        
+        with tasks_lock:
+            if batch_id in download_batches:
+                download_batches[batch_id]['wishlist_summary'] = completion_summary
+                # Phase already set to 'complete' in _on_download_completed
+        
+        print(f"✅ [Wishlist Processing] Completed wishlist processing for batch {batch_id}")
+        return completion_summary
+    
+    except Exception as e:
+        print(f"❌ [Wishlist Processing] CRITICAL ERROR in wishlist processing: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        # Mark batch as complete even with errors to prevent infinite loops
+        try:
+            with tasks_lock:
+                if batch_id in download_batches:
+                    download_batches[batch_id]['phase'] = 'complete'
+                    download_batches[batch_id]['wishlist_summary'] = {
+                        'tracks_added': 0, 
+                        'errors': 1, 
+                        'total_failed': 0,
+                        'error_message': str(e)
+                    }
+        except Exception as lock_error:
+            print(f"❌ [Wishlist Processing] Failed to update batch after error: {lock_error}")
+        
+        return {'tracks_added': 0, 'errors': 1, 'total_failed': 0}
+
 def _on_download_completed(batch_id, task_id, success=True):
     """Called when a download completes to start the next one in queue"""
     with tasks_lock:
         if batch_id not in download_batches:
             print(f"⚠️ [Batch Manager] Batch {batch_id} not found for completed task {task_id}")
             return
+        
+        # Track failed/cancelled tasks in batch state (replicating sync.py)
+        if not success and task_id in download_tasks:
+            task = download_tasks[task_id]
+            task_status = task.get('status', 'unknown')
+            
+            # Build track_info structure matching sync.py's permanently_failed_tracks format
+            original_track_info = task.get('track_info', {})
+            
+            # Ensure spotify_track has proper structure for wishlist service
+            spotify_track_data = _ensure_spotify_track_format(original_track_info)
+            
+            track_info = {
+                'download_index': task.get('track_index', 0),
+                'table_index': task.get('track_index', 0), 
+                'track_name': original_track_info.get('name', 'Unknown Track'),
+                'artist_name': _get_track_artist_name(original_track_info),
+                'retry_count': task.get('retry_count', 0),
+                'spotify_track': spotify_track_data,  # Properly formatted spotify track for wishlist
+                'failure_reason': 'Download cancelled' if task_status == 'cancelled' else 'Download failed',
+                'candidates': task.get('cached_candidates', [])  # Include search results if available
+            }
+            
+            if task_status == 'cancelled':
+                download_batches[batch_id]['cancelled_tracks'].add(task.get('track_index', 0))
+                print(f"🚫 [Batch Manager] Added cancelled track to batch tracking: {track_info['track_name']}")
+            elif task_status == 'failed':
+                download_batches[batch_id]['permanently_failed_tracks'].append(track_info)
+                print(f"❌ [Batch Manager] Added failed track to batch tracking: {track_info['track_name']}")
             
         # Decrement active count
         old_active = download_batches[batch_id]['active_count']
@@ -3670,8 +3928,16 @@ def _on_download_completed(batch_id, task_id, success=True):
         no_active = batch['active_count'] == 0
         
         if all_processed and no_active:
-            print(f"🎉 [Batch Manager] Batch {batch_id} fully complete - stopping monitor")
+            print(f"🎉 [Batch Manager] Batch {batch_id} fully complete - processing failed tracks to wishlist")
+            
+            # Mark batch as complete and process wishlist outside of lock to prevent deadlocks
+            batch['phase'] = 'complete'
+            
+            print(f"🎉 [Batch Manager] Batch {batch_id} complete - stopping monitor")
             download_monitor.stop_monitoring(batch_id)
+            
+            # Process wishlist outside of the lock to prevent threading issues
+            missing_download_executor.submit(_process_failed_tracks_to_wishlist_exact, batch_id)
             return  # Don't start next batch if we're done
     
     # Start next downloads in queue
@@ -4150,7 +4416,10 @@ def start_playlist_missing_downloads(playlist_id):
                 'queue': [],
                 'active_count': 0,
                 'max_concurrent': 3,
-                'queue_index': 0
+                'queue_index': 0,
+                # Track state management (replicating sync.py)
+                'permanently_failed_tracks': [],
+                'cancelled_tracks': set()
             }
             
             for i, track_entry in enumerate(missing_tracks):
@@ -4294,6 +4563,10 @@ def get_batch_download_status(batch_id):
                     batch_tasks.append(task_status)
                 batch_tasks.sort(key=lambda x: x['track_index'])
                 response_data['tasks'] = batch_tasks
+                
+                # Add wishlist summary if batch is complete (matching sync.py behavior)
+                if response_data["phase"] == 'complete' and 'wishlist_summary' in batch:
+                    response_data['wishlist_summary'] = batch['wishlist_summary']
 
             return jsonify(response_data)
 
@@ -4529,6 +4802,9 @@ def start_missing_tracks_process(playlist_id):
             'queue': [],
             'active_count': 0,
             'max_concurrent': 3,
+            # Track state management (replicating sync.py)
+            'permanently_failed_tracks': [],
+            'cancelled_tracks': set(),
             'queue_index': 0,
             'analysis_total': len(tracks),
             'analysis_processed': 0,
@@ -4566,7 +4842,10 @@ def start_missing_downloads():
                 'queue': [],
                 'active_count': 0,
                 'max_concurrent': 3,
-                'queue_index': 0
+                'queue_index': 0,
+                # Track state management (replicating sync.py)
+                'permanently_failed_tracks': [],
+                'cancelled_tracks': set()
             }
             
             for track_index, track_data in enumerate(missing_tracks):
