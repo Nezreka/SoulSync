@@ -1798,7 +1798,7 @@ async function rehydrateModal(processInfo, userRequested = false) {
         console.log(`✅ Setting wishlist process state - batchId: ${batch_id}, status: running`);
         process.status = 'running';
         process.batchId = batch_id;
-        updateRefreshButtonState();
+        // Note: Wishlist processes don't affect sync page refresh button state
 
         const beginBtn = document.getElementById(`begin-analysis-btn-${playlist_id}`);
         const cancelBtn = document.getElementById(`cancel-all-btn-${playlist_id}`);
@@ -1968,9 +1968,11 @@ async function cleanupDownloadProcess(playlistId) {
     // Remove from client-side global state
     delete activeDownloadProcesses[playlistId];
 
-    // Restore card UI
-    updatePlaylistCardUI(playlistId);
-    updateRefreshButtonState();
+    // Restore card UI (only for non-wishlist playlists)
+    if (playlistId !== 'wishlist') {
+        updatePlaylistCardUI(playlistId);
+    }
+    updateRefreshButtonState(); // Now safe since hasActiveOperations() excludes wishlist
 }
 
 function togglePlaylistSelection(event) {
@@ -2503,7 +2505,7 @@ async function startWishlistMissingTracksProcess(playlistId) {
     console.log(`🚀 Kicking off wishlist missing tracks process`);
     try {
         process.status = 'running';
-        updateRefreshButtonState();
+        // Note: Wishlist processes don't affect sync page refresh button state
         document.getElementById(`begin-analysis-btn-${playlistId}`).style.display = 'none';
         document.getElementById(`cancel-all-btn-${playlistId}`).style.display = 'inline-block';
 
@@ -2533,7 +2535,7 @@ async function startWishlistMissingTracksProcess(playlistId) {
         
         // Reset UI state on error
         process.status = 'idle';
-        updateRefreshButtonState();
+        // Note: Wishlist processes don't affect sync page refresh button state
         document.getElementById(`begin-analysis-btn-${playlistId}`).style.display = 'inline-block';
         document.getElementById(`cancel-all-btn-${playlistId}`).style.display = 'none';
     }
@@ -3111,7 +3113,10 @@ function disablePlaylistSelection(disabled) {
 
 function hasActiveOperations() {
     const hasActiveSyncs = Object.keys(activeSyncPollers).length > 0;
-    const hasActiveDownloads = Object.values(activeDownloadProcesses).some(p => p.status === 'running');
+    // Only check non-wishlist download processes for sync page refresh button
+    const hasActiveDownloads = Object.entries(activeDownloadProcesses)
+        .filter(([playlistId, process]) => playlistId !== 'wishlist') // Exclude wishlist
+        .some(([_, process]) => process.status === 'running');
     const hasSequentialSync = sequentialSyncManager && sequentialSyncManager.isRunning;
     return hasActiveSyncs || hasActiveDownloads || hasSequentialSync;
 }
