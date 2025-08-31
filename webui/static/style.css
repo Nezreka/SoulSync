@@ -4660,6 +4660,7 @@ body {
 .youtube-discovery-modal .discovery-table {
     width: 100%;
     border-collapse: collapse;
+    table-layout: fixed; /* Enable fixed layout for consistent column widths */
 }
 
 .youtube-discovery-modal .discovery-table th {
@@ -4673,12 +4674,55 @@ body {
     position: sticky;
     top: 0;
     z-index: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Column width distribution for balanced layout */
+.youtube-discovery-modal .discovery-table th:nth-child(1), /* YT Track */
+.youtube-discovery-modal .discovery-table td:nth-child(1) {
+    width: 20%;
+}
+
+.youtube-discovery-modal .discovery-table th:nth-child(2), /* YT Artist */
+.youtube-discovery-modal .discovery-table td:nth-child(2) {
+    width: 15%;
+}
+
+.youtube-discovery-modal .discovery-table th:nth-child(3), /* Status */
+.youtube-discovery-modal .discovery-table td:nth-child(3) {
+    width: 12%;
+}
+
+.youtube-discovery-modal .discovery-table th:nth-child(4), /* Spotify Track */
+.youtube-discovery-modal .discovery-table td:nth-child(4) {
+    width: 20%;
+}
+
+.youtube-discovery-modal .discovery-table th:nth-child(5), /* Spotify Artist */
+.youtube-discovery-modal .discovery-table td:nth-child(5) {
+    width: 15%;
+}
+
+.youtube-discovery-modal .discovery-table th:nth-child(6), /* Album */
+.youtube-discovery-modal .discovery-table td:nth-child(6) {
+    width: 13%;
+}
+
+.youtube-discovery-modal .discovery-table th:nth-child(7), /* Duration */
+.youtube-discovery-modal .discovery-table td:nth-child(7) {
+    width: 5%;
+    text-align: center;
 }
 
 .youtube-discovery-modal .discovery-table td {
     padding: 10px 8px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.05);
     font-size: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .youtube-discovery-modal .discovery-table .yt-track,
