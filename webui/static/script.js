@@ -1921,15 +1921,44 @@ function handleViewProgressClick(event, playlistId) {
 function updatePlaylistCardUI(playlistId) {
     const process = activeDownloadProcesses[playlistId];
     const progressBtn = document.getElementById(`progress-btn-${playlistId}`);
+    const actionBtn = document.getElementById(`action-btn-${playlistId}`);
+    const card = document.querySelector(`.playlist-card[data-playlist-id="${playlistId}"]`);
 
-    if (!progressBtn) return;
+    if (!progressBtn || !actionBtn) return;
 
     if (process && process.status === 'running') {
         // A process is running: show the progress button
         progressBtn.classList.remove('hidden');
+        progressBtn.textContent = 'View Progress';
+        progressBtn.style.backgroundColor = '';  // Reset any custom styling
+        actionBtn.textContent = '📥 Downloading...';
+        actionBtn.disabled = true;
+        
+        // Remove completion styling from card
+        if (card) card.classList.remove('download-complete');
+        
+    } else if (process && process.status === 'complete') {
+        // Process completed: show "ready for review" indicator
+        progressBtn.classList.remove('hidden');
+        progressBtn.textContent = '📋 View Results';  
+        progressBtn.style.backgroundColor = '#28a745'; // Green success color
+        progressBtn.style.color = 'white';
+        actionBtn.textContent = '✅ Ready for Review';
+        actionBtn.disabled = false; // Allow clicking to see results
+        
+        // Add completion styling to card
+        if (card) card.classList.add('download-complete');
+        
     } else {
-        // No process or it's finished: hide the progress button
+        // No process or it's been cleaned up: normal state
         progressBtn.classList.add('hidden');
+        progressBtn.style.backgroundColor = '';  // Reset styling
+        progressBtn.style.color = '';  // Reset styling
+        actionBtn.textContent = 'Sync / Download';
+        actionBtn.disabled = false;
+        
+        // Remove completion styling from card
+        if (card) card.classList.remove('download-complete');
     }
 }
 
@@ -2690,9 +2719,11 @@ function startModalDownloadPolling(playlistId) {
                         showToast(`Process cancelled for ${process.playlist.name}.`, 'info');
                     } else if (data.phase === 'error') {
                         process.status = 'complete'; // Treat as complete to allow cleanup
+                        updatePlaylistCardUI(playlistId); // Update card to show ready for review
                         showToast(`Process for ${process.playlist.name} failed!`, 'error');
                     } else {
                         process.status = 'complete';
+                        updatePlaylistCardUI(playlistId); // Update card to show ready for review
                         
                         // Handle background wishlist processing completion specially
                         if (isBackgroundWishlist) {
