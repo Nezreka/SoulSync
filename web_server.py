@@ -3293,6 +3293,13 @@ def _post_process_matched_download(context_key, context, file_path):
         _cleanup_empty_directories(downloads_path, file_path)
 
         print(f"✅ Post-processing complete for: {final_path}")
+        
+        # Call completion callback for missing downloads tasks to start next batch
+        task_id = context.get('task_id')
+        batch_id = context.get('batch_id')
+        if task_id and batch_id:
+            print(f"🎯 [Post-Process] Calling completion callback for task {task_id} in batch {batch_id}")
+            _on_download_completed(batch_id, task_id, success=True)
 
     except Exception as e:
         import traceback
@@ -4254,6 +4261,9 @@ def _download_track_worker(task_id, batch_id=None):
                 return
 
         track_data = task['track_info']
+        track_name = track_data.get('name', 'Unknown Track')
+        
+        print(f"🎯 [Modal Worker] Task {task_id} starting search for track: '{track_name}'")
         
         # Recreate a SpotifyTrack object for the matching engine
         # Handle both string format and Spotify API format for artists
@@ -4341,6 +4351,7 @@ def _download_track_worker(task_id, batch_id=None):
         
         search_queries = unique_queries
         print(f"🔍 [Modal Worker] Generated {len(search_queries)} smart search queries for '{track.name}': {search_queries}")
+        print(f"🔍 [Modal Worker] About to start search loop for task {task_id} (track: '{track.name}')")
 
         # 2. Sequential Query Search (matches GUI's start_search_worker_parallel logic)
         for query_index, query in enumerate(search_queries):
@@ -4356,10 +4367,12 @@ def _download_track_worker(task_id, batch_id=None):
                 download_tasks[task_id]['current_query_index'] = query_index
                     
             print(f"🔍 [Modal Worker] Query {query_index + 1}/{len(search_queries)}: '{query}'")
+            print(f"🔍 [DEBUG] About to call soulseek search for task {task_id}")
             
             try:
                 # Perform search with timeout
                 tracks_result, _ = asyncio.run(soulseek_client.search(query, timeout=30))
+                print(f"🔍 [DEBUG] Search completed for task {task_id}, got {len(tracks_result) if tracks_result else 0} results")
                 
                 # CRITICAL: Check cancellation immediately after search returns
                 with tasks_lock:
@@ -4393,9 +4406,9 @@ def _download_track_worker(task_id, batch_id=None):
                         # Try to download with these candidates
                         success = _attempt_download_with_candidates(task_id, candidates, track, batch_id)
                         if success:
-                            # Notify batch manager that this task completed (success)
+                            # Download initiated successfully - let the download monitoring system handle completion
                             if batch_id:
-                                _on_download_completed(batch_id, task_id, success=True)
+                                print(f"✅ [Modal Worker] Download initiated successfully for task {task_id} - monitoring will handle completion")
                             return  # Success, exit the worker
                             
             except Exception as e:
@@ -4414,7 +4427,7 @@ def _download_track_worker(task_id, batch_id=None):
 
     except Exception as e:
         import traceback
-        print(f"❌ CRITICAL ERROR in download task for '{track_data.get('name')}': {e}")
+        print(f"❌ CRITICAL ERROR in download task for '{track_name}' (task_id: {task_id}): {e}")
         traceback.print_exc()
         with tasks_lock:
             if task_id in download_tasks:
@@ -4536,7 +4549,9 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
                         "spotify_album": spotify_album_context,
                         "original_search_result": enhanced_payload,
                         "is_album_download": is_album_context,  # Critical fix: Use actual album context
-                        "has_clean_spotify_data": has_clean_spotify_data  # Flag for post-processing
+                        "has_clean_spotify_data": has_clean_spotify_data,  # Flag for post-processing
+                        "task_id": task_id,  # Add task_id for completion callbacks
+                        "batch_id": batch_id  # Add batch_id for completion callbacks
                     }
                     
                     print(f"🎯 [Context] Set is_album_download: {is_album_context} (has clean data: {has_clean_spotify_data})")
