@@ -5993,6 +5993,38 @@ function updateYouTubeCardPhase(urlHash, phase) {
             actionBtn.disabled = false;
             progressElement.classList.add('hidden');
             break;
+            
+        case 'syncing':
+            phaseTextElement.textContent = 'Syncing...';
+            phaseTextElement.style.color = '#ffa500'; // Orange
+            actionBtn.textContent = 'View Progress';
+            actionBtn.disabled = false;
+            progressElement.classList.remove('hidden');
+            break;
+            
+        case 'sync_complete':
+            phaseTextElement.textContent = 'Sync Complete';
+            phaseTextElement.style.color = '#1db954'; // Green
+            actionBtn.textContent = 'View Details';
+            actionBtn.disabled = false;
+            progressElement.classList.add('hidden');
+            break;
+            
+        case 'downloading':
+            phaseTextElement.textContent = 'Downloading...';
+            phaseTextElement.style.color = '#ffa500'; // Orange
+            actionBtn.textContent = 'View Downloads';
+            actionBtn.disabled = false;
+            progressElement.classList.remove('hidden');
+            break;
+            
+        case 'download_complete':
+            phaseTextElement.textContent = 'Download Complete';
+            phaseTextElement.style.color = '#1db954'; // Green
+            actionBtn.textContent = 'View Results';
+            actionBtn.disabled = false;
+            progressElement.classList.add('hidden');
+            break;
     }
     
     console.log('🃏 Updated YouTube card phase:', urlHash, phase);
@@ -6013,9 +6045,25 @@ function handleYouTubeCardClick(urlHash) {
             
         case 'discovering':
         case 'discovered':
-            // Subsequent clicks: Just open modal with preserved state
-            console.log('🎬 Opening existing YouTube modal:', urlHash);
+        case 'syncing':
+        case 'sync_complete':
+            // Open discovery modal with current state
+            console.log('🎬 Opening YouTube discovery modal:', urlHash);
             openYouTubeDiscoveryModal(urlHash);
+            break;
+            
+        case 'downloading':
+        case 'download_complete':
+            // Open download missing tracks modal
+            console.log('🎬 Opening download modal for YouTube playlist:', urlHash);
+            // Need to get playlist ID from converted Spotify data
+            const spotifyPlaylistId = state.convertedSpotifyPlaylistId;
+            if (spotifyPlaylistId) {
+                openDownloadMissingModal(spotifyPlaylistId);
+            } else {
+                console.error('❌ No converted Spotify playlist ID found for downloads');
+                showToast('Unable to open download modal - missing playlist data', 'error');
+            }
             break;
     }
 }
@@ -6127,6 +6175,9 @@ function startYouTubeDiscoveryPolling(urlHash) {
                 // Update card phase to discovered
                 updateYouTubeCardPhase(urlHash, 'discovered');
                 
+                // Update modal buttons to show sync and download buttons
+                updateYouTubeModalButtons(urlHash, 'discovered');
+                
                 console.log('✅ YouTube discovery complete:', urlHash);
                 showToast('YouTube discovery complete!', 'success');
             }
@@ -6213,7 +6264,12 @@ function openYouTubeDiscoveryModal(urlHash) {
                     </div>
                     
                     <div class="modal-footer">
-                        <button class="modal-btn modal-btn-secondary" onclick="closeYouTubeDiscoveryModal('${urlHash}')">🏠 Close</button>
+                        <div class="modal-footer-left">
+                            ${getModalActionButtons(urlHash, state.phase)}
+                        </div>
+                        <div class="modal-footer-right">
+                            <button class="modal-btn modal-btn-secondary" onclick="closeYouTubeDiscoveryModal('${urlHash}')">🏠 Close</button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -6238,6 +6294,36 @@ function openYouTubeDiscoveryModal(urlHash) {
         }
         
         console.log('✨ Created new modal with current state');
+    }
+}
+
+function getModalActionButtons(urlHash, phase) {
+    switch (phase) {
+        case 'discovered':
+            return `
+                <button class="modal-btn modal-btn-primary" onclick="startYouTubePlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>
+                <button class="modal-btn modal-btn-primary" onclick="startYouTubeDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>
+            `;
+        case 'syncing':
+            return `
+                <button class="modal-btn modal-btn-danger" onclick="cancelYouTubeSync('${urlHash}')">❌ Cancel Sync</button>
+                <div class="playlist-modal-sync-status" id="youtube-sync-status-${urlHash}" style="display: flex;">
+                    <span class="sync-stat total-tracks">♪ <span id="youtube-total-${urlHash}">0</span></span>
+                    <span class="sync-separator">/</span>
+                    <span class="sync-stat matched-tracks">✓ <span id="youtube-matched-${urlHash}">0</span></span>
+                    <span class="sync-separator">/</span>
+                    <span class="sync-stat failed-tracks">✗ <span id="youtube-failed-${urlHash}">0</span></span>
+                    <span class="sync-stat percentage">(<span id="youtube-percentage-${urlHash}">0</span>%)</span>
+                </div>
+            `;
+        case 'sync_complete':
+            return `
+                <button class="modal-btn modal-btn-primary" onclick="startYouTubePlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>
+                <button class="modal-btn modal-btn-primary" onclick="startYouTubeDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>
+                <button class="modal-btn modal-btn-secondary" onclick="resetYouTubePlaylist('${urlHash}')">🔄 Reset</button>
+            `;
+        default:
+            return '';
     }
 }
 
@@ -6319,10 +6405,28 @@ function updateYouTubeDiscoveryModal(urlHash, status) {
     progressBar.style.width = `${status.progress}%`;
     progressText.textContent = `${status.spotify_matches} / ${status.spotify_total} tracks matched (${status.progress}%)`;
     
-    // Update table rows
+    // Update table rows - create missing rows if needed
     status.results.forEach(result => {
-        const row = document.getElementById(`youtube-discovery-row-${result.index}`);
-        if (!row) return;
+        let row = document.getElementById(`youtube-discovery-row-${result.index}`);
+        
+        // Create missing row if it doesn't exist
+        if (!row) {
+            const rowHtml = `
+                <tr id="youtube-discovery-row-${result.index}">
+                    <td class="yt-track">${result.yt_track}</td>
+                    <td class="yt-artist">${result.yt_artist}</td>
+                    <td class="discovery-status">🔍 Pending...</td>
+                    <td class="spotify-track">-</td>
+                    <td class="spotify-artist">-</td>
+                    <td class="spotify-album">-</td>
+                    <td class="duration">${result.duration || '0:00'}</td>
+                </tr>
+            `;
+            tableBody.insertAdjacentHTML('beforeend', rowHtml);
+            row = document.getElementById(`youtube-discovery-row-${result.index}`);
+        }
+        
+        if (!row) return; // Safety check
         
         const statusCell = row.querySelector('.discovery-status');
         const spotifyTrackCell = row.querySelector('.spotify-track');
@@ -6348,6 +6452,277 @@ function closeYouTubeDiscoveryModal(urlHash) {
     
     // Keep modal reference and all state intact
     // Discovery polling continues in background if active
+}
+
+// ===============================
+// YOUTUBE SYNC FUNCTIONALITY
+// ===============================
+
+async function startYouTubePlaylistSync(urlHash) {
+    try {
+        console.log('🔄 Starting YouTube playlist sync:', urlHash);
+        
+        const response = await fetch(`/api/youtube/sync/start/${urlHash}`, {
+            method: 'POST'
+        });
+        
+        const result = await response.json();
+        
+        if (result.error) {
+            showToast(`Error starting sync: ${result.error}`, 'error');
+            return;
+        }
+        
+        // Update card and modal to syncing phase
+        updateYouTubeCardPhase(urlHash, 'syncing');
+        
+        // Update modal buttons if modal is open
+        updateYouTubeModalButtons(urlHash, 'syncing');
+        
+        // Start sync polling
+        startYouTubeSyncPolling(urlHash);
+        
+        showToast('YouTube playlist sync started!', 'success');
+        
+    } catch (error) {
+        console.error('❌ Error starting YouTube sync:', error);
+        showToast(`Error starting sync: ${error.message}`, 'error');
+    }
+}
+
+function startYouTubeSyncPolling(urlHash) {
+    // Stop any existing polling
+    if (activeYouTubePollers[urlHash]) {
+        clearInterval(activeYouTubePollers[urlHash]);
+    }
+    
+    const pollInterval = setInterval(async () => {
+        try {
+            const response = await fetch(`/api/youtube/sync/status/${urlHash}`);
+            const status = await response.json();
+            
+            if (status.error) {
+                console.error('❌ Error polling YouTube sync status:', status.error);
+                clearInterval(pollInterval);
+                delete activeYouTubePollers[urlHash];
+                return;
+            }
+            
+            // Update card progress with sync stats
+            updateYouTubeCardSyncProgress(urlHash, status.progress);
+            
+            // Update modal sync display if open
+            updateYouTubeModalSyncProgress(urlHash, status.progress);
+            
+            // Check if complete
+            if (status.complete) {
+                clearInterval(pollInterval);
+                delete activeYouTubePollers[urlHash];
+                
+                // Update card phase to sync complete
+                updateYouTubeCardPhase(urlHash, 'sync_complete');
+                
+                // Update modal buttons
+                updateYouTubeModalButtons(urlHash, 'sync_complete');
+                
+                console.log('✅ YouTube sync complete:', urlHash);
+                showToast('YouTube playlist sync complete!', 'success');
+            } else if (status.sync_status === 'error') {
+                clearInterval(pollInterval);
+                delete activeYouTubePollers[urlHash];
+                
+                // Revert to discovered phase on error
+                updateYouTubeCardPhase(urlHash, 'discovered');
+                updateYouTubeModalButtons(urlHash, 'discovered');
+                
+                showToast(`Sync failed: ${status.error || 'Unknown error'}`, 'error');
+            }
+            
+        } catch (error) {
+            console.error('❌ Error polling YouTube sync:', error);
+            clearInterval(pollInterval);
+            delete activeYouTubePollers[urlHash];
+        }
+    }, 1000);
+    
+    activeYouTubePollers[urlHash] = pollInterval;
+}
+
+async function cancelYouTubeSync(urlHash) {
+    try {
+        console.log('❌ Cancelling YouTube sync:', urlHash);
+        
+        const response = await fetch(`/api/youtube/sync/cancel/${urlHash}`, {
+            method: 'POST'
+        });
+        
+        const result = await response.json();
+        
+        if (result.error) {
+            showToast(`Error cancelling sync: ${result.error}`, 'error');
+            return;
+        }
+        
+        // Stop polling
+        if (activeYouTubePollers[urlHash]) {
+            clearInterval(activeYouTubePollers[urlHash]);
+            delete activeYouTubePollers[urlHash];
+        }
+        
+        // Revert to discovered phase
+        updateYouTubeCardPhase(urlHash, 'discovered');
+        updateYouTubeModalButtons(urlHash, 'discovered');
+        
+        showToast('YouTube sync cancelled', 'info');
+        
+    } catch (error) {
+        console.error('❌ Error cancelling YouTube sync:', error);
+        showToast(`Error cancelling sync: ${error.message}`, 'error');
+    }
+}
+
+function updateYouTubeCardSyncProgress(urlHash, progress) {
+    const state = youtubePlaylistStates[urlHash];
+    if (!state || !state.cardElement || !progress) return;
+    
+    const card = state.cardElement;
+    const progressElement = card.querySelector('.playlist-card-progress');
+    
+    // Build clean status counter HTML exactly like Spotify cards
+    let statusCounterHTML = '';
+    if (progress && progress.total_tracks > 0) {
+        const matched = progress.matched_tracks || 0;
+        const failed = progress.failed_tracks || 0;
+        const total = progress.total_tracks || 0;
+        const processed = matched + failed;
+        const percentage = total > 0 ? Math.round((processed / total) * 100) : 0;
+        
+        statusCounterHTML = `
+            <div class="playlist-card-sync-status">
+                <span class="sync-stat total-tracks">♪ ${total}</span>
+                <span class="sync-separator">/</span>
+                <span class="sync-stat matched-tracks">✓ ${matched}</span>
+                <span class="sync-separator">/</span>
+                <span class="sync-stat failed-tracks">✗ ${failed}</span>
+                <span class="sync-stat percentage">(${percentage}%)</span>
+            </div>
+        `;
+    }
+    
+    progressElement.innerHTML = statusCounterHTML || '<div class="playlist-card-sync-status">🔄 Starting...</div>';
+    
+    console.log(`🔄 Updated YouTube sync progress: ♪ ${progress?.total_tracks || 0} / ✓ ${progress?.matched_tracks || 0} / ✗ ${progress?.failed_tracks || 0}`);
+}
+
+function updateYouTubeModalSyncProgress(urlHash, progress) {
+    const statusDisplay = document.getElementById(`youtube-sync-status-${urlHash}`);
+    if (!statusDisplay || !progress) return;
+    
+    console.log(`📊 Updating YouTube modal sync progress for ${urlHash}:`, progress);
+    
+    // Update individual counters exactly like Spotify sync
+    const totalEl = document.getElementById(`youtube-total-${urlHash}`);
+    const matchedEl = document.getElementById(`youtube-matched-${urlHash}`);
+    const failedEl = document.getElementById(`youtube-failed-${urlHash}`);
+    const percentageEl = document.getElementById(`youtube-percentage-${urlHash}`);
+    
+    const total = progress.total_tracks || 0;
+    const matched = progress.matched_tracks || 0;
+    const failed = progress.failed_tracks || 0;
+    
+    if (totalEl) totalEl.textContent = total;
+    if (matchedEl) matchedEl.textContent = matched;
+    if (failedEl) failedEl.textContent = failed;
+    
+    // Calculate percentage like Spotify sync
+    if (total > 0) {
+        const processed = matched + failed;
+        const percentage = Math.round((processed / total) * 100);
+        if (percentageEl) percentageEl.textContent = percentage;
+    }
+    
+    console.log(`📊 YouTube modal updated: ♪ ${total} / ✓ ${matched} / ✗ ${failed} (${Math.round((matched + failed) / total * 100)}%)`);
+}
+
+function updateYouTubeModalButtons(urlHash, phase) {
+    const modal = document.getElementById(`youtube-discovery-modal-${urlHash}`);
+    if (!modal) return;
+    
+    const footerLeft = modal.querySelector('.modal-footer-left');
+    if (footerLeft) {
+        footerLeft.innerHTML = getModalActionButtons(urlHash, phase);
+    }
+}
+
+// ===============================
+// YOUTUBE DOWNLOAD MISSING TRACKS
+// ===============================
+
+async function startYouTubeDownloadMissing(urlHash) {
+    try {
+        console.log('🔍 Starting download missing tracks for YouTube playlist:', urlHash);
+        
+        const state = youtubePlaylistStates[urlHash];
+        if (!state || !state.discoveryResults) {
+            showToast('No discovery results available for download', 'error');
+            return;
+        }
+        
+        // Convert YouTube results to a format compatible with the download modal
+        const spotifyTracks = state.discoveryResults
+            .filter(result => result.spotify_data)
+            .map(result => result.spotify_data);
+        
+        if (spotifyTracks.length === 0) {
+            showToast('No Spotify matches found for download', 'error');
+            return;
+        }
+        
+        // Create a virtual playlist for the download system
+        const virtualPlaylistId = `youtube_${urlHash}`;
+        const playlistName = `[YouTube] ${state.playlist.name}`;
+        
+        // Store reference for card navigation
+        state.convertedSpotifyPlaylistId = virtualPlaylistId;
+        
+        // Open the existing download missing tracks modal
+        await openDownloadMissingModal(virtualPlaylistId, playlistName, spotifyTracks);
+        
+        // Update YouTube card phase when download process starts
+        updateYouTubeCardPhase(urlHash, 'downloading');
+        
+    } catch (error) {
+        console.error('❌ Error starting download missing tracks:', error);
+        showToast(`Error starting downloads: ${error.message}`, 'error');
+    }
+}
+
+function resetYouTubePlaylist(urlHash) {
+    const state = youtubePlaylistStates[urlHash];
+    if (!state) return;
+    
+    // Stop any active polling
+    if (activeYouTubePollers[urlHash]) {
+        clearInterval(activeYouTubePollers[urlHash]);
+        delete activeYouTubePollers[urlHash];
+    }
+    
+    // Reset to fresh phase
+    state.phase = 'fresh';
+    state.discoveryResults = [];
+    state.discoveryProgress = 0;
+    state.spotifyMatches = 0;
+    state.syncPlaylistId = null;
+    state.syncProgress = {};
+    state.convertedSpotifyPlaylistId = null;
+    
+    // Update card
+    updateYouTubeCardPhase(urlHash, 'fresh');
+    
+    // Close modal
+    closeYouTubeDiscoveryModal(urlHash);
+    
+    showToast('YouTube playlist reset to fresh state', 'info');
 }
 
 

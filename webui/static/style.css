@@ -4755,8 +4755,19 @@ body {
     padding: 30px;
     border-top: 1px solid rgba(255, 255, 255, 0.1);
     display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.youtube-discovery-modal .modal-footer-left {
+    display: flex;
     gap: 12px;
-    justify-content: flex-end;
+    align-items: center;
+}
+
+.youtube-discovery-modal .modal-footer-right {
+    display: flex;
+    gap: 12px;
 }
 
 .youtube-discovery-modal .modal-btn {
@@ -4778,6 +4789,42 @@ body {
 .youtube-discovery-modal .modal-btn-secondary:hover {
     background: rgba(255, 255, 255, 0.2);
     border-color: rgba(255, 255, 255, 0.3);
+}
+
+.youtube-discovery-modal .modal-btn-primary {
+    background: linear-gradient(135deg, #1db954 0%, #1ed760 100%);
+    color: #ffffff;
+    border: 1px solid rgba(29, 185, 84, 0.3);
+}
+
+.youtube-discovery-modal .modal-btn-primary:hover {
+    background: linear-gradient(135deg, #1ed760 0%, #1fbc56 100%);
+    border-color: rgba(29, 185, 84, 0.5);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(29, 185, 84, 0.3);
+}
+
+.youtube-discovery-modal .modal-btn-danger {
+    background: linear-gradient(135deg, #ff6b6b 0%, #ff5555 100%);
+    color: #ffffff;
+    border: 1px solid rgba(255, 107, 107, 0.3);
+}
+
+.youtube-discovery-modal .modal-btn-danger:hover {
+    background: linear-gradient(135deg, #ff5555 0%, #ff4444 100%);
+    border-color: rgba(255, 107, 107, 0.5);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(255, 107, 107, 0.3);
+}
+
+.youtube-discovery-modal .sync-progress-display {
+    color: #1ed760;
+    font-size: 14px;
+    font-weight: 500;
+    padding: 8px 12px;
+    background: rgba(29, 185, 84, 0.1);
+    border-radius: 8px;
+    border: 1px solid rgba(29, 185, 84, 0.2);
 }
 
 /* Modal state management */

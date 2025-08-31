@@ -5731,6 +5731,143 @@ def _calculate_similarity(str1, str2):
     
     return intersection / union if union > 0 else 0
 
+@app.route('/api/youtube/sync/start/<url_hash>', methods=['POST'])
+def start_youtube_sync(url_hash):
+    """Start sync process for a YouTube playlist using discovered Spotify tracks"""
+    try:
+        if url_hash not in youtube_discovery_states:
+            return jsonify({"error": "YouTube playlist not found"}), 404
+        
+        state = youtube_discovery_states[url_hash]
+        
+        if state['phase'] not in ['discovered', 'sync_complete']:
+            return jsonify({"error": "YouTube playlist not ready for sync"}), 400
+        
+        # Convert discovery results to Spotify tracks format
+        spotify_tracks = convert_youtube_results_to_spotify_tracks(state['discovery_results'])
+        
+        if not spotify_tracks:
+            return jsonify({"error": "No Spotify matches found for sync"}), 400
+        
+        # Create a temporary playlist ID for sync tracking
+        sync_playlist_id = f"youtube_{url_hash}"
+        playlist_name = state['playlist']['name']
+        
+        # Update YouTube state
+        state['phase'] = 'syncing'
+        state['sync_playlist_id'] = sync_playlist_id
+        state['sync_progress'] = {}
+        
+        # Start the sync using existing sync infrastructure
+        sync_data = {
+            'playlist_id': sync_playlist_id,
+            'playlist_name': f"[YouTube] {playlist_name}",
+            'tracks': spotify_tracks
+        }
+        
+        with sync_lock:
+            sync_states[sync_playlist_id] = {"status": "starting", "progress": {}}
+        
+        # Submit sync task
+        future = sync_executor.submit(_run_sync_task, sync_playlist_id, sync_data['playlist_name'], spotify_tracks)
+        active_sync_workers[sync_playlist_id] = future
+        
+        print(f"🔄 Started YouTube sync for: {playlist_name} ({len(spotify_tracks)} tracks)")
+        return jsonify({"success": True, "sync_playlist_id": sync_playlist_id})
+        
+    except Exception as e:
+        print(f"❌ Error starting YouTube sync: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/youtube/sync/status/<url_hash>', methods=['GET'])
+def get_youtube_sync_status(url_hash):
+    """Get sync status for a YouTube playlist"""
+    try:
+        if url_hash not in youtube_discovery_states:
+            return jsonify({"error": "YouTube playlist not found"}), 404
+        
+        state = youtube_discovery_states[url_hash]
+        sync_playlist_id = state.get('sync_playlist_id')
+        
+        if not sync_playlist_id:
+            return jsonify({"error": "No sync in progress"}), 404
+        
+        # Get sync status from existing sync infrastructure
+        with sync_lock:
+            sync_state = sync_states.get(sync_playlist_id, {})
+        
+        response = {
+            'phase': state['phase'],
+            'sync_status': sync_state.get('status', 'unknown'),
+            'progress': sync_state.get('progress', {}),
+            'complete': sync_state.get('status') == 'finished',
+            'error': sync_state.get('error')
+        }
+        
+        # Update YouTube state if sync completed
+        if sync_state.get('status') == 'finished':
+            state['phase'] = 'sync_complete'
+            state['sync_progress'] = sync_state.get('progress', {})
+        elif sync_state.get('status') == 'error':
+            state['phase'] = 'discovered'  # Revert on error
+        
+        return jsonify(response)
+        
+    except Exception as e:
+        print(f"❌ Error getting YouTube sync status: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/youtube/sync/cancel/<url_hash>', methods=['POST'])
+def cancel_youtube_sync(url_hash):
+    """Cancel sync for a YouTube playlist"""
+    try:
+        if url_hash not in youtube_discovery_states:
+            return jsonify({"error": "YouTube playlist not found"}), 404
+        
+        state = youtube_discovery_states[url_hash]
+        sync_playlist_id = state.get('sync_playlist_id')
+        
+        if sync_playlist_id:
+            # Cancel the sync using existing sync infrastructure
+            with sync_lock:
+                sync_states[sync_playlist_id] = {"status": "cancelled"}
+            
+            # Clean up sync worker
+            if sync_playlist_id in active_sync_workers:
+                del active_sync_workers[sync_playlist_id]
+        
+        # Revert YouTube state
+        state['phase'] = 'discovered'
+        state['sync_playlist_id'] = None
+        state['sync_progress'] = {}
+        
+        return jsonify({"success": True, "message": "YouTube sync cancelled"})
+        
+    except Exception as e:
+        print(f"❌ Error cancelling YouTube sync: {e}")
+        return jsonify({"error": str(e)}), 500
+
+def convert_youtube_results_to_spotify_tracks(discovery_results):
+    """Convert YouTube discovery results to Spotify tracks format for sync"""
+    spotify_tracks = []
+    
+    for result in discovery_results:
+        if result.get('spotify_data'):
+            spotify_data = result['spotify_data']
+            
+            # Create track object matching the expected format
+            track = {
+                'id': spotify_data['id'],
+                'name': spotify_data['name'],
+                'artists': spotify_data['artists'],
+                'album': spotify_data['album'],
+                'duration_ms': spotify_data['duration_ms']
+            }
+            spotify_tracks.append(track)
+    
+    print(f"🔄 Converted {len(spotify_tracks)} YouTube matches to Spotify tracks for sync")
+    return spotify_tracks
+
 
 # Add these new endpoints to the end of web_server.py
 
