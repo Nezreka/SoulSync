@@ -120,6 +120,13 @@ download_tasks = {}  # task_id -> task state dict
 download_batches = {}  # batch_id -> {queue, active_count, max_concurrent}
 tasks_lock = threading.Lock()
 
+# --- Automatic Wishlist Processing Infrastructure ---
+# Server-side timer system for automatic wishlist processing (replaces client-side JavaScript timers)
+wishlist_auto_processor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="WishlistAutoProcessor")
+wishlist_auto_timer = None  # threading.Timer for scheduling next auto-processing
+wishlist_auto_processing = False  # Flag to prevent concurrent auto-processing
+wishlist_timer_lock = threading.Lock()  # Thread safety for timer operations
+
 # --- Shared Transfer Data Cache ---
 # Cache transfer data to avoid hammering the Soulseek API with multiple concurrent modals
 transfer_data_cache = {
@@ -3385,6 +3392,139 @@ def start_simple_background_monitor():
     monitor_thread.start()
 
 # ===============================
+# == AUTOMATIC WISHLIST PROCESSING ==
+# ===============================
+
+def start_wishlist_auto_processing():
+    """Start automatic wishlist processing with 1-minute initial delay."""
+    global wishlist_auto_timer
+    
+    with wishlist_timer_lock:
+        # Stop any existing timer to prevent duplicates
+        if wishlist_auto_timer is not None:
+            wishlist_auto_timer.cancel()
+        
+        print("🔄 Starting automatic wishlist processing system (1 minute initial delay)")
+        wishlist_auto_timer = threading.Timer(60.0, _process_wishlist_automatically)  # 1 minute
+        wishlist_auto_timer.daemon = True
+        wishlist_auto_timer.start()
+
+def stop_wishlist_auto_processing():
+    """Stop automatic wishlist processing and cleanup timer."""
+    global wishlist_auto_timer, wishlist_auto_processing
+    
+    with wishlist_timer_lock:
+        if wishlist_auto_timer is not None:
+            wishlist_auto_timer.cancel()
+            wishlist_auto_timer = None
+            print("⏹️ Stopped automatic wishlist processing")
+        
+        wishlist_auto_processing = False
+
+def schedule_next_wishlist_processing():
+    """Schedule next automatic wishlist processing in 10 minutes."""
+    global wishlist_auto_timer
+    
+    with wishlist_timer_lock:
+        print("⏰ Scheduling next automatic wishlist processing in 10 minutes")
+        wishlist_auto_timer = threading.Timer(600.0, _process_wishlist_automatically)  # 10 minutes
+        wishlist_auto_timer.daemon = True
+        wishlist_auto_timer.start()
+
+def _process_wishlist_automatically():
+    """Main automatic processing logic that runs in background thread."""
+    global wishlist_auto_processing
+    
+    print("🤖 Starting automatic wishlist processing...")
+    
+    try:
+        with wishlist_timer_lock:
+            if wishlist_auto_processing:
+                print("⚠️ Wishlist auto-processing already running, skipping.")
+                schedule_next_wishlist_processing()
+                return
+            
+            wishlist_auto_processing = True
+        
+        # Use app context for database operations
+        with app.app_context():
+            from core.wishlist_service import get_wishlist_service
+            wishlist_service = get_wishlist_service()
+            
+            # Check if wishlist has tracks
+            count = wishlist_service.get_wishlist_count()
+            if count == 0:
+                print("ℹ️ No tracks in wishlist for auto-processing.")
+                with wishlist_timer_lock:
+                    wishlist_auto_processing = False
+                schedule_next_wishlist_processing()
+                return
+            
+            print(f"🎵 Found {count} tracks in wishlist, starting automatic processing...")
+            
+            # Check if wishlist processing is already active
+            playlist_id = "wishlist"
+            with tasks_lock:
+                for batch_id, batch_data in download_batches.items():
+                    if (batch_data.get('playlist_id') == playlist_id and 
+                        batch_data.get('phase') not in ['complete', 'error', 'cancelled']):
+                        print("⚠️ Wishlist processing already active in another batch, skipping automatic start")
+                        with wishlist_timer_lock:
+                            wishlist_auto_processing = False
+                        schedule_next_wishlist_processing()
+                        return
+            
+            # Get wishlist tracks for processing
+            wishlist_tracks = wishlist_service.get_wishlist_tracks_for_download()
+            if not wishlist_tracks:
+                print("⚠️ No tracks returned from wishlist service.")
+                with wishlist_timer_lock:
+                    wishlist_auto_processing = False
+                schedule_next_wishlist_processing()
+                return
+            
+            # Create batch for automatic processing
+            batch_id = str(uuid.uuid4())
+            playlist_name = "Wishlist (Auto)"
+            
+            # Create task queue - convert wishlist tracks to expected format
+            with tasks_lock:
+                download_batches[batch_id] = {
+                    'phase': 'analysis',
+                    'playlist_id': playlist_id,
+                    'playlist_name': playlist_name,
+                    'queue': [],
+                    'active_count': 0,
+                    'max_concurrent': 3,
+                    'queue_index': 0,
+                    'analysis_total': len(wishlist_tracks),
+                    'analysis_processed': 0,
+                    'analysis_results': [],
+                    # Track state management (replicating sync.py)
+                    'permanently_failed_tracks': [],
+                    'cancelled_tracks': set(),
+                    # Mark as auto-initiated
+                    'auto_initiated': True,
+                    'auto_processing_timestamp': time.time()
+                }
+            
+            print(f"🚀 Starting automatic wishlist batch {batch_id} with {len(wishlist_tracks)} tracks")
+            
+            # Submit the wishlist processing job using existing infrastructure
+            missing_download_executor.submit(_run_full_missing_tracks_process, batch_id, playlist_id, wishlist_tracks)
+            
+            # Don't mark auto_processing as False here - let completion handler do it
+            
+    except Exception as e:
+        print(f"❌ Error in automatic wishlist processing: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        with wishlist_timer_lock:
+            wishlist_auto_processing = False
+        schedule_next_wishlist_processing()
+
+# ===============================
 # == DATABASE UPDATER API      ==
 # ===============================
 
@@ -3879,6 +4019,49 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
         
         return {'tracks_added': 0, 'errors': 1, 'total_failed': 0}
 
+def _process_failed_tracks_to_wishlist_exact_with_auto_completion(batch_id):
+    """
+    Process failed tracks to wishlist for auto-initiated batches and handle auto-processing completion.
+    This extends the standard processing with automatic scheduling of the next cycle.
+    """
+    global wishlist_auto_processing
+    
+    try:
+        print(f"🤖 [Auto-Wishlist] Processing completion for auto-initiated batch {batch_id}")
+        
+        # Run standard wishlist processing
+        completion_summary = _process_failed_tracks_to_wishlist_exact(batch_id)
+        
+        # Log auto-processing completion
+        tracks_added = completion_summary.get('tracks_added', 0)
+        total_failed = completion_summary.get('total_failed', 0)
+        print(f"🎉 [Auto-Wishlist] Background processing complete: {tracks_added} added to wishlist, {total_failed} failed")
+        
+        # Mark auto-processing as complete
+        with wishlist_timer_lock:
+            wishlist_auto_processing = False
+        
+        # Schedule next automatic processing cycle
+        print("⏰ [Auto-Wishlist] Scheduling next automatic cycle in 10 minutes")
+        schedule_next_wishlist_processing()
+        
+        return completion_summary
+        
+    except Exception as e:
+        print(f"❌ [Auto-Wishlist] Error in auto-completion processing: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        # Ensure auto-processing flag is reset even on error
+        with wishlist_timer_lock:
+            wishlist_auto_processing = False
+        
+        # Schedule next cycle even after error to maintain continuity
+        print("⏰ [Auto-Wishlist] Scheduling next cycle after error (10 minutes)")
+        schedule_next_wishlist_processing()
+        
+        return {'tracks_added': 0, 'errors': 1, 'total_failed': 0}
+
 def _on_download_completed(batch_id, task_id, success=True):
     """Called when a download completes to start the next one in queue"""
     with tasks_lock:
@@ -3930,6 +4113,9 @@ def _on_download_completed(batch_id, task_id, success=True):
         if all_processed and no_active:
             print(f"🎉 [Batch Manager] Batch {batch_id} fully complete - processing failed tracks to wishlist")
             
+            # Check if this is an auto-initiated batch
+            is_auto_batch = batch.get('auto_initiated', False)
+            
             # Mark batch as complete and process wishlist outside of lock to prevent deadlocks
             batch['phase'] = 'complete'
             
@@ -3937,7 +4123,12 @@ def _on_download_completed(batch_id, task_id, success=True):
             download_monitor.stop_monitoring(batch_id)
             
             # Process wishlist outside of the lock to prevent threading issues
-            missing_download_executor.submit(_process_failed_tracks_to_wishlist_exact, batch_id)
+            if is_auto_batch:
+                # For auto-initiated batches, handle completion and schedule next cycle
+                missing_download_executor.submit(_process_failed_tracks_to_wishlist_exact_with_auto_completion, batch_id)
+            else:
+                # For manual batches, use standard wishlist processing
+                missing_download_executor.submit(_process_failed_tracks_to_wishlist_exact, batch_id)
             return  # Don't start next batch if we're done
     
     # Start next downloads in queue
@@ -4495,7 +4686,8 @@ def get_batch_download_status(batch_id):
             batch = download_batches[batch_id]
             response_data = {
                 "phase": batch.get('phase', 'unknown'),
-                "error": batch.get('error')
+                "error": batch.get('error'),
+                "auto_initiated": batch.get('auto_initiated', False)
             }
 
             if response_data["phase"] == 'analysis':
@@ -5369,5 +5561,10 @@ if __name__ == '__main__':
     print("🔧 Starting simple background monitor...")
     start_simple_background_monitor()
     print("✅ Simple background monitor started")
+    
+    # Start automatic wishlist processing when server starts
+    print("🔧 Starting automatic wishlist processing...")
+    start_wishlist_auto_processing()
+    print("✅ Automatic wishlist processing started")
     
     app.run(host='0.0.0.0', port=5001, debug=True)
