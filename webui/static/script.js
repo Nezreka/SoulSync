@@ -6405,28 +6405,10 @@ function updateYouTubeDiscoveryModal(urlHash, status) {
     progressBar.style.width = `${status.progress}%`;
     progressText.textContent = `${status.spotify_matches} / ${status.spotify_total} tracks matched (${status.progress}%)`;
     
-    // Update table rows - create missing rows if needed
+    // Update table rows
     status.results.forEach(result => {
-        let row = document.getElementById(`youtube-discovery-row-${result.index}`);
-        
-        // Create missing row if it doesn't exist
-        if (!row) {
-            const rowHtml = `
-                <tr id="youtube-discovery-row-${result.index}">
-                    <td class="yt-track">${result.yt_track}</td>
-                    <td class="yt-artist">${result.yt_artist}</td>
-                    <td class="discovery-status">🔍 Pending...</td>
-                    <td class="spotify-track">-</td>
-                    <td class="spotify-artist">-</td>
-                    <td class="spotify-album">-</td>
-                    <td class="duration">${result.duration || '0:00'}</td>
-                </tr>
-            `;
-            tableBody.insertAdjacentHTML('beforeend', rowHtml);
-            row = document.getElementById(`youtube-discovery-row-${result.index}`);
-        }
-        
-        if (!row) return; // Safety check
+        const row = document.getElementById(`youtube-discovery-row-${result.index}`);
+        if (!row) return;
         
         const statusCell = row.querySelector('.discovery-status');
         const spotifyTrackCell = row.querySelector('.spotify-track');
