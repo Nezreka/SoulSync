@@ -30,6 +30,7 @@ from core.database_update_worker import DatabaseUpdateWorker, DatabaseStatsWorke
 from database.music_database import get_database
 from services.sync_service import PlaylistSyncService
 from datetime import datetime
+import yt_dlp
 
 # --- Flask App Setup ---
 base_dir = os.path.abspath(os.path.dirname(__file__))
@@ -2855,6 +2856,261 @@ def _clean_track_title_web(track_title: str, artist_name: str) -> str:
     return cleaned if cleaned else original
 
 
+# ===================================================================
+# YOUTUBE TRACK CLEANING FUNCTIONS (Ported from GUI sync.py)
+# ===================================================================
+
+def clean_youtube_track_title(title, artist_name=None):
+    """
+    Aggressively clean YouTube track titles by removing video noise and extracting clean track names
+    
+    Examples:
+    'No Way Jose (Official Music Video)' → 'No Way Jose'
+    'bbno$ - mary poppins (official music video)' → 'mary poppins'
+    'Beyond (From "Moana 2") (Official Video) ft. Rachel House' → 'Beyond'
+    'Temporary (feat. Skylar Grey) [Official Music Video]' → 'Temporary'
+    'ALL MY LOVE (Directors\' Cut)' → 'ALL MY LOVE'
+    'Espresso Macchiato | Estonia 🇪🇪 | Official Music Video | #Eurovision2025' → 'Espresso Macchiato'
+    """
+    import re
+    
+    if not title:
+        return title
+    
+    original_title = title
+    
+    # FIRST: Remove artist name if it appears at the start with a dash
+    # Handle formats like "LITTLE BIG - MOUSTACHE" → "MOUSTACHE"
+    if artist_name:
+        # Create a regex pattern to match artist name at the beginning followed by dash
+        # Use word boundaries and case-insensitive matching for better accuracy
+        artist_pattern = r'^' + re.escape(artist_name.strip()) + r'\s*[-–—]\s*'
+        cleaned_title = re.sub(artist_pattern, '', title, flags=re.IGNORECASE).strip()
+        
+        # Debug logging for artist removal
+        if cleaned_title != title:
+            print(f"🎯 Removed artist from title: '{title}' -> '{cleaned_title}' (artist: '{artist_name}')")
+        
+        title = cleaned_title
+    
+    # Remove content in brackets/braces of any type SECOND (before general dash removal)
+    title = re.sub(r'【[^】]*】', '', title)  # Japanese brackets
+    title = re.sub(r'\s*\([^)]*\)', '', title)   # Parentheses - removes everything after first (
+    title = re.sub(r'\s*\(.*$', '', title)      # Remove everything after lone ( (unmatched parentheses)
+    title = re.sub(r'\[[^\]]*\]', '', title)  # Square brackets
+    title = re.sub(r'\{[^}]*\}', '', title)   # Curly braces
+    title = re.sub(r'<[^>]*>', '', title)     # Angle brackets
+    
+    # Remove everything after a dash (often album or extra info)
+    title = re.sub(r'\s*-\s*.*$', '', title)
+    
+    # Remove everything after pipes (|) - often used for additional context
+    title = re.split(r'\s*\|\s*', title)[0].strip()
+    
+    # Remove common video/platform noise
+    noise_patterns = [
+        r'\bapple\s+music\b',
+        r'\bfull\s+video\b', 
+        r'\bmusic\s+video\b',
+        r'\bofficial\s+video\b',
+        r'\bofficial\s+music\s+video\b',
+        r'\bofficial\b',
+        r'\bcensored\s+version\b',
+        r'\buncensored\s+version\b',
+        r'\bexplicit\s+version\b',
+        r'\blive\s+version\b',
+        r'\bversion\b',
+        r'\btopic\b',
+        r'\baudio\b',
+        r'\blyrics?\b',
+        r'\blyric\s+video\b',
+        r'\bwith\s+lyrics?\b',
+        r'\bvisuali[sz]er\b',
+        r'\bmv\b',
+        r'\bdirectors?\s+cut\b',
+        r'\bremaster(ed)?\b',
+        r'\bremix\b'
+    ]
+    
+    for pattern in noise_patterns:
+        title = re.sub(pattern, '', title, flags=re.IGNORECASE)
+    
+    # Remove artist name from title if present
+    if artist_name:
+        # Try removing exact artist name
+        title = re.sub(rf'\b{re.escape(artist_name)}\b', '', title, flags=re.IGNORECASE)
+        # Try removing artist name with common separators
+        title = re.sub(rf'\b{re.escape(artist_name)}\s*[-–—:]\s*', '', title, flags=re.IGNORECASE)
+        title = re.sub(rf'^{re.escape(artist_name)}\s*[-–—:]\s*', '', title, flags=re.IGNORECASE)
+    
+    # Remove all quotes and other punctuation
+    title = re.sub(r'["\'''""„‚‛‹›«»]', '', title)
+    
+    # Remove featured artist patterns (after removing parentheses)
+    feat_patterns = [
+        r'\s+feat\.?\s+.+$',     # " feat Artist" at end
+        r'\s+ft\.?\s+.+$',       # " ft Artist" at end  
+        r'\s+featuring\s+.+$',   # " featuring Artist" at end
+        r'\s+with\s+.+$',        # " with Artist" at end
+    ]
+    
+    for pattern in feat_patterns:
+        title = re.sub(pattern, '', title, flags=re.IGNORECASE).strip()
+    
+    # Clean up whitespace and punctuation
+    title = re.sub(r'\s+', ' ', title).strip()
+    title = re.sub(r'^[-–—:,.\s]+|[-–—:,.\s]+$', '', title).strip()
+    
+    # If we cleaned too much, return original
+    if not title.strip() or len(title.strip()) < 2:
+        title = original_title
+    
+    if title != original_title:
+        print(f"🧹 YouTube title cleaned: '{original_title}' → '{title}'")
+    
+    return title
+
+def clean_youtube_artist(artist_string):
+    """
+    Clean YouTube artist strings to get primary artist name
+    
+    Examples:
+    'Yung Gravy, bbno$ (BABY GRAVY)' → 'Yung Gravy'
+    'Y2K, bbno$' → 'Y2K'
+    'LITTLE BIG' → 'LITTLE BIG'
+    'Artist "Nickname" Name' → 'Artist Nickname Name'
+    'ArtistVEVO' → 'Artist'
+    """
+    import re
+    
+    if not artist_string:
+        return artist_string
+    
+    original_artist = artist_string
+    
+    # Remove all quotes - they're usually not part of artist names
+    artist_string = artist_string.replace('"', '').replace("'", '').replace(''', '').replace(''', '').replace('"', '').replace('"', '')
+    
+    # Remove anything in parentheses (often group/label names)
+    artist_string = re.sub(r'\s*\([^)]*\)', '', artist_string).strip()
+    
+    # Remove anything in brackets (often additional info)
+    artist_string = re.sub(r'\s*\[[^\]]*\]', '', artist_string).strip()
+    
+    # Remove common YouTube channel suffixes
+    channel_suffixes = [
+        r'\s*VEVO\s*$',
+        r'\s*Music\s*$',
+        r'\s*Official\s*$',
+        r'\s*Records\s*$',
+        r'\s*Entertainment\s*$',
+        r'\s*TV\s*$',
+        r'\s*Channel\s*$'
+    ]
+    
+    for suffix in channel_suffixes:
+        artist_string = re.sub(suffix, '', artist_string, flags=re.IGNORECASE).strip()
+    
+    # Split on common separators and take the first artist
+    separators = [',', '&', ' and ', ' x ', ' X ', ' feat.', ' ft.', ' featuring', ' with', ' vs ', ' vs.']
+    
+    for sep in separators:
+        if sep in artist_string:
+            parts = artist_string.split(sep)
+            artist_string = parts[0].strip()
+            break
+    
+    # Clean up extra whitespace and punctuation
+    artist_string = re.sub(r'\s+', ' ', artist_string).strip()
+    artist_string = re.sub(r'^\-\s*|\s*\-$', '', artist_string).strip()  # Remove leading/trailing dashes
+    artist_string = re.sub(r'^,\s*|\s*,$', '', artist_string).strip()    # Remove leading/trailing commas
+    
+    # If we cleaned too much, return original
+    if not artist_string.strip():
+        artist_string = original_artist
+    
+    if artist_string != original_artist:
+        print(f"🧹 YouTube artist cleaned: '{original_artist}' → '{artist_string}'")
+    
+    return artist_string
+
+def parse_youtube_playlist(url):
+    """
+    Parse a YouTube Music playlist URL and extract track information using yt-dlp
+    Uses flat playlist extraction to avoid rate limits and get all tracks
+    Returns a list of track dictionaries compatible with our Track structure
+    """
+    try:
+        # Configure yt-dlp options for flat playlist extraction (avoids rate limits)
+        ydl_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'extract_flat': True,  # Only extract basic info, no individual video metadata
+            'flat_playlist': True,  # Extract all playlist entries without hitting API for each video
+            'skip_download': True,  # Don't download, just extract IDs and basic info
+            # Remove all limits to get complete playlist
+        }
+        
+        tracks = []
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            # Extract playlist info
+            playlist_info = ydl.extract_info(url, download=False)
+            
+            if not playlist_info:
+                print("❌ Could not extract playlist information")
+                return None
+            
+            playlist_name = playlist_info.get('title', 'Unknown Playlist')
+            playlist_id = playlist_info.get('id', 'unknown_id')
+            entries = playlist_info.get('entries', [])
+            
+            print(f"🎵 Found YouTube playlist: '{playlist_name}' with {len(entries)} entries")
+            
+            for entry in entries:
+                if not entry:
+                    continue
+                
+                # Extract basic information from flat extraction
+                raw_title = entry.get('title', 'Unknown Track')
+                raw_uploader = entry.get('uploader', 'Unknown Artist')
+                duration = entry.get('duration', 0)
+                video_id = entry.get('id', '')
+                
+                # Clean the track title and artist using our cleaning functions
+                cleaned_artist = clean_youtube_artist(raw_uploader)
+                cleaned_title = clean_youtube_track_title(raw_title, cleaned_artist)
+                
+                # Create track object matching GUI structure
+                track_data = {
+                    'id': video_id,
+                    'name': cleaned_title,
+                    'artists': [cleaned_artist],
+                    'duration_ms': duration * 1000 if duration else 0,
+                    'raw_title': raw_title,  # Keep original for reference
+                    'raw_artist': raw_uploader,  # Keep original for reference
+                    'url': f"https://www.youtube.com/watch?v={video_id}"
+                }
+                
+                tracks.append(track_data)
+            
+            # Create playlist object matching GUI structure
+            playlist_data = {
+                'id': playlist_id,
+                'name': playlist_name,
+                'tracks': tracks,
+                'track_count': len(tracks),
+                'url': url,
+                'source': 'youtube'
+            }
+            
+            print(f"✅ Successfully parsed YouTube playlist: {len(tracks)} tracks extracted")
+            return playlist_data
+            
+    except Exception as e:
+        print(f"❌ Error parsing YouTube playlist: {e}")
+        return None
+
 
 # ===================================================================
 # METADATA & COVER ART HELPERS (Ported from downloads.py)
@@ -5218,6 +5474,263 @@ def get_playlist_tracks(playlist_id):
         return jsonify(playlist_dict)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ===================================================================
+# YOUTUBE PLAYLIST API ENDPOINTS
+# ===================================================================
+
+# Global state for YouTube discovery processes
+youtube_discovery_states = {}
+youtube_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="youtube_discovery")
+
+@app.route('/api/youtube/parse', methods=['POST'])
+def parse_youtube_playlist_endpoint():
+    """Parse a YouTube playlist URL and return structured track data"""
+    try:
+        data = request.get_json()
+        url = data.get('url', '').strip()
+        
+        if not url:
+            return jsonify({"error": "YouTube URL is required"}), 400
+        
+        # Validate URL
+        if not ('youtube.com/playlist' in url or 'music.youtube.com/playlist' in url):
+            return jsonify({"error": "Invalid YouTube playlist URL"}), 400
+        
+        print(f"🎬 Parsing YouTube playlist: {url}")
+        
+        # Parse the playlist using our function
+        playlist_data = parse_youtube_playlist(url)
+        
+        if not playlist_data:
+            return jsonify({"error": "Failed to parse YouTube playlist"}), 500
+        
+        # Create URL hash for state tracking
+        url_hash = str(hash(url))
+        
+        # Initialize discovery state
+        youtube_discovery_states[url_hash] = {
+            'playlist': playlist_data,
+            'phase': 'fresh',
+            'discovery_results': [],
+            'discovery_progress': 0,
+            'spotify_matches': 0,
+            'spotify_total': len(playlist_data['tracks']),
+            'status': 'parsed',
+            'url': url
+        }
+        
+        playlist_data['url_hash'] = url_hash
+        
+        print(f"✅ YouTube playlist parsed successfully: {playlist_data['name']} ({len(playlist_data['tracks'])} tracks)")
+        return jsonify(playlist_data)
+        
+    except Exception as e:
+        print(f"❌ Error parsing YouTube playlist: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/youtube/discovery/start/<url_hash>', methods=['POST'])
+def start_youtube_discovery(url_hash):
+    """Start Spotify discovery process for a YouTube playlist"""
+    try:
+        if url_hash not in youtube_discovery_states:
+            return jsonify({"error": "YouTube playlist not found"}), 404
+        
+        state = youtube_discovery_states[url_hash]
+        
+        if state['phase'] == 'discovering':
+            return jsonify({"error": "Discovery already in progress"}), 400
+        
+        # Update phase to discovering
+        state['phase'] = 'discovering'
+        state['status'] = 'discovering'
+        state['discovery_progress'] = 0
+        state['spotify_matches'] = 0
+        
+        # Start discovery worker
+        future = youtube_discovery_executor.submit(_run_youtube_discovery_worker, url_hash)
+        state['discovery_future'] = future
+        
+        print(f"🔍 Started Spotify discovery for YouTube playlist: {state['playlist']['name']}")
+        return jsonify({"success": True, "message": "Discovery started"})
+        
+    except Exception as e:
+        print(f"❌ Error starting YouTube discovery: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/youtube/discovery/status/<url_hash>', methods=['GET'])
+def get_youtube_discovery_status(url_hash):
+    """Get real-time discovery status for a YouTube playlist"""
+    try:
+        if url_hash not in youtube_discovery_states:
+            return jsonify({"error": "YouTube playlist not found"}), 404
+        
+        state = youtube_discovery_states[url_hash]
+        
+        response = {
+            'phase': state['phase'],
+            'status': state['status'],
+            'progress': state['discovery_progress'],
+            'spotify_matches': state['spotify_matches'],
+            'spotify_total': state['spotify_total'],
+            'results': state['discovery_results'],
+            'complete': state['phase'] == 'discovered'
+        }
+        
+        return jsonify(response)
+        
+    except Exception as e:
+        print(f"❌ Error getting YouTube discovery status: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+def _run_youtube_discovery_worker(url_hash):
+    """Background worker for YouTube Spotify discovery process"""
+    try:
+        state = youtube_discovery_states[url_hash]
+        playlist = state['playlist']
+        tracks = playlist['tracks']
+        
+        print(f"🔍 Starting Spotify discovery for {len(tracks)} YouTube tracks...")
+        
+        if not spotify_client or not spotify_client.is_authenticated():
+            print("❌ Spotify client not authenticated")
+            state['status'] = 'error'
+            state['phase'] = 'fresh'
+            return
+        
+        # Process each track for Spotify discovery
+        for i, track in enumerate(tracks):
+            try:
+                # Update progress
+                state['discovery_progress'] = int((i / len(tracks)) * 100)
+                
+                # Search for track on Spotify using cleaned data
+                cleaned_title = track['name']
+                cleaned_artist = track['artists'][0] if track['artists'] else 'Unknown Artist'
+                
+                print(f"🔍 Searching Spotify for: '{cleaned_artist}' - '{cleaned_title}'")
+                
+                # Try multiple search strategies
+                spotify_track = None
+                
+                # Strategy 1: Standard search
+                query = f"artist:{cleaned_artist} track:{cleaned_title}"
+                spotify_results = spotify_client.search_tracks(query, limit=5)
+                
+                if spotify_results:
+                    # Find best match using similarity
+                    best_match = None
+                    best_score = 0
+                    
+                    for spotify_result in spotify_results:
+                        # Calculate similarity score
+                        title_score = _calculate_similarity(cleaned_title.lower(), spotify_result.name.lower())
+                        artist_score = _calculate_similarity(cleaned_artist.lower(), spotify_result.artists[0].lower())
+                        combined_score = (title_score * 0.7) + (artist_score * 0.3)
+                        
+                        if combined_score > best_score and combined_score > 0.6:
+                            best_match = spotify_result
+                            best_score = combined_score
+                    
+                    spotify_track = best_match
+                
+                # Strategy 2: Swapped search (if first failed)
+                if not spotify_track:
+                    query = f"artist:{cleaned_title} track:{cleaned_artist}"
+                    spotify_results = spotify_client.search_tracks(query, limit=3)
+                    if spotify_results:
+                        spotify_track = spotify_results[0]
+                
+                # Strategy 3: Raw data search (if still failed)
+                if not spotify_track:
+                    raw_title = track['raw_title']
+                    raw_artist = track['raw_artist']
+                    query = f"{raw_artist} {raw_title}"
+                    spotify_results = spotify_client.search_tracks(query, limit=3)
+                    if spotify_results:
+                        spotify_track = spotify_results[0]
+                
+                # Create result entry
+                result = {
+                    'index': i,
+                    'yt_track': cleaned_title,
+                    'yt_artist': cleaned_artist,
+                    'status': '✅ Found' if spotify_track else '❌ Not Found',
+                    'status_class': 'found' if spotify_track else 'not-found',
+                    'spotify_track': spotify_track.name if spotify_track else '',
+                    'spotify_artist': spotify_track.artists[0] if spotify_track else '',
+                    'spotify_album': spotify_track.album if spotify_track else '',
+                    'duration': f"{track['duration_ms'] // 60000}:{(track['duration_ms'] % 60000) // 1000:02d}" if track['duration_ms'] else '0:00'
+                }
+                
+                if spotify_track:
+                    state['spotify_matches'] += 1
+                    result['spotify_data'] = {
+                        'id': spotify_track.id,
+                        'name': spotify_track.name,
+                        'artists': spotify_track.artists,
+                        'album': spotify_track.album,
+                        'duration_ms': spotify_track.duration_ms
+                    }
+                
+                state['discovery_results'].append(result)
+                
+                print(f"  {'✅' if spotify_track else '❌'} Track {i+1}/{len(tracks)}: {result['status']}")
+                
+            except Exception as e:
+                print(f"❌ Error processing track {i}: {e}")
+                # Add failed result
+                result = {
+                    'index': i,
+                    'yt_track': track['name'],
+                    'yt_artist': track['artists'][0] if track['artists'] else 'Unknown',
+                    'status': '❌ Error',
+                    'status_class': 'error',
+                    'spotify_track': '',
+                    'spotify_artist': '',
+                    'spotify_album': '',
+                    'duration': '0:00'
+                }
+                state['discovery_results'].append(result)
+        
+        # Complete discovery
+        state['phase'] = 'discovered'
+        state['status'] = 'complete'
+        state['discovery_progress'] = 100
+        
+        print(f"✅ YouTube discovery complete: {state['spotify_matches']}/{len(tracks)} tracks matched")
+        
+    except Exception as e:
+        print(f"❌ Error in YouTube discovery worker: {e}")
+        state['status'] = 'error'
+        state['phase'] = 'fresh'
+
+def _calculate_similarity(str1, str2):
+    """Calculate string similarity using simple character overlap"""
+    if not str1 or not str2:
+        return 0
+    
+    # Convert to lowercase and remove extra spaces
+    str1 = str1.lower().strip()
+    str2 = str2.lower().strip()
+    
+    if str1 == str2:
+        return 1.0
+    
+    # Calculate character overlap
+    set1 = set(str1.replace(' ', ''))
+    set2 = set(str2.replace(' ', ''))
+    
+    if not set1 or not set2:
+        return 0
+    
+    intersection = len(set1.intersection(set2))
+    union = len(set1.union(set2))
+    
+    return intersection / union if union > 0 else 0
+
 
 # Add these new endpoints to the end of web_server.py
 
