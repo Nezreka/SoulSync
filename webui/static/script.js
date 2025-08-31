@@ -38,6 +38,10 @@ let spotifyPlaylistsLoaded = false;
 let activeDownloadProcesses = {};
 let sequentialSyncManager = null;
 
+// --- YouTube Playlist State Management ---
+let youtubePlaylistStates = {}; // Key: url_hash, Value: playlist state
+let activeYouTubePollers = {}; // Key: url_hash, Value: intervalId
+
 // Sequential Sync Manager Class
 class SequentialSyncManager {
     constructor() {
@@ -5604,6 +5608,22 @@ function initializeSyncPage() {
     if (startSyncBtn) {
         startSyncBtn.addEventListener('click', startSequentialSync);
     }
+    
+    // Logic for the YouTube parse button
+    const youtubeParseBtn = document.getElementById('youtube-parse-btn');
+    if (youtubeParseBtn) {
+        youtubeParseBtn.addEventListener('click', parseYouTubePlaylist);
+    }
+    
+    // Logic for YouTube URL input (Enter key support)
+    const youtubeUrlInput = document.getElementById('youtube-url-input');
+    if (youtubeUrlInput) {
+        youtubeUrlInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                parseYouTubePlaylist();
+            }
+        });
+    }
 }
 
 
@@ -5783,6 +5803,553 @@ async function clearWishlist(playlistId) {
         }
     }
 }
+
+
+// ===============================
+// YOUTUBE PLAYLIST FUNCTIONALITY
+// ===============================
+
+async function parseYouTubePlaylist() {
+    const urlInput = document.getElementById('youtube-url-input');
+    const url = urlInput.value.trim();
+    
+    if (!url) {
+        showToast('Please enter a YouTube playlist URL', 'error');
+        return;
+    }
+    
+    // Validate URL format
+    if (!url.includes('youtube.com/playlist') && !url.includes('music.youtube.com/playlist')) {
+        showToast('Please enter a valid YouTube playlist URL', 'error');
+        return;
+    }
+    
+    try {
+        console.log('🎬 Parsing YouTube playlist:', url);
+        
+        // Create card immediately in 'fresh' phase
+        createYouTubeCard(url, 'fresh');
+        
+        // Parse playlist via API
+        const response = await fetch('/api/youtube/parse', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ url: url })
+        });
+        
+        const result = await response.json();
+        
+        if (result.error) {
+            showToast(`Error parsing YouTube playlist: ${result.error}`, 'error');
+            removeYouTubeCard(url);
+            return;
+        }
+        
+        console.log('✅ YouTube playlist parsed:', result.name, `(${result.tracks.length} tracks)`);
+        
+        // Update card with parsed data and stay in 'fresh' phase
+        updateYouTubeCardData(result.url_hash, result);
+        updateYouTubeCardPhase(result.url_hash, 'fresh');
+        
+        // Clear input
+        urlInput.value = '';
+        
+        // Show success message
+        showToast(`YouTube playlist parsed: ${result.name} (${result.tracks.length} tracks)`, 'success');
+        
+    } catch (error) {
+        console.error('❌ Error parsing YouTube playlist:', error);
+        showToast(`Error parsing YouTube playlist: ${error.message}`, 'error');
+        removeYouTubeCard(url);
+    }
+}
+
+function createYouTubeCard(url, phase = 'fresh') {
+    const container = document.getElementById('youtube-playlist-container');
+    const placeholder = container.querySelector('.playlist-placeholder');
+    
+    // Remove placeholder if it exists
+    if (placeholder) {
+        placeholder.style.display = 'none';
+    }
+    
+    // Create temporary URL hash for initial card
+    const tempHash = btoa(url).substring(0, 8);
+    
+    const cardHtml = `
+        <div class="youtube-playlist-card" id="youtube-card-${tempHash}" data-url="${url}">
+            <div class="playlist-card-icon youtube-icon">▶</div>
+            <div class="playlist-card-content">
+                <div class="playlist-card-name">Parsing YouTube playlist...</div>
+                <div class="playlist-card-info">
+                    <span class="playlist-card-track-count">-- tracks</span>
+                    <span class="playlist-card-phase-text" style="color: #999;">Loading...</span>
+                </div>
+            </div>
+            <div class="playlist-card-progress hidden">
+                ♪ 0 / ✓ 0 / ✗ 0 / 0%
+            </div>
+            <button class="playlist-card-action-btn" disabled>Parsing...</button>
+        </div>
+    `;
+    
+    container.insertAdjacentHTML('beforeend', cardHtml);
+    
+    // Store temporary state
+    youtubePlaylistStates[tempHash] = {
+        phase: phase,
+        url: url,
+        cardElement: document.getElementById(`youtube-card-${tempHash}`),
+        tempHash: tempHash
+    };
+    
+    console.log('🃏 Created YouTube card for URL:', url);
+}
+
+function updateYouTubeCardData(urlHash, playlistData) {
+    // Find the card by URL or temp hash
+    let state = youtubePlaylistStates[urlHash];
+    if (!state) {
+        // Look for temporary card by URL
+        const tempState = Object.values(youtubePlaylistStates).find(s => s.url === playlistData.url);
+        if (tempState) {
+            // Update the state with real hash
+            delete youtubePlaylistStates[tempState.tempHash];
+            youtubePlaylistStates[urlHash] = tempState;
+            state = tempState;
+            
+            // Update card ID
+            if (state.cardElement) {
+                state.cardElement.id = `youtube-card-${urlHash}`;
+            }
+        }
+    }
+    
+    if (!state || !state.cardElement) {
+        console.error('❌ Could not find YouTube card for hash:', urlHash);
+        return;
+    }
+    
+    const card = state.cardElement;
+    
+    // Update card content
+    const nameElement = card.querySelector('.playlist-card-name');
+    const trackCountElement = card.querySelector('.playlist-card-track-count');
+    
+    nameElement.textContent = playlistData.name;
+    trackCountElement.textContent = `${playlistData.tracks.length} tracks`;
+    
+    // Store playlist data
+    state.playlist = playlistData;
+    state.urlHash = urlHash;
+    
+    // Add click handler for card and action button
+    const handleCardClick = () => handleYouTubeCardClick(urlHash);
+    const actionBtn = card.querySelector('.playlist-card-action-btn');
+    
+    card.addEventListener('click', handleCardClick);
+    actionBtn.addEventListener('click', (e) => {
+        e.stopPropagation(); // Prevent card click
+        handleCardClick();
+    });
+    
+    console.log('🃏 Updated YouTube card data:', playlistData.name);
+}
+
+function updateYouTubeCardPhase(urlHash, phase) {
+    const state = youtubePlaylistStates[urlHash];
+    if (!state || !state.cardElement) return;
+    
+    const card = state.cardElement;
+    const phaseTextElement = card.querySelector('.playlist-card-phase-text');
+    const actionBtn = card.querySelector('.playlist-card-action-btn');
+    const progressElement = card.querySelector('.playlist-card-progress');
+    
+    state.phase = phase;
+    
+    switch (phase) {
+        case 'fresh':
+            phaseTextElement.textContent = 'Ready to discover';
+            phaseTextElement.style.color = '#999';
+            actionBtn.textContent = 'Start Discovery';
+            actionBtn.disabled = false;
+            progressElement.classList.add('hidden');
+            break;
+            
+        case 'discovering':
+            phaseTextElement.textContent = 'Discovering...';
+            phaseTextElement.style.color = '#ffa500'; // Orange
+            actionBtn.textContent = 'View Progress';
+            actionBtn.disabled = false;
+            progressElement.classList.remove('hidden');
+            break;
+            
+        case 'discovered':
+            phaseTextElement.textContent = 'Discovery Complete';
+            phaseTextElement.style.color = '#1db954'; // Green
+            actionBtn.textContent = 'View Details';
+            actionBtn.disabled = false;
+            progressElement.classList.add('hidden');
+            break;
+    }
+    
+    console.log('🃏 Updated YouTube card phase:', urlHash, phase);
+}
+
+function handleYouTubeCardClick(urlHash) {
+    const state = youtubePlaylistStates[urlHash];
+    if (!state) return;
+    
+    switch (state.phase) {
+        case 'fresh':
+            // First click: Start discovery and open modal
+            console.log('🎬 Starting YouTube discovery for first time:', urlHash);
+            updateYouTubeCardPhase(urlHash, 'discovering');
+            startYouTubeDiscovery(urlHash);
+            openYouTubeDiscoveryModal(urlHash);
+            break;
+            
+        case 'discovering':
+        case 'discovered':
+            // Subsequent clicks: Just open modal with preserved state
+            console.log('🎬 Opening existing YouTube modal:', urlHash);
+            openYouTubeDiscoveryModal(urlHash);
+            break;
+    }
+}
+
+function updateYouTubeCardProgress(urlHash, progress) {
+    const state = youtubePlaylistStates[urlHash];
+    if (!state || !state.cardElement) return;
+    
+    const card = state.cardElement;
+    const progressElement = card.querySelector('.playlist-card-progress');
+    
+    const total = progress.spotify_total || 0;
+    const matches = progress.spotify_matches || 0;
+    const failed = total - matches;
+    const percentage = total > 0 ? Math.round((matches / total) * 100) : 0;
+    
+    progressElement.textContent = `♪ ${total} / ✓ ${matches} / ✗ ${failed} / ${percentage}%`;
+    
+    console.log('🃏 Updated YouTube card progress:', urlHash, `${matches}/${total} (${percentage}%)`);
+}
+
+function removeYouTubeCard(url) {
+    const state = Object.values(youtubePlaylistStates).find(s => s.url === url);
+    if (state && state.cardElement) {
+        state.cardElement.remove();
+        
+        // Remove from state
+        if (state.urlHash) {
+            delete youtubePlaylistStates[state.urlHash];
+        } else if (state.tempHash) {
+            delete youtubePlaylistStates[state.tempHash];
+        }
+    }
+    
+    // Show placeholder if no cards left
+    const container = document.getElementById('youtube-playlist-container');
+    const cards = container.querySelectorAll('.youtube-playlist-card');
+    const placeholder = container.querySelector('.playlist-placeholder');
+    
+    if (cards.length === 0 && placeholder) {
+        placeholder.style.display = 'block';
+    }
+}
+
+async function startYouTubeDiscovery(urlHash) {
+    try {
+        console.log('🔍 Starting YouTube Spotify discovery for:', urlHash);
+        
+        const response = await fetch(`/api/youtube/discovery/start/${urlHash}`, {
+            method: 'POST'
+        });
+        
+        const result = await response.json();
+        
+        if (result.error) {
+            showToast(`Error starting discovery: ${result.error}`, 'error');
+            return;
+        }
+        
+        // Start polling for progress
+        startYouTubeDiscoveryPolling(urlHash);
+        
+        // Open discovery modal
+        openYouTubeDiscoveryModal(urlHash);
+        
+    } catch (error) {
+        console.error('❌ Error starting YouTube discovery:', error);
+        showToast(`Error starting discovery: ${error.message}`, 'error');
+    }
+}
+
+function startYouTubeDiscoveryPolling(urlHash) {
+    // Stop any existing polling
+    if (activeYouTubePollers[urlHash]) {
+        clearInterval(activeYouTubePollers[urlHash]);
+    }
+    
+    const pollInterval = setInterval(async () => {
+        try {
+            const response = await fetch(`/api/youtube/discovery/status/${urlHash}`);
+            const status = await response.json();
+            
+            if (status.error) {
+                console.error('❌ Error polling YouTube discovery status:', status.error);
+                clearInterval(pollInterval);
+                delete activeYouTubePollers[urlHash];
+                return;
+            }
+            
+            // Update card progress
+            updateYouTubeCardProgress(urlHash, status);
+            
+            // Store discovery results and progress in state
+            const state = youtubePlaylistStates[urlHash];
+            if (state) {
+                state.discoveryResults = status.results || [];
+                state.discoveryProgress = status.progress || 0;
+                state.spotifyMatches = status.spotify_matches || 0;
+            }
+            
+            // Update modal if open
+            updateYouTubeDiscoveryModal(urlHash, status);
+            
+            // Check if complete
+            if (status.complete) {
+                clearInterval(pollInterval);
+                delete activeYouTubePollers[urlHash];
+                
+                // Update card phase to discovered
+                updateYouTubeCardPhase(urlHash, 'discovered');
+                
+                console.log('✅ YouTube discovery complete:', urlHash);
+                showToast('YouTube discovery complete!', 'success');
+            }
+            
+        } catch (error) {
+            console.error('❌ Error polling YouTube discovery:', error);
+            clearInterval(pollInterval);
+            delete activeYouTubePollers[urlHash];
+        }
+    }, 1000);
+    
+    activeYouTubePollers[urlHash] = pollInterval;
+}
+
+function stopYouTubeDiscoveryPolling(urlHash) {
+    if (activeYouTubePollers[urlHash]) {
+        clearInterval(activeYouTubePollers[urlHash]);
+        delete activeYouTubePollers[urlHash];
+        console.log('⏹ Stopped YouTube discovery polling for:', urlHash);
+    }
+}
+
+function openYouTubeDiscoveryModal(urlHash) {
+    const state = youtubePlaylistStates[urlHash];
+    if (!state || !state.playlist) {
+        console.error('❌ No YouTube playlist data found for hash:', urlHash);
+        return;
+    }
+    
+    console.log('🎵 Opening YouTube discovery modal for:', state.playlist.name);
+    
+    // Check if modal already exists
+    let modal = document.getElementById(`youtube-discovery-modal-${urlHash}`);
+    
+    if (modal) {
+        // Modal exists, just show it
+        modal.classList.remove('hidden');
+        console.log('🔄 Showing existing modal with preserved state');
+        
+        // Resume polling if discovery is in progress
+        if (state.phase === 'discovering' && !activeYouTubePollers[urlHash]) {
+            console.log('🔄 Resuming discovery polling...');
+            startYouTubeDiscoveryPolling(urlHash);
+        }
+    } else {
+        // Create new modal
+        const modalHtml = `
+            <div class="modal-overlay" id="youtube-discovery-modal-${urlHash}">
+                <div class="youtube-discovery-modal">
+                    <div class="modal-header">
+                        <h2>🎵 YouTube Playlist Discovery</h2>
+                        <div class="modal-subtitle">${state.playlist.name} (${state.playlist.tracks.length} tracks)</div>
+                        <div class="modal-description">${getModalDescription(state.phase)}</div>
+                        <button class="modal-close-btn" onclick="closeYouTubeDiscoveryModal('${urlHash}')">✕</button>
+                    </div>
+                    
+                    <div class="modal-body">
+                        <div class="progress-section">
+                            <div class="progress-label">🔍 Spotify Discovery Progress</div>
+                            <div class="progress-bar-container">
+                                <div class="progress-bar-fill" id="youtube-discovery-progress-${urlHash}" style="width: 0%;"></div>
+                            </div>
+                            <div class="progress-text" id="youtube-discovery-progress-text-${urlHash}">${getInitialProgressText(state.phase)}</div>
+                        </div>
+                        
+                        <div class="discovery-table-container">
+                            <table class="discovery-table">
+                                <thead>
+                                    <tr>
+                                        <th>YT Track</th>
+                                        <th>YT Artist</th>
+                                        <th>Status</th>
+                                        <th>Spotify Track</th>
+                                        <th>Spotify Artist</th>
+                                        <th>Album</th>
+                                        <th>Duration</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="youtube-discovery-table-${urlHash}">
+                                    ${generateTableRowsFromState(state)}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    
+                    <div class="modal-footer">
+                        <button class="modal-btn modal-btn-secondary" onclick="closeYouTubeDiscoveryModal('${urlHash}')">🏠 Close</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        // Add modal to DOM
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+        modal = document.getElementById(`youtube-discovery-modal-${urlHash}`);
+        
+        // Store modal reference
+        state.modalElement = modal;
+        
+        // Set initial progress if we have discovery results
+        if (state.discoveryResults && state.discoveryResults.length > 0) {
+            const progressData = {
+                progress: state.discoveryProgress || 0,
+                spotify_matches: state.spotifyMatches || 0,
+                spotify_total: state.playlist.tracks.length,
+                results: state.discoveryResults
+            };
+            updateYouTubeDiscoveryModal(urlHash, progressData);
+        }
+        
+        console.log('✨ Created new modal with current state');
+    }
+}
+
+function getModalDescription(phase) {
+    switch (phase) {
+        case 'fresh':
+            return 'Ready to discover clean Spotify metadata for YouTube tracks...';
+        case 'discovering':
+            return 'Discovering clean Spotify metadata for YouTube tracks...';
+        case 'discovered':
+            return 'Discovery complete! View the results below.';
+        default:
+            return 'Discovering clean Spotify metadata for YouTube tracks...';
+    }
+}
+
+function getInitialProgressText(phase) {
+    switch (phase) {
+        case 'fresh':
+            return 'Click Start Discovery to begin...';
+        case 'discovering':
+            return 'Starting discovery...';
+        case 'discovered':
+            return 'Discovery completed!';
+        default:
+            return 'Starting discovery...';
+    }
+}
+
+function generateTableRowsFromState(state) {
+    if (state.discoveryResults && state.discoveryResults.length > 0) {
+        // Generate rows from existing discovery results
+        return state.discoveryResults.map((result, index) => `
+            <tr id="youtube-discovery-row-${result.index}">
+                <td class="yt-track">${result.yt_track}</td>
+                <td class="yt-artist">${result.yt_artist}</td>
+                <td class="discovery-status ${result.status_class}">${result.status}</td>
+                <td class="spotify-track">${result.spotify_track || '-'}</td>
+                <td class="spotify-artist">${result.spotify_artist || '-'}</td>
+                <td class="spotify-album">${result.spotify_album || '-'}</td>
+                <td class="duration">${result.duration}</td>
+            </tr>
+        `).join('');
+    } else {
+        // Generate initial rows from playlist tracks
+        return generateInitialTableRows(state.playlist.tracks);
+    }
+}
+
+function generateInitialTableRows(tracks) {
+    return tracks.map((track, index) => `
+        <tr id="youtube-discovery-row-${index}">
+            <td class="yt-track">${track.name}</td>
+            <td class="yt-artist">${track.artists[0] || 'Unknown Artist'}</td>
+            <td class="discovery-status">🔍 Pending...</td>
+            <td class="spotify-track">-</td>
+            <td class="spotify-artist">-</td>
+            <td class="spotify-album">-</td>
+            <td class="duration">${formatDuration(track.duration_ms)}</td>
+        </tr>
+    `).join('');
+}
+
+function formatDuration(durationMs) {
+    if (!durationMs) return '0:00';
+    const minutes = Math.floor(durationMs / 60000);
+    const seconds = Math.floor((durationMs % 60000) / 1000);
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}
+
+function updateYouTubeDiscoveryModal(urlHash, status) {
+    const progressBar = document.getElementById(`youtube-discovery-progress-${urlHash}`);
+    const progressText = document.getElementById(`youtube-discovery-progress-text-${urlHash}`);
+    const tableBody = document.getElementById(`youtube-discovery-table-${urlHash}`);
+    
+    if (!progressBar || !progressText || !tableBody) return;
+    
+    // Update progress bar
+    progressBar.style.width = `${status.progress}%`;
+    progressText.textContent = `${status.spotify_matches} / ${status.spotify_total} tracks matched (${status.progress}%)`;
+    
+    // Update table rows
+    status.results.forEach(result => {
+        const row = document.getElementById(`youtube-discovery-row-${result.index}`);
+        if (!row) return;
+        
+        const statusCell = row.querySelector('.discovery-status');
+        const spotifyTrackCell = row.querySelector('.spotify-track');
+        const spotifyArtistCell = row.querySelector('.spotify-artist');
+        const spotifyAlbumCell = row.querySelector('.spotify-album');
+        
+        statusCell.textContent = result.status;
+        statusCell.className = `discovery-status ${result.status_class}`;
+        
+        spotifyTrackCell.textContent = result.spotify_track || '-';
+        spotifyArtistCell.textContent = result.spotify_artist || '-';
+        spotifyAlbumCell.textContent = result.spotify_album || '-';
+    });
+}
+
+function closeYouTubeDiscoveryModal(urlHash) {
+    const modal = document.getElementById(`youtube-discovery-modal-${urlHash}`);
+    if (modal) {
+        // Hide modal instead of removing it to preserve state
+        modal.classList.add('hidden');
+        console.log('🚪 Hidden YouTube discovery modal (preserving state):', urlHash);
+    }
+    
+    // Keep modal reference and all state intact
+    // Discovery polling continues in background if active
+}
+
 
 // --- Global Cleanup on Page Unload ---
 // Note: Automatic wishlist processing now runs server-side and continues even when browser is closed
