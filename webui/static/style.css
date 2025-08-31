@@ -4682,7 +4682,7 @@ body {
 /* Column width distribution for balanced layout */
 .youtube-discovery-modal .discovery-table th:nth-child(1), /* YT Track */
 .youtube-discovery-modal .discovery-table td:nth-child(1) {
-    width: 20%;
+    width: 17.5%;
 }
 
 .youtube-discovery-modal .discovery-table th:nth-child(2), /* YT Artist */
@@ -4697,7 +4697,7 @@ body {
 
 .youtube-discovery-modal .discovery-table th:nth-child(4), /* Spotify Track */
 .youtube-discovery-modal .discovery-table td:nth-child(4) {
-    width: 20%;
+    width: 17.5%;
 }
 
 .youtube-discovery-modal .discovery-table th:nth-child(5), /* Spotify Artist */
@@ -4712,7 +4712,7 @@ body {
 
 .youtube-discovery-modal .discovery-table th:nth-child(7), /* Duration */
 .youtube-discovery-modal .discovery-table td:nth-child(7) {
-    width: 5%;
+    width: 10%;
     text-align: center;
 }
 
