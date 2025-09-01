@@ -2713,7 +2713,152 @@ async function openDownloadMissingModal(playlistId) {
     modal.style.display = 'flex';
 }
 
+async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistName, spotifyTracks) {
+    // Check if a process is already active for this virtual playlist
+    if (activeDownloadProcesses[virtualPlaylistId]) {
+        console.log(`Modal for ${virtualPlaylistId} already exists. Showing it.`);
+        const process = activeDownloadProcesses[virtualPlaylistId];
+        if (process.modalElement) {
+            if (process.status === 'complete') {
+                showToast('Showing previous results. Close this modal to start a new analysis.', 'info');
+            }
+            process.modalElement.style.display = 'flex';
+        }
+        return;
+    }
 
+    console.log(`📥 Opening Download Missing Tracks modal for YouTube playlist: ${virtualPlaylistId}`);
+    
+    // Create virtual playlist object for compatibility with existing modal logic
+    const virtualPlaylist = {
+        id: virtualPlaylistId,
+        name: playlistName,
+        track_count: spotifyTracks.length
+    };
+    
+    // Store the tracks in the cache for the modal to use
+    playlistTrackCache[virtualPlaylistId] = spotifyTracks;
+    currentPlaylistTracks = spotifyTracks;
+    currentModalPlaylistId = virtualPlaylistId;
+    
+    let modal = document.createElement('div');
+    modal.id = `download-missing-modal-${virtualPlaylistId}`;
+    modal.className = 'download-missing-modal';
+    modal.style.display = 'none';
+    document.body.appendChild(modal);
+
+    // Register the new process in our global state tracker using the same structure as Spotify
+    activeDownloadProcesses[virtualPlaylistId] = {
+        status: 'idle',
+        modalElement: modal,
+        poller: null,
+        batchId: null,
+        playlist: virtualPlaylist,
+        tracks: spotifyTracks
+    };
+    
+    // Use the exact same modal HTML structure as the existing Spotify modal
+    modal.innerHTML = `
+        <div class="download-missing-modal-content">
+            <div class="download-missing-modal-header">
+                <h2 class="download-missing-modal-title">Download Missing Tracks - ${escapeHtml(playlistName)}</h2>
+                <span class="download-missing-modal-close" onclick="closeDownloadMissingModal('${virtualPlaylistId}')">&times;</span>
+            </div>
+            
+            <div class="download-missing-modal-body">
+                <div class="download-dashboard-stats">
+                    <div class="dashboard-stat stat-total">
+                        <div class="dashboard-stat-number" id="stat-total-${virtualPlaylistId}">${spotifyTracks.length}</div>
+                        <div class="dashboard-stat-label">Total Tracks</div>
+                    </div>
+                    <div class="dashboard-stat stat-found">
+                        <div class="dashboard-stat-number" id="stat-found-${virtualPlaylistId}">-</div>
+                        <div class="dashboard-stat-label">Found in Library</div>
+                    </div>
+                    <div class="dashboard-stat stat-missing">
+                        <div class="dashboard-stat-number" id="stat-missing-${virtualPlaylistId}">-</div>
+                        <div class="dashboard-stat-label">Missing Tracks</div>
+                    </div>
+                    <div class="dashboard-stat stat-downloaded">
+                        <div class="dashboard-stat-number" id="stat-downloaded-${virtualPlaylistId}">0</div>
+                        <div class="dashboard-stat-label">Downloaded</div>
+                    </div>
+                </div>
+                
+                <div class="download-progress-section">
+                    <div class="progress-item">
+                        <div class="progress-label">
+                            🔍 Library Analysis
+                            <span id="analysis-progress-text-${virtualPlaylistId}">Ready to start</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill analysis" id="analysis-progress-fill-${virtualPlaylistId}"></div>
+                        </div>
+                    </div>
+                    <div class="progress-item">
+                        <div class="progress-label">
+                            ⏬ Downloads
+                            <span id="download-progress-text-${virtualPlaylistId}">Waiting for analysis</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill download" id="download-progress-fill-${virtualPlaylistId}"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="download-tracks-section">
+                    <div class="download-tracks-header">
+                        <h3 class="download-tracks-title">📋 Track Analysis & Download Status</h3>
+                    </div>
+                    <div class="download-tracks-table-container">
+                        <table class="download-tracks-table">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Track</th>
+                                    <th>Artist</th>
+                                    <th>Duration</th>
+                                    <th>Library Match</th>
+                                    <th>Download Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="download-tracks-tbody-${virtualPlaylistId}">
+                                ${spotifyTracks.map((track, index) => `
+                                    <tr data-track-index="${index}">
+                                        <td class="track-number">${index + 1}</td>
+                                        <td class="track-name" title="${escapeHtml(track.name)}">${escapeHtml(track.name)}</td>
+                                        <td class="track-artist" title="${escapeHtml(track.artists.join(', '))}">${track.artists.join(', ')}</td>
+                                        <td class="track-duration">${formatDuration(track.duration_ms)}</td>
+                                        <td class="track-match-status match-checking" id="match-${virtualPlaylistId}-${index}">🔍 Pending</td>
+                                        <td class="track-download-status" id="download-${virtualPlaylistId}-${index}">-</td>
+                                        <td class="track-actions" id="actions-${virtualPlaylistId}-${index}">-</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="download-missing-modal-footer">
+                <div class="download-phase-controls">
+                    <button class="download-control-btn primary" id="begin-analysis-btn-${virtualPlaylistId}" onclick="startMissingTracksProcess('${virtualPlaylistId}')">
+                        Begin Analysis
+                    </button>
+                    <button class="download-control-btn danger" id="cancel-all-btn-${virtualPlaylistId}" onclick="cancelAllOperations('${virtualPlaylistId}')" style="display: none;">
+                        Cancel All
+                    </button>
+                </div>
+                <div class="modal-close-section">
+                    <button class="download-control-btn secondary" onclick="closeDownloadMissingModal('${virtualPlaylistId}')">Close</button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    modal.style.display = 'flex';
+}
 
 function closeDownloadMissingModal(playlistId) {
     const process = activeDownloadProcesses[playlistId];
@@ -7108,8 +7253,8 @@ async function startYouTubeDownloadMissing(urlHash) {
         // Store reference for card navigation
         state.convertedSpotifyPlaylistId = virtualPlaylistId;
         
-        // Open the existing download missing tracks modal
-        await openDownloadMissingModal(virtualPlaylistId, playlistName, spotifyTracks);
+        // Open download missing tracks modal for YouTube playlist
+        await openDownloadMissingModalForYouTube(virtualPlaylistId, playlistName, spotifyTracks);
         
         // Update YouTube card phase when download process starts
         updateYouTubeCardPhase(urlHash, 'downloading');
