@@ -1790,9 +1790,8 @@ async function checkForActiveProcesses() {
                 }
             }
             
-            // Note: YouTube playlists are now handled by loadYouTubePlaylistsFromBackend() 
-            // in loadSyncData(), which provides more complete data than active processes.
-            // Skip YouTube rehydration here to avoid conflicts and duplicate cards.
+            // Note: YouTube playlists are handled by loadYouTubePlaylistsFromBackend() and rehydrateYouTubePlaylist()
+            // in loadSyncData(), which provides more complete data than active processes and handles download modal rehydration.
             console.log(`ℹ️ Skipping ${youtubeProcesses.length} YouTube playlists - handled by full backend loading`);
         }
     } catch (error) {
@@ -1803,6 +1802,12 @@ async function checkForActiveProcesses() {
 async function rehydrateModal(processInfo, userRequested = false) {
     const { playlist_id, playlist_name, batch_id } = processInfo;
     console.log(`💧 Rehydrating modal for "${playlist_name}" (batch: ${batch_id}) - User requested: ${userRequested}`);
+
+    // Handle YouTube virtual playlists - skip rehydration here, handled by YouTube system
+    if (playlist_id.startsWith('youtube_')) {
+        console.log(`⏭️ Skipping YouTube virtual playlist rehydration - handled by YouTube system`);
+        return;
+    }
 
     // Handle wishlist processes specially
     if (playlist_id === "wishlist") {
@@ -1953,6 +1958,57 @@ async function loadYouTubePlaylistsFromBackend() {
                     }
                 } catch (error) {
                     console.warn(`⚠️ Error fetching discovery results for ${playlistInfo.playlist.name}:`, error.message);
+                }
+            }
+        }
+        
+        // Rehydrate download modals for YouTube playlists in downloading/download_complete phases
+        for (const playlistInfo of playlists) {
+            if ((playlistInfo.phase === 'downloading' || playlistInfo.phase === 'download_complete') && 
+                playlistInfo.converted_spotify_playlist_id && playlistInfo.download_process_id) {
+                
+                const convertedPlaylistId = playlistInfo.converted_spotify_playlist_id;
+                
+                if (!activeDownloadProcesses[convertedPlaylistId]) {
+                    console.log(`💧 Rehydrating download modal for YouTube playlist: ${playlistInfo.playlist.name}`);
+                    try {
+                        // Create the download modal using the YouTube-specific function
+                        const spotifyTracks = youtubePlaylistStates[playlistInfo.url_hash]?.discoveryResults
+                            ?.filter(result => result.spotify_data)
+                            ?.map(result => result.spotify_data) || [];
+                        
+                        if (spotifyTracks.length > 0) {
+                            await openDownloadMissingModalForYouTube(
+                                convertedPlaylistId, 
+                                playlistInfo.playlist.name, 
+                                spotifyTracks
+                            );
+                            
+                            // Set the modal to running state with the correct batch ID
+                            const process = activeDownloadProcesses[convertedPlaylistId];
+                            if (process) {
+                                process.status = 'running';
+                                process.batchId = playlistInfo.download_process_id;
+                                
+                                // Update UI to running state
+                                const beginBtn = document.getElementById(`begin-analysis-btn-${convertedPlaylistId}`);
+                                const cancelBtn = document.getElementById(`cancel-all-btn-${convertedPlaylistId}`);
+                                if (beginBtn) beginBtn.style.display = 'none';
+                                if (cancelBtn) cancelBtn.style.display = 'inline-block';
+                                
+                                // Start polling for this process
+                                startModalDownloadPolling(convertedPlaylistId);
+                                
+                                // Hide modal since this is background rehydration
+                                process.modalElement.style.display = 'none';
+                                console.log(`✅ Rehydrated download modal for YouTube playlist: ${playlistInfo.playlist.name}`);
+                            }
+                        } else {
+                            console.warn(`⚠️ No Spotify tracks found for YouTube download modal: ${playlistInfo.playlist.name}`);
+                        }
+                    } catch (error) {
+                        console.error(`❌ Error rehydrating download modal for ${playlistInfo.playlist.name}:`, error);
+                    }
                 }
             }
         }
@@ -2878,6 +2934,13 @@ function closeDownloadMissingModal(playlistId) {
         process.modalElement.style.display = 'none';
     } else {
         console.log(`Closing and cleaning up download modal for playlist ${playlistId}.`);
+        
+        // Reset YouTube playlist phase to 'discovered' when modal is closed after completion
+        if (playlistId.startsWith('youtube_')) {
+            const urlHash = playlistId.replace('youtube_', '');
+            updateYouTubeCardPhase(urlHash, 'discovered');
+        }
+        
         cleanupDownloadProcess(playlistId);
     }
 }
@@ -3098,6 +3161,12 @@ async function startMissingTracksProcess(playlistId) {
         process.status = 'running';
         updatePlaylistCardUI(playlistId);
         updateRefreshButtonState();
+        
+        // Update YouTube playlist phase to 'downloading' if this is a YouTube playlist
+        if (playlistId.startsWith('youtube_')) {
+            const urlHash = playlistId.replace('youtube_', '');
+            updateYouTubeCardPhase(urlHash, 'downloading');
+        }
         document.getElementById(`begin-analysis-btn-${playlistId}`).style.display = 'none';
         document.getElementById(`cancel-all-btn-${playlistId}`).style.display = 'inline-block';
 
@@ -3235,14 +3304,34 @@ function startModalDownloadPolling(playlistId) {
                     
                     if (data.phase === 'cancelled') {
                         process.status = 'cancelled';
+                        
+                        // Reset YouTube playlist phase to 'discovered' if this is a YouTube playlist on cancel
+                        if (playlistId.startsWith('youtube_')) {
+                            const urlHash = playlistId.replace('youtube_', '');
+                            updateYouTubeCardPhase(urlHash, 'discovered');
+                        }
+                        
                         showToast(`Process cancelled for ${process.playlist.name}.`, 'info');
                     } else if (data.phase === 'error') {
                         process.status = 'complete'; // Treat as complete to allow cleanup
                         updatePlaylistCardUI(playlistId); // Update card to show ready for review
+                        
+                        // Reset YouTube playlist phase to 'discovered' if this is a YouTube playlist on error
+                        if (playlistId.startsWith('youtube_')) {
+                            const urlHash = playlistId.replace('youtube_', '');
+                            updateYouTubeCardPhase(urlHash, 'discovered');
+                        }
+                        
                         showToast(`Process for ${process.playlist.name} failed!`, 'error');
                     } else {
                         process.status = 'complete';
                         updatePlaylistCardUI(playlistId); // Update card to show ready for review
+                        
+                        // Update YouTube playlist phase to 'download_complete' if this is a YouTube playlist
+                        if (playlistId.startsWith('youtube_')) {
+                            const urlHash = playlistId.replace('youtube_', '');
+                            updateYouTubeCardPhase(urlHash, 'download_complete');
+                        }
                         
                         // Handle background wishlist processing completion specially
                         if (isBackgroundWishlist) {
@@ -6574,7 +6663,39 @@ function handleYouTubeCardClick(urlHash) {
             // Need to get playlist ID from converted Spotify data
             const spotifyPlaylistId = state.convertedSpotifyPlaylistId;
             if (spotifyPlaylistId) {
-                openDownloadMissingModal(spotifyPlaylistId);
+                // Check if we have discovery results, if not load them first
+                if (!state.discoveryResults || state.discoveryResults.length === 0) {
+                    console.log('🔍 Loading discovery results for download modal...');
+                    fetch(`/api/youtube/state/${urlHash}`)
+                        .then(response => response.json())
+                        .then(fullState => {
+                            if (fullState.discovery_results) {
+                                state.discoveryResults = fullState.discovery_results;
+                                console.log(`✅ Loaded ${state.discoveryResults.length} discovery results`);
+                                
+                                // Now open the modal with the loaded data
+                                const playlistName = `[YouTube] ${state.playlist.name}`;
+                                const spotifyTracks = state.discoveryResults
+                                    .filter(result => result.spotify_data)
+                                    .map(result => result.spotify_data);
+                                openDownloadMissingModalForYouTube(spotifyPlaylistId, playlistName, spotifyTracks);
+                            } else {
+                                console.error('❌ No discovery results found for downloads');
+                                showToast('Unable to open download modal - no discovery data', 'error');
+                            }
+                        })
+                        .catch(error => {
+                            console.error('❌ Error loading discovery results:', error);
+                            showToast('Error loading playlist data', 'error');
+                        });
+                } else {
+                    // Use the YouTube-specific function to maintain proper state linking
+                    const playlistName = `[YouTube] ${state.playlist.name}`;
+                    const spotifyTracks = state.discoveryResults
+                        .filter(result => result.spotify_data)
+                        .map(result => result.spotify_data);
+                    openDownloadMissingModalForYouTube(spotifyPlaylistId, playlistName, spotifyTracks);
+                }
             } else {
                 console.error('❌ No converted Spotify playlist ID found for downloads');
                 showToast('Unable to open download modal - missing playlist data', 'error');
@@ -7256,8 +7377,7 @@ async function startYouTubeDownloadMissing(urlHash) {
         // Open download missing tracks modal for YouTube playlist
         await openDownloadMissingModalForYouTube(virtualPlaylistId, playlistName, spotifyTracks);
         
-        // Update YouTube card phase when download process starts
-        updateYouTubeCardPhase(urlHash, 'downloading');
+        // Phase will change to 'downloading' when user clicks "Begin Analysis" button
         
     } catch (error) {
         console.error('❌ Error starting download missing tracks:', error);
