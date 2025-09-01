@@ -4382,6 +4382,14 @@ def _on_download_completed(batch_id, task_id, success=True):
             # Mark batch as complete and process wishlist outside of lock to prevent deadlocks
             batch['phase'] = 'complete'
             
+            # Update YouTube playlist phase to 'download_complete' if this is a YouTube playlist
+            playlist_id = batch.get('playlist_id')
+            if playlist_id and playlist_id.startswith('youtube_'):
+                url_hash = playlist_id.replace('youtube_', '')
+                if url_hash in youtube_playlist_states:
+                    youtube_playlist_states[url_hash]['phase'] = 'download_complete'
+                    print(f"📋 Updated YouTube playlist {url_hash} to download_complete phase")
+            
             print(f"🎉 [Batch Manager] Batch {batch_id} complete - stopping monitor")
             download_monitor.stop_monitoring(batch_id)
             
@@ -4459,6 +4467,13 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
             with tasks_lock:
                 if batch_id in download_batches:
                     download_batches[batch_id]['phase'] = 'complete'
+                    
+                    # Update YouTube playlist phase to 'download_complete' if this is a YouTube playlist
+                    if playlist_id.startswith('youtube_'):
+                        url_hash = playlist_id.replace('youtube_', '')
+                        if url_hash in youtube_playlist_states:
+                            youtube_playlist_states[url_hash]['phase'] = 'download_complete'
+                            print(f"📋 Updated YouTube playlist {url_hash} to download_complete phase (no missing tracks)")
             return
 
         print(f" transitioning batch {batch_id} to download phase with {len(missing_tracks)} tracks.")
@@ -4490,6 +4505,13 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
             if batch_id in download_batches:
                 download_batches[batch_id]['phase'] = 'error'
                 download_batches[batch_id]['error'] = str(e)
+                
+                # Reset YouTube playlist phase to 'discovered' if this is a YouTube playlist on error
+                if playlist_id.startswith('youtube_'):
+                    url_hash = playlist_id.replace('youtube_', '')
+                    if url_hash in youtube_playlist_states:
+                        youtube_playlist_states[url_hash]['phase'] = 'discovered'
+                        print(f"📋 Reset YouTube playlist {url_hash} to discovered phase (error)")
 
 def _download_track_worker(task_id, batch_id=None):
     """
@@ -4956,7 +4978,8 @@ def get_active_processes():
                 "discovery_progress": state['discovery_progress'],
                 "spotify_matches": state['spotify_matches'],
                 "spotify_total": state['spotify_total'],
-                "converted_spotify_playlist_id": state.get('converted_spotify_playlist_id')
+                "converted_spotify_playlist_id": state.get('converted_spotify_playlist_id'),
+                "download_process_id": state.get('download_process_id')  # batch_id for download modal rehydration
             })
     
     print(f"📊 Active processes check: {len([p for p in active_processes if p['type'] == 'batch'])} download batches, {len([p for p in active_processes if p['type'] == 'youtube_playlist'])} YouTube playlists")
@@ -5196,6 +5219,14 @@ def cancel_batch(batch_id):
             # Mark batch as cancelled
             download_batches[batch_id]['phase'] = 'cancelled'
             
+            # Reset YouTube playlist phase to 'discovered' if this is a YouTube playlist
+            playlist_id = download_batches[batch_id].get('playlist_id')
+            if playlist_id and playlist_id.startswith('youtube_'):
+                url_hash = playlist_id.replace('youtube_', '')
+                if url_hash in youtube_playlist_states:
+                    youtube_playlist_states[url_hash]['phase'] = 'discovered'
+                    print(f"📋 Reset YouTube playlist {url_hash} to discovered phase (batch cancelled)")
+            
             # Cancel all individual tasks in the batch
             cancelled_count = 0
             for task_id in download_batches[batch_id].get('queue', []):
@@ -5295,6 +5326,15 @@ def start_missing_tracks_process(playlist_id):
             'analysis_processed': 0,
             'analysis_results': []
         }
+
+    # Link YouTube playlist to download process if this is a YouTube playlist
+    if playlist_id.startswith('youtube_'):
+        url_hash = playlist_id.replace('youtube_', '')
+        if url_hash in youtube_playlist_states:
+            youtube_playlist_states[url_hash]['download_process_id'] = batch_id
+            youtube_playlist_states[url_hash]['phase'] = 'downloading'
+            youtube_playlist_states[url_hash]['converted_spotify_playlist_id'] = playlist_id
+            print(f"🔗 Linked YouTube playlist {url_hash} to download process {batch_id} (converted ID: {playlist_id})")
 
     missing_download_executor.submit(_run_full_missing_tracks_process, batch_id, playlist_id, tracks)
 
@@ -5543,6 +5583,7 @@ def parse_youtube_playlist_endpoint():
             'url': url,
             'sync_playlist_id': None,
             'converted_spotify_playlist_id': None,
+            'download_process_id': None,  # Track associated download missing tracks process
             'created_at': time.time(),
             'last_accessed': time.time(),
             'discovery_future': None,
@@ -5903,6 +5944,8 @@ def get_all_youtube_playlists():
                 'discovery_progress': state['discovery_progress'],
                 'spotify_matches': state['spotify_matches'],
                 'spotify_total': state['spotify_total'],
+                'converted_spotify_playlist_id': state.get('converted_spotify_playlist_id'),
+                'download_process_id': state.get('download_process_id'),
                 'created_at': state['created_at'],
                 'last_accessed': state['last_accessed']
             }
