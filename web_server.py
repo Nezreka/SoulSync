@@ -4924,10 +4924,13 @@ def start_playlist_missing_downloads(playlist_id):
 @app.route('/api/active-processes', methods=['GET'])
 def get_active_processes():
     """
-    This endpoint now only needs to check for active download batches,
-    as the analysis phase is now part of the batch process.
+    Returns all active processes for frontend rehydration:
+    - Download batch processes (Spotify playlists)
+    - YouTube discovery/sync processes (non-fresh phases)
     """
     active_processes = []
+    
+    # Add active download batch processes
     with tasks_lock:
         for batch_id, batch_data in download_batches.items():
             if batch_data.get('phase') not in ['complete', 'error', 'cancelled']:
@@ -4938,6 +4941,25 @@ def get_active_processes():
                     "batch_id": batch_id,
                     "phase": batch_data.get('phase')
                 })
+    
+    # Add YouTube playlists in non-fresh phases for rehydration
+    for url_hash, state in youtube_playlist_states.items():
+        # Include playlists that have progressed beyond fresh phase
+        if state['phase'] != 'fresh':
+            active_processes.append({
+                "type": "youtube_playlist",
+                "url_hash": url_hash,
+                "url": state['url'],
+                "playlist_name": state['playlist']['name'],
+                "phase": state['phase'],
+                "status": state['status'],
+                "discovery_progress": state['discovery_progress'],
+                "spotify_matches": state['spotify_matches'],
+                "spotify_total": state['spotify_total'],
+                "converted_spotify_playlist_id": state.get('converted_spotify_playlist_id')
+            })
+    
+    print(f"📊 Active processes check: {len([p for p in active_processes if p['type'] == 'batch'])} download batches, {len([p for p in active_processes if p['type'] == 'youtube_playlist'])} YouTube playlists")
     return jsonify({"active_processes": active_processes})
 
 @app.route('/api/playlists/<batch_id>/download_status', methods=['GET'])
@@ -5480,8 +5502,8 @@ def get_playlist_tracks(playlist_id):
 # YOUTUBE PLAYLIST API ENDPOINTS
 # ===================================================================
 
-# Global state for YouTube discovery processes
-youtube_discovery_states = {}
+# Global state for YouTube playlist management (persistent across page reloads)
+youtube_playlist_states = {}  # Key: url_hash, Value: persistent playlist state
 youtube_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="youtube_discovery")
 
 @app.route('/api/youtube/parse', methods=['POST'])
@@ -5509,16 +5531,22 @@ def parse_youtube_playlist_endpoint():
         # Create URL hash for state tracking
         url_hash = str(hash(url))
         
-        # Initialize discovery state
-        youtube_discovery_states[url_hash] = {
+        # Initialize persistent playlist state (similar to Spotify download_batches structure)
+        youtube_playlist_states[url_hash] = {
             'playlist': playlist_data,
-            'phase': 'fresh',
+            'phase': 'fresh',  # fresh -> discovering -> discovered -> syncing -> sync_complete -> downloading -> download_complete
             'discovery_results': [],
             'discovery_progress': 0,
             'spotify_matches': 0,
             'spotify_total': len(playlist_data['tracks']),
             'status': 'parsed',
-            'url': url
+            'url': url,
+            'sync_playlist_id': None,
+            'converted_spotify_playlist_id': None,
+            'created_at': time.time(),
+            'last_accessed': time.time(),
+            'discovery_future': None,
+            'sync_progress': {}
         }
         
         playlist_data['url_hash'] = url_hash
@@ -5534,10 +5562,11 @@ def parse_youtube_playlist_endpoint():
 def start_youtube_discovery(url_hash):
     """Start Spotify discovery process for a YouTube playlist"""
     try:
-        if url_hash not in youtube_discovery_states:
+        if url_hash not in youtube_playlist_states:
             return jsonify({"error": "YouTube playlist not found"}), 404
         
-        state = youtube_discovery_states[url_hash]
+        state = youtube_playlist_states[url_hash]
+        state['last_accessed'] = time.time()  # Update access time
         
         if state['phase'] == 'discovering':
             return jsonify({"error": "Discovery already in progress"}), 400
@@ -5563,10 +5592,11 @@ def start_youtube_discovery(url_hash):
 def get_youtube_discovery_status(url_hash):
     """Get real-time discovery status for a YouTube playlist"""
     try:
-        if url_hash not in youtube_discovery_states:
+        if url_hash not in youtube_playlist_states:
             return jsonify({"error": "YouTube playlist not found"}), 404
         
-        state = youtube_discovery_states[url_hash]
+        state = youtube_playlist_states[url_hash]
+        state['last_accessed'] = time.time()  # Update access time
         
         response = {
             'phase': state['phase'],
@@ -5588,7 +5618,7 @@ def get_youtube_discovery_status(url_hash):
 def _run_youtube_discovery_worker(url_hash):
     """Background worker for YouTube Spotify discovery process"""
     try:
-        state = youtube_discovery_states[url_hash]
+        state = youtube_playlist_states[url_hash]
         playlist = state['playlist']
         tracks = playlist['tracks']
         
@@ -5735,10 +5765,11 @@ def _calculate_similarity(str1, str2):
 def start_youtube_sync(url_hash):
     """Start sync process for a YouTube playlist using discovered Spotify tracks"""
     try:
-        if url_hash not in youtube_discovery_states:
+        if url_hash not in youtube_playlist_states:
             return jsonify({"error": "YouTube playlist not found"}), 404
         
-        state = youtube_discovery_states[url_hash]
+        state = youtube_playlist_states[url_hash]
+        state['last_accessed'] = time.time()  # Update access time
         
         if state['phase'] not in ['discovered', 'sync_complete']:
             return jsonify({"error": "YouTube playlist not ready for sync"}), 400
@@ -5783,10 +5814,11 @@ def start_youtube_sync(url_hash):
 def get_youtube_sync_status(url_hash):
     """Get sync status for a YouTube playlist"""
     try:
-        if url_hash not in youtube_discovery_states:
+        if url_hash not in youtube_playlist_states:
             return jsonify({"error": "YouTube playlist not found"}), 404
         
-        state = youtube_discovery_states[url_hash]
+        state = youtube_playlist_states[url_hash]
+        state['last_accessed'] = time.time()  # Update access time
         sync_playlist_id = state.get('sync_playlist_id')
         
         if not sync_playlist_id:
@@ -5821,10 +5853,11 @@ def get_youtube_sync_status(url_hash):
 def cancel_youtube_sync(url_hash):
     """Cancel sync for a YouTube playlist"""
     try:
-        if url_hash not in youtube_discovery_states:
+        if url_hash not in youtube_playlist_states:
             return jsonify({"error": "YouTube playlist not found"}), 404
         
-        state = youtube_discovery_states[url_hash]
+        state = youtube_playlist_states[url_hash]
+        state['last_accessed'] = time.time()  # Update access time
         sync_playlist_id = state.get('sync_playlist_id')
         
         if sync_playlist_id:
@@ -5845,6 +5878,131 @@ def cancel_youtube_sync(url_hash):
         
     except Exception as e:
         print(f"❌ Error cancelling YouTube sync: {e}")
+        return jsonify({"error": str(e)}), 500
+
+# New YouTube Playlist Management Endpoints (for persistent state)
+
+@app.route('/api/youtube/playlists', methods=['GET'])
+def get_all_youtube_playlists():
+    """Get all stored YouTube playlists for frontend hydration (similar to Spotify playlists)"""
+    try:
+        playlists = []
+        current_time = time.time()
+        
+        for url_hash, state in youtube_playlist_states.items():
+            # Update access time when requested
+            state['last_accessed'] = current_time
+            
+            # Return essential data for card recreation
+            playlist_info = {
+                'url_hash': url_hash,
+                'url': state['url'],
+                'playlist': state['playlist'],
+                'phase': state['phase'],
+                'status': state['status'],
+                'discovery_progress': state['discovery_progress'],
+                'spotify_matches': state['spotify_matches'],
+                'spotify_total': state['spotify_total'],
+                'created_at': state['created_at'],
+                'last_accessed': state['last_accessed']
+            }
+            playlists.append(playlist_info)
+        
+        print(f"📋 Returning {len(playlists)} stored YouTube playlists for hydration")
+        return jsonify({"playlists": playlists})
+        
+    except Exception as e:
+        print(f"❌ Error getting YouTube playlists: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/youtube/state/<url_hash>', methods=['GET'])
+def get_youtube_playlist_state(url_hash):
+    """Get specific YouTube playlist state (detailed version of status endpoint)"""
+    try:
+        if url_hash not in youtube_playlist_states:
+            return jsonify({"error": "YouTube playlist not found"}), 404
+        
+        state = youtube_playlist_states[url_hash]
+        state['last_accessed'] = time.time()
+        
+        # Return full state information (including results for modal hydration)
+        response = {
+            'url_hash': url_hash,
+            'url': state['url'],
+            'playlist': state['playlist'],
+            'phase': state['phase'],
+            'status': state['status'],
+            'discovery_progress': state['discovery_progress'],
+            'spotify_matches': state['spotify_matches'],
+            'spotify_total': state['spotify_total'],
+            'discovery_results': state['discovery_results'],
+            'sync_playlist_id': state['sync_playlist_id'],
+            'converted_spotify_playlist_id': state['converted_spotify_playlist_id'],
+            'sync_progress': state['sync_progress'],
+            'created_at': state['created_at'],
+            'last_accessed': state['last_accessed']
+        }
+        
+        return jsonify(response)
+        
+    except Exception as e:
+        print(f"❌ Error getting YouTube playlist state: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/youtube/reset/<url_hash>', methods=['POST'])
+def reset_youtube_playlist(url_hash):
+    """Reset YouTube playlist to fresh phase (clear discovery/sync data)"""
+    try:
+        if url_hash not in youtube_playlist_states:
+            return jsonify({"error": "YouTube playlist not found"}), 404
+        
+        state = youtube_playlist_states[url_hash]
+        
+        # Stop any active discovery
+        if 'discovery_future' in state and state['discovery_future']:
+            state['discovery_future'].cancel()
+        
+        # Reset state to fresh (preserve original playlist data)
+        state['phase'] = 'fresh'
+        state['status'] = 'parsed'
+        state['discovery_results'] = []
+        state['discovery_progress'] = 0
+        state['spotify_matches'] = 0
+        state['sync_playlist_id'] = None
+        state['converted_spotify_playlist_id'] = None
+        state['sync_progress'] = {}
+        state['discovery_future'] = None
+        state['last_accessed'] = time.time()
+        
+        print(f"🔄 Reset YouTube playlist to fresh phase: {state['playlist']['name']}")
+        return jsonify({"success": True, "message": "Playlist reset to fresh state"})
+        
+    except Exception as e:
+        print(f"❌ Error resetting YouTube playlist: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/youtube/delete/<url_hash>', methods=['DELETE'])
+def delete_youtube_playlist(url_hash):
+    """Remove YouTube playlist from backend storage entirely"""
+    try:
+        if url_hash not in youtube_playlist_states:
+            return jsonify({"error": "YouTube playlist not found"}), 404
+        
+        state = youtube_playlist_states[url_hash]
+        
+        # Stop any active discovery
+        if 'discovery_future' in state and state['discovery_future']:
+            state['discovery_future'].cancel()
+        
+        # Remove from storage
+        playlist_name = state['playlist']['name']
+        del youtube_playlist_states[url_hash]
+        
+        print(f"🗑️ Deleted YouTube playlist from backend: {playlist_name}")
+        return jsonify({"success": True, "message": f"Playlist '{playlist_name}' deleted"})
+        
+    except Exception as e:
+        print(f"❌ Error deleting YouTube playlist: {e}")
         return jsonify({"error": str(e)}), 500
 
 def convert_youtube_results_to_spotify_tracks(discovery_results):
