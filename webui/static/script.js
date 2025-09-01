@@ -1761,6 +1761,9 @@ async function loadSyncData() {
     if (!spotifyPlaylistsLoaded) {
         await loadSpotifyPlaylists();
     }
+    
+    // Load YouTube playlists from backend (always refresh to get latest state)
+    await loadYouTubePlaylistsFromBackend();
 }
 
 async function checkForActiveProcesses() {
@@ -1773,11 +1776,24 @@ async function checkForActiveProcesses() {
 
         if (processes.length > 0) {
             console.log(`🔄 Found ${processes.length} active process(es) from backend. Rehydrating UI...`);
-            for (const processInfo of processes) {
+            
+            // Separate download batch processes from YouTube playlist processes
+            const downloadProcesses = processes.filter(p => p.type === 'batch');
+            const youtubeProcesses = processes.filter(p => p.type === 'youtube_playlist');
+            
+            console.log(`📊 Process breakdown: ${downloadProcesses.length} download batches, ${youtubeProcesses.length} YouTube playlists`);
+            
+            // Rehydrate download modal processes (existing Spotify system)
+            for (const processInfo of downloadProcesses) {
                 if (!activeDownloadProcesses[processInfo.playlist_id]) {
                     rehydrateModal(processInfo);
                 }
             }
+            
+            // Note: YouTube playlists are now handled by loadYouTubePlaylistsFromBackend() 
+            // in loadSyncData(), which provides more complete data than active processes.
+            // Skip YouTube rehydration here to avoid conflicts and duplicate cards.
+            console.log(`ℹ️ Skipping ${youtubeProcesses.length} YouTube playlists - handled by full backend loading`);
         }
     } catch (error) {
         console.error('Failed to check for active processes:', error);
@@ -1844,6 +1860,360 @@ async function rehydrateModal(processInfo, userRequested = false) {
     startModalDownloadPolling(playlist_id);
 
     process.modalElement.style.display = 'none';
+}
+
+// ===================================================================
+// YOUTUBE PLAYLIST BACKEND HYDRATION FUNCTIONS
+// ===================================================================
+
+async function loadYouTubePlaylistsFromBackend() {
+    // Load all stored YouTube playlists from backend and recreate cards (similar to Spotify hydration)
+    try {
+        console.log('📋 Loading YouTube playlists from backend...');
+        
+        const response = await fetch('/api/youtube/playlists');
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to fetch YouTube playlists');
+        }
+        
+        const data = await response.json();
+        const playlists = data.playlists || [];
+        
+        console.log(`🎬 Found ${playlists.length} stored YouTube playlists in backend`);
+        
+        if (playlists.length === 0) {
+            console.log('📋 No YouTube playlists to hydrate');
+            return;
+        }
+        
+        const container = document.getElementById('youtube-playlist-container');
+        
+        // Create cards for playlists that don't already exist (avoid duplicates)
+        for (const playlistInfo of playlists) {
+            const urlHash = playlistInfo.url_hash;
+            
+            // Check if card already exists (from rehydration or previous loading)
+            if (youtubePlaylistStates[urlHash] && youtubePlaylistStates[urlHash].cardElement && 
+                document.body.contains(youtubePlaylistStates[urlHash].cardElement)) {
+                console.log(`⏭️ Skipping existing YouTube playlist card: ${playlistInfo.playlist.name}`);
+                
+                // Update existing state with backend data
+                const state = youtubePlaylistStates[urlHash];
+                state.phase = playlistInfo.phase;
+                state.discoveryProgress = playlistInfo.discovery_progress;
+                state.spotifyMatches = playlistInfo.spotify_matches;
+                state.convertedSpotifyPlaylistId = playlistInfo.converted_spotify_playlist_id;
+                
+                // Fetch discovery results for existing cards too if they don't have them
+                if (playlistInfo.phase !== 'fresh' && playlistInfo.phase !== 'discovering' && 
+                    (!state.discoveryResults || state.discoveryResults.length === 0)) {
+                    try {
+                        console.log(`🔍 Fetching missing discovery results for existing card: ${playlistInfo.playlist.name}`);
+                        const stateResponse = await fetch(`/api/youtube/state/${urlHash}`);
+                        if (stateResponse.ok) {
+                            const fullState = await stateResponse.json();
+                            if (fullState.discovery_results) {
+                                state.discoveryResults = fullState.discovery_results;
+                                state.syncPlaylistId = fullState.sync_playlist_id;
+                                state.syncProgress = fullState.sync_progress || {};
+                                console.log(`✅ Restored ${state.discoveryResults.length} discovery results for existing card`);
+                            }
+                        }
+                    } catch (error) {
+                        console.warn(`⚠️ Error fetching discovery results for existing card:`, error.message);
+                    }
+                }
+                
+                continue;
+            }
+            
+            console.log(`🎬 Creating YouTube playlist card: ${playlistInfo.playlist.name} (Phase: ${playlistInfo.phase})`);
+            createYouTubeCardFromBackendState(playlistInfo);
+            
+            // Fetch discovery results for non-fresh playlists (same logic as rehydrateYouTubePlaylist)
+            if (playlistInfo.phase !== 'fresh' && playlistInfo.phase !== 'discovering') {
+                try {
+                    console.log(`🔍 Fetching discovery results for: ${playlistInfo.playlist.name}`);
+                    const stateResponse = await fetch(`/api/youtube/state/${urlHash}`);
+                    if (stateResponse.ok) {
+                        const fullState = await stateResponse.json();
+                        console.log(`📋 Retrieved full state with ${fullState.discovery_results?.length || 0} discovery results`);
+                        
+                        // Store discovery results in local state
+                        const state = youtubePlaylistStates[urlHash];
+                        if (fullState.discovery_results && state) {
+                            state.discoveryResults = fullState.discovery_results;
+                            state.syncPlaylistId = fullState.sync_playlist_id;
+                            state.syncProgress = fullState.sync_progress || {};
+                            console.log(`✅ Restored ${state.discoveryResults.length} discovery results for: ${playlistInfo.playlist.name}`);
+                        }
+                    } else {
+                        console.warn(`⚠️ Could not fetch discovery results for: ${playlistInfo.playlist.name}`);
+                    }
+                } catch (error) {
+                    console.warn(`⚠️ Error fetching discovery results for ${playlistInfo.playlist.name}:`, error.message);
+                }
+            }
+        }
+        
+        console.log(`✅ Successfully hydrated ${playlists.length} YouTube playlists from backend`);
+        
+    } catch (error) {
+        console.error('❌ Error loading YouTube playlists from backend:', error);
+        showToast(`Error loading YouTube playlists: ${error.message}`, 'error');
+    }
+}
+
+function createYouTubeCardFromBackendState(playlistInfo) {
+    // Create YouTube playlist card from backend state data
+    const urlHash = playlistInfo.url_hash;
+    const playlist = playlistInfo.playlist;
+    const phase = playlistInfo.phase;
+    
+    const container = document.getElementById('youtube-playlist-container');
+    
+    // Remove placeholder if it exists
+    const placeholder = container.querySelector('.youtube-playlist-placeholder');
+    if (placeholder) {
+        placeholder.remove();
+    }
+    
+    // Create card HTML (using EXACT same structure as createYouTubeCard)
+    const cardHtml = `
+        <div class="youtube-playlist-card" id="youtube-card-${urlHash}" data-url="${playlistInfo.url}" onclick="handleYouTubeCardClick('${urlHash}')">
+            <div class="playlist-card-icon youtube-icon">▶</div>
+            <div class="playlist-card-content">
+                <div class="playlist-card-name">${escapeHtml(playlist.name)}</div>
+                <div class="playlist-card-info">
+                    <span class="playlist-card-track-count">${playlist.tracks.length} tracks</span>
+                    <span class="playlist-card-phase-text" style="color: ${getPhaseColor(phase)};">${getPhaseText(phase)}</span>
+                </div>
+            </div>
+            <div class="playlist-card-progress ${phase === 'fresh' ? 'hidden' : ''}">
+                ♪ ${playlistInfo.spotify_total} / ✓ ${playlistInfo.spotify_matches} / ✗ ${playlistInfo.spotify_total - playlistInfo.spotify_matches} / ${Math.round(getProgressWidth(playlistInfo))}%
+            </div>
+            <button class="playlist-card-action-btn">${getActionButtonText(phase)}</button>
+        </div>
+    `;
+    
+    container.insertAdjacentHTML('beforeend', cardHtml);
+    
+    // Store state for UI management (but backend remains source of truth)
+    youtubePlaylistStates[urlHash] = {
+        phase: phase,
+        url: playlistInfo.url,
+        playlist: playlist,
+        cardElement: document.getElementById(`youtube-card-${urlHash}`),
+        discoveryResults: [],
+        discoveryProgress: playlistInfo.discovery_progress,
+        spotifyMatches: playlistInfo.spotify_matches,
+        convertedSpotifyPlaylistId: playlistInfo.converted_spotify_playlist_id,
+        backendSynced: true  // Flag to indicate this came from backend
+    };
+    
+    console.log(`🃏 Created YouTube card from backend state: ${playlist.name} (${phase})`);
+}
+
+function getActionButtonText(phase) {
+    switch (phase) {
+        case 'fresh': return 'Discover';
+        case 'discovering': return 'View Progress';
+        case 'discovered': return 'View Results';
+        case 'syncing': return 'View Sync';
+        case 'sync_complete': return 'Download';
+        case 'downloading': return 'View Downloads';
+        case 'download_complete': return 'Complete';
+        default: return 'Open';
+    }
+}
+
+function getPhaseText(phase) {
+    switch (phase) {
+        case 'fresh': return 'Ready to discover';
+        case 'discovering': return 'Discovering...';
+        case 'discovered': return 'Discovery Complete';
+        case 'syncing': return 'Syncing...';
+        case 'sync_complete': return 'Sync Complete';
+        case 'downloading': return 'Downloading...';
+        case 'download_complete': return 'Download Complete';
+        default: return phase;
+    }
+}
+
+function getPhaseColor(phase) {
+    switch (phase) {
+        case 'fresh': return '#999';
+        case 'discovering': case 'syncing': case 'downloading': return '#ffa500';
+        case 'discovered': case 'sync_complete': case 'download_complete': return '#1db954';
+        default: return '#999';
+    }
+}
+
+function getProgressWidth(playlistInfo) {
+    if (playlistInfo.phase === 'fresh') return 0;
+    if (playlistInfo.spotify_total === 0) return 0;
+    return Math.round((playlistInfo.spotify_matches / playlistInfo.spotify_total) * 100);
+}
+
+async function rehydrateYouTubePlaylist(playlistInfo, userRequested = false) {
+    // Rehydrate a YouTube playlist's discovery modal state (similar to rehydrateModal)
+    const urlHash = playlistInfo.url_hash;
+    const playlistName = playlistInfo.playlist_name;
+    const phase = playlistInfo.phase;
+    
+    console.log(`💧 Rehydrating YouTube playlist "${playlistName}" (Phase: ${phase}) - User requested: ${userRequested}`);
+    
+    try {
+        // First, ensure the card exists (create from backend if needed)
+        if (!youtubePlaylistStates[urlHash] || !youtubePlaylistStates[urlHash].cardElement) {
+            console.log(`🃏 Creating missing YouTube card for rehydration: ${playlistName}`);
+            
+            // Since playlistInfo from active processes doesn't have full playlist data,
+            // we need to fetch it from the backend first
+            try {
+                const stateResponse = await fetch(`/api/youtube/state/${urlHash}`);
+                if (stateResponse.ok) {
+                    const fullPlaylistState = await stateResponse.json();
+                    createYouTubeCardFromBackendState(fullPlaylistState);
+                } else {
+                    console.error(`❌ Could not fetch full playlist state for card creation: ${playlistName}`);
+                    return; // Can't create card without playlist data
+                }
+            } catch (error) {
+                console.error(`❌ Error fetching playlist state for card creation: ${error.message}`);
+                return;
+            }
+        }
+        
+        // Fetch full state from backend to get discovery results
+        let fullState = null;
+        if (phase !== 'fresh' && phase !== 'discovering') {
+            try {
+                console.log(`🔍 Fetching full backend state for: ${playlistName}`);
+                const stateResponse = await fetch(`/api/youtube/state/${urlHash}`);
+                if (stateResponse.ok) {
+                    fullState = await stateResponse.json();
+                    console.log(`📋 Retrieved full state with ${fullState.discovery_results?.length || 0} discovery results`);
+                }
+            } catch (error) {
+                console.warn(`⚠️ Could not fetch full state for ${playlistName}:`, error.message);
+            }
+        }
+
+        // Update local state to match backend
+        const state = youtubePlaylistStates[urlHash];
+        state.phase = phase;
+        state.discoveryProgress = playlistInfo.discovery_progress;
+        state.spotifyMatches = playlistInfo.spotify_matches;
+        state.convertedSpotifyPlaylistId = playlistInfo.converted_spotify_playlist_id;
+        
+        // Restore discovery results if we have them
+        if (fullState && fullState.discovery_results) {
+            state.discoveryResults = fullState.discovery_results;
+            state.syncPlaylistId = fullState.sync_playlist_id;
+            state.syncProgress = fullState.sync_progress || {};
+            console.log(`✅ Restored ${state.discoveryResults.length} discovery results from backend`);
+            
+            // Update modal if it already exists
+            const existingModal = document.getElementById(`youtube-discovery-modal-${urlHash}`);
+            if (existingModal && !existingModal.classList.contains('hidden')) {
+                console.log(`🔄 Refreshing existing modal with restored discovery results`);
+                refreshYouTubeDiscoveryModalTable(urlHash);
+            }
+        }
+        
+        // Update card display
+        updateYouTubeCardPhase(urlHash, phase);
+        updateYouTubeCardProgress(urlHash, playlistInfo);
+        
+        // Handle active discovery polling
+        if (phase === 'discovering') {
+            console.log(`🔍 Resuming discovery polling for: ${playlistName}`);
+            startYouTubeDiscoveryPolling(urlHash);
+        }
+        
+        // Open modal if user requested
+        if (userRequested) {
+            switch (phase) {
+                case 'discovering':
+                case 'discovered':
+                case 'syncing':
+                case 'sync_complete':
+                    openYouTubeDiscoveryModal(urlHash);
+                    break;
+                case 'downloading':
+                case 'download_complete':
+                    // Open download modal if we have the converted playlist ID
+                    if (playlistInfo.converted_spotify_playlist_id) {
+                        await openDownloadMissingModal(playlistInfo.converted_spotify_playlist_id);
+                    }
+                    break;
+            }
+        }
+        
+        console.log(`✅ Successfully rehydrated YouTube playlist: ${playlistName}`);
+        
+    } catch (error) {
+        console.error(`❌ Error rehydrating YouTube playlist "${playlistName}":`, error);
+    }
+}
+
+async function removeYouTubePlaylistFromBackend(event, urlHash) {
+    // Remove YouTube playlist from backend storage and update UI
+    event.stopPropagation(); // Prevent card click
+    
+    const state = youtubePlaylistStates[urlHash];
+    if (!state) return;
+    
+    const playlistName = state.playlist.name;
+    
+    try {
+        console.log(`🗑️ Removing YouTube playlist from backend: ${playlistName}`);
+        
+        const response = await fetch(`/api/youtube/delete/${urlHash}`, {
+            method: 'DELETE'
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to delete playlist');
+        }
+        
+        // Remove card from UI
+        if (state.cardElement) {
+            state.cardElement.remove();
+        }
+        
+        // Remove from client state
+        delete youtubePlaylistStates[urlHash];
+        
+        // Stop any active polling
+        if (activeYouTubePollers[urlHash]) {
+            clearInterval(activeYouTubePollers[urlHash]);
+            delete activeYouTubePollers[urlHash];
+        }
+        
+        // Close discovery modal if open
+        const modal = document.getElementById(`youtube-discovery-modal-${urlHash}`);
+        if (modal) {
+            modal.remove();
+        }
+        
+        // Show placeholder if no cards left
+        const container = document.getElementById('youtube-playlist-container');
+        const cards = container.querySelectorAll('.youtube-playlist-card');
+        if (cards.length === 0) {
+            container.innerHTML = '<div class="youtube-playlist-placeholder">No YouTube playlists added yet. Parse a YouTube playlist URL above to get started!</div>';
+        }
+        
+        showToast(`Removed "${playlistName}" from backend storage`, 'success');
+        console.log(`✅ Successfully removed YouTube playlist: ${playlistName}`);
+        
+    } catch (error) {
+        console.error(`❌ Error removing YouTube playlist "${playlistName}":`, error);
+        showToast(`Error removing playlist: ${error.message}`, 'error');
+    }
 }
 
 async function loadSpotifyPlaylists() {
@@ -6265,7 +6635,7 @@ function openYouTubeDiscoveryModal(urlHash) {
                     
                     <div class="modal-footer">
                         <div class="modal-footer-left">
-                            ${getModalActionButtons(urlHash, state.phase)}
+                            ${getModalActionButtons(urlHash, state.phase, state)}
                         </div>
                         <div class="modal-footer-right">
                             <button class="modal-btn modal-btn-secondary" onclick="closeYouTubeDiscoveryModal('${urlHash}')">🏠 Close</button>
@@ -6297,13 +6667,42 @@ function openYouTubeDiscoveryModal(urlHash) {
     }
 }
 
-function getModalActionButtons(urlHash, phase) {
+function getModalActionButtons(urlHash, phase, state = null) {
+    // Get state if not provided
+    if (!state) {
+        state = youtubePlaylistStates[urlHash];
+    }
+    
+    // Validate data availability for buttons
+    const hasDiscoveryResults = state && state.discoveryResults && state.discoveryResults.length > 0;
+    const hasSpotifyMatches = state && state.spotifyMatches > 0;
+    const hasConvertedPlaylistId = state && state.convertedSpotifyPlaylistId;
+    
     switch (phase) {
         case 'discovered':
-            return `
-                <button class="modal-btn modal-btn-primary" onclick="startYouTubePlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>
-                <button class="modal-btn modal-btn-primary" onclick="startYouTubeDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>
-            `;
+            // Only show buttons if we actually have discovery data
+            if (!hasDiscoveryResults) {
+                return `<div class="modal-info">⚠️ No discovery results available. Try starting discovery again.</div>`;
+            }
+            
+            let buttons = '';
+            
+            // Only show sync button if there are Spotify matches
+            if (hasSpotifyMatches) {
+                buttons += `<button class="modal-btn modal-btn-primary" onclick="startYouTubePlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+            }
+            
+            // Only show download button if we have matches or a converted playlist ID
+            if (hasSpotifyMatches || hasConvertedPlaylistId) {
+                buttons += `<button class="modal-btn modal-btn-primary" onclick="startYouTubeDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
+            }
+            
+            if (!buttons) {
+                buttons = `<div class="modal-info">ℹ️ No Spotify matches found. Discovery complete but no tracks could be matched.</div>`;
+            }
+            
+            return buttons;
+            
         case 'syncing':
             return `
                 <button class="modal-btn modal-btn-danger" onclick="cancelYouTubeSync('${urlHash}')">❌ Cancel Sync</button>
@@ -6316,12 +6715,24 @@ function getModalActionButtons(urlHash, phase) {
                     <span class="sync-stat percentage">(<span id="youtube-percentage-${urlHash}">0</span>%)</span>
                 </div>
             `;
+            
         case 'sync_complete':
-            return `
-                <button class="modal-btn modal-btn-primary" onclick="startYouTubePlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>
-                <button class="modal-btn modal-btn-primary" onclick="startYouTubeDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>
-                <button class="modal-btn modal-btn-secondary" onclick="resetYouTubePlaylist('${urlHash}')">🔄 Reset</button>
-            `;
+            let syncCompleteButtons = '';
+            
+            // Only show sync button if there are Spotify matches
+            if (hasSpotifyMatches) {
+                syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startYouTubePlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+            }
+            
+            // Only show download button if we have matches or a converted playlist ID
+            if (hasSpotifyMatches || hasConvertedPlaylistId) {
+                syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startYouTubeDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
+            }
+            
+            syncCompleteButtons += `<button class="modal-btn modal-btn-secondary" onclick="resetYouTubePlaylist('${urlHash}')">🔄 Reset</button>`;
+            
+            return syncCompleteButtons;
+            
         default:
             return '';
     }
@@ -6422,6 +6833,36 @@ function updateYouTubeDiscoveryModal(urlHash, status) {
         spotifyArtistCell.textContent = result.spotify_artist || '-';
         spotifyAlbumCell.textContent = result.spotify_album || '-';
     });
+}
+
+function refreshYouTubeDiscoveryModalTable(urlHash) {
+    const state = youtubePlaylistStates[urlHash];
+    if (!state || !state.modalElement) {
+        console.warn(`⚠️ Cannot refresh modal table: no state or modal for ${urlHash}`);
+        return;
+    }
+    
+    console.log(`🔄 Refreshing modal table with ${state.discoveryResults?.length || 0} discovery results`);
+    
+    // Update the table body with new discovery results
+    const tableBody = state.modalElement.querySelector(`#youtube-discovery-table-${urlHash}`);
+    if (tableBody) {
+        tableBody.innerHTML = generateTableRowsFromState(state);
+        console.log(`✅ Modal table refreshed with discovery data`);
+    } else {
+        console.warn(`⚠️ Could not find table body for modal ${urlHash}`);
+    }
+    
+    // Update the progress bar and footer buttons too
+    if (state.discoveryResults && state.discoveryResults.length > 0) {
+        const progressData = {
+            progress: state.discoveryProgress || 100,
+            spotify_matches: state.spotifyMatches || 0,
+            spotify_total: state.playlist.tracks.length,
+            results: state.discoveryResults
+        };
+        updateYouTubeDiscoveryModal(urlHash, progressData);
+    }
 }
 
 function closeYouTubeDiscoveryModal(urlHash) {
@@ -6679,32 +7120,56 @@ async function startYouTubeDownloadMissing(urlHash) {
     }
 }
 
-function resetYouTubePlaylist(urlHash) {
+async function resetYouTubePlaylist(urlHash) {
     const state = youtubePlaylistStates[urlHash];
     if (!state) return;
     
-    // Stop any active polling
-    if (activeYouTubePollers[urlHash]) {
-        clearInterval(activeYouTubePollers[urlHash]);
-        delete activeYouTubePollers[urlHash];
+    try {
+        console.log(`🔄 Resetting YouTube playlist to fresh state: ${state.playlist.name}`);
+        
+        // Call backend reset endpoint
+        const response = await fetch(`/api/youtube/reset/${urlHash}`, {
+            method: 'POST'
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to reset playlist');
+        }
+        
+        // Stop any active polling
+        if (activeYouTubePollers[urlHash]) {
+            clearInterval(activeYouTubePollers[urlHash]);
+            delete activeYouTubePollers[urlHash];
+        }
+        
+        // Update client state to match backend reset
+        state.phase = 'fresh';
+        state.discoveryResults = [];
+        state.discoveryProgress = 0;
+        state.spotifyMatches = 0;
+        state.syncPlaylistId = null;
+        state.syncProgress = {};
+        state.convertedSpotifyPlaylistId = null;
+        
+        // Update card to reflect fresh state
+        updateYouTubeCardPhase(urlHash, 'fresh');
+        updateYouTubeCardProgress(urlHash, { 
+            discovery_progress: 0, 
+            spotify_matches: 0, 
+            spotify_total: state.playlist.tracks.length 
+        });
+        
+        // Close modal
+        closeYouTubeDiscoveryModal(urlHash);
+        
+        showToast(`Reset "${state.playlist.name}" to fresh state`, 'success');
+        console.log(`✅ Successfully reset YouTube playlist: ${state.playlist.name}`);
+        
+    } catch (error) {
+        console.error(`❌ Error resetting YouTube playlist:`, error);
+        showToast(`Error resetting playlist: ${error.message}`, 'error');
     }
-    
-    // Reset to fresh phase
-    state.phase = 'fresh';
-    state.discoveryResults = [];
-    state.discoveryProgress = 0;
-    state.spotifyMatches = 0;
-    state.syncPlaylistId = null;
-    state.syncProgress = {};
-    state.convertedSpotifyPlaylistId = null;
-    
-    // Update card
-    updateYouTubeCardPhase(urlHash, 'fresh');
-    
-    // Close modal
-    closeYouTubeDiscoveryModal(urlHash);
-    
-    showToast('YouTube playlist reset to fresh state', 'info');
 }
 
 
