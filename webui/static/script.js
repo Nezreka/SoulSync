@@ -7752,25 +7752,6 @@ function updateYouTubeDiscoveryModal(urlHash, status) {
     progressBar.style.width = `${status.progress}%`;
     progressText.textContent = `${status.spotify_matches} / ${status.spotify_total} tracks matched (${status.progress}%)`;
     
-    // Ensure progress bar container has proper height (CSS might not be applying correctly)
-    const progressContainer = progressBar.parentElement;
-    if (progressContainer && progressContainer.classList.contains('progress-bar-container')) {
-        progressContainer.style.height = '8px';
-        progressContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.3)';
-        progressContainer.style.borderRadius = '8px';
-        progressContainer.style.overflow = 'hidden';
-        progressContainer.style.marginBottom = '8px';
-        
-        // Ensure progress bar fill has proper styling
-        progressBar.style.height = '100%';
-        progressBar.style.background = 'linear-gradient(90deg, #1db954 0%, #1ed760 100%)';
-        progressBar.style.transition = 'width 0.5s ease';
-    }
-    
-    console.log(`📊 Updated modal progress for ${urlHash}: ${status.progress}% (${status.spotify_matches}/${status.spotify_total})`);
-    console.log(`📊 Progress bar width set to: ${progressBar.style.width}`);
-    console.log(`📊 Progress bar element:`, progressBar);
-    console.log(`📊 Progress bar computed styles:`, window.getComputedStyle(progressBar));
     
     // Update table rows
     status.results.forEach(result => {
