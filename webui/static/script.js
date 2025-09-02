@@ -6420,6 +6420,9 @@ function createTidalCard(playlist) {
                     <span class="playlist-card-phase-text" style="color: ${phaseColor};">${phaseText}</span>
                 </div>
             </div>
+            <div class="playlist-card-progress ${phase === 'fresh' ? 'hidden' : ''}">
+                ♪ ${playlist.track_count} / ✓ 0 / ✗ ${playlist.track_count} / 0%
+            </div>
             <button class="playlist-card-action-btn">${buttonText}</button>
         </div>
     `;
@@ -6436,13 +6439,7 @@ async function handleTidalCardClick(playlistId) {
         console.log(`🎵 Using pre-loaded Tidal playlist data for: ${state.playlist.name}`);
         console.log(`🎵 Ready with ${state.playlist.tracks.length} Tidal tracks for discovery`);
         
-        // Update phase to discovering
-        state.phase = 'discovering';
-        
-        // Update card to show discovering state
-        updateTidalCardPhase(playlistId, 'discovering');
-        
-        // Open YouTube discovery modal but with Tidal data (exact sync.py pattern)
+        // Open discovery modal - phase will be updated when discovery actually starts
         openTidalDiscoveryModal(playlistId, state.playlist);
         
     } else if (state.phase === 'discovering' || state.phase === 'discovered') {
@@ -6479,43 +6476,54 @@ async function openTidalDiscoveryModal(playlistId, playlistData) {
     // Create a fake YouTube-style urlHash for the modal system
     const fakeUrlHash = `tidal_${playlistId}`;
     
-    // Get current Tidal card state to check if discovery is already done
+    // Get current Tidal card state to check if discovery is already done or in progress
     const tidalCardState = tidalPlaylistStates[playlistId];
     const isAlreadyDiscovered = tidalCardState && tidalCardState.phase === 'discovered';
+    const isCurrentlyDiscovering = tidalCardState && tidalCardState.phase === 'discovering';
     
     // Prepare discovery results in the correct format for modal
     let transformedResults = [];
+    let actualMatches = 0;
     if (isAlreadyDiscovered && tidalCardState.discovery_results) {
-        transformedResults = tidalCardState.discovery_results.map((result, index) => ({
-            index: index,
-            yt_track: result.tidal_track ? result.tidal_track.name : 'Unknown',
-            yt_artist: result.tidal_track ? (result.tidal_track.artists ? result.tidal_track.artists.join(', ') : 'Unknown') : 'Unknown',
-            status: result.status === 'found' ? '✅ Found' : '❌ Not Found',
-            status_class: result.status === 'found' ? 'found' : 'not-found',
-            spotify_track: result.spotify_data ? result.spotify_data.name : '-',
-            spotify_artist: result.spotify_data ? result.spotify_data.artists.join(', ') : '-',
-            spotify_album: result.spotify_data ? result.spotify_data.album : '-'
-        }));
+        transformedResults = tidalCardState.discovery_results.map((result, index) => {
+            const isFound = result.status === 'found';
+            if (isFound) actualMatches++;
+            
+            return {
+                index: index,
+                yt_track: result.tidal_track ? result.tidal_track.name : 'Unknown',
+                yt_artist: result.tidal_track ? (result.tidal_track.artists ? result.tidal_track.artists.join(', ') : 'Unknown') : 'Unknown',
+                status: isFound ? '✅ Found' : '❌ Not Found',
+                status_class: isFound ? 'found' : 'not-found',
+                spotify_track: result.spotify_data ? result.spotify_data.name : '-',
+                spotify_artist: result.spotify_data ? result.spotify_data.artists.join(', ') : '-',
+                spotify_album: result.spotify_data ? result.spotify_data.album : '-'
+            };
+        });
+        console.log(`🎵 Tidal modal: Calculated ${actualMatches} matches from ${transformedResults.length} results`);
     }
     
-    // Create YouTube-compatible state structure
+    // Create YouTube-compatible state structure  
+    const modalPhase = isAlreadyDiscovered ? 'discovered' : (isCurrentlyDiscovering ? 'discovering' : 'fresh');
     youtubePlaylistStates[fakeUrlHash] = {
-        phase: isAlreadyDiscovered ? 'discovered' : 'discovering',
+        phase: modalPhase,
         playlist: {
             name: playlistData.name,
             tracks: playlistData.tracks
         },
         is_tidal_playlist: true,  // Flag to identify this as Tidal
         tidal_playlist_id: playlistId,
-        discovery_progress: isAlreadyDiscovered ? (tidalCardState.discovery_progress || 100) : 0,
-        spotify_matches: isAlreadyDiscovered ? (tidalCardState.spotify_matches || 0) : 0,
+        discovery_progress: isAlreadyDiscovered ? 100 : 0,
+        spotify_matches: isAlreadyDiscovered ? actualMatches : 0, // Backend format (snake_case)
+        spotifyMatches: isAlreadyDiscovered ? actualMatches : 0, // Frontend format (camelCase) - for button logic
         spotify_total: playlistData.tracks.length,
         discovery_results: transformedResults,
-        discoveryResults: transformedResults // Both formats for compatibility
+        discoveryResults: transformedResults, // Both formats for compatibility
+        discoveryProgress: isAlreadyDiscovered ? 100 : 0 // Frontend format for modal progress display
     };
     
-    // Only start discovery if not already discovered
-    if (!isAlreadyDiscovered) {
+    // Only start discovery if not already discovered AND not currently discovering
+    if (!isAlreadyDiscovered && !isCurrentlyDiscovering) {
         // Start Tidal discovery process automatically (like sync.py)
         try {
             console.log(`🔍 Starting Tidal discovery for: ${playlistData.name}`);
@@ -6534,6 +6542,13 @@ async function openTidalDiscoveryModal(playlistId, playlistData) {
             
             console.log('✅ Tidal discovery started, beginning polling...');
             
+            // Update phase to discovering now that backend discovery is actually started
+            tidalPlaylistStates[playlistId].phase = 'discovering';
+            updateTidalCardPhase(playlistId, 'discovering');
+            
+            // Update modal phase to match
+            youtubePlaylistStates[fakeUrlHash].phase = 'discovering';
+            
             // Start polling for progress
             startTidalDiscoveryPolling(fakeUrlHash, playlistId);
             
@@ -6541,6 +6556,10 @@ async function openTidalDiscoveryModal(playlistId, playlistData) {
             console.error('❌ Error starting Tidal discovery:', error);
             showToast(`Error starting discovery: ${error.message}`, 'error');
         }
+    } else if (isCurrentlyDiscovering) {
+        // Resume polling if discovery is already in progress (like YouTube)
+        console.log(`🔄 Resuming Tidal discovery polling for: ${playlistData.name}`);
+        startTidalDiscoveryPolling(fakeUrlHash, playlistId);
     } else {
         console.log('✅ Using existing discovery results - no need to re-discover');
     }
@@ -6569,34 +6588,38 @@ function startTidalDiscoveryPolling(fakeUrlHash, playlistId) {
                 return;
             }
             
+            // Transform Tidal results to YouTube modal format first
+            const transformedStatus = {
+                progress: status.progress,
+                spotify_matches: status.spotify_matches,
+                spotify_total: status.spotify_total,
+                results: status.results.map((result, index) => ({
+                    index: index,
+                    yt_track: result.tidal_track ? result.tidal_track.name : 'Unknown',
+                    yt_artist: result.tidal_track ? (result.tidal_track.artists ? result.tidal_track.artists.join(', ') : 'Unknown') : 'Unknown',
+                    status: result.status === 'found' ? '✅ Found' : '❌ Not Found',
+                    status_class: result.status === 'found' ? 'found' : 'not-found',
+                    spotify_track: result.spotify_data ? result.spotify_data.name : '-',
+                    spotify_artist: result.spotify_data ? result.spotify_data.artists.join(', ') : '-',
+                    spotify_album: result.spotify_data ? result.spotify_data.album : '-'
+                }))
+            };
+            
             // Update fake YouTube state with Tidal discovery results
             const state = youtubePlaylistStates[fakeUrlHash];
             if (state) {
-                state.discovery_progress = status.progress;
-                state.spotify_matches = status.spotify_matches;
-                state.discovery_results = status.results;
+                state.discovery_progress = status.progress; // Backend format
+                state.discoveryProgress = status.progress; // Frontend format - for modal progress display
+                state.spotify_matches = status.spotify_matches; // Backend format
+                state.spotifyMatches = status.spotify_matches; // Frontend format - for button logic
+                state.discovery_results = status.results; // Backend format
+                state.discoveryResults = transformedStatus.results; // Frontend format - for button logic  
                 state.phase = status.phase;
-                
-                // Transform Tidal results to YouTube modal format
-                const transformedStatus = {
-                    progress: status.progress,
-                    spotify_matches: status.spotify_matches,
-                    spotify_total: status.spotify_total,
-                    results: status.results.map((result, index) => ({
-                        index: index,
-                        status: result.status === 'found' ? '✅ Found' : '❌ Not Found',
-                        status_class: result.status === 'found' ? 'found' : 'not-found',
-                        spotify_track: result.spotify_data ? result.spotify_data.name : '-',
-                        spotify_artist: result.spotify_data ? result.spotify_data.artists.join(', ') : '-',
-                        spotify_album: result.spotify_data ? result.spotify_data.album : '-'
-                        // Note: No duration column for Tidal (matches GUI version)
-                    }))
-                };
                 
                 // Update modal with transformed data (reuse YouTube modal update logic)
                 updateYouTubeDiscoveryModal(fakeUrlHash, transformedStatus);
                 
-                // Update Tidal card phase and save discovery results
+                // Update Tidal card phase and save discovery results FIRST
                 if (tidalPlaylistStates[playlistId]) {
                     tidalPlaylistStates[playlistId].phase = status.phase;
                     tidalPlaylistStates[playlistId].discovery_results = status.results;
@@ -6604,6 +6627,9 @@ function startTidalDiscoveryPolling(fakeUrlHash, playlistId) {
                     tidalPlaylistStates[playlistId].discovery_progress = status.progress;
                     updateTidalCardPhase(playlistId, status.phase);
                 }
+                
+                // Update Tidal card progress AFTER phase update to avoid being overwritten
+                updateTidalCardProgress(playlistId, status);
                 
                 console.log(`🔄 Tidal discovery progress: ${status.progress}% (${status.spotify_matches}/${status.spotify_total} found)`);
             }
@@ -6688,14 +6714,68 @@ async function applyTidalPlaylistState(stateInfo) {
         tidalPlaylistStates[playlist_id].discovery_results = discovery_results;
         tidalPlaylistStates[playlist_id].playlist = playlistData; // Ensure playlist data is set
         
+        // Fetch full discovery results for non-fresh playlists (matching YouTube pattern)
+        if (phase !== 'fresh' && phase !== 'discovering') {
+            try {
+                console.log(`🔍 Fetching full discovery results for Tidal playlist: ${playlistData.name}`);
+                const stateResponse = await fetch(`/api/tidal/state/${playlist_id}`);
+                if (stateResponse.ok) {
+                    const fullState = await stateResponse.json();
+                    console.log(`📋 Retrieved full Tidal state with ${fullState.discovery_results?.length || 0} discovery results`);
+                    
+                    // Store full discovery results in local state (matching YouTube pattern)
+                    if (fullState.discovery_results && tidalPlaylistStates[playlist_id]) {
+                        tidalPlaylistStates[playlist_id].discovery_results = fullState.discovery_results;
+                        tidalPlaylistStates[playlist_id].discovery_progress = fullState.discovery_progress;
+                        tidalPlaylistStates[playlist_id].spotify_matches = fullState.spotify_matches;
+                        console.log(`✅ Restored ${fullState.discovery_results.length} discovery results for Tidal playlist: ${playlistData.name}`);
+                    }
+                } else {
+                    console.warn(`⚠️ Could not fetch full discovery results for Tidal playlist: ${playlistData.name}`);
+                }
+            } catch (error) {
+                console.warn(`⚠️ Error fetching full discovery results for Tidal playlist ${playlistData.name}:`, error.message);
+            }
+        }
+        
         // Update the card UI to reflect the saved state
         updateTidalCardPhase(playlist_id, phase);
+        
+        // Update card progress if we have discovery results
+        if (phase === 'discovered' && tidalPlaylistStates[playlist_id]) {
+            const progressInfo = {
+                spotify_total: playlistData.track_count || playlistData.tracks?.length || 0,
+                spotify_matches: tidalPlaylistStates[playlist_id].spotify_matches || 0
+            };
+            updateTidalCardProgress(playlist_id, progressInfo);
+        }
         
         console.log(`✅ Applied saved state for Tidal playlist: ${playlist_id} -> ${phase}`);
         
     } catch (error) {
         console.error(`❌ Error applying Tidal playlist state for ${playlist_id}:`, error);
     }
+}
+
+function updateTidalCardProgress(playlistId, progress) {
+    const state = tidalPlaylistStates[playlistId];
+    if (!state) return;
+    
+    const card = document.getElementById(`tidal-card-${playlistId}`);
+    if (!card) return;
+    
+    const progressElement = card.querySelector('.playlist-card-progress');
+    if (!progressElement) return;
+    
+    const total = progress.spotify_total || 0;
+    const matches = progress.spotify_matches || 0;
+    const failed = total - matches;
+    const percentage = total > 0 ? Math.round((matches / total) * 100) : 0;
+    
+    progressElement.textContent = `♪ ${total} / ✓ ${matches} / ✗ ${failed} / ${percentage}%`;
+    progressElement.classList.remove('hidden'); // Show progress during discovery
+    
+    console.log('🎵 Updated Tidal card progress:', playlistId, `${matches}/${total} (${percentage}%)`);
 }
 
 // Tidal-specific sync and download functions (placeholder implementations)
@@ -7659,11 +7739,38 @@ function updateYouTubeDiscoveryModal(urlHash, status) {
     const progressText = document.getElementById(`youtube-discovery-progress-text-${urlHash}`);
     const tableBody = document.getElementById(`youtube-discovery-table-${urlHash}`);
     
-    if (!progressBar || !progressText || !tableBody) return;
+    if (!progressBar || !progressText || !tableBody) {
+        console.warn(`⚠️ Missing modal elements for ${urlHash}:`, {
+            progressBar: !!progressBar,
+            progressText: !!progressText, 
+            tableBody: !!tableBody
+        });
+        return;
+    }
     
     // Update progress bar
     progressBar.style.width = `${status.progress}%`;
     progressText.textContent = `${status.spotify_matches} / ${status.spotify_total} tracks matched (${status.progress}%)`;
+    
+    // Ensure progress bar container has proper height (CSS might not be applying correctly)
+    const progressContainer = progressBar.parentElement;
+    if (progressContainer && progressContainer.classList.contains('progress-bar-container')) {
+        progressContainer.style.height = '8px';
+        progressContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.3)';
+        progressContainer.style.borderRadius = '8px';
+        progressContainer.style.overflow = 'hidden';
+        progressContainer.style.marginBottom = '8px';
+        
+        // Ensure progress bar fill has proper styling
+        progressBar.style.height = '100%';
+        progressBar.style.background = 'linear-gradient(90deg, #1db954 0%, #1ed760 100%)';
+        progressBar.style.transition = 'width 0.5s ease';
+    }
+    
+    console.log(`📊 Updated modal progress for ${urlHash}: ${status.progress}% (${status.spotify_matches}/${status.spotify_total})`);
+    console.log(`📊 Progress bar width set to: ${progressBar.style.width}`);
+    console.log(`📊 Progress bar element:`, progressBar);
+    console.log(`📊 Progress bar computed styles:`, window.getComputedStyle(progressBar));
     
     // Update table rows
     status.results.forEach(result => {
@@ -7682,6 +7789,18 @@ function updateYouTubeDiscoveryModal(urlHash, status) {
         spotifyArtistCell.textContent = result.spotify_artist || '-';
         spotifyAlbumCell.textContent = result.spotify_album || '-';
     });
+    
+    // Update action buttons if discovery is complete (progress = 100%)
+    if (status.progress >= 100) {
+        const state = youtubePlaylistStates[urlHash];
+        if (state && state.phase === 'discovered') {
+            const actionButtonsContainer = document.querySelector(`#youtube-discovery-modal-${urlHash} .modal-footer-left`);
+            if (actionButtonsContainer) {
+                actionButtonsContainer.innerHTML = getModalActionButtons(urlHash, 'discovered', state);
+                console.log(`✨ Updated action buttons for completed discovery: ${urlHash}`);
+            }
+        }
+    }
 }
 
 function refreshYouTubeDiscoveryModalTable(urlHash) {
