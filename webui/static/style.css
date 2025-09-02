@@ -4657,10 +4657,11 @@ body {
 }
 
 .youtube-discovery-modal .progress-bar-container {
+
     background: rgba(0, 0, 0, 0.3);
     border-radius: 8px;
     overflow: hidden;
-    height: 8px;
+    height: 20px!important;
     margin-bottom: 8px;
 }
 

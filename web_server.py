@@ -5676,22 +5676,35 @@ def start_tidal_discovery(playlist_id):
         if not target_playlist.tracks:
             return jsonify({"error": "Playlist has no tracks"}), 400
         
-        # Initialize or update discovery state
-        if playlist_id in tidal_discovery_states and tidal_discovery_states[playlist_id]['phase'] == 'discovering':
-            return jsonify({"error": "Discovery already in progress"}), 400
-        
-        state = {
-            'playlist': target_playlist,
-            'phase': 'discovering',
-            'status': 'discovering',
-            'discovery_progress': 0,
-            'spotify_matches': 0,
-            'spotify_total': len(target_playlist.tracks),
-            'discovery_results': [],
-            'last_accessed': time.time()
-        }
-        
-        tidal_discovery_states[playlist_id] = state
+        # Initialize discovery state if it doesn't exist, or update existing state
+        if playlist_id in tidal_discovery_states:
+            existing_state = tidal_discovery_states[playlist_id]
+            if existing_state['phase'] == 'discovering':
+                return jsonify({"error": "Discovery already in progress"}), 400
+            # Update existing state for discovery
+            existing_state['phase'] = 'discovering'
+            existing_state['status'] = 'discovering' 
+            existing_state['last_accessed'] = time.time()
+            state = existing_state
+        else:
+            # Create new state for first-time discovery
+            state = {
+                'playlist': target_playlist,
+                'phase': 'discovering', # fresh -> discovering -> discovered -> syncing -> sync_complete -> downloading -> download_complete
+                'status': 'discovering',
+                'discovery_progress': 0,
+                'spotify_matches': 0,
+                'spotify_total': len(target_playlist.tracks),
+                'discovery_results': [],
+                'sync_playlist_id': None,
+                'converted_spotify_playlist_id': None,
+                'download_process_id': None,  # Track associated download missing tracks process
+                'created_at': time.time(),
+                'last_accessed': time.time(),
+                'discovery_future': None,
+                'sync_progress': {}
+            }
+            tidal_discovery_states[playlist_id] = state
         
         # Start discovery worker
         future = tidal_discovery_executor.submit(_run_tidal_discovery_worker, playlist_id)
@@ -5759,6 +5772,91 @@ def get_tidal_playlist_states():
         
     except Exception as e:
         print(f"❌ Error getting Tidal playlist states: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/tidal/state/<playlist_id>', methods=['GET'])
+def get_tidal_playlist_state(playlist_id):
+    """Get specific Tidal playlist state (detailed version matching YouTube's state endpoint)"""
+    try:
+        if playlist_id not in tidal_discovery_states:
+            return jsonify({"error": "Tidal playlist not found"}), 404
+        
+        state = tidal_discovery_states[playlist_id]
+        state['last_accessed'] = time.time()
+        
+        # Return full state information (including results for modal hydration)
+        response = {
+            'playlist_id': playlist_id,
+            'playlist': state['playlist'].__dict__ if hasattr(state['playlist'], '__dict__') else state['playlist'],
+            'phase': state['phase'],
+            'status': state['status'],
+            'discovery_progress': state['discovery_progress'],
+            'spotify_matches': state['spotify_matches'],
+            'spotify_total': state['spotify_total'],
+            'discovery_results': state['discovery_results'],
+            'last_accessed': state['last_accessed']
+        }
+        
+        return jsonify(response)
+        
+    except Exception as e:
+        print(f"❌ Error getting Tidal playlist state: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/tidal/reset/<playlist_id>', methods=['POST'])
+def reset_tidal_playlist(playlist_id):
+    """Reset Tidal playlist to fresh phase (clear discovery/sync data)"""
+    try:
+        if playlist_id not in tidal_discovery_states:
+            return jsonify({"error": "Tidal playlist not found"}), 404
+        
+        state = tidal_discovery_states[playlist_id]
+        
+        # Stop any active discovery
+        if 'discovery_future' in state and state['discovery_future']:
+            state['discovery_future'].cancel()
+        
+        # Reset state to fresh (preserve original playlist data)
+        state['phase'] = 'fresh'
+        state['status'] = 'fresh'
+        state['discovery_results'] = []
+        state['discovery_progress'] = 0
+        state['spotify_matches'] = 0
+        state['sync_playlist_id'] = None
+        state['converted_spotify_playlist_id'] = None
+        state['download_process_id'] = None
+        state['sync_progress'] = {}
+        state['discovery_future'] = None
+        state['last_accessed'] = time.time()
+        
+        print(f"🔄 Reset Tidal playlist to fresh: {playlist_id}")
+        return jsonify({"success": True, "message": "Playlist reset to fresh phase"})
+        
+    except Exception as e:
+        print(f"❌ Error resetting Tidal playlist: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/tidal/delete/<playlist_id>', methods=['POST'])
+def delete_tidal_playlist(playlist_id):
+    """Delete Tidal playlist state completely"""
+    try:
+        if playlist_id not in tidal_discovery_states:
+            return jsonify({"error": "Tidal playlist not found"}), 404
+        
+        state = tidal_discovery_states[playlist_id]
+        
+        # Stop any active discovery
+        if 'discovery_future' in state and state['discovery_future']:
+            state['discovery_future'].cancel()
+        
+        # Remove from state dictionary
+        del tidal_discovery_states[playlist_id]
+        
+        print(f"🗑️ Deleted Tidal playlist state: {playlist_id}")
+        return jsonify({"success": True, "message": "Playlist deleted"})
+        
+    except Exception as e:
+        print(f"❌ Error deleting Tidal playlist: {e}")
         return jsonify({"error": str(e)}), 500
 
 
