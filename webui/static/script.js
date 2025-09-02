@@ -6350,6 +6350,9 @@ async function loadTidalPlaylists() {
         tidalPlaylistsLoaded = true;
 
         console.log(`🎵 Loaded ${tidalPlaylists.length} Tidal playlists`);
+        
+        // Load and apply saved discovery states from backend (like YouTube)
+        await loadTidalPlaylistStatesFromBackend();
 
     } catch (error) {
         container.innerHTML = `<div class="playlist-placeholder">❌ Error: ${error.message}</div>`;
@@ -6621,6 +6624,78 @@ function startTidalDiscoveryPolling(fakeUrlHash, playlistId) {
     
     // Store poller reference (reuse YouTube poller storage)
     activeYouTubePollers[fakeUrlHash] = pollInterval;
+}
+
+async function loadTidalPlaylistStatesFromBackend() {
+    // Load all stored Tidal playlist discovery states from backend (similar to YouTube hydration)
+    try {
+        console.log('🎵 Loading Tidal playlist states from backend...');
+        
+        const response = await fetch('/api/tidal/playlists/states');
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to fetch Tidal playlist states');
+        }
+        
+        const data = await response.json();
+        const states = data.states || [];
+        
+        console.log(`🎵 Found ${states.length} stored Tidal playlist states in backend`);
+        
+        if (states.length === 0) {
+            console.log('🎵 No Tidal playlist states to hydrate');
+            return;
+        }
+        
+        // Apply states to existing playlist cards
+        for (const stateInfo of states) {
+            await applyTidalPlaylistState(stateInfo);
+        }
+        
+        console.log('✅ Tidal playlist states loaded and applied');
+        
+    } catch (error) {
+        console.error('❌ Error loading Tidal playlist states:', error);
+    }
+}
+
+async function applyTidalPlaylistState(stateInfo) {
+    const { playlist_id, phase, discovery_progress, spotify_matches, discovery_results } = stateInfo;
+    
+    try {
+        console.log(`🎵 Applying saved state for Tidal playlist: ${playlist_id}, Phase: ${phase}`);
+        
+        // Find the playlist data from the loaded playlists
+        const playlistData = tidalPlaylists.find(p => p.id === playlist_id);
+        if (!playlistData) {
+            console.warn(`⚠️ Playlist data not found for state ${playlist_id} - skipping`);
+            return;
+        }
+        
+        // Update local state
+        if (!tidalPlaylistStates[playlist_id]) {
+            // Initialize state if it doesn't exist
+            tidalPlaylistStates[playlist_id] = {
+                playlist: playlistData,
+                phase: 'fresh'
+            };
+        }
+        
+        // Update with backend state
+        tidalPlaylistStates[playlist_id].phase = phase;
+        tidalPlaylistStates[playlist_id].discovery_progress = discovery_progress;
+        tidalPlaylistStates[playlist_id].spotify_matches = spotify_matches;
+        tidalPlaylistStates[playlist_id].discovery_results = discovery_results;
+        tidalPlaylistStates[playlist_id].playlist = playlistData; // Ensure playlist data is set
+        
+        // Update the card UI to reflect the saved state
+        updateTidalCardPhase(playlist_id, phase);
+        
+        console.log(`✅ Applied saved state for Tidal playlist: ${playlist_id} -> ${phase}`);
+        
+    } catch (error) {
+        console.error(`❌ Error applying Tidal playlist state for ${playlist_id}:`, error);
+    }
 }
 
 // Tidal-specific sync and download functions (placeholder implementations)

@@ -5730,6 +5730,37 @@ def get_tidal_discovery_status(playlist_id):
         print(f"❌ Error getting Tidal discovery status: {e}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/tidal/playlists/states', methods=['GET'])
+def get_tidal_playlist_states():
+    """Get all stored Tidal playlist discovery states for frontend hydration (similar to YouTube playlists)"""
+    try:
+        states = []
+        current_time = time.time()
+        
+        for playlist_id, state in tidal_discovery_states.items():
+            # Update access time when requested
+            state['last_accessed'] = current_time
+            
+            # Return essential data for card state recreation
+            state_info = {
+                'playlist_id': playlist_id,
+                'phase': state['phase'],
+                'status': state['status'],
+                'discovery_progress': state['discovery_progress'],
+                'spotify_matches': state['spotify_matches'],
+                'spotify_total': state['spotify_total'],
+                'discovery_results': state['discovery_results'],
+                'last_accessed': state['last_accessed']
+            }
+            states.append(state_info)
+        
+        print(f"🎵 Returning {len(states)} stored Tidal playlist states for hydration")
+        return jsonify({"states": states})
+        
+    except Exception as e:
+        print(f"❌ Error getting Tidal playlist states: {e}")
+        return jsonify({"error": str(e)}), 500
+
 
 def _run_tidal_discovery_worker(playlist_id):
     """Background worker for Tidal Spotify discovery process (like sync.py)"""
