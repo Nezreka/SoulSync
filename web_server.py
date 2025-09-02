@@ -5539,6 +5539,320 @@ def get_playlist_tracks(playlist_id):
 
 
 # ===================================================================
+# TIDAL PLAYLIST API ENDPOINTS  
+# ===================================================================
+
+@app.route('/api/tidal/playlists', methods=['GET'])
+def get_tidal_playlists():
+    """Fetches all user playlists from Tidal with full track data (like sync.py)."""
+    if not tidal_client or not tidal_client.is_authenticated():
+        return jsonify({"error": "Tidal not authenticated."}), 401
+    try:
+        # Use same method as sync.py - this already includes all track data
+        playlists = tidal_client.get_user_playlists_metadata_only()
+        
+        playlist_data = []
+        for p in playlists:
+            # Get track count from actual tracks if available
+            track_count = len(p.tracks) if hasattr(p, 'tracks') and p.tracks else 0
+            
+            playlist_dict = {
+                "id": p.id, 
+                "name": p.name, 
+                "owner": getattr(p, 'owner', 'Unknown'),
+                "track_count": track_count,
+                "image_url": getattr(p, 'image_url', None),
+                "description": getattr(p, 'description', ''),
+                "tracks": []  # Add tracks data like sync.py
+            }
+            
+            # Include full track data if available (like sync.py has)
+            if hasattr(p, 'tracks') and p.tracks:
+                playlist_dict['tracks'] = [{
+                    'id': t.id,
+                    'name': t.name, 
+                    'artists': t.artists or [],
+                    'album': getattr(t, 'album', 'Unknown Album'),
+                    'duration_ms': getattr(t, 'duration_ms', 0),
+                    'track_number': getattr(t, 'track_number', 0)
+                } for t in p.tracks]
+                
+            playlist_data.append(playlist_dict)
+            
+        print(f"🎵 Loaded {len(playlist_data)} Tidal playlists with track data")
+        return jsonify(playlist_data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/tidal/playlist/<playlist_id>', methods=['GET'])
+def get_tidal_playlist_tracks(playlist_id):
+    """Fetches full track details for a specific Tidal playlist (matches sync.py pattern)."""
+    if not tidal_client or not tidal_client.is_authenticated():
+        return jsonify({"error": "Tidal not authenticated."}), 401
+    try:
+        print(f"🎵 Getting full Tidal playlist with tracks for: {playlist_id}")
+        
+        # First check if this playlist exists in metadata list
+        try:
+            metadata_playlists = tidal_client.get_user_playlists_metadata_only()
+            target_playlist = None
+            for p in metadata_playlists:
+                if p.id == playlist_id:
+                    target_playlist = p
+                    break
+            
+            if not target_playlist:
+                print(f"❌ Playlist {playlist_id} not found in user's Tidal playlists")
+                return jsonify({"error": "Playlist not found in your Tidal library"}), 404
+                
+            print(f"🎵 Found playlist in metadata: {target_playlist.name}")
+        except Exception as e:
+            print(f"❌ Error checking playlist metadata: {e}")
+        
+        # Use same method as sync.py: tidal_client.get_playlist(playlist_id)
+        full_playlist = tidal_client.get_playlist(playlist_id)
+        if not full_playlist:
+            return jsonify({"error": "Unable to access this Tidal playlist. This may be due to privacy settings or Tidal API restrictions. Please try a different playlist."}), 403
+            
+        if not full_playlist.tracks:
+            return jsonify({"error": "This playlist appears to have no tracks or they cannot be accessed"}), 403
+        
+        print(f"🎵 Loaded {len(full_playlist.tracks)} tracks from Tidal playlist: {full_playlist.name}")
+        
+        # Convert playlist to dict (matches sync.py structure)
+        playlist_dict = {
+            'id': full_playlist.id,
+            'name': full_playlist.name,
+            'description': getattr(full_playlist, 'description', ''),
+            'owner': getattr(full_playlist, 'owner', 'Unknown'),
+            'track_count': len(full_playlist.tracks),
+            'image_url': getattr(full_playlist, 'image_url', None),
+            'tracks': []
+        }
+        
+        # Convert tracks to dict format (for discovery modal)
+        playlist_dict['tracks'] = [{
+            'id': t.id,
+            'name': t.name, 
+            'artists': t.artists or [],
+            'album': getattr(t, 'album', 'Unknown Album'),
+            'duration_ms': getattr(t, 'duration_ms', 0),
+            'track_number': getattr(t, 'track_number', 0)
+        } for t in full_playlist.tracks]
+        
+        return jsonify(playlist_dict)
+    except Exception as e:
+        print(f"❌ Error getting Tidal playlist tracks: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+# ===================================================================
+# TIDAL DISCOVERY API ENDPOINTS
+# ===================================================================
+
+# Global state for Tidal playlist discovery management
+tidal_discovery_states = {}  # Key: playlist_id, Value: discovery state
+tidal_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="tidal_discovery")
+
+@app.route('/api/tidal/discovery/start/<playlist_id>', methods=['POST'])
+def start_tidal_discovery(playlist_id):
+    """Start Spotify discovery process for a Tidal playlist"""
+    try:
+        # Get playlist data from the initial load
+        if not tidal_client or not tidal_client.is_authenticated():
+            return jsonify({"error": "Tidal not authenticated."}), 401
+            
+        # Get playlist from tidal client
+        playlists = tidal_client.get_user_playlists_metadata_only()
+        target_playlist = None
+        for p in playlists:
+            if p.id == playlist_id:
+                target_playlist = p
+                break
+                
+        if not target_playlist:
+            return jsonify({"error": "Tidal playlist not found"}), 404
+            
+        if not target_playlist.tracks:
+            return jsonify({"error": "Playlist has no tracks"}), 400
+        
+        # Initialize or update discovery state
+        if playlist_id in tidal_discovery_states and tidal_discovery_states[playlist_id]['phase'] == 'discovering':
+            return jsonify({"error": "Discovery already in progress"}), 400
+        
+        state = {
+            'playlist': target_playlist,
+            'phase': 'discovering',
+            'status': 'discovering',
+            'discovery_progress': 0,
+            'spotify_matches': 0,
+            'spotify_total': len(target_playlist.tracks),
+            'discovery_results': [],
+            'last_accessed': time.time()
+        }
+        
+        tidal_discovery_states[playlist_id] = state
+        
+        # Start discovery worker
+        future = tidal_discovery_executor.submit(_run_tidal_discovery_worker, playlist_id)
+        state['discovery_future'] = future
+        
+        print(f"🔍 Started Spotify discovery for Tidal playlist: {target_playlist.name}")
+        return jsonify({"success": True, "message": "Discovery started"})
+        
+    except Exception as e:
+        print(f"❌ Error starting Tidal discovery: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/tidal/discovery/status/<playlist_id>', methods=['GET'])
+def get_tidal_discovery_status(playlist_id):
+    """Get real-time discovery status for a Tidal playlist"""
+    try:
+        if playlist_id not in tidal_discovery_states:
+            return jsonify({"error": "Tidal discovery not found"}), 404
+        
+        state = tidal_discovery_states[playlist_id]
+        state['last_accessed'] = time.time()  # Update access time
+        
+        response = {
+            'phase': state['phase'],
+            'status': state['status'],
+            'progress': state['discovery_progress'],
+            'spotify_matches': state['spotify_matches'],
+            'spotify_total': state['spotify_total'],
+            'results': state['discovery_results'],
+            'complete': state['phase'] == 'discovered'
+        }
+        
+        return jsonify(response)
+        
+    except Exception as e:
+        print(f"❌ Error getting Tidal discovery status: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+def _run_tidal_discovery_worker(playlist_id):
+    """Background worker for Tidal Spotify discovery process (like sync.py)"""
+    try:
+        state = tidal_discovery_states[playlist_id]
+        playlist = state['playlist']
+        
+        print(f"🎵 Starting Tidal Spotify discovery for: {playlist.name}")
+        
+        # Import matching engine for validation (like sync.py)
+        from core.matching_engine import MusicMatchingEngine
+        matching_engine = MusicMatchingEngine()
+        
+        successful_discoveries = 0
+        
+        for i, tidal_track in enumerate(playlist.tracks):
+            if state.get('cancelled', False):
+                break
+            
+            try:
+                print(f"🔍 [{i+1}/{len(playlist.tracks)}] Searching: {tidal_track.name} by {', '.join(tidal_track.artists)}")
+                
+                # Use the same search logic as sync.py TidalSpotifyDiscoveryWorker
+                spotify_track = _search_spotify_for_tidal_track(tidal_track)
+                
+                # Create result entry
+                result = {
+                    'tidal_track': {
+                        'id': tidal_track.id,
+                        'name': tidal_track.name,
+                        'artists': tidal_track.artists or [],
+                        'album': getattr(tidal_track, 'album', 'Unknown Album'),
+                        'duration_ms': getattr(tidal_track, 'duration_ms', 0),
+                    },
+                    'spotify_data': None,
+                    'status': 'not_found'
+                }
+                
+                if spotify_track:
+                    result['spotify_data'] = {
+                        'id': spotify_track.id,
+                        'name': spotify_track.name,
+                        'artists': spotify_track.artists,  # Already a list of strings
+                        'album': spotify_track.album,      # Already a string
+                        'duration_ms': spotify_track.duration_ms,
+                        'external_urls': spotify_track.external_urls
+                    }
+                    result['status'] = 'found'
+                    successful_discoveries += 1
+                    state['spotify_matches'] = successful_discoveries
+                
+                state['discovery_results'].append(result)
+                state['discovery_progress'] = int(((i + 1) / len(playlist.tracks)) * 100)
+                
+                # Add delay between requests (like sync.py)
+                time.sleep(0.1)
+                
+            except Exception as e:
+                print(f"❌ Error processing track {i+1}: {e}")
+                # Add error result
+                result = {
+                    'tidal_track': {
+                        'name': tidal_track.name,
+                        'artists': tidal_track.artists or [],
+                    },
+                    'spotify_data': None,
+                    'status': 'error',
+                    'error': str(e)
+                }
+                state['discovery_results'].append(result)
+                state['discovery_progress'] = int(((i + 1) / len(playlist.tracks)) * 100)
+        
+        # Mark as complete
+        state['phase'] = 'discovered'
+        state['status'] = 'discovered'
+        state['discovery_progress'] = 100
+        
+        print(f"✅ Tidal discovery complete: {successful_discoveries}/{len(playlist.tracks)} tracks found")
+        
+    except Exception as e:
+        print(f"❌ Error in Tidal discovery worker: {e}")
+        state['phase'] = 'error'
+        state['status'] = f'error: {str(e)}'
+
+
+def _search_spotify_for_tidal_track(tidal_track):
+    """Search Spotify for a Tidal track (simplified version of sync.py logic)"""
+    if not spotify_client or not spotify_client.is_authenticated():
+        return None
+        
+    try:
+        # Construct search query like sync.py does
+        track_name = tidal_track.name
+        artists = tidal_track.artists or []
+        
+        if not artists:
+            return None
+            
+        # Try different search combinations (like sync.py TidalSpotifyDiscoveryWorker)
+        search_queries = [
+            f'track:"{track_name}" artist:"{artists[0]}"',
+            f'"{track_name}" "{artists[0]}"',
+            f'{track_name} {artists[0]}'
+        ]
+        
+        for query in search_queries:
+            try:
+                results = spotify_client.search_tracks(query, limit=5)
+                if results and len(results) > 0:
+                    # Return first match (could add matching logic like sync.py)
+                    return results[0]
+            except Exception as e:
+                print(f"❌ Search error for query '{query}': {e}")
+                continue
+                
+        return None
+        
+    except Exception as e:
+        print(f"❌ Error searching Spotify for Tidal track: {e}")
+        return None
+
+
+# ===================================================================
 # YOUTUBE PLAYLIST API ENDPOINTS
 # ===================================================================
 
