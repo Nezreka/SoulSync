@@ -4534,6 +4534,33 @@ body {
 }
 
 /* ===============================
+   TIDAL PLAYLIST CARD STYLES (extends YouTube card styles)
+   ===============================*/
+
+.tidal-playlist-card .playlist-card-icon {
+    background: rgba(255, 102, 0, 0.2);
+    border: 1px solid #ff6600;
+    color: #ff6600;
+    font-size: 16px;
+}
+
+.tidal-playlist-card:hover .playlist-card-icon {
+    background: rgba(255, 102, 0, 0.3);
+    border: 1px solid #ff7700;
+}
+
+.tidal-playlist-card .playlist-card-action-btn {
+    background: linear-gradient(135deg, #ff6600, #ff7700);
+    border: 1px solid #ff6600;
+}
+
+.tidal-playlist-card .playlist-card-action-btn:hover:not(:disabled) {
+    background: linear-gradient(135deg, #ff7700, #ff8800);
+    border: 1px solid #ff7700;
+    box-shadow: 0 4px 15px rgba(255, 102, 0, 0.3);
+}
+
+/* ===============================
    YOUTUBE DISCOVERY MODAL STYLES
    =============================== */
 

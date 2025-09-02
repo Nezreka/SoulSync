@@ -42,6 +42,11 @@ let sequentialSyncManager = null;
 let youtubePlaylistStates = {}; // Key: url_hash, Value: playlist state
 let activeYouTubePollers = {}; // Key: url_hash, Value: intervalId
 
+// --- Tidal Playlist State Management (Similar to YouTube but loads from API like Spotify) ---
+let tidalPlaylists = [];
+let tidalPlaylistStates = {}; // Key: playlist_id, Value: playlist state with phases
+let tidalPlaylistsLoaded = false;
+
 // --- Wishlist Modal Persistence State Management ---
 const WishlistModalState = {
     // Track if wishlist modal was visible before page refresh
@@ -6321,6 +6326,331 @@ function updateDbProgressUI(state) {
     }
 }
 
+// ===================================================================
+// TIDAL PLAYLIST MANAGEMENT (YouTube-style cards with Tidal colors)
+// ===================================================================
+
+async function loadTidalPlaylists() {
+    const container = document.getElementById('tidal-playlist-container');
+    const refreshBtn = document.getElementById('tidal-refresh-btn');
+    
+    container.innerHTML = `<div class="playlist-placeholder">🔄 Loading Tidal playlists...</div>`;
+    refreshBtn.disabled = true;
+    refreshBtn.textContent = '🔄 Loading...';
+
+    try {
+        const response = await fetch('/api/tidal/playlists');
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to fetch Tidal playlists');
+        }
+        
+        tidalPlaylists = await response.json();
+        renderTidalPlaylists();
+        tidalPlaylistsLoaded = true;
+
+        console.log(`🎵 Loaded ${tidalPlaylists.length} Tidal playlists`);
+
+    } catch (error) {
+        container.innerHTML = `<div class="playlist-placeholder">❌ Error: ${error.message}</div>`;
+        showToast(`Error loading Tidal playlists: ${error.message}`, 'error');
+    } finally {
+        refreshBtn.disabled = false;
+        refreshBtn.textContent = '🔄 Refresh';
+    }
+}
+
+function renderTidalPlaylists() {
+    const container = document.getElementById('tidal-playlist-container');
+    if (tidalPlaylists.length === 0) {
+        container.innerHTML = `<div class="playlist-placeholder">No Tidal playlists found.</div>`;
+        return;
+    }
+
+    container.innerHTML = tidalPlaylists.map(p => {
+        // Initialize state if not exists (fresh state like sync.py)
+        if (!tidalPlaylistStates[p.id]) {
+            tidalPlaylistStates[p.id] = {
+                phase: 'fresh',
+                playlist: p
+            };
+        }
+        
+        return createTidalCard(p);
+    }).join('');
+    
+    // Add click handlers to cards
+    tidalPlaylists.forEach(p => {
+        const card = document.getElementById(`tidal-card-${p.id}`);
+        if (card) {
+            card.addEventListener('click', () => handleTidalCardClick(p.id));
+        }
+    });
+}
+
+function createTidalCard(playlist) {
+    const state = tidalPlaylistStates[playlist.id];
+    const phase = state.phase;
+    
+    // Get phase-specific button text (like YouTube cards)
+    let buttonText = 'Start Discovery';
+    let phaseText = 'Ready to discover';
+    let phaseColor = '#999';
+    
+    if (phase === 'discovering') {
+        buttonText = 'View Progress';
+        phaseText = 'Discovering...';
+        phaseColor = '#ff6600';
+    } else if (phase === 'discovered') {
+        buttonText = 'View Details';
+        phaseText = 'Discovery Complete';
+        phaseColor = '#1db954';
+    }
+    
+    return `
+        <div class="youtube-playlist-card tidal-playlist-card" id="tidal-card-${playlist.id}">
+            <div class="playlist-card-icon">🎵</div>
+            <div class="playlist-card-content">
+                <div class="playlist-card-name">${escapeHtml(playlist.name)}</div>
+                <div class="playlist-card-info">
+                    <span class="playlist-card-track-count">${playlist.track_count} tracks</span>
+                    <span class="playlist-card-phase-text" style="color: ${phaseColor};">${phaseText}</span>
+                </div>
+            </div>
+            <button class="playlist-card-action-btn">${buttonText}</button>
+        </div>
+    `;
+}
+
+async function handleTidalCardClick(playlistId) {
+    const state = tidalPlaylistStates[playlistId];
+    if (!state) return;
+    
+    console.log(`🎵 Tidal card clicked: ${playlistId}, Phase: ${state.phase}`);
+    
+    if (state.phase === 'fresh') {
+        // No need to fetch data - we already have all tracks from initial load (like sync.py)
+        console.log(`🎵 Using pre-loaded Tidal playlist data for: ${state.playlist.name}`);
+        console.log(`🎵 Ready with ${state.playlist.tracks.length} Tidal tracks for discovery`);
+        
+        // Update phase to discovering
+        state.phase = 'discovering';
+        
+        // Update card to show discovering state
+        updateTidalCardPhase(playlistId, 'discovering');
+        
+        // Open YouTube discovery modal but with Tidal data (exact sync.py pattern)
+        openTidalDiscoveryModal(playlistId, state.playlist);
+        
+    } else if (state.phase === 'discovering' || state.phase === 'discovered') {
+        // Reopen existing modal (like sync.py)
+        openTidalDiscoveryModal(playlistId, state.playlist);
+    }
+}
+
+function updateTidalCardPhase(playlistId, phase) {
+    const state = tidalPlaylistStates[playlistId];
+    if (!state) return;
+    
+    state.phase = phase;
+    
+    // Re-render the card with new phase
+    const card = document.getElementById(`tidal-card-${playlistId}`);
+    if (card) {
+        const newCardHtml = createTidalCard(state.playlist);
+        card.outerHTML = newCardHtml;
+        
+        // Re-attach click handler
+        const newCard = document.getElementById(`tidal-card-${playlistId}`);
+        if (newCard) {
+            newCard.addEventListener('click', () => handleTidalCardClick(playlistId));
+        }
+    }
+    
+    console.log(`🎵 Updated Tidal card phase: ${playlistId} -> ${phase}`);
+}
+
+async function openTidalDiscoveryModal(playlistId, playlistData) {
+    console.log(`🎵 Opening Tidal discovery modal (reusing YouTube modal): ${playlistData.name}`);
+    
+    // Create a fake YouTube-style urlHash for the modal system
+    const fakeUrlHash = `tidal_${playlistId}`;
+    
+    // Get current Tidal card state to check if discovery is already done
+    const tidalCardState = tidalPlaylistStates[playlistId];
+    const isAlreadyDiscovered = tidalCardState && tidalCardState.phase === 'discovered';
+    
+    // Prepare discovery results in the correct format for modal
+    let transformedResults = [];
+    if (isAlreadyDiscovered && tidalCardState.discovery_results) {
+        transformedResults = tidalCardState.discovery_results.map((result, index) => ({
+            index: index,
+            yt_track: result.tidal_track ? result.tidal_track.name : 'Unknown',
+            yt_artist: result.tidal_track ? (result.tidal_track.artists ? result.tidal_track.artists.join(', ') : 'Unknown') : 'Unknown',
+            status: result.status === 'found' ? '✅ Found' : '❌ Not Found',
+            status_class: result.status === 'found' ? 'found' : 'not-found',
+            spotify_track: result.spotify_data ? result.spotify_data.name : '-',
+            spotify_artist: result.spotify_data ? result.spotify_data.artists.join(', ') : '-',
+            spotify_album: result.spotify_data ? result.spotify_data.album : '-'
+        }));
+    }
+    
+    // Create YouTube-compatible state structure
+    youtubePlaylistStates[fakeUrlHash] = {
+        phase: isAlreadyDiscovered ? 'discovered' : 'discovering',
+        playlist: {
+            name: playlistData.name,
+            tracks: playlistData.tracks
+        },
+        is_tidal_playlist: true,  // Flag to identify this as Tidal
+        tidal_playlist_id: playlistId,
+        discovery_progress: isAlreadyDiscovered ? (tidalCardState.discovery_progress || 100) : 0,
+        spotify_matches: isAlreadyDiscovered ? (tidalCardState.spotify_matches || 0) : 0,
+        spotify_total: playlistData.tracks.length,
+        discovery_results: transformedResults,
+        discoveryResults: transformedResults // Both formats for compatibility
+    };
+    
+    // Only start discovery if not already discovered
+    if (!isAlreadyDiscovered) {
+        // Start Tidal discovery process automatically (like sync.py)
+        try {
+            console.log(`🔍 Starting Tidal discovery for: ${playlistData.name}`);
+            
+            const response = await fetch(`/api/tidal/discovery/start/${playlistId}`, {
+                method: 'POST'
+            });
+            
+            const result = await response.json();
+            
+            if (result.error) {
+                console.error('❌ Error starting Tidal discovery:', result.error);
+                showToast(`Error starting discovery: ${result.error}`, 'error');
+                return;
+            }
+            
+            console.log('✅ Tidal discovery started, beginning polling...');
+            
+            // Start polling for progress
+            startTidalDiscoveryPolling(fakeUrlHash, playlistId);
+            
+        } catch (error) {
+            console.error('❌ Error starting Tidal discovery:', error);
+            showToast(`Error starting discovery: ${error.message}`, 'error');
+        }
+    } else {
+        console.log('✅ Using existing discovery results - no need to re-discover');
+    }
+    
+    // Reuse YouTube discovery modal (exact sync.py pattern)
+    openYouTubeDiscoveryModal(fakeUrlHash);
+}
+
+function startTidalDiscoveryPolling(fakeUrlHash, playlistId) {
+    console.log(`🔄 Starting Tidal discovery polling for: ${playlistId}`);
+    
+    // Stop any existing polling
+    if (activeYouTubePollers[fakeUrlHash]) {
+        clearInterval(activeYouTubePollers[fakeUrlHash]);
+    }
+    
+    const pollInterval = setInterval(async () => {
+        try {
+            const response = await fetch(`/api/tidal/discovery/status/${playlistId}`);
+            const status = await response.json();
+            
+            if (status.error) {
+                console.error('❌ Error polling Tidal discovery status:', status.error);
+                clearInterval(pollInterval);
+                delete activeYouTubePollers[fakeUrlHash];
+                return;
+            }
+            
+            // Update fake YouTube state with Tidal discovery results
+            const state = youtubePlaylistStates[fakeUrlHash];
+            if (state) {
+                state.discovery_progress = status.progress;
+                state.spotify_matches = status.spotify_matches;
+                state.discovery_results = status.results;
+                state.phase = status.phase;
+                
+                // Transform Tidal results to YouTube modal format
+                const transformedStatus = {
+                    progress: status.progress,
+                    spotify_matches: status.spotify_matches,
+                    spotify_total: status.spotify_total,
+                    results: status.results.map((result, index) => ({
+                        index: index,
+                        status: result.status === 'found' ? '✅ Found' : '❌ Not Found',
+                        status_class: result.status === 'found' ? 'found' : 'not-found',
+                        spotify_track: result.spotify_data ? result.spotify_data.name : '-',
+                        spotify_artist: result.spotify_data ? result.spotify_data.artists.join(', ') : '-',
+                        spotify_album: result.spotify_data ? result.spotify_data.album : '-'
+                        // Note: No duration column for Tidal (matches GUI version)
+                    }))
+                };
+                
+                // Update modal with transformed data (reuse YouTube modal update logic)
+                updateYouTubeDiscoveryModal(fakeUrlHash, transformedStatus);
+                
+                // Update Tidal card phase and save discovery results
+                if (tidalPlaylistStates[playlistId]) {
+                    tidalPlaylistStates[playlistId].phase = status.phase;
+                    tidalPlaylistStates[playlistId].discovery_results = status.results;
+                    tidalPlaylistStates[playlistId].spotify_matches = status.spotify_matches;
+                    tidalPlaylistStates[playlistId].discovery_progress = status.progress;
+                    updateTidalCardPhase(playlistId, status.phase);
+                }
+                
+                console.log(`🔄 Tidal discovery progress: ${status.progress}% (${status.spotify_matches}/${status.spotify_total} found)`);
+            }
+            
+            // Stop polling when complete
+            if (status.complete) {
+                console.log(`✅ Tidal discovery complete: ${status.spotify_matches}/${status.spotify_total} tracks found`);
+                clearInterval(pollInterval);
+                delete activeYouTubePollers[fakeUrlHash];
+            }
+            
+        } catch (error) {
+            console.error('❌ Error polling Tidal discovery:', error);
+            clearInterval(pollInterval);
+            delete activeYouTubePollers[fakeUrlHash];
+        }
+    }, 1000); // Poll every second like YouTube
+    
+    // Store poller reference (reuse YouTube poller storage)
+    activeYouTubePollers[fakeUrlHash] = pollInterval;
+}
+
+// Tidal-specific sync and download functions (placeholder implementations)
+function startTidalPlaylistSync(urlHash) {
+    console.log(`🎵 Starting Tidal playlist sync for: ${urlHash}`);
+    const state = youtubePlaylistStates[urlHash];
+    if (!state || !state.is_tidal_playlist) {
+        console.error('❌ Invalid Tidal playlist state for sync');
+        return;
+    }
+    
+    // TODO: Implement Tidal playlist sync logic
+    // For now, show a message that this feature is coming soon
+    showToast('🔄 Tidal playlist sync functionality coming soon!', 'info');
+}
+
+function startTidalDownloadMissing(urlHash) {
+    console.log(`🎵 Starting Tidal download missing tracks for: ${urlHash}`);
+    const state = youtubePlaylistStates[urlHash];
+    if (!state || !state.is_tidal_playlist) {
+        console.error('❌ Invalid Tidal playlist state for download');
+        return;
+    }
+    
+    // TODO: Implement Tidal download missing tracks logic
+    // For now, show a message that this feature is coming soon
+    showToast('🔍 Tidal download missing tracks functionality coming soon!', 'info');
+}
+
+
 // ===============================
 // SYNC PAGE FUNCTIONALITY (REDESIGNED)
 // ===============================
@@ -6350,6 +6680,13 @@ function initializeSyncPage() {
         // Remove any old listeners to be safe, then add the new one
         refreshBtn.removeEventListener('click', loadSpotifyPlaylists);
         refreshBtn.addEventListener('click', loadSpotifyPlaylists);
+    }
+
+    // Logic for the Tidal refresh button
+    const tidalRefreshBtn = document.getElementById('tidal-refresh-btn');
+    if (tidalRefreshBtn) {
+        tidalRefreshBtn.removeEventListener('click', loadTidalPlaylists);
+        tidalRefreshBtn.addEventListener('click', loadTidalPlaylists);
     }
 
     // Logic for the Start Sync button
@@ -7013,14 +7350,18 @@ function openYouTubeDiscoveryModal(urlHash) {
             startYouTubeDiscoveryPolling(urlHash);
         }
     } else {
-        // Create new modal
+        // Create new modal (support both YouTube and Tidal like sync.py)
+        const isTidal = state.is_tidal_playlist;
+        const modalTitle = isTidal ? '🎵 Tidal Playlist Discovery' : '🎵 YouTube Playlist Discovery';
+        const sourceLabel = isTidal ? 'Tidal' : 'YT';
+        
         const modalHtml = `
             <div class="modal-overlay" id="youtube-discovery-modal-${urlHash}">
                 <div class="youtube-discovery-modal">
                     <div class="modal-header">
-                        <h2>🎵 YouTube Playlist Discovery</h2>
+                        <h2>${modalTitle}</h2>
                         <div class="modal-subtitle">${state.playlist.name} (${state.playlist.tracks.length} tracks)</div>
-                        <div class="modal-description">${getModalDescription(state.phase)}</div>
+                        <div class="modal-description">${getModalDescription(state.phase, isTidal)}</div>
                         <button class="modal-close-btn" onclick="closeYouTubeDiscoveryModal('${urlHash}')">✕</button>
                     </div>
                     
@@ -7030,24 +7371,24 @@ function openYouTubeDiscoveryModal(urlHash) {
                             <div class="progress-bar-container">
                                 <div class="progress-bar-fill" id="youtube-discovery-progress-${urlHash}" style="width: 0%;"></div>
                             </div>
-                            <div class="progress-text" id="youtube-discovery-progress-text-${urlHash}">${getInitialProgressText(state.phase)}</div>
+                            <div class="progress-text" id="youtube-discovery-progress-text-${urlHash}">${getInitialProgressText(state.phase, isTidal)}</div>
                         </div>
                         
                         <div class="discovery-table-container">
                             <table class="discovery-table">
                                 <thead>
                                     <tr>
-                                        <th>YT Track</th>
-                                        <th>YT Artist</th>
+                                        <th>${sourceLabel} Track</th>
+                                        <th>${sourceLabel} Artist</th>
                                         <th>Status</th>
                                         <th>Spotify Track</th>
                                         <th>Spotify Artist</th>
                                         <th>Album</th>
-                                        <th>Duration</th>
+                                        ${isTidal ? '' : '<th>Duration</th>'}
                                     </tr>
                                 </thead>
                                 <tbody id="youtube-discovery-table-${urlHash}">
-                                    ${generateTableRowsFromState(state)}
+                                    ${generateTableRowsFromState(state, urlHash)}
                                 </tbody>
                             </table>
                         </div>
@@ -7093,6 +7434,8 @@ function getModalActionButtons(urlHash, phase, state = null) {
         state = youtubePlaylistStates[urlHash];
     }
     
+    const isTidal = state && state.is_tidal_playlist;
+    
     // Validate data availability for buttons
     const hasDiscoveryResults = state && state.discoveryResults && state.discoveryResults.length > 0;
     const hasSpotifyMatches = state && state.spotifyMatches > 0;
@@ -7109,12 +7452,20 @@ function getModalActionButtons(urlHash, phase, state = null) {
             
             // Only show sync button if there are Spotify matches
             if (hasSpotifyMatches) {
-                buttons += `<button class="modal-btn modal-btn-primary" onclick="startYouTubePlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                if (isTidal) {
+                    buttons += `<button class="modal-btn modal-btn-primary" onclick="startTidalPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                } else {
+                    buttons += `<button class="modal-btn modal-btn-primary" onclick="startYouTubePlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                }
             }
             
             // Only show download button if we have matches or a converted playlist ID
             if (hasSpotifyMatches || hasConvertedPlaylistId) {
-                buttons += `<button class="modal-btn modal-btn-primary" onclick="startYouTubeDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
+                if (isTidal) {
+                    buttons += `<button class="modal-btn modal-btn-primary" onclick="startTidalDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
+                } else {
+                    buttons += `<button class="modal-btn modal-btn-primary" onclick="startYouTubeDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
+                }
             }
             
             if (!buttons) {
@@ -7158,20 +7509,21 @@ function getModalActionButtons(urlHash, phase, state = null) {
     }
 }
 
-function getModalDescription(phase) {
+function getModalDescription(phase, isTidal = false) {
+    const source = isTidal ? 'Tidal' : 'YouTube';
     switch (phase) {
         case 'fresh':
-            return 'Ready to discover clean Spotify metadata for YouTube tracks...';
+            return `Ready to discover clean Spotify metadata for ${source} tracks...`;
         case 'discovering':
-            return 'Discovering clean Spotify metadata for YouTube tracks...';
+            return `Discovering clean Spotify metadata for ${source} tracks...`;
         case 'discovered':
             return 'Discovery complete! View the results below.';
         default:
-            return 'Discovering clean Spotify metadata for YouTube tracks...';
+            return `Discovering clean Spotify metadata for ${source} tracks...`;
     }
 }
 
-function getInitialProgressText(phase) {
+function getInitialProgressText(phase, isTidal = false) {
     switch (phase) {
         case 'fresh':
             return 'Click Start Discovery to begin...';
@@ -7184,36 +7536,38 @@ function getInitialProgressText(phase) {
     }
 }
 
-function generateTableRowsFromState(state) {
+function generateTableRowsFromState(state, urlHash) {
+    const isTidal = state.is_tidal_playlist;
+    
     if (state.discoveryResults && state.discoveryResults.length > 0) {
         // Generate rows from existing discovery results
         return state.discoveryResults.map((result, index) => `
-            <tr id="youtube-discovery-row-${result.index}">
+            <tr id="discovery-row-${urlHash}-${result.index}">
                 <td class="yt-track">${result.yt_track}</td>
                 <td class="yt-artist">${result.yt_artist}</td>
                 <td class="discovery-status ${result.status_class}">${result.status}</td>
                 <td class="spotify-track">${result.spotify_track || '-'}</td>
                 <td class="spotify-artist">${result.spotify_artist || '-'}</td>
                 <td class="spotify-album">${result.spotify_album || '-'}</td>
-                <td class="duration">${result.duration}</td>
+                ${isTidal ? '' : `<td class="duration">${result.duration}</td>`}
             </tr>
         `).join('');
     } else {
         // Generate initial rows from playlist tracks
-        return generateInitialTableRows(state.playlist.tracks);
+        return generateInitialTableRows(state.playlist.tracks, isTidal, urlHash);
     }
 }
 
-function generateInitialTableRows(tracks) {
+function generateInitialTableRows(tracks, isTidal = false, urlHash = '') {
     return tracks.map((track, index) => `
-        <tr id="youtube-discovery-row-${index}">
+        <tr id="discovery-row-${urlHash}-${index}">
             <td class="yt-track">${track.name}</td>
-            <td class="yt-artist">${track.artists[0] || 'Unknown Artist'}</td>
+            <td class="yt-artist">${track.artists ? (Array.isArray(track.artists) ? track.artists.join(', ') : track.artists) : 'Unknown Artist'}</td>
             <td class="discovery-status">🔍 Pending...</td>
             <td class="spotify-track">-</td>
             <td class="spotify-artist">-</td>
             <td class="spotify-album">-</td>
-            <td class="duration">${formatDuration(track.duration_ms)}</td>
+            ${isTidal ? '' : `<td class="duration">${formatDuration(track.duration_ms)}</td>`}
         </tr>
     `).join('');
 }
@@ -7238,7 +7592,7 @@ function updateYouTubeDiscoveryModal(urlHash, status) {
     
     // Update table rows
     status.results.forEach(result => {
-        const row = document.getElementById(`youtube-discovery-row-${result.index}`);
+        const row = document.getElementById(`discovery-row-${urlHash}-${result.index}`);
         if (!row) return;
         
         const statusCell = row.querySelector('.discovery-status');
@@ -7267,7 +7621,7 @@ function refreshYouTubeDiscoveryModalTable(urlHash) {
     // Update the table body with new discovery results
     const tableBody = state.modalElement.querySelector(`#youtube-discovery-table-${urlHash}`);
     if (tableBody) {
-        tableBody.innerHTML = generateTableRowsFromState(state);
+        tableBody.innerHTML = generateTableRowsFromState(state, urlHash);
         console.log(`✅ Modal table refreshed with discovery data`);
     } else {
         console.warn(`⚠️ Could not find table body for modal ${urlHash}`);
