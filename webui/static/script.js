@@ -3000,10 +3000,38 @@ function closeDownloadMissingModal(playlistId) {
             updateYouTubeCardPhase(urlHash, 'discovered');
         }
         
-        // Reset Tidal playlist phase to 'discovered' when modal is closed after completion
+        // Enhanced Tidal playlist state management (based on GUI sync.py patterns)
         if (playlistId.startsWith('tidal_')) {
             const tidalPlaylistId = playlistId.replace('tidal_', '');
+            
+            // Clear download-specific state but preserve discovery results (like GUI closeEvent)
+            if (tidalPlaylistStates[tidalPlaylistId]) {
+                // Preserve discovery data for future use (like GUI modal behavior)
+                const preservedData = {
+                    playlist: tidalPlaylistStates[tidalPlaylistId].playlist,
+                    discovery_results: tidalPlaylistStates[tidalPlaylistId].discovery_results,
+                    spotify_matches: tidalPlaylistStates[tidalPlaylistId].spotify_matches,
+                    discovery_progress: tidalPlaylistStates[tidalPlaylistId].discovery_progress,
+                    convertedSpotifyPlaylistId: tidalPlaylistStates[tidalPlaylistId].convertedSpotifyPlaylistId
+                };
+                
+                // Clear download-specific state 
+                delete tidalPlaylistStates[tidalPlaylistId].download_process_id;
+                delete tidalPlaylistStates[tidalPlaylistId].phase;
+                
+                // Restore preserved data and set to discovered phase
+                Object.assign(tidalPlaylistStates[tidalPlaylistId], preservedData);
+                tidalPlaylistStates[tidalPlaylistId].phase = 'discovered';
+                
+                // ALTERNATIVE: Reset to fresh state for new discovery (uncomment if user prefers this)
+                // tidalPlaylistStates[tidalPlaylistId].phase = 'fresh';
+                
+                console.log(`🧹 [Modal Close] Reset Tidal playlist ${tidalPlaylistId} - cleared download state, preserved discovery data`);
+            }
+            
             updateTidalCardPhase(tidalPlaylistId, 'discovered');
+            console.log(`🔄 [Modal Close] Reset Tidal playlist ${tidalPlaylistId} to discovered phase`);
+            console.log(`📝 [Modal Close] Expected button text for discovered phase: "${getActionButtonText('discovered')}"`);
         }
         
         // Clear wishlist modal state when modal is fully closed
@@ -3299,6 +3327,8 @@ function startModalDownloadPolling(playlistId) {
     if (!process || !process.batchId) return;
     if (process.poller) clearInterval(process.poller);
 
+    console.log(`🔄 [Polling] Starting status polling for playlistId: ${playlistId}, batchId: ${process.batchId}`);
+
     process.poller = setInterval(async () => {
         if (!activeDownloadProcesses[playlistId]) {
             clearInterval(process.poller);
@@ -3306,8 +3336,14 @@ function startModalDownloadPolling(playlistId) {
         }
         try {
             const response = await fetch(`/api/playlists/${process.batchId}/download_status`);
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            
             const data = await response.json();
             if (data.error) throw new Error(data.error);
+            
+            console.debug(`📊 [Polling] Status update for ${playlistId}: phase=${data.phase}, tasks=${(data.tasks || []).length}`);
             
             // Auto-show wishlist modal during active auto-processing
             const isWishlist = (playlistId === 'wishlist');
@@ -3335,6 +3371,8 @@ function startModalDownloadPolling(playlistId) {
                     document.getElementById(`stat-missing-${playlistId}`).textContent = missingCount;
                 }
             } else if (data.phase === 'downloading' || data.phase === 'complete' || data.phase === 'error') {
+                console.debug(`📊 [Status Update] Processing ${data.phase} phase for playlistId: ${playlistId}, tasks: ${(data.tasks || []).length}`);
+                
                 if (document.getElementById(`analysis-progress-fill-${playlistId}`).style.width !== '100%') {
                      document.getElementById(`analysis-progress-fill-${playlistId}`).style.width = '100%';
                      document.getElementById(`analysis-progress-text-${playlistId}`).textContent = 'Analysis complete!';
@@ -3350,10 +3388,20 @@ function startModalDownloadPolling(playlistId) {
                 const missingCount = missingTracks.length;
                 let completedCount = 0;
                 let failedOrCancelledCount = 0;
+                
+                // Verify modal exists before processing tasks
+                const modal = document.getElementById(`download-missing-modal-${playlistId}`);
+                if (!modal) {
+                    console.error(`❌ [Status Update] Modal not found: download-missing-modal-${playlistId}`);
+                    return;
+                }
 
                 (data.tasks || []).forEach(task => {
                     const row = document.querySelector(`#download-missing-modal-${playlistId} tr[data-track-index="${task.track_index}"]`);
-                    if (!row) return;
+                    if (!row) {
+                        console.debug(`❌ [Status Update] Row not found for playlistId: ${playlistId}, track_index: ${task.track_index}`);
+                        return;
+                    }
                     
                     // Stronger protection: Don't override locally cancelled tracks with any backend updates
                     if (row.dataset.locallyCancelled === 'true') {
@@ -3374,7 +3422,12 @@ function startModalDownloadPolling(playlistId) {
                         case 'cancelled': statusText = '🚫 Cancelled'; failedOrCancelledCount++; break;
                         default: statusText = `⚪ ${task.status}`; break;
                     }
-                    if(statusEl) statusEl.textContent = statusText;
+                    if(statusEl) {
+                        statusEl.textContent = statusText;
+                        console.debug(`✅ [Status Update] Updated track ${task.track_index} to: ${statusText}`);
+                    } else {
+                        console.warn(`❌ [Status Update] Status element not found: download-${playlistId}-${task.track_index}`);
+                    }
                     if (actionsEl && !['completed', 'failed', 'cancelled'].includes(task.status) && actionsEl.innerHTML === '-') {
                         actionsEl.innerHTML = `<button class="cancel-track-btn" title="Cancel this download" onclick="cancelTrackDownload('${playlistId}', ${task.track_index})">×</button>`;
                     } 
@@ -3440,8 +3493,10 @@ function startModalDownloadPolling(playlistId) {
                             const tidalPlaylistId = playlistId.replace('tidal_', '');
                             if (tidalPlaylistStates[tidalPlaylistId]) {
                                 tidalPlaylistStates[tidalPlaylistId].phase = 'download_complete';
+                                // Store the download process ID for potential modal rehydration
+                                tidalPlaylistStates[tidalPlaylistId].download_process_id = process.batchId;
                                 updateTidalCardPhase(tidalPlaylistId, 'download_complete');
-                                console.log(`✅ Updated Tidal playlist ${tidalPlaylistId} to download_complete phase`);
+                                console.log(`✅ [Status Complete] Updated Tidal playlist ${tidalPlaylistId} to download_complete phase`);
                             }
                         }
                         
@@ -3488,7 +3543,14 @@ function startModalDownloadPolling(playlistId) {
                 }
             }
         } catch (error) {
-            console.error(`Polling error for ${playlistId}:`, error);
+            console.error(`❌ [Polling] Error for ${playlistId} (batch: ${process.batchId}):`, error);
+            
+            // Don't stop polling for temporary errors, but stop if the batch is no longer valid
+            if (error.message.includes('404') || error.message.includes('Batch not found')) {
+                console.warn(`🛑 [Polling] Stopping polling for ${playlistId} - batch no longer exists`);
+                clearInterval(process.poller);
+                process.poller = null;
+            }
         }
     }, 500);
 }
@@ -6445,10 +6507,28 @@ function createTidalCard(playlist) {
 }
 
 async function handleTidalCardClick(playlistId) {
+    // Robust state validation
     const state = tidalPlaylistStates[playlistId];
-    if (!state) return;
+    if (!state) {
+        console.error(`❌ [Card Click] No state found for Tidal playlist: ${playlistId}`);
+        showToast('Playlist state not found - try refreshing the page', 'error');
+        return;
+    }
     
-    console.log(`🎵 Tidal card clicked: ${playlistId}, Phase: ${state.phase}`);
+    // Validate required state data
+    if (!state.playlist) {
+        console.error(`❌ [Card Click] No playlist data found for Tidal playlist: ${playlistId}`);
+        showToast('Playlist data missing - try refreshing the page', 'error');
+        return;
+    }
+    
+    // Validate phase
+    if (!state.phase) {
+        console.warn(`⚠️ [Card Click] No phase set for Tidal playlist ${playlistId} - defaulting to 'fresh'`);
+        state.phase = 'fresh';
+    }
+    
+    console.log(`🎵 [Card Click] Tidal card clicked: ${playlistId}, Phase: ${state.phase}`);
     
     if (state.phase === 'fresh') {
         // No need to fetch data - we already have all tracks from initial load (like sync.py)
@@ -6459,32 +6539,77 @@ async function handleTidalCardClick(playlistId) {
         openTidalDiscoveryModal(playlistId, state.playlist);
         
     } else if (state.phase === 'discovering' || state.phase === 'discovered' || state.phase === 'syncing' || state.phase === 'sync_complete') {
-        // Reopen existing modal (like sync.py)
+        // Reopen existing modal with preserved discovery results (like GUI sync.py)
+        console.log(`🎵 [Card Click] Opening Tidal discovery modal for ${state.phase} phase`);
+        
+        // Validate that we have discovery results to show
+        if (state.phase === 'discovered' && (!state.discovery_results || state.discovery_results.length === 0)) {
+            console.warn(`⚠️ [Card Click] Discovered phase but no discovery results found - attempting to reload from backend`);
+            
+            // Try to fetch from backend as fallback
+            try {
+                const stateResponse = await fetch(`/api/tidal/state/${playlistId}`);
+                if (stateResponse.ok) {
+                    const fullState = await stateResponse.json();
+                    if (fullState.discovery_results) {
+                        // Merge backend state with current state
+                        state.discovery_results = fullState.discovery_results;
+                        state.spotify_matches = fullState.spotify_matches || state.spotify_matches;
+                        state.discovery_progress = fullState.discovery_progress || state.discovery_progress;
+                        tidalPlaylistStates[playlistId] = {...tidalPlaylistStates[playlistId], ...state};
+                        console.log(`✅ [Card Click] Restored ${fullState.discovery_results.length} discovery results from backend`);
+                    }
+                }
+            } catch (error) {
+                console.error(`❌ [Card Click] Failed to fetch discovery results from backend: ${error}`);
+            }
+        }
+        
         openTidalDiscoveryModal(playlistId, state.playlist);
     } else if (state.phase === 'downloading' || state.phase === 'download_complete') {
         // Open download modal if we have the converted playlist ID
         if (state.convertedSpotifyPlaylistId) {
-            console.log(`🔍 Opening download modal for Tidal playlist: ${state.playlist.name}`);
+            console.log(`🔍 [Card Click] Opening download modal for Tidal playlist: ${state.playlist.name} (phase: ${state.phase})`);
             // Check if modal already exists, if not create it
             if (activeDownloadProcesses[state.convertedSpotifyPlaylistId]) {
                 const process = activeDownloadProcesses[state.convertedSpotifyPlaylistId];
                 if (process.modalElement) {
+                    console.log(`📱 [Card Click] Showing existing download modal for ${state.phase} phase`);
                     process.modalElement.style.display = 'flex';
+                } else {
+                    console.warn(`⚠️ [Card Click] Download process exists but modal element missing - rehydrating`);
+                    await rehydrateTidalDownloadModal(playlistId, state);
                 }
             } else {
                 // Need to create the download modal - fetch the discovery results
+                console.log(`🔧 [Card Click] Rehydrating Tidal download modal for ${state.phase} phase`);
                 await rehydrateTidalDownloadModal(playlistId, state);
             }
         } else {
-            console.error('❌ No converted Spotify playlist ID found for Tidal download modal');
-            showToast('Unable to open download modal - missing playlist data', 'error');
+            console.error('❌ [Card Click] No converted Spotify playlist ID found for Tidal download modal');
+            console.log('📊 [Card Click] Available state data:', Object.keys(state));
+            
+            // Fallback: try to open discovery modal if we have discovery results
+            if (state.discovery_results && state.discovery_results.length > 0) {
+                console.log(`🔄 [Card Click] Fallback: Opening discovery modal with ${state.discovery_results.length} results`);
+                openTidalDiscoveryModal(playlistId, state.playlist);
+            } else {
+                showToast('Unable to open download modal - missing playlist data', 'error');
+            }
         }
     }
 }
 
 async function rehydrateTidalDownloadModal(playlistId, state) {
     try {
-        console.log(`💧 Rehydrating Tidal download modal for: ${state.playlist.name}`);
+        // Robust state validation for rehydration
+        if (!state || !state.playlist) {
+            console.error(`❌ [Rehydration] Invalid state data for Tidal playlist: ${playlistId}`);
+            showToast('Cannot open download modal - invalid playlist data', 'error');
+            return;
+        }
+        
+        console.log(`💧 [Rehydration] Rehydrating Tidal download modal for: ${state.playlist.name}`);
         
         // Get discovery results from backend if not already loaded
         if (!state.discovery_results) {
@@ -6545,6 +6670,27 @@ async function rehydrateTidalDownloadModal(playlistId, state) {
                     if (beginBtn) beginBtn.style.display = 'none';
                     if (cancelBtn) cancelBtn.style.display = 'none';
                     console.log(`✅ Showing completed Tidal download results: ${state.download_process_id}`);
+                    
+                    // For completed downloads, fetch the final results once to populate the modal
+                    try {
+                        const response = await fetch(`/api/playlists/${state.download_process_id}/download_status`);
+                        if (response.ok) {
+                            const data = await response.json();
+                            if (data.phase === 'complete' && data.tasks) {
+                                console.log(`📊 [Rehydration] Loading ${data.tasks.length} completed tasks for modal display`);
+                                // Process the completed tasks to update modal display
+                                updateCompletedModalResults(virtualPlaylistId, data);
+                            } else {
+                                console.warn(`⚠️ [Rehydration] Unexpected data from download_status: phase=${data.phase}, tasks=${data.tasks?.length || 0}`);
+                            }
+                        } else {
+                            console.error(`❌ [Rehydration] Failed to fetch download status: ${response.status} ${response.statusText}`);
+                        }
+                    } catch (error) {
+                        console.error(`❌ [Rehydration] Error fetching final results for completed download: ${error}`);
+                        // Show a user-friendly message but still allow modal to open
+                        showToast('Could not load download results - modal may show incomplete data', 'warning', 3000);
+                    }
                 }
             }
         }
@@ -6557,6 +6703,86 @@ async function rehydrateTidalDownloadModal(playlistId, state) {
     }
 }
 
+function updateCompletedModalResults(playlistId, downloadData) {
+    /**
+     * Update a completed download modal with final results
+     * This reuses the existing status polling logic but applies it once for completed state
+     */
+    console.log(`📊 [Completed Results] Updating modal ${playlistId} with final download results`);
+    
+    // Validate input data
+    if (!downloadData || !downloadData.tasks) {
+        console.error(`❌ [Completed Results] Invalid download data for playlist ${playlistId}:`, downloadData);
+        return;
+    }
+    
+    try {
+        // Update analysis progress to 100%
+        const analysisProgressFill = document.getElementById(`analysis-progress-fill-${playlistId}`);
+        const analysisProgressText = document.getElementById(`analysis-progress-text-${playlistId}`);
+        if (analysisProgressFill) analysisProgressFill.style.width = '100%';
+        if (analysisProgressText) analysisProgressText.textContent = 'Analysis complete!';
+        
+        // Update analysis results and stats
+        if (downloadData.analysis_results) {
+            updateTrackAnalysisResults(playlistId, downloadData.analysis_results);
+            const foundCount = downloadData.analysis_results.filter(r => r.found).length;
+            const missingCount = downloadData.analysis_results.filter(r => !r.found).length;
+            
+            const statFound = document.getElementById(`stat-found-${playlistId}`);
+            const statMissing = document.getElementById(`stat-missing-${playlistId}`);
+            if (statFound) statFound.textContent = foundCount;
+            if (statMissing) statMissing.textContent = missingCount;
+        }
+        
+        // Process completed tasks to update individual track statuses
+        const missingTracks = (downloadData.analysis_results || []).filter(r => !r.found);
+        let completedCount = 0;
+        let failedOrCancelledCount = 0;
+
+        (downloadData.tasks || []).forEach(task => {
+            const row = document.querySelector(`#download-missing-modal-${playlistId} tr[data-track-index="${task.track_index}"]`);
+            if (!row) return;
+            
+            row.dataset.taskId = task.task_id;
+            const statusEl = document.getElementById(`download-${playlistId}-${task.track_index}`);
+            const actionsEl = document.getElementById(`actions-${playlistId}-${task.track_index}`);
+            
+            let statusText = '';
+            switch (task.status) {
+                case 'pending': statusText = '⏸️ Pending'; break;
+                case 'searching': statusText = '🔍 Searching...'; break;
+                case 'downloading': statusText = `⏬ Downloading... ${Math.round(task.progress || 0)}%`; break;
+                case 'completed': statusText = '✅ Completed'; completedCount++; break;
+                case 'failed': statusText = '❌ Failed'; failedOrCancelledCount++; break;
+                case 'cancelled': statusText = '🚫 Cancelled'; failedOrCancelledCount++; break;
+                default: statusText = `⚪ ${task.status}`; break;
+            }
+            
+            if (statusEl) statusEl.textContent = statusText;
+            if (actionsEl) actionsEl.innerHTML = '-'; // Remove action buttons for completed tasks
+        });
+
+        // Update download progress to final state
+        const totalFinished = completedCount + failedOrCancelledCount;
+        const missingCount = missingTracks.length;
+        const progressPercent = missingCount > 0 ? (totalFinished / missingCount) * 100 : 100;
+        
+        const downloadProgressFill = document.getElementById(`download-progress-fill-${playlistId}`);
+        const downloadProgressText = document.getElementById(`download-progress-text-${playlistId}`);
+        const statDownloaded = document.getElementById(`stat-downloaded-${playlistId}`);
+        
+        if (downloadProgressFill) downloadProgressFill.style.width = `${progressPercent}%`;
+        if (downloadProgressText) downloadProgressText.textContent = `${completedCount}/${missingCount} completed (${progressPercent.toFixed(0)}%)`;
+        if (statDownloaded) statDownloaded.textContent = completedCount;
+        
+        console.log(`✅ [Completed Results] Updated modal with ${completedCount} completed, ${failedOrCancelledCount} failed tasks`);
+        
+    } catch (error) {
+        console.error(`❌ [Completed Results] Error updating completed modal results:`, error);
+    }
+}
+
 function updateTidalCardPhase(playlistId, phase) {
     const state = tidalPlaylistStates[playlistId];
     if (!state) return;
@@ -6566,13 +6792,30 @@ function updateTidalCardPhase(playlistId, phase) {
     // Re-render the card with new phase
     const card = document.getElementById(`tidal-card-${playlistId}`);
     if (card) {
+        const oldButtonText = card.querySelector('.playlist-card-action-btn')?.textContent || 'unknown';
         const newCardHtml = createTidalCard(state.playlist);
         card.outerHTML = newCardHtml;
+        
+        // Verify the card was actually updated
+        const updatedCard = document.getElementById(`tidal-card-${playlistId}`);
+        const newButtonText = updatedCard?.querySelector('.playlist-card-action-btn')?.textContent || 'unknown';
+        
+        console.log(`🔄 [Card Update] Re-rendered Tidal card ${playlistId}:`);
+        console.log(`   📊 Phase: ${phase}`);
+        console.log(`   🔘 Button text: "${oldButtonText}" → "${newButtonText}"`);
+        console.log(`   ✅ Expected: "${getActionButtonText(phase)}"`);
+        
+        if (newButtonText !== getActionButtonText(phase)) {
+            console.error(`❌ [Card Update] Button text mismatch! Expected "${getActionButtonText(phase)}", got "${newButtonText}"`);
+        }
         
         // Re-attach click handler
         const newCard = document.getElementById(`tidal-card-${playlistId}`);
         if (newCard) {
             newCard.addEventListener('click', () => handleTidalCardClick(playlistId));
+            console.debug(`🔗 [Card Update] Reattached click handler for Tidal card: ${playlistId}`);
+        } else {
+            console.error(`❌ [Card Update] Failed to find new card after rendering: tidal-card-${playlistId}`);
         }
         
         // If we have sync progress and we're in sync/sync_complete phase, restore it
