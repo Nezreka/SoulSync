@@ -7442,7 +7442,10 @@ function updateTidalCardSyncProgress(playlistId, progress) {
         `;
     }
     
-    progressElement.innerHTML = statusCounterHTML || '<div class="playlist-card-sync-status">🔄 Starting...</div>';
+    // Only update if we have valid sync progress, otherwise preserve existing discovery results
+    if (statusCounterHTML) {
+        progressElement.innerHTML = statusCounterHTML;
+    }
     
     console.log(`🎵 Updated Tidal card sync progress: ♪ ${progress?.total_tracks || 0} / ✓ ${progress?.matched_tracks || 0} / ✗ ${progress?.failed_tracks || 0}`);
 }
@@ -8895,7 +8898,10 @@ function updateYouTubeCardSyncProgress(urlHash, progress) {
         `;
     }
     
-    progressElement.innerHTML = statusCounterHTML || '<div class="playlist-card-sync-status">🔄 Starting...</div>';
+    // Only update if we have valid sync progress, otherwise preserve existing discovery results
+    if (statusCounterHTML) {
+        progressElement.innerHTML = statusCounterHTML;
+    }
     
     console.log(`🔄 Updated YouTube sync progress: ♪ ${progress?.total_tracks || 0} / ✓ ${progress?.matched_tracks || 0} / ✗ ${progress?.failed_tracks || 0}`);
 }
