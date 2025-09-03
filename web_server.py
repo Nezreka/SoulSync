@@ -4390,6 +4390,13 @@ def _on_download_completed(batch_id, task_id, success=True):
                     youtube_playlist_states[url_hash]['phase'] = 'download_complete'
                     print(f"📋 Updated YouTube playlist {url_hash} to download_complete phase")
             
+            # Update Tidal playlist phase to 'download_complete' if this is a Tidal playlist
+            if playlist_id and playlist_id.startswith('tidal_'):
+                tidal_playlist_id = playlist_id.replace('tidal_', '')
+                if tidal_playlist_id in tidal_discovery_states:
+                    tidal_discovery_states[tidal_playlist_id]['phase'] = 'download_complete'
+                    print(f"📋 Updated Tidal playlist {tidal_playlist_id} to download_complete phase")
+            
             print(f"🎉 [Batch Manager] Batch {batch_id} complete - stopping monitor")
             download_monitor.stop_monitoring(batch_id)
             
@@ -4474,6 +4481,13 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                         if url_hash in youtube_playlist_states:
                             youtube_playlist_states[url_hash]['phase'] = 'download_complete'
                             print(f"📋 Updated YouTube playlist {url_hash} to download_complete phase (no missing tracks)")
+                    
+                    # Update Tidal playlist phase to 'download_complete' if this is a Tidal playlist
+                    if playlist_id.startswith('tidal_'):
+                        tidal_playlist_id = playlist_id.replace('tidal_', '')
+                        if tidal_playlist_id in tidal_discovery_states:
+                            tidal_discovery_states[tidal_playlist_id]['phase'] = 'download_complete'
+                            print(f"📋 Updated Tidal playlist {tidal_playlist_id} to download_complete phase (no missing tracks)")
             return
 
         print(f" transitioning batch {batch_id} to download phase with {len(missing_tracks)} tracks.")
@@ -5335,6 +5349,15 @@ def start_missing_tracks_process(playlist_id):
             youtube_playlist_states[url_hash]['phase'] = 'downloading'
             youtube_playlist_states[url_hash]['converted_spotify_playlist_id'] = playlist_id
             print(f"🔗 Linked YouTube playlist {url_hash} to download process {batch_id} (converted ID: {playlist_id})")
+    
+    # Link Tidal playlist to download process if this is a Tidal playlist
+    if playlist_id.startswith('tidal_'):
+        tidal_playlist_id = playlist_id.replace('tidal_', '')
+        if tidal_playlist_id in tidal_discovery_states:
+            tidal_discovery_states[tidal_playlist_id]['download_process_id'] = batch_id
+            tidal_discovery_states[tidal_playlist_id]['phase'] = 'downloading'
+            tidal_discovery_states[tidal_playlist_id]['converted_spotify_playlist_id'] = playlist_id
+            print(f"🔗 Linked Tidal playlist {tidal_playlist_id} to download process {batch_id} (converted ID: {playlist_id})")
 
     missing_download_executor.submit(_run_full_missing_tracks_process, batch_id, playlist_id, tracks)
 
@@ -5763,6 +5786,8 @@ def get_tidal_playlist_states():
                 'spotify_matches': state['spotify_matches'],
                 'spotify_total': state['spotify_total'],
                 'discovery_results': state['discovery_results'],
+                'converted_spotify_playlist_id': state.get('converted_spotify_playlist_id'),
+                'download_process_id': state.get('download_process_id'),
                 'last_accessed': state['last_accessed']
             }
             states.append(state_info)
@@ -5794,6 +5819,10 @@ def get_tidal_playlist_state(playlist_id):
             'spotify_matches': state['spotify_matches'],
             'spotify_total': state['spotify_total'],
             'discovery_results': state['discovery_results'],
+            'sync_playlist_id': state.get('sync_playlist_id'),
+            'converted_spotify_playlist_id': state.get('converted_spotify_playlist_id'),
+            'download_process_id': state.get('download_process_id'),
+            'sync_progress': state.get('sync_progress', {}),
             'last_accessed': state['last_accessed']
         }
         
