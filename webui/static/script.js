@@ -6396,19 +6396,9 @@ function createTidalCard(playlist) {
     const phase = state.phase;
     
     // Get phase-specific button text (like YouTube cards)
-    let buttonText = 'Start Discovery';
-    let phaseText = 'Ready to discover';
-    let phaseColor = '#999';
-    
-    if (phase === 'discovering') {
-        buttonText = 'View Progress';
-        phaseText = 'Discovering...';
-        phaseColor = '#ff6600';
-    } else if (phase === 'discovered') {
-        buttonText = 'View Details';
-        phaseText = 'Discovery Complete';
-        phaseColor = '#1db954';
-    }
+    let buttonText = getActionButtonText(phase);
+    let phaseText = getPhaseText(phase);
+    let phaseColor = getPhaseColor(phase);
     
     return `
         <div class="youtube-playlist-card tidal-playlist-card" id="tidal-card-${playlist.id}">
@@ -6421,7 +6411,7 @@ function createTidalCard(playlist) {
                 </div>
             </div>
             <div class="playlist-card-progress ${phase === 'fresh' ? 'hidden' : ''}">
-                ♪ ${playlist.track_count} / ✓ 0 / ✗ ${playlist.track_count} / 0%
+                <!-- Progress will be dynamically updated based on phase -->
             </div>
             <button class="playlist-card-action-btn">${buttonText}</button>
         </div>
@@ -6442,7 +6432,7 @@ async function handleTidalCardClick(playlistId) {
         // Open discovery modal - phase will be updated when discovery actually starts
         openTidalDiscoveryModal(playlistId, state.playlist);
         
-    } else if (state.phase === 'discovering' || state.phase === 'discovered') {
+    } else if (state.phase === 'discovering' || state.phase === 'discovered' || state.phase === 'syncing' || state.phase === 'sync_complete') {
         // Reopen existing modal (like sync.py)
         openTidalDiscoveryModal(playlistId, state.playlist);
     }
@@ -6465,6 +6455,13 @@ function updateTidalCardPhase(playlistId, phase) {
         if (newCard) {
             newCard.addEventListener('click', () => handleTidalCardClick(playlistId));
         }
+        
+        // If we have sync progress and we're in sync/sync_complete phase, restore it
+        if ((phase === 'syncing' || phase === 'sync_complete') && state.lastSyncProgress) {
+            setTimeout(() => {
+                updateTidalCardSyncProgress(playlistId, state.lastSyncProgress);
+            }, 0);
+        }
     }
     
     console.log(`🎵 Updated Tidal card phase: ${playlistId} -> ${phase}`);
@@ -6478,7 +6475,7 @@ async function openTidalDiscoveryModal(playlistId, playlistData) {
     
     // Get current Tidal card state to check if discovery is already done or in progress
     const tidalCardState = tidalPlaylistStates[playlistId];
-    const isAlreadyDiscovered = tidalCardState && tidalCardState.phase === 'discovered';
+    const isAlreadyDiscovered = tidalCardState && (tidalCardState.phase === 'discovered' || tidalCardState.phase === 'syncing' || tidalCardState.phase === 'sync_complete');
     const isCurrentlyDiscovering = tidalCardState && tidalCardState.phase === 'discovering';
     
     // Prepare discovery results in the correct format for modal
@@ -6504,7 +6501,7 @@ async function openTidalDiscoveryModal(playlistId, playlistData) {
     }
     
     // Create YouTube-compatible state structure  
-    const modalPhase = isAlreadyDiscovered ? 'discovered' : (isCurrentlyDiscovering ? 'discovering' : 'fresh');
+    const modalPhase = tidalCardState ? tidalCardState.phase : 'fresh';
     youtubePlaylistStates[fakeUrlHash] = {
         phase: modalPhase,
         playlist: {
@@ -6560,8 +6557,12 @@ async function openTidalDiscoveryModal(playlistId, playlistData) {
         // Resume polling if discovery is already in progress (like YouTube)
         console.log(`🔄 Resuming Tidal discovery polling for: ${playlistData.name}`);
         startTidalDiscoveryPolling(fakeUrlHash, playlistId);
+    } else if (tidalCardState && tidalCardState.phase === 'syncing') {
+        // Resume sync polling if sync is in progress
+        console.log(`🔄 Resuming Tidal sync polling for: ${playlistData.name}`);
+        startTidalSyncPolling(fakeUrlHash);
     } else {
-        console.log('✅ Using existing discovery results - no need to re-discover');
+        console.log('✅ Using existing results - no need to re-discover');
     }
     
     // Reuse YouTube discovery modal (exact sync.py pattern)
@@ -6778,18 +6779,242 @@ function updateTidalCardProgress(playlistId, progress) {
     console.log('🎵 Updated Tidal card progress:', playlistId, `${matches}/${total} (${percentage}%)`);
 }
 
-// Tidal-specific sync and download functions (placeholder implementations)
-function startTidalPlaylistSync(urlHash) {
-    console.log(`🎵 Starting Tidal playlist sync for: ${urlHash}`);
-    const state = youtubePlaylistStates[urlHash];
-    if (!state || !state.is_tidal_playlist) {
-        console.error('❌ Invalid Tidal playlist state for sync');
-        return;
+// ===============================
+// TIDAL SYNC FUNCTIONALITY
+// ===============================
+
+async function startTidalPlaylistSync(urlHash) {
+    try {
+        console.log('🎵 Starting Tidal playlist sync:', urlHash);
+        
+        const state = youtubePlaylistStates[urlHash];
+        if (!state || !state.is_tidal_playlist) {
+            console.error('❌ Invalid Tidal playlist state for sync');
+            return;
+        }
+        
+        const playlistId = state.tidal_playlist_id;
+        const response = await fetch(`/api/tidal/sync/start/${playlistId}`, {
+            method: 'POST'
+        });
+        
+        const result = await response.json();
+        
+        if (result.error) {
+            showToast(`Error starting sync: ${result.error}`, 'error');
+            return;
+        }
+        
+        // Update card and modal to syncing phase
+        updateTidalCardPhase(playlistId, 'syncing');
+        
+        // Update modal buttons if modal is open
+        updateTidalModalButtons(urlHash, 'syncing');
+        
+        // Start sync polling
+        startTidalSyncPolling(urlHash);
+        
+        showToast('Tidal playlist sync started!', 'success');
+        
+    } catch (error) {
+        console.error('❌ Error starting Tidal sync:', error);
+        showToast(`Error starting sync: ${error.message}`, 'error');
+    }
+}
+
+function startTidalSyncPolling(urlHash) {
+    // Stop any existing polling
+    if (activeYouTubePollers[urlHash]) {
+        clearInterval(activeYouTubePollers[urlHash]);
     }
     
-    // TODO: Implement Tidal playlist sync logic
-    // For now, show a message that this feature is coming soon
-    showToast('🔄 Tidal playlist sync functionality coming soon!', 'info');
+    const state = youtubePlaylistStates[urlHash];
+    const playlistId = state.tidal_playlist_id;
+    
+    const pollInterval = setInterval(async () => {
+        try {
+            const response = await fetch(`/api/tidal/sync/status/${playlistId}`);
+            const status = await response.json();
+            
+            if (status.error) {
+                console.error('❌ Error polling Tidal sync status:', status.error);
+                clearInterval(pollInterval);
+                delete activeYouTubePollers[urlHash];
+                return;
+            }
+            
+            // Update card progress with sync stats
+            updateTidalCardSyncProgress(playlistId, status.progress);
+            
+            // Update modal sync display if open
+            updateTidalModalSyncProgress(urlHash, status.progress);
+            
+            // Check if complete
+            if (status.complete) {
+                clearInterval(pollInterval);
+                delete activeYouTubePollers[urlHash];
+                
+                // Update both states to sync_complete
+                if (tidalPlaylistStates[playlistId]) {
+                    tidalPlaylistStates[playlistId].phase = 'sync_complete';
+                }
+                if (youtubePlaylistStates[urlHash]) {
+                    youtubePlaylistStates[urlHash].phase = 'sync_complete';
+                }
+                
+                // Update card phase to sync complete
+                updateTidalCardPhase(playlistId, 'sync_complete');
+                
+                // Update modal buttons
+                updateTidalModalButtons(urlHash, 'sync_complete');
+                
+                console.log('✅ Tidal sync complete:', urlHash);
+                showToast('Tidal playlist sync complete!', 'success');
+            } else if (status.sync_status === 'error') {
+                clearInterval(pollInterval);
+                delete activeYouTubePollers[urlHash];
+                
+                // Update both states to discovered (revert on error)
+                if (tidalPlaylistStates[playlistId]) {
+                    tidalPlaylistStates[playlistId].phase = 'discovered';
+                }
+                if (youtubePlaylistStates[urlHash]) {
+                    youtubePlaylistStates[urlHash].phase = 'discovered';
+                }
+                
+                // Revert to discovered phase on error
+                updateTidalCardPhase(playlistId, 'discovered');
+                updateTidalModalButtons(urlHash, 'discovered');
+                
+                showToast(`Sync failed: ${status.error || 'Unknown error'}`, 'error');
+            }
+            
+        } catch (error) {
+            console.error('❌ Error polling Tidal sync:', error);
+            clearInterval(pollInterval);
+            delete activeYouTubePollers[urlHash];
+        }
+    }, 1000);
+    
+    activeYouTubePollers[urlHash] = pollInterval;
+}
+
+async function cancelTidalSync(urlHash) {
+    try {
+        console.log('❌ Cancelling Tidal sync:', urlHash);
+        
+        const state = youtubePlaylistStates[urlHash];
+        if (!state || !state.is_tidal_playlist) {
+            console.error('❌ Invalid Tidal playlist state');
+            return;
+        }
+        
+        const playlistId = state.tidal_playlist_id;
+        const response = await fetch(`/api/tidal/sync/cancel/${playlistId}`, {
+            method: 'POST'
+        });
+        
+        const result = await response.json();
+        
+        if (result.error) {
+            showToast(`Error cancelling sync: ${result.error}`, 'error');
+            return;
+        }
+        
+        // Stop polling
+        if (activeYouTubePollers[urlHash]) {
+            clearInterval(activeYouTubePollers[urlHash]);
+            delete activeYouTubePollers[urlHash];
+        }
+        
+        // Revert to discovered phase
+        updateTidalCardPhase(playlistId, 'discovered');
+        updateTidalModalButtons(urlHash, 'discovered');
+        
+        showToast('Tidal sync cancelled', 'info');
+        
+    } catch (error) {
+        console.error('❌ Error cancelling Tidal sync:', error);
+        showToast(`Error cancelling sync: ${error.message}`, 'error');
+    }
+}
+
+function updateTidalCardSyncProgress(playlistId, progress) {
+    const state = tidalPlaylistStates[playlistId];
+    if (!state || !state.playlist || !progress) return;
+    
+    // Save the progress for later restoration
+    state.lastSyncProgress = progress;
+    
+    const card = document.getElementById(`tidal-card-${playlistId}`);
+    if (!card) return;
+    
+    const progressElement = card.querySelector('.playlist-card-progress');
+    
+    // Build clean status counter HTML exactly like YouTube cards
+    let statusCounterHTML = '';
+    if (progress && progress.total_tracks > 0) {
+        const matched = progress.matched_tracks || 0;
+        const failed = progress.failed_tracks || 0;
+        const total = progress.total_tracks || 0;
+        const processed = matched + failed;
+        const percentage = total > 0 ? Math.round((processed / total) * 100) : 0;
+        
+        statusCounterHTML = `
+            <div class="playlist-card-sync-status">
+                <span class="sync-stat total-tracks">♪ ${total}</span>
+                <span class="sync-separator">/</span>
+                <span class="sync-stat matched-tracks">✓ ${matched}</span>
+                <span class="sync-separator">/</span>
+                <span class="sync-stat failed-tracks">✗ ${failed}</span>
+                <span class="sync-stat percentage">(${percentage}%)</span>
+            </div>
+        `;
+    }
+    
+    progressElement.innerHTML = statusCounterHTML || '<div class="playlist-card-sync-status">🔄 Starting...</div>';
+    
+    console.log(`🎵 Updated Tidal card sync progress: ♪ ${progress?.total_tracks || 0} / ✓ ${progress?.matched_tracks || 0} / ✗ ${progress?.failed_tracks || 0}`);
+}
+
+function updateTidalModalSyncProgress(urlHash, progress) {
+    const statusDisplay = document.getElementById(`tidal-sync-status-${urlHash}`);
+    if (!statusDisplay || !progress) return;
+    
+    console.log(`📊 Updating Tidal modal sync progress for ${urlHash}:`, progress);
+    
+    // Update individual counters exactly like YouTube sync
+    const totalEl = document.getElementById(`tidal-total-${urlHash}`);
+    const matchedEl = document.getElementById(`tidal-matched-${urlHash}`);
+    const failedEl = document.getElementById(`tidal-failed-${urlHash}`);
+    const percentageEl = document.getElementById(`tidal-percentage-${urlHash}`);
+    
+    const total = progress.total_tracks || 0;
+    const matched = progress.matched_tracks || 0;
+    const failed = progress.failed_tracks || 0;
+    
+    if (totalEl) totalEl.textContent = total;
+    if (matchedEl) matchedEl.textContent = matched;
+    if (failedEl) failedEl.textContent = failed;
+    
+    // Calculate percentage like YouTube sync
+    if (total > 0) {
+        const processed = matched + failed;
+        const percentage = Math.round((processed / total) * 100);
+        if (percentageEl) percentageEl.textContent = percentage;
+    }
+    
+    console.log(`📊 Tidal modal updated: ♪ ${total} / ✓ ${matched} / ✗ ${failed} (${Math.round((matched + failed) / total * 100)}%)`);
+}
+
+function updateTidalModalButtons(urlHash, phase) {
+    const modal = document.getElementById(`youtube-discovery-modal-${urlHash}`);
+    if (!modal) return;
+    
+    const footerLeft = modal.querySelector('.modal-footer-left');
+    if (footerLeft) {
+        footerLeft.innerHTML = getModalActionButtons(urlHash, phase);
+    }
 }
 
 function startTidalDownloadMissing(urlHash) {
@@ -7630,32 +7855,59 @@ function getModalActionButtons(urlHash, phase, state = null) {
             return buttons;
             
         case 'syncing':
-            return `
-                <button class="modal-btn modal-btn-danger" onclick="cancelYouTubeSync('${urlHash}')">❌ Cancel Sync</button>
-                <div class="playlist-modal-sync-status" id="youtube-sync-status-${urlHash}" style="display: flex;">
-                    <span class="sync-stat total-tracks">♪ <span id="youtube-total-${urlHash}">0</span></span>
-                    <span class="sync-separator">/</span>
-                    <span class="sync-stat matched-tracks">✓ <span id="youtube-matched-${urlHash}">0</span></span>
-                    <span class="sync-separator">/</span>
-                    <span class="sync-stat failed-tracks">✗ <span id="youtube-failed-${urlHash}">0</span></span>
-                    <span class="sync-stat percentage">(<span id="youtube-percentage-${urlHash}">0</span>%)</span>
-                </div>
-            `;
+            if (isTidal) {
+                return `
+                    <button class="modal-btn modal-btn-danger" onclick="cancelTidalSync('${urlHash}')">❌ Cancel Sync</button>
+                    <div class="playlist-modal-sync-status" id="tidal-sync-status-${urlHash}" style="display: flex;">
+                        <span class="sync-stat total-tracks">♪ <span id="tidal-total-${urlHash}">0</span></span>
+                        <span class="sync-separator">/</span>
+                        <span class="sync-stat matched-tracks">✓ <span id="tidal-matched-${urlHash}">0</span></span>
+                        <span class="sync-separator">/</span>
+                        <span class="sync-stat failed-tracks">✗ <span id="tidal-failed-${urlHash}">0</span></span>
+                        <span class="sync-stat percentage">(<span id="tidal-percentage-${urlHash}">0</span>%)</span>
+                    </div>
+                `;
+            } else {
+                return `
+                    <button class="modal-btn modal-btn-danger" onclick="cancelYouTubeSync('${urlHash}')">❌ Cancel Sync</button>
+                    <div class="playlist-modal-sync-status" id="youtube-sync-status-${urlHash}" style="display: flex;">
+                        <span class="sync-stat total-tracks">♪ <span id="youtube-total-${urlHash}">0</span></span>
+                        <span class="sync-separator">/</span>
+                        <span class="sync-stat matched-tracks">✓ <span id="youtube-matched-${urlHash}">0</span></span>
+                        <span class="sync-separator">/</span>
+                        <span class="sync-stat failed-tracks">✗ <span id="youtube-failed-${urlHash}">0</span></span>
+                        <span class="sync-stat percentage">(<span id="youtube-percentage-${urlHash}">0</span>%)</span>
+                    </div>
+                `;
+            }
             
         case 'sync_complete':
             let syncCompleteButtons = '';
             
             // Only show sync button if there are Spotify matches
             if (hasSpotifyMatches) {
-                syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startYouTubePlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                if (isTidal) {
+                    syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startTidalPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                } else {
+                    syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startYouTubePlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                }
             }
             
             // Only show download button if we have matches or a converted playlist ID
             if (hasSpotifyMatches || hasConvertedPlaylistId) {
-                syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startYouTubeDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
+                if (isTidal) {
+                    syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startTidalDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
+                } else {
+                    syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startYouTubeDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
+                }
             }
             
-            syncCompleteButtons += `<button class="modal-btn modal-btn-secondary" onclick="resetYouTubePlaylist('${urlHash}')">🔄 Reset</button>`;
+            if (isTidal) {
+                // Tidal doesn't have a reset function yet, but could be added
+                // syncCompleteButtons += `<button class="modal-btn modal-btn-secondary" onclick="resetTidalPlaylist('${urlHash}')">🔄 Reset</button>`;
+            } else {
+                syncCompleteButtons += `<button class="modal-btn modal-btn-secondary" onclick="resetYouTubePlaylist('${urlHash}')">🔄 Reset</button>`;
+            }
             
             return syncCompleteButtons;
             
