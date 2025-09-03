@@ -2969,7 +2969,7 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
     modal.style.display = 'flex';
 }
 
-function closeDownloadMissingModal(playlistId) {
+async function closeDownloadMissingModal(playlistId) {
     const process = activeDownloadProcesses[playlistId];
     if (!process) {
         // If somehow called without a process, try to find and remove the element
@@ -2998,14 +2998,41 @@ function closeDownloadMissingModal(playlistId) {
         if (playlistId.startsWith('youtube_')) {
             const urlHash = playlistId.replace('youtube_', '');
             updateYouTubeCardPhase(urlHash, 'discovered');
+            
+            // Update backend state to prevent rehydration issues on page refresh (similar to Tidal fix)
+            try {
+                const response = await fetch(`/api/youtube/update_phase/${urlHash}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        phase: 'discovered'
+                    })
+                });
+                
+                if (response.ok) {
+                    console.log(`✅ [Modal Close] Updated backend phase for YouTube playlist ${urlHash} to 'discovered'`);
+                } else {
+                    console.warn(`⚠️ [Modal Close] Failed to update backend phase for YouTube playlist ${urlHash}`);
+                }
+            } catch (error) {
+                console.error(`❌ [Modal Close] Error updating backend phase for YouTube playlist ${urlHash}:`, error);
+            }
         }
         
         // Enhanced Tidal playlist state management (based on GUI sync.py patterns)
         if (playlistId.startsWith('tidal_')) {
             const tidalPlaylistId = playlistId.replace('tidal_', '');
             
+            console.log(`🧹 [Modal Close] Processing Tidal playlist close: playlistId="${playlistId}", tidalPlaylistId="${tidalPlaylistId}"`);
+            console.log(`🧹 [Modal Close] Current Tidal state:`, tidalPlaylistStates[tidalPlaylistId]);
+            
             // Clear download-specific state but preserve discovery results (like GUI closeEvent)
             if (tidalPlaylistStates[tidalPlaylistId]) {
+                const currentPhase = tidalPlaylistStates[tidalPlaylistId].phase;
+                console.log(`🧹 [Modal Close] Current phase before reset: ${currentPhase}`);
+                
                 // Preserve discovery data for future use (like GUI modal behavior)
                 const preservedData = {
                     playlist: tidalPlaylistStates[tidalPlaylistId].playlist,
@@ -3023,15 +3050,36 @@ function closeDownloadMissingModal(playlistId) {
                 Object.assign(tidalPlaylistStates[tidalPlaylistId], preservedData);
                 tidalPlaylistStates[tidalPlaylistId].phase = 'discovered';
                 
-                // ALTERNATIVE: Reset to fresh state for new discovery (uncomment if user prefers this)
-                // tidalPlaylistStates[tidalPlaylistId].phase = 'fresh';
-                
                 console.log(`🧹 [Modal Close] Reset Tidal playlist ${tidalPlaylistId} - cleared download state, preserved discovery data`);
+                console.log(`🧹 [Modal Close] New phase after reset: ${tidalPlaylistStates[tidalPlaylistId].phase}`);
+            } else {
+                console.error(`❌ [Modal Close] No Tidal state found for playlistId: ${tidalPlaylistId}`);
             }
             
             updateTidalCardPhase(tidalPlaylistId, 'discovered');
             console.log(`🔄 [Modal Close] Reset Tidal playlist ${tidalPlaylistId} to discovered phase`);
             console.log(`📝 [Modal Close] Expected button text for discovered phase: "${getActionButtonText('discovered')}"`);
+            
+            // Update backend state to prevent rehydration issues on page refresh
+            try {
+                const response = await fetch(`/api/tidal/update_phase/${tidalPlaylistId}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        phase: 'discovered'
+                    })
+                });
+                
+                if (response.ok) {
+                    console.log(`✅ [Modal Close] Updated backend phase for Tidal playlist ${tidalPlaylistId} to 'discovered'`);
+                } else {
+                    console.warn(`⚠️ [Modal Close] Failed to update backend phase for Tidal playlist ${tidalPlaylistId}`);
+                }
+            } catch (error) {
+                console.error(`❌ [Modal Close] Error updating backend phase for Tidal playlist ${tidalPlaylistId}:`, error);
+            }
         }
         
         // Clear wishlist modal state when modal is fully closed
