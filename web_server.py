@@ -31,6 +31,7 @@ from database.music_database import get_database
 from services.sync_service import PlaylistSyncService
 from datetime import datetime
 import yt_dlp
+from core.matching_engine import MusicMatchingEngine
 
 # --- Flask App Setup ---
 base_dir = os.path.abspath(os.path.dirname(__file__))
@@ -1451,6 +1452,8 @@ def get_download_status():
                                         # Don't add to _processed_download_ids yet - wait until thread starts successfully
                                     else:
                                         print(f"❌ CRITICAL: Could not find '{os.path.basename(filename_from_api)}' on disk. Post-processing skipped.")
+                                        # Mark as processed to prevent endless retries
+                                        _processed_download_ids.add(context_key)
 
         # If we found completed matched downloads, start processing them in background threads
         if completed_matched_downloads:
@@ -2424,7 +2427,8 @@ def _detect_album_info_web(context: dict, artist: dict) -> dict:
         best_confidence = 0
         
         if tracks:
-            from core.matching_engine import matching_engine
+            from core.matching_engine import MusicMatchingEngine
+            matching_engine = MusicMatchingEngine()
             for track in tracks:
                 # Calculate confidence based on artist and title similarity
                 artist_confidence = matching_engine.similarity_score(
@@ -2740,7 +2744,8 @@ def _search_track_in_album_context_web(context: dict, spotify_artist: dict) -> d
     (Ported from GUI downloads.py)
     """
     try:
-        from core.matching_engine import matching_engine
+        from core.matching_engine import MusicMatchingEngine
+        matching_engine = MusicMatchingEngine()
         
         # Get album and track info from context
         original_search = context.get("original_search_result", {})
