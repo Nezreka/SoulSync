@@ -5933,6 +5933,35 @@ def delete_tidal_playlist(playlist_id):
         print(f"❌ Error deleting Tidal playlist: {e}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/tidal/update_phase/<playlist_id>', methods=['POST'])
+def update_tidal_playlist_phase(playlist_id):
+    """Update Tidal playlist phase (used when modal closes to reset from download_complete to discovered)"""
+    try:
+        if playlist_id not in tidal_discovery_states:
+            return jsonify({"error": "Tidal playlist not found"}), 404
+        
+        data = request.get_json()
+        if not data or 'phase' not in data:
+            return jsonify({"error": "Phase not provided"}), 400
+        
+        new_phase = data['phase']
+        valid_phases = ['fresh', 'discovering', 'discovered', 'syncing', 'sync_complete', 'downloading', 'download_complete']
+        
+        if new_phase not in valid_phases:
+            return jsonify({"error": f"Invalid phase. Must be one of: {', '.join(valid_phases)}"}), 400
+        
+        state = tidal_discovery_states[playlist_id]
+        old_phase = state.get('phase', 'unknown')
+        state['phase'] = new_phase
+        state['last_accessed'] = time.time()
+        
+        print(f"🔄 Updated Tidal playlist {playlist_id} phase: {old_phase} → {new_phase}")
+        return jsonify({"success": True, "message": f"Phase updated to {new_phase}", "old_phase": old_phase, "new_phase": new_phase})
+        
+    except Exception as e:
+        print(f"❌ Error updating Tidal playlist phase: {e}")
+        return jsonify({"error": str(e)}), 500
+
 
 def _run_tidal_discovery_worker(playlist_id):
     """Background worker for Tidal Spotify discovery process (like sync.py)"""
@@ -6709,6 +6738,35 @@ def delete_youtube_playlist(url_hash):
         
     except Exception as e:
         print(f"❌ Error deleting YouTube playlist: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/youtube/update_phase/<url_hash>', methods=['POST'])
+def update_youtube_playlist_phase(url_hash):
+    """Update YouTube playlist phase (used when modal closes to reset from download_complete to discovered)"""
+    try:
+        if url_hash not in youtube_playlist_states:
+            return jsonify({"error": "YouTube playlist not found"}), 404
+        
+        data = request.get_json()
+        if not data or 'phase' not in data:
+            return jsonify({"error": "Phase not provided"}), 400
+        
+        new_phase = data['phase']
+        valid_phases = ['fresh', 'parsed', 'discovering', 'discovered', 'syncing', 'sync_complete', 'downloading', 'download_complete']
+        
+        if new_phase not in valid_phases:
+            return jsonify({"error": f"Invalid phase. Must be one of: {', '.join(valid_phases)}"}), 400
+        
+        state = youtube_playlist_states[url_hash]
+        old_phase = state.get('phase', 'unknown')
+        state['phase'] = new_phase
+        state['last_accessed'] = time.time()
+        
+        print(f"🔄 Updated YouTube playlist {url_hash} phase: {old_phase} → {new_phase}")
+        return jsonify({"success": True, "message": f"Phase updated to {new_phase}", "old_phase": old_phase, "new_phase": new_phase})
+        
+    except Exception as e:
+        print(f"❌ Error updating YouTube playlist phase: {e}")
         return jsonify({"error": str(e)}), 500
 
 def convert_youtube_results_to_spotify_tracks(discovery_results):
