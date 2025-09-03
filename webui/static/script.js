@@ -7482,7 +7482,7 @@ async function startTidalDownloadMissing(urlHash) {
         // Close the discovery modal if it's open (same as YouTube)
         const discoveryModal = document.getElementById(`youtube-discovery-modal-${urlHash}`);
         if (discoveryModal) {
-            discoveryModal.style.display = 'none';
+            discoveryModal.classList.add('hidden');
             console.log('🔄 Closed Tidal discovery modal to show download modal');
         }
         
