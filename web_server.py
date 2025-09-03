@@ -312,22 +312,59 @@ class WebUIDownloadMonitor:
             if 'queued_start_time' not in task:
                 task['queued_start_time'] = current_time
                 return False
-            elif current_time - task['queued_start_time'] > 90:
-                print(f"⚠️ Task stuck in queue for 90+ seconds")
-                return True
+            else:
+                queue_time = current_time - task['queued_start_time']
+                if queue_time > 90:
+                    # Track retry attempts to prevent rapid loops
+                    retry_count = task.get('stuck_retry_count', 0)
+                    last_retry = task.get('last_retry_time', 0)
+                    
+                    # Don't retry too frequently (wait at least 30 seconds between retries)
+                    if retry_count < 3 and (current_time - last_retry) > 30:  # Max 3 retry attempts
+                        print(f"⚠️ Task stuck in queue for {queue_time:.1f}s (retry {retry_count + 1}/3)")
+                        task['stuck_retry_count'] = retry_count + 1
+                        task['last_retry_time'] = current_time
+                        return True
+                    elif retry_count < 3:
+                        # Wait longer before next retry
+                        return False
+                    else:
+                        # Too many retries, mark as failed
+                        print(f"❌ Task failed after 3 retry attempts (queue timeout)")
+                        task['status'] = 'failed'
+                        task['error_message'] = 'Failed after multiple queue timeout retries'
+                        return False
                 
         # Check for downloading at 0% timeout (90 seconds like GUI) 
         elif 'InProgress' in state_str and progress < 1:
             if 'downloading_start_time' not in task:
                 task['downloading_start_time'] = current_time
                 return False
-            elif current_time - task['downloading_start_time'] > 90:
-                print(f"⚠️ Task stuck at 0% for 90+ seconds")
-                return True
+            else:
+                download_time = current_time - task['downloading_start_time']
+                if download_time > 90:
+                    retry_count = task.get('stuck_retry_count', 0)
+                    last_retry = task.get('last_retry_time', 0)
+                    
+                    # Don't retry too frequently (wait at least 30 seconds between retries)
+                    if retry_count < 3 and (current_time - last_retry) > 30:  # Max 3 retry attempts
+                        print(f"⚠️ Task stuck at 0% for {download_time:.1f}s (retry {retry_count + 1}/3)")
+                        task['stuck_retry_count'] = retry_count + 1
+                        task['last_retry_time'] = current_time
+                        return True
+                    elif retry_count < 3:
+                        # Wait longer before next retry
+                        return False
+                    else:
+                        print(f"❌ Task failed after 3 retry attempts (0% progress timeout)")
+                        task['status'] = 'failed'
+                        task['error_message'] = 'Failed after multiple 0% progress retries'
+                        return False
         else:
-            # Progress being made, reset timers
+            # Progress being made, reset timers and retry counts
             task.pop('queued_start_time', None)
             task.pop('downloading_start_time', None)
+            task.pop('stuck_retry_count', None)
             
         return False
     
@@ -335,7 +372,7 @@ class WebUIDownloadMonitor:
         """Trigger retry for a stuck/failed task"""
         try:
             # Cancel the stuck download first (like GUI)
-            self._cancel_download_before_retry(task)
+            self._cancel_download_before_retry(task, task_id)
             
             # Update task for retry
             with tasks_lock:
@@ -358,7 +395,7 @@ class WebUIDownloadMonitor:
         except Exception as e:
             print(f"❌ Error triggering retry for task {task_id}: {e}")
     
-    def _cancel_download_before_retry(self, task):
+    def _cancel_download_before_retry(self, task, task_id):
         """Cancel current download before retry (matches GUI cancel_download_before_retry)"""
         try:
             download_id = task.get('download_id')
@@ -368,17 +405,20 @@ class WebUIDownloadMonitor:
             # Only attempt cancellation if we have what looks like a proper download ID
             # (not a filename fallback which would be much longer)
             if download_id and username and len(download_id) < 100:
-                print(f"🚫 Attempting to cancel stuck download: {os.path.basename(download_id)} from {username}")
+                print(f"🚫 Attempting to cancel stuck download: {os.path.basename(download_id)} from {username} (task: {task_id[:8]}...)")
                 try:
                     success = asyncio.run(soulseek_client.cancel_download(download_id, username, remove=False))
                     if success:
-                        print(f"✅ Successfully cancelled download")
+                        print(f"✅ Successfully cancelled download {download_id[:8]}... from {username}")
+                        # Clear any stored download info to prevent status conflicts
+                        task.pop('soulseek_download_id', None)
+                        task.pop('soulseek_username', None)
                     else:
-                        print(f"⚠️ Cancel request failed, proceeding with retry anyway")
+                        print(f"⚠️ Cancel request failed for {download_id[:8]}... - all API endpoints returned errors, proceeding with retry anyway")
                 except Exception as e:
-                    print(f"⚠️ Cancel error: {str(e)[:100]}, proceeding with retry anyway")
+                    print(f"⚠️ Cancel exception for {download_id[:8]}...: {str(e)[:150]}, proceeding with retry anyway")
             else:
-                print(f"⚠️ No valid download ID for cancellation, proceeding with retry")
+                print(f"⚠️ Invalid download ID for cancellation (len={len(download_id) if download_id else 0}, username={bool(username)}), proceeding with retry")
                     
         except Exception as e:
             print(f"⚠️ Error in cancellation logic, proceeding with retry: {e}")
