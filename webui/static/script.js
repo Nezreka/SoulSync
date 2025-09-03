@@ -3000,6 +3000,12 @@ function closeDownloadMissingModal(playlistId) {
             updateYouTubeCardPhase(urlHash, 'discovered');
         }
         
+        // Reset Tidal playlist phase to 'discovered' when modal is closed after completion
+        if (playlistId.startsWith('tidal_')) {
+            const tidalPlaylistId = playlistId.replace('tidal_', '');
+            updateTidalCardPhase(tidalPlaylistId, 'discovered');
+        }
+        
         // Clear wishlist modal state when modal is fully closed
         if (playlistId === 'wishlist') {
             WishlistModalState.clear(); // Clear all tracking since modal is fully closed
@@ -3234,6 +3240,16 @@ async function startMissingTracksProcess(playlistId) {
             const urlHash = playlistId.replace('youtube_', '');
             updateYouTubeCardPhase(urlHash, 'downloading');
         }
+        
+        // Update Tidal playlist phase to 'downloading' if this is a Tidal playlist
+        if (playlistId.startsWith('tidal_')) {
+            const tidalPlaylistId = playlistId.replace('tidal_', '');
+            if (tidalPlaylistStates[tidalPlaylistId]) {
+                tidalPlaylistStates[tidalPlaylistId].phase = 'downloading';
+                updateTidalCardPhase(tidalPlaylistId, 'downloading');
+                console.log(`🔄 Updated Tidal playlist ${tidalPlaylistId} to downloading phase`);
+            }
+        }
         document.getElementById(`begin-analysis-btn-${playlistId}`).style.display = 'none';
         document.getElementById(`cancel-all-btn-${playlistId}`).style.display = 'inline-block';
 
@@ -3417,6 +3433,16 @@ function startModalDownloadPolling(playlistId) {
                         if (playlistId.startsWith('youtube_')) {
                             const urlHash = playlistId.replace('youtube_', '');
                             updateYouTubeCardPhase(urlHash, 'download_complete');
+                        }
+                        
+                        // Update Tidal playlist phase to 'download_complete' if this is a Tidal playlist
+                        if (playlistId.startsWith('tidal_')) {
+                            const tidalPlaylistId = playlistId.replace('tidal_', '');
+                            if (tidalPlaylistStates[tidalPlaylistId]) {
+                                tidalPlaylistStates[tidalPlaylistId].phase = 'download_complete';
+                                updateTidalCardPhase(tidalPlaylistId, 'download_complete');
+                                console.log(`✅ Updated Tidal playlist ${tidalPlaylistId} to download_complete phase`);
+                            }
                         }
                         
                         // Handle background wishlist processing completion specially
@@ -6435,6 +6461,99 @@ async function handleTidalCardClick(playlistId) {
     } else if (state.phase === 'discovering' || state.phase === 'discovered' || state.phase === 'syncing' || state.phase === 'sync_complete') {
         // Reopen existing modal (like sync.py)
         openTidalDiscoveryModal(playlistId, state.playlist);
+    } else if (state.phase === 'downloading' || state.phase === 'download_complete') {
+        // Open download modal if we have the converted playlist ID
+        if (state.convertedSpotifyPlaylistId) {
+            console.log(`🔍 Opening download modal for Tidal playlist: ${state.playlist.name}`);
+            // Check if modal already exists, if not create it
+            if (activeDownloadProcesses[state.convertedSpotifyPlaylistId]) {
+                const process = activeDownloadProcesses[state.convertedSpotifyPlaylistId];
+                if (process.modalElement) {
+                    process.modalElement.style.display = 'flex';
+                }
+            } else {
+                // Need to create the download modal - fetch the discovery results
+                await rehydrateTidalDownloadModal(playlistId, state);
+            }
+        } else {
+            console.error('❌ No converted Spotify playlist ID found for Tidal download modal');
+            showToast('Unable to open download modal - missing playlist data', 'error');
+        }
+    }
+}
+
+async function rehydrateTidalDownloadModal(playlistId, state) {
+    try {
+        console.log(`💧 Rehydrating Tidal download modal for: ${state.playlist.name}`);
+        
+        // Get discovery results from backend if not already loaded
+        if (!state.discovery_results) {
+            console.log(`🔍 Fetching discovery results from backend for Tidal playlist: ${playlistId}`);
+            const stateResponse = await fetch(`/api/tidal/state/${playlistId}`);
+            if (stateResponse.ok) {
+                const fullState = await stateResponse.json();
+                state.discovery_results = fullState.discovery_results;
+                state.convertedSpotifyPlaylistId = fullState.converted_spotify_playlist_id;
+                state.download_process_id = fullState.download_process_id;
+                console.log(`✅ Loaded ${fullState.discovery_results?.length || 0} discovery results from backend`);
+            } else {
+                console.error('❌ Failed to fetch Tidal discovery results from backend');
+                showToast('Error loading playlist data', 'error');
+                return;
+            }
+        }
+        
+        // Extract Spotify tracks from discovery results
+        const spotifyTracks = [];
+        for (const result of state.discovery_results) {
+            if (result.spotify_data) {
+                spotifyTracks.push(result.spotify_data);
+            }
+        }
+        
+        if (spotifyTracks.length === 0) {
+            console.error('❌ No Spotify tracks found for download modal');
+            showToast('No Spotify matches found for download', 'error');
+            return;
+        }
+        
+        const virtualPlaylistId = state.convertedSpotifyPlaylistId;
+        const playlistName = `[Tidal] ${state.playlist.name}`;
+        
+        // Create the download modal
+        await openDownloadMissingModalForTidal(virtualPlaylistId, playlistName, spotifyTracks);
+        
+        // If we have a download process ID, set up the modal for the running state
+        if (state.download_process_id) {
+            const process = activeDownloadProcesses[virtualPlaylistId];
+            if (process) {
+                process.status = state.phase === 'download_complete' ? 'complete' : 'running';
+                process.batchId = state.download_process_id;
+                
+                // Update UI based on phase
+                const beginBtn = document.getElementById(`begin-analysis-btn-${virtualPlaylistId}`);
+                const cancelBtn = document.getElementById(`cancel-all-btn-${virtualPlaylistId}`);
+                
+                if (state.phase === 'downloading') {
+                    if (beginBtn) beginBtn.style.display = 'none';
+                    if (cancelBtn) cancelBtn.style.display = 'inline-block';
+                    
+                    // Start polling for live updates
+                    startModalDownloadPolling(virtualPlaylistId);
+                    console.log(`🔄 Started polling for active Tidal download: ${state.download_process_id}`);
+                } else if (state.phase === 'download_complete') {
+                    if (beginBtn) beginBtn.style.display = 'none';
+                    if (cancelBtn) cancelBtn.style.display = 'none';
+                    console.log(`✅ Showing completed Tidal download results: ${state.download_process_id}`);
+                }
+            }
+        }
+        
+        console.log(`✅ Successfully rehydrated Tidal download modal for: ${state.playlist.name}`);
+        
+    } catch (error) {
+        console.error(`❌ Error rehydrating Tidal download modal:`, error);
+        showToast('Error opening download modal', 'error');
     }
 }
 
@@ -6679,6 +6798,62 @@ async function loadTidalPlaylistStatesFromBackend() {
             await applyTidalPlaylistState(stateInfo);
         }
         
+        // Rehydrate download modals for Tidal playlists in downloading/download_complete phases
+        for (const stateInfo of states) {
+            if ((stateInfo.phase === 'downloading' || stateInfo.phase === 'download_complete') && 
+                stateInfo.converted_spotify_playlist_id && stateInfo.download_process_id) {
+                
+                const convertedPlaylistId = stateInfo.converted_spotify_playlist_id;
+                
+                if (!activeDownloadProcesses[convertedPlaylistId]) {
+                    console.log(`💧 Rehydrating download modal for Tidal playlist: ${stateInfo.playlist_id}`);
+                    try {
+                        // Get the playlist data
+                        const playlistData = tidalPlaylists.find(p => p.id === stateInfo.playlist_id);
+                        if (!playlistData) {
+                            console.warn(`⚠️ Playlist data not found for rehydration: ${stateInfo.playlist_id}`);
+                            continue;
+                        }
+                        
+                        // Create the download modal using the Tidal-specific function
+                        const spotifyTracks = tidalPlaylistStates[stateInfo.playlist_id]?.discovery_results
+                            ?.filter(result => result.spotify_data)
+                            ?.map(result => result.spotify_data) || [];
+                        
+                        if (spotifyTracks.length > 0) {
+                            await openDownloadMissingModalForTidal(
+                                convertedPlaylistId, 
+                                `[Tidal] ${playlistData.name}`, 
+                                spotifyTracks
+                            );
+                            
+                            // Set the modal to running state with the correct batch ID
+                            const process = activeDownloadProcesses[convertedPlaylistId];
+                            if (process) {
+                                process.status = 'running';
+                                process.batchId = stateInfo.download_process_id;
+                                
+                                // Update UI to running state
+                                const beginBtn = document.getElementById(`begin-analysis-btn-${convertedPlaylistId}`);
+                                const cancelBtn = document.getElementById(`cancel-all-btn-${convertedPlaylistId}`);
+                                if (beginBtn) beginBtn.style.display = 'none';
+                                if (cancelBtn) cancelBtn.style.display = 'inline-block';
+                                
+                                // Start polling for this process
+                                startModalDownloadPolling(convertedPlaylistId);
+                                
+                                console.log(`✅ Rehydrated Tidal download modal for batch ${stateInfo.download_process_id}`);
+                            }
+                        } else {
+                            console.warn(`⚠️ No Spotify tracks found for Tidal playlist rehydration: ${stateInfo.playlist_id}`);
+                        }
+                    } catch (error) {
+                        console.error(`❌ Error rehydrating Tidal download modal for ${stateInfo.playlist_id}:`, error);
+                    }
+                }
+            }
+        }
+        
         console.log('✅ Tidal playlist states loaded and applied');
         
     } catch (error) {
@@ -6687,7 +6862,7 @@ async function loadTidalPlaylistStatesFromBackend() {
 }
 
 async function applyTidalPlaylistState(stateInfo) {
-    const { playlist_id, phase, discovery_progress, spotify_matches, discovery_results } = stateInfo;
+    const { playlist_id, phase, discovery_progress, spotify_matches, discovery_results, converted_spotify_playlist_id, download_process_id } = stateInfo;
     
     try {
         console.log(`🎵 Applying saved state for Tidal playlist: ${playlist_id}, Phase: ${phase}`);
@@ -6713,6 +6888,8 @@ async function applyTidalPlaylistState(stateInfo) {
         tidalPlaylistStates[playlist_id].discovery_progress = discovery_progress;
         tidalPlaylistStates[playlist_id].spotify_matches = spotify_matches;
         tidalPlaylistStates[playlist_id].discovery_results = discovery_results;
+        tidalPlaylistStates[playlist_id].convertedSpotifyPlaylistId = converted_spotify_playlist_id;
+        tidalPlaylistStates[playlist_id].download_process_id = download_process_id;
         tidalPlaylistStates[playlist_id].playlist = playlistData; // Ensure playlist data is set
         
         // Fetch full discovery results for non-fresh playlists (matching YouTube pattern)
@@ -6729,6 +6906,8 @@ async function applyTidalPlaylistState(stateInfo) {
                         tidalPlaylistStates[playlist_id].discovery_results = fullState.discovery_results;
                         tidalPlaylistStates[playlist_id].discovery_progress = fullState.discovery_progress;
                         tidalPlaylistStates[playlist_id].spotify_matches = fullState.spotify_matches;
+                        tidalPlaylistStates[playlist_id].convertedSpotifyPlaylistId = fullState.converted_spotify_playlist_id;
+                        tidalPlaylistStates[playlist_id].download_process_id = fullState.download_process_id;
                         console.log(`✅ Restored ${fullState.discovery_results.length} discovery results for Tidal playlist: ${playlistData.name}`);
                     }
                 } else {
@@ -7017,17 +7196,209 @@ function updateTidalModalButtons(urlHash, phase) {
     }
 }
 
-function startTidalDownloadMissing(urlHash) {
-    console.log(`🎵 Starting Tidal download missing tracks for: ${urlHash}`);
-    const state = youtubePlaylistStates[urlHash];
-    if (!state || !state.is_tidal_playlist) {
-        console.error('❌ Invalid Tidal playlist state for download');
+async function startTidalDownloadMissing(urlHash) {
+    try {
+        console.log('🔍 Starting download missing tracks for Tidal playlist:', urlHash);
+        
+        const state = youtubePlaylistStates[urlHash];
+        if (!state || !state.is_tidal_playlist) {
+            console.error('❌ Invalid Tidal playlist state for download');
+            return;
+        }
+        
+        // Get the actual Tidal playlist ID
+        const tidalPlaylistId = state.tidal_playlist_id;
+        const tidalState = tidalPlaylistStates[tidalPlaylistId];
+        
+        if (!tidalState || !tidalState.discovery_results) {
+            showToast('No discovery results available for download', 'error');
+            return;
+        }
+        
+        // Convert Tidal discovery results to Spotify tracks format (same as YouTube)
+        const spotifyTracks = [];
+        for (const result of tidalState.discovery_results) {
+            if (result.spotify_data) {
+                spotifyTracks.push(result.spotify_data);
+            }
+        }
+        
+        if (spotifyTracks.length === 0) {
+            showToast('No Spotify matches found for download', 'error');
+            return;
+        }
+        
+        // Create a virtual playlist for the download system
+        const virtualPlaylistId = `tidal_${tidalPlaylistId}`;
+        const playlistName = `[Tidal] ${tidalState.playlist.name}`;
+        
+        // Store reference for card navigation (same as YouTube)
+        tidalState.convertedSpotifyPlaylistId = virtualPlaylistId;
+        state.convertedSpotifyPlaylistId = virtualPlaylistId;
+        
+        // Close the discovery modal if it's open (same as YouTube)
+        const discoveryModal = document.getElementById(`youtube-discovery-modal-${urlHash}`);
+        if (discoveryModal) {
+            discoveryModal.style.display = 'none';
+            console.log('🔄 Closed Tidal discovery modal to show download modal');
+        }
+        
+        // Open download missing tracks modal for Tidal playlist
+        await openDownloadMissingModalForTidal(virtualPlaylistId, playlistName, spotifyTracks);
+        
+        // Phase will change to 'downloading' when user clicks "Begin Analysis" button
+        
+    } catch (error) {
+        console.error('❌ Error starting download missing tracks:', error);
+        showToast(`Error starting downloads: ${error.message}`, 'error');
+    }
+}
+
+async function openDownloadMissingModalForTidal(virtualPlaylistId, playlistName, spotifyTracks) {
+    // Check if a process is already active for this virtual playlist
+    if (activeDownloadProcesses[virtualPlaylistId]) {
+        console.log(`Modal for ${virtualPlaylistId} already exists. Showing it.`);
+        const process = activeDownloadProcesses[virtualPlaylistId];
+        if (process.modalElement) {
+            if (process.status === 'complete') {
+                showToast('Showing previous results. Close this modal to start a new analysis.', 'info');
+            }
+            process.modalElement.style.display = 'flex';
+        }
         return;
     }
+
+    console.log(`📥 Opening Download Missing Tracks modal for Tidal playlist: ${virtualPlaylistId}`);
     
-    // TODO: Implement Tidal download missing tracks logic
-    // For now, show a message that this feature is coming soon
-    showToast('🔍 Tidal download missing tracks functionality coming soon!', 'info');
+    // Create virtual playlist object for compatibility with existing modal logic
+    const virtualPlaylist = {
+        id: virtualPlaylistId,
+        name: playlistName,
+        track_count: spotifyTracks.length
+    };
+    
+    // Store the tracks in the cache for the modal to use
+    playlistTrackCache[virtualPlaylistId] = spotifyTracks;
+    currentPlaylistTracks = spotifyTracks;
+    currentModalPlaylistId = virtualPlaylistId;
+    
+    let modal = document.createElement('div');
+    modal.id = `download-missing-modal-${virtualPlaylistId}`;
+    modal.className = 'download-missing-modal';
+    modal.style.display = 'none';
+    document.body.appendChild(modal);
+
+    // Register the new process in our global state tracker using the same structure as Spotify
+    activeDownloadProcesses[virtualPlaylistId] = {
+        status: 'idle',
+        modalElement: modal,
+        poller: null,
+        batchId: null,
+        playlist: virtualPlaylist,
+        tracks: spotifyTracks
+    };
+    
+    // Use the exact same modal HTML structure as the existing Spotify modal
+    modal.innerHTML = `
+        <div class="download-missing-modal-content">
+            <div class="download-missing-modal-header">
+                <h2 class="download-missing-modal-title">Download Missing Tracks - ${escapeHtml(playlistName)}</h2>
+                <span class="download-missing-modal-close" onclick="closeDownloadMissingModal('${virtualPlaylistId}')">&times;</span>
+            </div>
+            
+            <div class="download-missing-modal-body">
+                <div class="download-dashboard-stats">
+                    <div class="dashboard-stat stat-total">
+                        <div class="dashboard-stat-number" id="stat-total-${virtualPlaylistId}">${spotifyTracks.length}</div>
+                        <div class="dashboard-stat-label">Total Tracks</div>
+                    </div>
+                    <div class="dashboard-stat stat-found">
+                        <div class="dashboard-stat-number" id="stat-found-${virtualPlaylistId}">-</div>
+                        <div class="dashboard-stat-label">Found in Library</div>
+                    </div>
+                    <div class="dashboard-stat stat-missing">
+                        <div class="dashboard-stat-number" id="stat-missing-${virtualPlaylistId}">-</div>
+                        <div class="dashboard-stat-label">Missing Tracks</div>
+                    </div>
+                    <div class="dashboard-stat stat-downloaded">
+                        <div class="dashboard-stat-number" id="stat-downloaded-${virtualPlaylistId}">0</div>
+                        <div class="dashboard-stat-label">Downloaded</div>
+                    </div>
+                </div>
+                
+                <div class="download-progress-section">
+                    <div class="progress-item">
+                        <div class="progress-label">
+                            🔍 Library Analysis
+                            <span id="analysis-progress-text-${virtualPlaylistId}">Ready to start</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill analysis" id="analysis-progress-fill-${virtualPlaylistId}"></div>
+                        </div>
+                    </div>
+                    <div class="progress-item">
+                        <div class="progress-label">
+                            ⏬ Downloads
+                            <span id="download-progress-text-${virtualPlaylistId}">Waiting for analysis</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill download" id="download-progress-fill-${virtualPlaylistId}"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="download-tracks-section">
+                    <div class="download-tracks-header">
+                        <h3 class="download-tracks-title">📋 Track Analysis & Download Status</h3>
+                    </div>
+                    <div class="download-tracks-table-container">
+                        <table class="download-tracks-table">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Track</th>
+                                    <th>Artist</th>
+                                    <th>Duration</th>
+                                    <th>Library Match</th>
+                                    <th>Download Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="download-tracks-tbody-${virtualPlaylistId}">
+                                ${spotifyTracks.map((track, index) => `
+                                    <tr data-track-index="${index}">
+                                        <td class="track-number">${index + 1}</td>
+                                        <td class="track-name" title="${escapeHtml(track.name)}">${escapeHtml(track.name)}</td>
+                                        <td class="track-artist" title="${escapeHtml(track.artists.join(', '))}">${track.artists.join(', ')}</td>
+                                        <td class="track-duration">${formatDuration(track.duration_ms)}</td>
+                                        <td class="track-match-status match-checking" id="match-${virtualPlaylistId}-${index}">🔍 Pending</td>
+                                        <td class="track-download-status" id="download-${virtualPlaylistId}-${index}">-</td>
+                                        <td class="track-actions" id="actions-${virtualPlaylistId}-${index}">-</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="download-missing-modal-footer">
+                <div class="download-phase-controls">
+                    <button class="download-control-btn primary" id="begin-analysis-btn-${virtualPlaylistId}" onclick="startMissingTracksProcess('${virtualPlaylistId}')">
+                        Begin Analysis
+                    </button>
+                    <button class="download-control-btn danger" id="cancel-all-btn-${virtualPlaylistId}" onclick="cancelAllOperations('${virtualPlaylistId}')" style="display: none;">
+                        Cancel All
+                    </button>
+                </div>
+                <div class="modal-close-section">
+                    <button class="download-control-btn secondary" onclick="closeDownloadMissingModal('${virtualPlaylistId}')">Close</button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    modal.style.display = 'flex';
 }
 
 
