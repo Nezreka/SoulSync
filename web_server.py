@@ -5981,6 +5981,152 @@ def _search_spotify_for_tidal_track(tidal_track):
         return None
 
 
+def convert_tidal_results_to_spotify_tracks(discovery_results):
+    """Convert Tidal discovery results to Spotify tracks format for sync"""
+    spotify_tracks = []
+    
+    for result in discovery_results:
+        if result.get('spotify_data'):
+            spotify_data = result['spotify_data']
+            
+            # Create track object matching the expected format
+            track = {
+                'id': spotify_data['id'],
+                'name': spotify_data['name'],
+                'artists': spotify_data['artists'],
+                'album': spotify_data['album'],
+                'duration_ms': spotify_data['duration_ms']
+            }
+            spotify_tracks.append(track)
+    
+    print(f"🔄 Converted {len(spotify_tracks)} Tidal matches to Spotify tracks for sync")
+    return spotify_tracks
+
+
+# ===================================================================
+# TIDAL SYNC API ENDPOINTS
+# ===================================================================
+
+@app.route('/api/tidal/sync/start/<playlist_id>', methods=['POST'])
+def start_tidal_sync(playlist_id):
+    """Start sync process for a Tidal playlist using discovered Spotify tracks"""
+    try:
+        if playlist_id not in tidal_discovery_states:
+            return jsonify({"error": "Tidal playlist not found"}), 404
+        
+        state = tidal_discovery_states[playlist_id]
+        state['last_accessed'] = time.time()  # Update access time
+        
+        if state['phase'] not in ['discovered', 'sync_complete']:
+            return jsonify({"error": "Tidal playlist not ready for sync"}), 400
+        
+        # Convert discovery results to Spotify tracks format
+        spotify_tracks = convert_tidal_results_to_spotify_tracks(state['discovery_results'])
+        
+        if not spotify_tracks:
+            return jsonify({"error": "No Spotify matches found for sync"}), 400
+        
+        # Create a temporary playlist ID for sync tracking
+        sync_playlist_id = f"tidal_{playlist_id}"
+        playlist_name = state['playlist'].name  # Tidal playlist object has .name attribute
+        
+        # Update Tidal state
+        state['phase'] = 'syncing'
+        state['sync_playlist_id'] = sync_playlist_id
+        state['sync_progress'] = {}
+        
+        # Start the sync using existing sync infrastructure
+        sync_data = {
+            'playlist_id': sync_playlist_id,
+            'playlist_name': f"[Tidal] {playlist_name}",
+            'tracks': spotify_tracks
+        }
+        
+        with sync_lock:
+            sync_states[sync_playlist_id] = {"status": "starting", "progress": {}}
+        
+        # Submit sync task
+        future = sync_executor.submit(_run_sync_task, sync_playlist_id, sync_data['playlist_name'], spotify_tracks)
+        active_sync_workers[sync_playlist_id] = future
+        
+        print(f"🔄 Started Tidal sync for: {playlist_name} ({len(spotify_tracks)} tracks)")
+        return jsonify({"success": True, "sync_playlist_id": sync_playlist_id})
+        
+    except Exception as e:
+        print(f"❌ Error starting Tidal sync: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/tidal/sync/status/<playlist_id>', methods=['GET'])
+def get_tidal_sync_status(playlist_id):
+    """Get sync status for a Tidal playlist"""
+    try:
+        if playlist_id not in tidal_discovery_states:
+            return jsonify({"error": "Tidal playlist not found"}), 404
+        
+        state = tidal_discovery_states[playlist_id]
+        state['last_accessed'] = time.time()  # Update access time
+        sync_playlist_id = state.get('sync_playlist_id')
+        
+        if not sync_playlist_id:
+            return jsonify({"error": "No sync in progress"}), 404
+        
+        # Get sync status from existing sync infrastructure
+        with sync_lock:
+            sync_state = sync_states.get(sync_playlist_id, {})
+        
+        response = {
+            'phase': state['phase'],
+            'sync_status': sync_state.get('status', 'unknown'),
+            'progress': sync_state.get('progress', {}),
+            'complete': sync_state.get('status') == 'finished',
+            'error': sync_state.get('error')
+        }
+        
+        # Update Tidal state if sync completed
+        if sync_state.get('status') == 'finished':
+            state['phase'] = 'sync_complete'
+            state['sync_progress'] = sync_state.get('progress', {})
+        elif sync_state.get('status') == 'error':
+            state['phase'] = 'discovered'  # Revert on error
+        
+        return jsonify(response)
+        
+    except Exception as e:
+        print(f"❌ Error getting Tidal sync status: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/tidal/sync/cancel/<playlist_id>', methods=['POST'])
+def cancel_tidal_sync(playlist_id):
+    """Cancel sync for a Tidal playlist"""
+    try:
+        if playlist_id not in tidal_discovery_states:
+            return jsonify({"error": "Tidal playlist not found"}), 404
+        
+        state = tidal_discovery_states[playlist_id]
+        state['last_accessed'] = time.time()  # Update access time
+        sync_playlist_id = state.get('sync_playlist_id')
+        
+        if sync_playlist_id:
+            # Cancel the sync using existing sync infrastructure
+            with sync_lock:
+                sync_states[sync_playlist_id] = {"status": "cancelled"}
+            
+            # Clean up sync worker
+            if sync_playlist_id in active_sync_workers:
+                del active_sync_workers[sync_playlist_id]
+        
+        # Revert Tidal state
+        state['phase'] = 'discovered'
+        state['sync_playlist_id'] = None
+        state['sync_progress'] = {}
+        
+        return jsonify({"success": True, "message": "Tidal sync cancelled"})
+        
+    except Exception as e:
+        print(f"❌ Error cancelling Tidal sync: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 # ===================================================================
 # YOUTUBE PLAYLIST API ENDPOINTS
 # ===================================================================
