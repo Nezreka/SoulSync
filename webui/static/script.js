@@ -59,7 +59,8 @@ let artistsPageState = {
     },
     cache: {
         searches: {}, // Cache search results by query
-        discography: {} // Cache discography by artist ID
+        discography: {}, // Cache discography by artist ID
+        colors: {} // Cache extracted colors by image URL
     }
 };
 let artistsSearchTimeout = null;
@@ -9293,6 +9294,14 @@ function displayArtistsResults(query, results) {
     // Add event listeners to cards
     container.querySelectorAll('.artist-card').forEach((card, index) => {
         card.addEventListener('click', () => selectArtist(results[index]));
+        
+        // Extract colors from artist image for dynamic glow
+        const artist = results[index];
+        if (artist.image_url) {
+            extractImageColors(artist.image_url, (colors) => {
+                applyDynamicGlow(card, colors);
+            });
+        }
     });
     
     // Add mouse wheel horizontal scrolling
@@ -9421,6 +9430,16 @@ function displayArtistDiscography(discography) {
     if (albumsContainer) {
         if (discography.albums?.length > 0) {
             albumsContainer.innerHTML = discography.albums.map(album => createAlbumCard(album)).join('');
+            
+            // Add dynamic glow effects to album cards
+            albumsContainer.querySelectorAll('.album-card').forEach((card, index) => {
+                const album = discography.albums[index];
+                if (album.image_url) {
+                    extractImageColors(album.image_url, (colors) => {
+                        applyDynamicGlow(card, colors);
+                    });
+                }
+            });
         } else {
             albumsContainer.innerHTML = `
                 <div style="grid-column: 1 / -1; text-align: center; padding: 40px 20px; color: rgba(255, 255, 255, 0.6);">
@@ -9436,6 +9455,16 @@ function displayArtistDiscography(discography) {
     if (singlesContainer) {
         if (discography.singles?.length > 0) {
             singlesContainer.innerHTML = discography.singles.map(single => createAlbumCard(single)).join('');
+            
+            // Add dynamic glow effects to singles cards
+            singlesContainer.querySelectorAll('.album-card').forEach((card, index) => {
+                const single = discography.singles[index];
+                if (single.image_url) {
+                    extractImageColors(single.image_url, (colors) => {
+                        applyDynamicGlow(card, colors);
+                    });
+                }
+            });
         } else {
             singlesContainer.innerHTML = `
                 <div style="grid-column: 1 / -1; text-align: center; padding: 40px 20px; color: rgba(255, 255, 255, 0.6);">
@@ -9715,6 +9744,184 @@ function showSearchLoadingCards() {
     
     // Show 6 loading cards
     container.innerHTML = loadingCardHtml.repeat(6);
+}
+
+/**
+ * Extract dominant colors from an image for dynamic glow effects
+ */
+async function extractImageColors(imageUrl, callback) {
+    if (!imageUrl) {
+        callback(['#1db954', '#1ed760']); // Fallback to Spotify green
+        return;
+    }
+    
+    // Check cache first for performance
+    if (artistsPageState.cache.colors[imageUrl]) {
+        callback(artistsPageState.cache.colors[imageUrl]);
+        return;
+    }
+    
+    try {
+        // Create a canvas to analyze the image
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        const img = new Image();
+        
+        img.crossOrigin = 'anonymous';
+        
+        img.onload = function() {
+            // Resize to small dimensions for faster processing
+            const size = 50;
+            canvas.width = size;
+            canvas.height = size;
+            
+            // Draw image to canvas
+            ctx.drawImage(img, 0, 0, size, size);
+            
+            try {
+                // Get image data
+                const imageData = ctx.getImageData(0, 0, size, size);
+                const data = imageData.data;
+                
+                // Extract colors (sample every few pixels for performance)
+                const colors = [];
+                for (let i = 0; i < data.length; i += 16) { // Sample every 4th pixel
+                    const r = data[i];
+                    const g = data[i + 1];
+                    const b = data[i + 2];
+                    const alpha = data[i + 3];
+                    
+                    // Skip transparent or very dark pixels
+                    if (alpha > 128 && (r + g + b) > 150) {
+                        colors.push({ r, g, b });
+                    }
+                }
+                
+                if (colors.length === 0) {
+                    callback(['#1db954', '#1ed760']); // Fallback
+                    return;
+                }
+                
+                // Find dominant colors using a simple clustering approach
+                const dominantColors = findDominantColors(colors, 2);
+                
+                // Convert to CSS hex colors
+                const hexColors = dominantColors.map(color => 
+                    `#${((1 << 24) + (color.r << 16) + (color.g << 8) + color.b).toString(16).slice(1)}`
+                );
+                
+                // Cache the colors for future use
+                artistsPageState.cache.colors[imageUrl] = hexColors;
+                
+                callback(hexColors);
+                
+            } catch (e) {
+                console.warn('Color extraction failed, using fallback colors:', e);
+                callback(['#1db954', '#1ed760']);
+            }
+        };
+        
+        img.onerror = function() {
+            callback(['#1db954', '#1ed760']); // Fallback on error
+        };
+        
+        img.src = imageUrl;
+        
+    } catch (error) {
+        console.warn('Image color extraction error:', error);
+        callback(['#1db954', '#1ed760']);
+    }
+}
+
+/**
+ * Simple color clustering to find dominant colors
+ */
+function findDominantColors(colors, numColors = 2) {
+    if (colors.length === 0) return [{ r: 29, g: 185, b: 84 }];
+    
+    // Simple k-means clustering
+    let centroids = [];
+    
+    // Initialize centroids randomly
+    for (let i = 0; i < numColors; i++) {
+        centroids.push(colors[Math.floor(Math.random() * colors.length)]);
+    }
+    
+    // Run a few iterations of k-means
+    for (let iteration = 0; iteration < 5; iteration++) {
+        const clusters = Array(numColors).fill().map(() => []);
+        
+        // Assign each color to nearest centroid
+        colors.forEach(color => {
+            let minDistance = Infinity;
+            let nearestCluster = 0;
+            
+            centroids.forEach((centroid, i) => {
+                const distance = Math.sqrt(
+                    Math.pow(color.r - centroid.r, 2) +
+                    Math.pow(color.g - centroid.g, 2) +
+                    Math.pow(color.b - centroid.b, 2)
+                );
+                
+                if (distance < minDistance) {
+                    minDistance = distance;
+                    nearestCluster = i;
+                }
+            });
+            
+            clusters[nearestCluster].push(color);
+        });
+        
+        // Update centroids
+        centroids = clusters.map(cluster => {
+            if (cluster.length === 0) return centroids[0]; // Fallback
+            
+            const avgR = cluster.reduce((sum, c) => sum + c.r, 0) / cluster.length;
+            const avgG = cluster.reduce((sum, c) => sum + c.g, 0) / cluster.length;
+            const avgB = cluster.reduce((sum, c) => sum + c.b, 0) / cluster.length;
+            
+            return { r: Math.round(avgR), g: Math.round(avgG), b: Math.round(avgB) };
+        });
+    }
+    
+    // Ensure we have vibrant colors by boosting saturation
+    return centroids.map(color => {
+        const max = Math.max(color.r, color.g, color.b);
+        const min = Math.min(color.r, color.g, color.b);
+        const saturation = max === 0 ? 0 : (max - min) / max;
+        
+        // Boost low saturation colors
+        if (saturation < 0.4) {
+            const factor = 1.3;
+            return {
+                r: Math.min(255, Math.round(color.r * factor)),
+                g: Math.min(255, Math.round(color.g * factor)),
+                b: Math.min(255, Math.round(color.b * factor))
+            };
+        }
+        
+        return color;
+    });
+}
+
+/**
+ * Apply dynamic glow effect to a card element
+ */
+function applyDynamicGlow(cardElement, colors) {
+    if (!cardElement || colors.length < 2) return;
+    
+    const color1 = colors[0];
+    const color2 = colors[1];
+    
+    // Add a small delay to make the effect feel more natural
+    setTimeout(() => {
+        // Create CSS custom properties for the dynamic colors
+        cardElement.style.setProperty('--glow-color-1', color1);
+        cardElement.style.setProperty('--glow-color-2', color2);
+        cardElement.classList.add('has-dynamic-glow');
+        
+        console.log(`🎨 Applied dynamic glow: ${color1}, ${color2}`);
+    }, Math.random() * 200 + 100); // Random delay between 100-300ms
 }
 
 /**
