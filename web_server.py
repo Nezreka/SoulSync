@@ -1587,6 +1587,91 @@ def get_artists():
     ]
     return jsonify({"artists": mock_artists})
 
+@app.route('/api/artist/<artist_id>/discography', methods=['GET'])
+def get_artist_discography(artist_id):
+    """Get an artist's complete discography (albums and singles)"""
+    try:
+        if not spotify_client or not spotify_client.is_authenticated():
+            return jsonify({"error": "Spotify not authenticated"}), 401
+        
+        print(f"🎤 Fetching discography for artist: {artist_id}")
+        
+        # Get all albums and singles for the artist
+        albums = spotify_client.get_artist_albums(artist_id, album_type='album,single,appears_on', limit=50)
+        
+        if not albums:
+            return jsonify({
+                "albums": [],
+                "singles": []
+            })
+        
+        # Separate albums from singles/EPs
+        album_list = []
+        singles_list = []
+        
+        # Track seen albums to avoid duplicates (especially for "appears_on")
+        seen_albums = set()
+        
+        for album in albums:
+            # Skip duplicates
+            if album.id in seen_albums:
+                continue
+            seen_albums.add(album.id)
+            
+            # Skip compilations and appears_on that aren't the main artist's work
+            if hasattr(album, 'album_type') and album.album_type == 'appears_on':
+                # Only include if the artist is the main artist
+                if hasattr(album, 'artists') and album.artists:
+                    main_artist_id = album.artists[0].id if hasattr(album.artists[0], 'id') else None
+                    if main_artist_id != artist_id:
+                        continue
+            
+            album_data = {
+                "id": album.id,
+                "name": album.name,
+                "release_date": album.release_date if hasattr(album, 'release_date') else None,
+                "album_type": album.album_type if hasattr(album, 'album_type') else 'album',
+                "image_url": album.image_url if hasattr(album, 'image_url') else None,
+                "total_tracks": album.total_tracks if hasattr(album, 'total_tracks') else 0,
+                "external_urls": album.external_urls if hasattr(album, 'external_urls') else {}
+            }
+            
+            # Categorize by album type
+            if hasattr(album, 'album_type'):
+                if album.album_type in ['single', 'ep']:
+                    singles_list.append(album_data)
+                else:  # 'album' or 'compilation'
+                    album_list.append(album_data)
+            else:
+                # Default to album if no type specified
+                album_list.append(album_data)
+        
+        # Sort by release date (newest first)
+        def get_release_year(item):
+            if item['release_date']:
+                try:
+                    # Handle different date formats (YYYY, YYYY-MM, YYYY-MM-DD)
+                    return int(item['release_date'][:4])
+                except (ValueError, IndexError):
+                    return 0
+            return 0
+        
+        album_list.sort(key=get_release_year, reverse=True)
+        singles_list.sort(key=get_release_year, reverse=True)
+        
+        print(f"✅ Found {len(album_list)} albums and {len(singles_list)} singles for artist")
+        
+        return jsonify({
+            "albums": album_list,
+            "singles": singles_list
+        })
+        
+    except Exception as e:
+        print(f"❌ Error fetching artist discography: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/api/stream/start', methods=['POST'])
 def stream_start():
     """Start streaming a track in the background"""
