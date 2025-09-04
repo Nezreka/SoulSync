@@ -1,0 +1,45 @@
+{
+  "active_media_server": "plex",
+  "spotify": {
+    "client_id": "SpotifyClientID",
+    "client_secret": "SpotifyClientSecret"
+  },
+  "tidal": {
+    "client_id": "TidalClientID",
+    "client_secret": "TidalClientSecret"
+  },
+  "plex": {
+    "base_url": "http://192.168.86.36:32400",
+    "token": "PLEX_API_TOKEN",
+    "auto_detect": true
+  },
+  "jellyfin": {
+    "base_url": "http://localhost:8096",
+    "api_key": "JELLYFIN_API_KEY",
+    "auto_detect": true
+  },
+  "soulseek": {
+    "slskd_url": "http://localhost:5030",
+    "api_key": "SoulseekAPIKey",
+    "download_path": "./Downloads",
+    "transfer_path": "./Transfer"
+  },
+  "logging": {
+    "path": "logs/app.log",
+    "level": "INFO"
+  },
+  "settings": {
+    "audio_quality": "flac"
+  },
+  "database": {
+    "path": "database/music_library.db",
+    "max_workers": 5
+  },
+  "metadata_enhancement": {
+    "enabled": true,
+    "embed_album_art": true
+  },
+  "playlist_sync": {
+    "create_backup": true
+  }
+}
