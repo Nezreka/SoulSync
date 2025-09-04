@@ -47,6 +47,24 @@ let tidalPlaylists = [];
 let tidalPlaylistStates = {}; // Key: playlist_id, Value: playlist state with phases
 let tidalPlaylistsLoaded = false;
 
+// --- Artists Page State Management ---
+let artistsPageState = {
+    currentView: 'search', // 'search', 'results', 'detail'
+    searchQuery: '',
+    searchResults: [],
+    selectedArtist: null,
+    artistDiscography: {
+        albums: [],
+        singles: []
+    },
+    cache: {
+        searches: {}, // Cache search results by query
+        discography: {} // Cache discography by artist ID
+    }
+};
+let artistsSearchTimeout = null;
+let artistsSearchController = null;
+
 // --- Wishlist Modal Persistence State Management ---
 const WishlistModalState = {
     // Track if wishlist modal was visible before page refresh
@@ -343,7 +361,7 @@ async function loadPageData(pageId) {
                 break;
             case 'artists':
                 stopDownloadPolling();
-                await loadArtistsData();
+                initializeArtistsPage();
                 break;
             case 'settings':
                 initializeSettings();
@@ -5183,6 +5201,7 @@ window.selectAlbum = selectAlbum;
 window.navigateToPage = navigateToPage;
 window.openKofi = openKofi;
 window.copyAddress = copyAddress;
+window.retryLastSearch = retryLastSearch;
 window.showVersionInfo = showVersionInfo;
 window.closeVersionModal = closeVersionModal;
 window.testConnection = testConnection;
@@ -9038,6 +9057,673 @@ async function resetYouTubePlaylist(urlHash) {
         console.error(`❌ Error resetting YouTube playlist:`, error);
         showToast(`Error resetting playlist: ${error.message}`, 'error');
     }
+}
+
+// ============================================================================
+// ARTISTS PAGE FUNCTIONALITY - ELEGANT SEARCH & DISCOVERY
+// ============================================================================
+
+/**
+ * Initialize the artists page when navigated to
+ */
+function initializeArtistsPage() {
+    console.log('🎵 Initializing Artists Page');
+    
+    // Get DOM elements
+    const searchInput = document.getElementById('artists-search-input');
+    const headerSearchInput = document.getElementById('artists-header-search-input');
+    const searchStatus = document.getElementById('artists-search-status');
+    const backButton = document.getElementById('artists-back-button');
+    const detailBackButton = document.getElementById('artist-detail-back-button');
+    
+    // Set up event listeners
+    if (searchInput) {
+        searchInput.addEventListener('input', handleArtistsSearchInput);
+        searchInput.addEventListener('keypress', handleArtistsSearchKeypress);
+    }
+    
+    if (headerSearchInput) {
+        headerSearchInput.addEventListener('input', handleArtistsHeaderSearchInput);
+        headerSearchInput.addEventListener('keypress', handleArtistsSearchKeypress);
+    }
+    
+    if (backButton) {
+        backButton.addEventListener('click', () => showArtistsSearchState());
+    }
+    
+    if (detailBackButton) {
+        detailBackButton.addEventListener('click', () => showArtistsResultsState());
+    }
+    
+    // Initialize tabs
+    initializeArtistTabs();
+    
+    // Reset to search state
+    showArtistsSearchState();
+    console.log('✅ Artists Page initialized successfully');
+}
+
+/**
+ * Handle search input with debouncing
+ */
+function handleArtistsSearchInput(event) {
+    const query = event.target.value.trim();
+    updateArtistsSearchStatus('searching');
+    
+    // Clear existing timeout
+    if (artistsSearchTimeout) {
+        clearTimeout(artistsSearchTimeout);
+    }
+    
+    // Cancel any active search
+    if (artistsSearchController) {
+        artistsSearchController.abort();
+    }
+    
+    if (query === '') {
+        updateArtistsSearchStatus('default');
+        return;
+    }
+    
+    // Set up new debounced search
+    artistsSearchTimeout = setTimeout(() => {
+        performArtistsSearch(query);
+    }, 1000); // 1 second debounce
+}
+
+/**
+ * Handle header search input (already in results state)
+ */
+function handleArtistsHeaderSearchInput(event) {
+    const query = event.target.value.trim();
+    
+    // Update main search input to match
+    const mainInput = document.getElementById('artists-search-input');
+    if (mainInput) {
+        mainInput.value = query;
+    }
+    
+    // Trigger search with same debouncing logic
+    handleArtistsSearchInput(event);
+}
+
+/**
+ * Handle Enter key press in search inputs
+ */
+function handleArtistsSearchKeypress(event) {
+    if (event.key === 'Enter') {
+        event.preventDefault();
+        const query = event.target.value.trim();
+        
+        if (query && query !== artistsPageState.searchQuery) {
+            // Clear timeout and search immediately
+            if (artistsSearchTimeout) {
+                clearTimeout(artistsSearchTimeout);
+            }
+            performArtistsSearch(query);
+        }
+    }
+}
+
+/**
+ * Perform artist search with API call
+ */
+async function performArtistsSearch(query) {
+    console.log(`🔍 Searching for artists: "${query}"`);
+    
+    // Check cache first
+    if (artistsPageState.cache.searches[query]) {
+        console.log('📦 Using cached search results');
+        displayArtistsResults(query, artistsPageState.cache.searches[query]);
+        return;
+    }
+    
+    // Update status
+    updateArtistsSearchStatus('searching');
+    
+    // Show loading cards immediately if we're in results view
+    if (artistsPageState.currentView === 'results') {
+        showSearchLoadingCards();
+    }
+    
+    try {
+        // Set up abort controller
+        artistsSearchController = new AbortController();
+        
+        const response = await fetch('/api/match/search', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                query: query,
+                context: 'artist'
+            }),
+            signal: artistsSearchController.signal
+        });
+        
+        if (!response.ok) {
+            throw new Error(`Search failed: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        console.log(`✅ Found ${data.results?.length || 0} artists`);
+        
+        // Transform the results to flatten the nested artist data
+        const transformedResults = (data.results || []).map(result => {
+            // Extract artist data from the nested structure
+            const artist = result.artist || result;
+            return {
+                id: artist.id,
+                name: artist.name,
+                image_url: artist.image_url,
+                genres: artist.genres,
+                popularity: artist.popularity,
+                confidence: result.confidence || 0
+            };
+        });
+        
+        console.log('🔧 Transformed results:', transformedResults);
+        
+        // Cache the transformed results
+        artistsPageState.cache.searches[query] = transformedResults;
+        
+        // Display results
+        displayArtistsResults(query, transformedResults);
+        
+    } catch (error) {
+        if (error.name !== 'AbortError') {
+            console.error('❌ Artist search failed:', error);
+            
+            // Provide specific error messages based on the error type
+            let errorMessage = 'Search failed. Please try again.';
+            if (error.message.includes('401') || error.message.includes('authentication')) {
+                errorMessage = 'Spotify not authenticated. Please check your API settings.';
+            } else if (error.message.includes('network') || error.message.includes('fetch')) {
+                errorMessage = 'Network error. Please check your connection.';
+            } else if (error.message.includes('timeout')) {
+                errorMessage = 'Search timed out. Please try again.';
+            }
+            
+            updateArtistsSearchStatus('error', errorMessage);
+        }
+    } finally {
+        artistsSearchController = null;
+    }
+}
+
+/**
+ * Display artist search results
+ */
+function displayArtistsResults(query, results) {
+    console.log(`📊 Displaying ${results.length} artist results`);
+    
+    // Update state
+    artistsPageState.searchQuery = query;
+    artistsPageState.searchResults = results;
+    artistsPageState.currentView = 'results';
+    
+    // Update header search input if different
+    const headerInput = document.getElementById('artists-header-search-input');
+    if (headerInput && headerInput.value !== query) {
+        headerInput.value = query;
+    }
+    
+    // Show results state
+    showArtistsResultsState();
+    
+    // Populate results
+    const container = document.getElementById('artists-cards-container');
+    if (!container) return;
+    
+    if (results.length === 0) {
+        container.innerHTML = `
+            <div style="grid-column: 1 / -1; text-align: center; padding: 60px 20px; color: rgba(255, 255, 255, 0.6);">
+                <div style="font-size: 24px; margin-bottom: 12px;">🔍</div>
+                <div style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">No artists found</div>
+                <div style="font-size: 14px;">Try a different search term</div>
+            </div>
+        `;
+        return;
+    }
+    
+    // Create artist cards
+    container.innerHTML = results.map(result => createArtistCard(result)).join('');
+    
+    // Add event listeners to cards
+    container.querySelectorAll('.artist-card').forEach((card, index) => {
+        card.addEventListener('click', () => selectArtist(results[index]));
+    });
+    
+    // Add mouse wheel horizontal scrolling
+    container.addEventListener('wheel', (event) => {
+        if (event.deltaY !== 0) {
+            event.preventDefault();
+            container.scrollLeft += event.deltaY;
+        }
+    });
+}
+
+/**
+ * Create HTML for an artist card
+ */
+function createArtistCard(artist) {
+    const imageUrl = artist.image_url || '';
+    const genres = artist.genres && artist.genres.length > 0 ? 
+        artist.genres.slice(0, 3).join(', ') : 'Various genres';
+    const popularity = artist.popularity || 0;
+    
+    // Create a fallback gradient if no image is available
+    const backgroundStyle = imageUrl ? 
+        `background-image: url('${imageUrl}');` :
+        `background: linear-gradient(135deg, rgba(29, 185, 84, 0.3) 0%, rgba(24, 156, 71, 0.2) 100%);`;
+    
+    // Format popularity as a percentage for better UX
+    const popularityText = popularity > 0 ? `${popularity}% Popular` : 'Popularity Unknown';
+    
+    return `
+        <div class="artist-card" data-artist-id="${artist.id}">
+            <div class="artist-card-background" style="${backgroundStyle}"></div>
+            <div class="artist-card-overlay"></div>
+            <div class="artist-card-content">
+                <div class="artist-card-name">${escapeHtml(artist.name)}</div>
+                <div class="artist-card-genres">${escapeHtml(genres)}</div>
+                <div class="artist-card-popularity">
+                    <span class="popularity-icon">🔥</span>
+                    <span>${popularityText}</span>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * Select an artist and show their discography
+ */
+async function selectArtist(artist) {
+    console.log(`🎤 Selected artist: ${artist.name}`);
+    
+    // Update state
+    artistsPageState.selectedArtist = artist;
+    artistsPageState.currentView = 'detail';
+    
+    // Show detail state
+    showArtistDetailState();
+    
+    // Update artist info in header
+    updateArtistDetailHeader(artist);
+    
+    // Load discography
+    await loadArtistDiscography(artist.id);
+}
+
+/**
+ * Load artist's discography from Spotify
+ */
+async function loadArtistDiscography(artistId) {
+    console.log(`💿 Loading discography for artist: ${artistId}`);
+    
+    // Check cache first
+    if (artistsPageState.cache.discography[artistId]) {
+        console.log('📦 Using cached discography');
+        displayArtistDiscography(artistsPageState.cache.discography[artistId]);
+        return;
+    }
+    
+    try {
+        // Show loading states
+        showDiscographyLoading();
+        
+        // Call the real API endpoint
+        const response = await fetch(`/api/artist/${artistId}/discography`);
+        
+        if (!response.ok) {
+            if (response.status === 401) {
+                throw new Error('Spotify not authenticated. Please check your API settings.');
+            }
+            throw new Error(`Failed to load discography: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        if (data.error) {
+            throw new Error(data.error);
+        }
+        
+        const discography = {
+            albums: data.albums || [],
+            singles: data.singles || []
+        };
+        
+        console.log(`✅ Loaded ${discography.albums.length} albums and ${discography.singles.length} singles`);
+        
+        // Cache the results
+        artistsPageState.cache.discography[artistId] = discography;
+        artistsPageState.artistDiscography = discography;
+        
+        // Display results
+        displayArtistDiscography(discography);
+        
+    } catch (error) {
+        console.error('❌ Failed to load discography:', error);
+        showDiscographyError(error.message);
+    }
+}
+
+/**
+ * Display artist's discography in tabs
+ */
+function displayArtistDiscography(discography) {
+    console.log(`📀 Displaying discography: ${discography.albums?.length || 0} albums, ${discography.singles?.length || 0} singles`);
+    
+    // Populate albums
+    const albumsContainer = document.getElementById('album-cards-container');
+    if (albumsContainer) {
+        if (discography.albums?.length > 0) {
+            albumsContainer.innerHTML = discography.albums.map(album => createAlbumCard(album)).join('');
+        } else {
+            albumsContainer.innerHTML = `
+                <div style="grid-column: 1 / -1; text-align: center; padding: 40px 20px; color: rgba(255, 255, 255, 0.6);">
+                    <div style="font-size: 18px; margin-bottom: 8px;">💿</div>
+                    <div style="font-size: 14px;">No albums found</div>
+                </div>
+            `;
+        }
+    }
+    
+    // Populate singles
+    const singlesContainer = document.getElementById('singles-cards-container');
+    if (singlesContainer) {
+        if (discography.singles?.length > 0) {
+            singlesContainer.innerHTML = discography.singles.map(single => createAlbumCard(single)).join('');
+        } else {
+            singlesContainer.innerHTML = `
+                <div style="grid-column: 1 / -1; text-align: center; padding: 40px 20px; color: rgba(255, 255, 255, 0.6);">
+                    <div style="font-size: 18px; margin-bottom: 8px;">🎵</div>
+                    <div style="font-size: 14px;">No singles or EPs found</div>
+                </div>
+            `;
+        }
+    }
+}
+
+/**
+ * Create HTML for an album/single card
+ */
+function createAlbumCard(album) {
+    const imageUrl = album.image_url || '';
+    const year = album.release_date ? new Date(album.release_date).getFullYear() : '';
+    const type = album.album_type === 'album' ? 'Album' : 
+                 album.album_type === 'single' ? 'Single' : 'EP';
+    
+    // Create a fallback gradient if no image is available
+    const backgroundStyle = imageUrl ? 
+        `background-image: url('${imageUrl}');` :
+        `background: linear-gradient(135deg, rgba(29, 185, 84, 0.2) 0%, rgba(24, 156, 71, 0.1) 100%);`;
+    
+    return `
+        <div class="album-card" data-album-id="${album.id}">
+            <div class="album-card-image" style="${backgroundStyle}"></div>
+            <div class="album-card-content">
+                <div class="album-card-name" title="${escapeHtml(album.name)}">${escapeHtml(album.name)}</div>
+                <div class="album-card-year">${year || 'Unknown'}</div>
+                <div class="album-card-type">${type}</div>
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * Initialize artist detail tabs
+ */
+function initializeArtistTabs() {
+    const tabButtons = document.querySelectorAll('.artist-tab');
+    const tabContents = document.querySelectorAll('.tab-content');
+    
+    tabButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            const tabName = button.getAttribute('data-tab');
+            
+            // Update button states
+            tabButtons.forEach(btn => btn.classList.remove('active'));
+            button.classList.add('active');
+            
+            // Update content states
+            tabContents.forEach(content => {
+                content.classList.remove('active');
+                if (content.id === `${tabName}-content`) {
+                    content.classList.add('active');
+                }
+            });
+            
+            console.log(`🔄 Switched to ${tabName} tab`);
+        });
+    });
+}
+
+/**
+ * State management functions
+ */
+function showArtistsSearchState() {
+    console.log('🔄 Showing search state');
+    
+    const searchState = document.getElementById('artists-search-state');
+    const resultsState = document.getElementById('artists-results-state');
+    const detailState = document.getElementById('artist-detail-state');
+    
+    if (searchState) {
+        searchState.classList.remove('hidden', 'fade-out');
+    }
+    if (resultsState) {
+        resultsState.classList.add('hidden');
+        resultsState.classList.remove('show');
+    }
+    if (detailState) {
+        detailState.classList.add('hidden');
+        detailState.classList.remove('show');
+    }
+    
+    artistsPageState.currentView = 'search';
+    updateArtistsSearchStatus('default');
+}
+
+function showArtistsResultsState() {
+    console.log('🔄 Showing results state');
+    
+    const searchState = document.getElementById('artists-search-state');
+    const resultsState = document.getElementById('artists-results-state');
+    const detailState = document.getElementById('artist-detail-state');
+    
+    if (searchState) {
+        searchState.classList.add('fade-out');
+        setTimeout(() => searchState.classList.add('hidden'), 200);
+    }
+    if (resultsState) {
+        resultsState.classList.remove('hidden');
+        setTimeout(() => resultsState.classList.add('show'), 50);
+    }
+    if (detailState) {
+        detailState.classList.add('hidden');
+        detailState.classList.remove('show');
+    }
+    
+    artistsPageState.currentView = 'results';
+}
+
+function showArtistDetailState() {
+    console.log('🔄 Showing detail state');
+    
+    const searchState = document.getElementById('artists-search-state');
+    const resultsState = document.getElementById('artists-results-state');
+    const detailState = document.getElementById('artist-detail-state');
+    
+    if (searchState) {
+        searchState.classList.add('hidden', 'fade-out');
+    }
+    if (resultsState) {
+        resultsState.classList.add('hidden');
+        resultsState.classList.remove('show');
+    }
+    if (detailState) {
+        detailState.classList.remove('hidden');
+        setTimeout(() => detailState.classList.add('show'), 50);
+    }
+    
+    artistsPageState.currentView = 'detail';
+}
+
+/**
+ * Update search status text and styling
+ */
+function updateArtistsSearchStatus(status, message = null) {
+    const statusElement = document.getElementById('artists-search-status');
+    if (!statusElement) return;
+    
+    // Clear all status classes
+    statusElement.classList.remove('searching', 'error');
+    
+    switch (status) {
+        case 'default':
+            statusElement.textContent = 'Start typing to search for artists';
+            break;
+        case 'searching':
+            statusElement.classList.add('searching');
+            statusElement.textContent = 'Searching for artists...';
+            break;
+        case 'error':
+            statusElement.classList.add('error');
+            statusElement.innerHTML = `
+                <div style="margin-bottom: 8px;">${message || 'Search failed. Please try again.'}</div>
+                <button onclick="retryLastSearch()" style="
+                    background: rgba(29, 185, 84, 0.15);
+                    color: rgba(29, 185, 84, 0.9);
+                    border: 1px solid rgba(29, 185, 84, 0.3);
+                    border-radius: 8px;
+                    padding: 4px 12px;
+                    font-size: 12px;
+                    cursor: pointer;
+                    font-family: inherit;
+                " onmouseover="this.style.background='rgba(29, 185, 84, 0.25)'" 
+                onmouseout="this.style.background='rgba(29, 185, 84, 0.15)'">
+                    🔄 Retry Search
+                </button>
+            `;
+            break;
+    }
+}
+
+/**
+ * Retry the last search query
+ */
+function retryLastSearch() {
+    const searchInput = document.getElementById('artists-search-input');
+    const headerSearchInput = document.getElementById('artists-header-search-input');
+    
+    // Get the last search query from either input
+    const query = searchInput?.value?.trim() || headerSearchInput?.value?.trim() || artistsPageState.searchQuery;
+    
+    if (query) {
+        console.log(`🔄 Retrying search for: "${query}"`);
+        performArtistsSearch(query);
+    }
+}
+
+/**
+ * Update artist detail header with artist info
+ */
+function updateArtistDetailHeader(artist) {
+    const imageElement = document.getElementById('artist-detail-image');
+    const nameElement = document.getElementById('artist-detail-name');
+    const genresElement = document.getElementById('artist-detail-genres');
+    
+    if (imageElement && artist.image_url) {
+        imageElement.style.backgroundImage = `url('${artist.image_url}')`;
+    }
+    
+    if (nameElement) {
+        nameElement.textContent = artist.name;
+    }
+    
+    if (genresElement) {
+        const genres = artist.genres?.slice(0, 4).join(' • ') || 'Various genres';
+        genresElement.textContent = genres;
+    }
+}
+
+/**
+ * Show loading state for discography
+ */
+function showDiscographyLoading() {
+    const albumsContainer = document.getElementById('album-cards-container');
+    const singlesContainer = document.getElementById('singles-cards-container');
+    
+    const loadingHtml = `
+        <div class="album-card loading">
+            <div class="album-card-image"></div>
+            <div class="album-card-content">
+                <div class="album-card-name">Loading...</div>
+                <div class="album-card-year">-</div>
+                <div class="album-card-type">-</div>
+            </div>
+        </div>
+    `.repeat(4);
+    
+    if (albumsContainer) albumsContainer.innerHTML = loadingHtml;
+    if (singlesContainer) singlesContainer.innerHTML = loadingHtml;
+}
+
+/**
+ * Show error state for discography
+ */
+function showDiscographyError(message = 'Failed to load discography') {
+    const albumsContainer = document.getElementById('album-cards-container');
+    const singlesContainer = document.getElementById('singles-cards-container');
+    
+    const errorHtml = `
+        <div style="grid-column: 1 / -1; text-align: center; padding: 40px 20px; color: rgba(255, 65, 54, 0.8);">
+            <div style="font-size: 18px; margin-bottom: 8px;">⚠️</div>
+            <div style="font-size: 14px; font-weight: 600; margin-bottom: 8px;">Failed to load discography</div>
+            <div style="font-size: 12px; color: rgba(255, 65, 54, 0.6); max-width: 300px; margin: 0 auto;">${escapeHtml(message)}</div>
+        </div>
+    `;
+    
+    if (albumsContainer) albumsContainer.innerHTML = errorHtml;
+    if (singlesContainer) singlesContainer.innerHTML = errorHtml;
+}
+
+/**
+ * Show loading cards while searching
+ */
+function showSearchLoadingCards() {
+    const container = document.getElementById('artists-cards-container');
+    if (!container) return;
+    
+    const loadingCardHtml = `
+        <div class="artist-card loading">
+            <div class="artist-card-background"></div>
+            <div class="artist-card-overlay"></div>
+            <div class="artist-card-content">
+                <div class="artist-card-name">Loading...</div>
+                <div class="artist-card-genres">Fetching data...</div>
+                <div class="artist-card-popularity">
+                    <span class="popularity-icon">⏳</span>
+                    <span>Loading...</span>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Show 6 loading cards
+    container.innerHTML = loadingCardHtml.repeat(6);
+}
+
+/**
+ * Utility function to escape HTML
+ */
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
 
 

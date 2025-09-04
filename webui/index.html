@@ -528,12 +528,94 @@
 
             <!-- Artists Page -->
             <div class="page" id="artists-page">
-                <div class="page-header">
-                    <h2>Artists</h2>
+                <!-- Initial Search State -->
+                <div class="artists-search-state" id="artists-search-state">
+                    <div class="artists-search-container">
+                        <div class="artists-welcome-section">
+                            <h2 class="artists-welcome-title">🎵 Discover Artists</h2>
+                            <p class="artists-welcome-subtitle">Search for your favorite artists and explore their complete discography</p>
+                        </div>
+                        
+                        <div class="artists-search-input-container">
+                            <input type="text" 
+                                   id="artists-search-input" 
+                                   class="artists-search-input" 
+                                   placeholder="Search for an artist...">
+                            <div class="artists-search-icon">🔍</div>
+                        </div>
+                        
+                        <div class="artists-search-status" id="artists-search-status">
+                            Start typing to search for artists
+                        </div>
+                    </div>
                 </div>
-                <div class="artists-content">
-                    <div class="artists-grid" id="artists-grid">
-                        <!-- Artists will be populated here -->
+                
+                <!-- Search Results State -->
+                <div class="artists-results-state hidden" id="artists-results-state">
+                    <div class="artists-results-header">
+                        <button class="artists-back-button" id="artists-back-button">
+                            <span class="back-icon">←</span>
+                            <span>Back to Search</span>
+                        </button>
+                        
+                        <div class="artists-search-header">
+                            <input type="text" 
+                                   id="artists-header-search-input" 
+                                   class="artists-header-search-input" 
+                                   placeholder="Search for an artist...">
+                        </div>
+                    </div>
+                    
+                    <div class="artists-results-content">
+                        <div class="artists-results-title">Search Results</div>
+                        <div class="artists-cards-container" id="artists-cards-container">
+                            <!-- Artist cards will be dynamically populated here -->
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Artist Detail State -->
+                <div class="artist-detail-state hidden" id="artist-detail-state">
+                    <div class="artist-detail-header">
+                        <button class="artist-detail-back-button" id="artist-detail-back-button">
+                            <span class="back-icon">←</span>
+                            <span>Back to Results</span>
+                        </button>
+                        
+                        <div class="artist-detail-info">
+                            <div class="artist-detail-image" id="artist-detail-image"></div>
+                            <div class="artist-detail-text">
+                                <h2 class="artist-detail-name" id="artist-detail-name">Artist Name</h2>
+                                <p class="artist-detail-genres" id="artist-detail-genres">Genres</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="artist-detail-content">
+                        <div class="artist-detail-tabs">
+                            <button class="artist-tab active" data-tab="albums" id="albums-tab">
+                                <span class="tab-icon">💿</span>
+                                <span>Albums</span>
+                            </button>
+                            <button class="artist-tab" data-tab="singles" id="singles-tab">
+                                <span class="tab-icon">🎵</span>
+                                <span>Singles & EPs</span>
+                            </button>
+                        </div>
+                        
+                        <div class="artist-detail-discography">
+                            <div class="tab-content active" id="albums-content">
+                                <div class="album-cards-container" id="album-cards-container">
+                                    <!-- Album cards will be populated here -->
+                                </div>
+                            </div>
+                            
+                            <div class="tab-content" id="singles-content">
+                                <div class="singles-cards-container" id="singles-cards-container">
+                                    <!-- Singles cards will be populated here -->
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>

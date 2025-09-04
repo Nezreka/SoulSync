@@ -5629,3 +5629,757 @@ body {
         0 2px 8px rgba(0, 0, 0, 0.4),
         inset 0 1px 0 rgba(255, 255, 255, 0.15);
 }
+
+/* ============================================================================ */
+/* ARTISTS PAGE STYLES - ELEGANT GLASSMORPHIC DESIGN                          */
+/* ============================================================================ */
+
+/* Artists Search State - Initial centered interface */
+.artists-search-state {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 70vh;
+    padding: 40px 20px;
+    opacity: 1;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.artists-search-state.fade-out {
+    opacity: 0;
+    transform: translateY(-20px);
+}
+
+.artists-search-container {
+    max-width: 600px;
+    width: 100%;
+    text-align: center;
+}
+
+.artists-welcome-section {
+    margin-bottom: 40px;
+}
+
+.artists-welcome-title {
+    font-size: 36px;
+    font-weight: 700;
+    color: #ffffff;
+    margin-bottom: 12px;
+    font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.artists-welcome-subtitle {
+    font-size: 16px;
+    color: rgba(255, 255, 255, 0.7);
+    font-weight: 400;
+    line-height: 1.5;
+    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.artists-search-input-container {
+    position: relative;
+    margin-bottom: 20px;
+}
+
+.artists-search-input {
+    width: 100%;
+    padding: 18px 24px 18px 60px;
+    font-size: 16px;
+    font-weight: 500;
+    color: #ffffff;
+    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
+    
+    /* Premium glassmorphic foundation */
+    background: linear-gradient(135deg, 
+        rgba(26, 26, 26, 0.9) 0%, 
+        rgba(18, 18, 18, 0.95) 100%);
+    backdrop-filter: blur(12px) saturate(1.1);
+    border-radius: 24px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-top: 1px solid rgba(255, 255, 255, 0.15);
+    
+    /* Elegant shadow system */
+    box-shadow: 
+        0 8px 32px rgba(0, 0, 0, 0.4),
+        0 0 0 1px rgba(29, 185, 84, 0.05),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.1);
+    
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    outline: none;
+}
+
+.artists-search-input:focus {
+    background: linear-gradient(135deg, 
+        rgba(30, 30, 30, 0.95) 0%, 
+        rgba(22, 22, 22, 1.0) 100%);
+    border-color: rgba(29, 185, 84, 0.3);
+    border-top-color: rgba(29, 185, 84, 0.4);
+    
+    box-shadow: 
+        0 12px 40px rgba(0, 0, 0, 0.5),
+        0 0 0 1px rgba(29, 185, 84, 0.15),
+        0 0 20px rgba(29, 185, 84, 0.1),
+        inset 0 1px 0 rgba(255, 255, 255, 0.12),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.15);
+    
+    transform: translateY(-1px);
+}
+
+.artists-search-input::placeholder {
+    color: rgba(255, 255, 255, 0.5);
+    font-weight: 400;
+}
+
+.artists-search-icon {
+    position: absolute;
+    left: 22px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 18px;
+    color: rgba(255, 255, 255, 0.6);
+    pointer-events: none;
+    transition: color 0.3s ease;
+}
+
+.artists-search-input:focus + .artists-search-icon {
+    color: rgba(29, 185, 84, 0.8);
+}
+
+.artists-search-status {
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.6);
+    font-weight: 400;
+    min-height: 20px;
+    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
+    transition: all 0.3s ease;
+}
+
+.artists-search-status.searching {
+    color: rgba(29, 185, 84, 0.8);
+}
+
+.artists-search-status.error {
+    color: rgba(255, 65, 54, 0.8);
+}
+
+/* Artists Results State */
+.artists-results-state {
+    opacity: 0;
+    transform: translateY(20px);
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    padding: 20px;
+}
+
+.artists-results-state.show {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.artists-results-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 30px;
+    gap: 20px;
+}
+
+.artists-back-button {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 20px;
+    font-size: 14px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.8);
+    
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 16px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    outline: none;
+    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.artists-back-button:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #ffffff;
+    transform: translateY(-1px);
+}
+
+.back-icon {
+    font-size: 16px;
+}
+
+.artists-search-header {
+    flex: 1;
+    max-width: 400px;
+}
+
+.artists-header-search-input {
+    width: 100%;
+    padding: 12px 20px;
+    font-size: 14px;
+    font-weight: 500;
+    color: #ffffff;
+    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
+    
+    background: rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 16px;
+    
+    transition: all 0.2s ease;
+    outline: none;
+}
+
+.artists-header-search-input:focus {
+    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba(29, 185, 84, 0.3);
+    box-shadow: 0 0 0 3px rgba(29, 185, 84, 0.1);
+}
+
+.artists-header-search-input::placeholder {
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.artists-results-content {
+    margin-bottom: 40px;
+}
+
+.artists-results-title {
+    font-size: 20px;
+    font-weight: 600;
+    color: #ffffff;
+    margin-bottom: 20px;
+    font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.artists-cards-container {
+    display: flex;
+    gap: 20px;
+    overflow-x: auto;
+    overflow-y: visible;
+    padding: 20px;
+    scroll-behavior: smooth;
+    
+    /* Custom scrollbar styling */
+    scrollbar-width: thin;
+    scrollbar-color: rgba(29, 185, 84, 0.6) rgba(255, 255, 255, 0.1);
+}
+
+.artists-cards-container::-webkit-scrollbar {
+    height: 8px;
+}
+
+.artists-cards-container::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+}
+
+.artists-cards-container::-webkit-scrollbar-thumb {
+    background: rgba(29, 185, 84, 0.6);
+    border-radius: 4px;
+    transition: background 0.3s ease;
+}
+
+.artists-cards-container::-webkit-scrollbar-thumb:hover {
+    background: rgba(29, 185, 84, 0.8);
+}
+
+/* Artist Card Styles with Background Images */
+.artist-card {
+    position: relative;
+    width: 280px;
+    height: 350px;
+    flex-shrink: 0;
+    border-radius: 20px;
+    overflow: hidden;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    
+    /* Premium glassmorphic foundation */
+    background: linear-gradient(135deg, 
+        rgba(26, 26, 26, 0.95) 0%, 
+        rgba(18, 18, 18, 0.98) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+    
+    /* Elegant shadow system */
+    box-shadow: 
+        0 10px 30px rgba(0, 0, 0, 0.5),
+        0 0 0 1px rgba(29, 185, 84, 0.05),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.artist-card:hover {
+    transform: translateY(-8px) scale(1.02);
+    z-index: 10;
+    
+    box-shadow: 
+        0 20px 50px rgba(0, 0, 0, 0.6),
+        0 0 0 1px rgba(29, 185, 84, 0.15),
+        0 0 30px rgba(29, 185, 84, 0.1),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.artist-card-background {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    opacity: 0.6;
+    transition: all 0.3s ease;
+}
+
+.artist-card:hover .artist-card-background {
+    opacity: 0.8;
+    transform: scale(1.05);
+}
+
+.artist-card-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(
+        0deg,
+        rgba(0, 0, 0, 0.9) 0%,
+        rgba(0, 0, 0, 0.3) 40%,
+        rgba(0, 0, 0, 0.1) 70%,
+        transparent 100%
+    );
+}
+
+.artist-card-content {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 30px 24px;
+    z-index: 2;
+}
+
+.artist-card-name {
+    font-size: 24px;
+    font-weight: 700;
+    color: #ffffff;
+    margin-bottom: 8px;
+    line-height: 1.2;
+    font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.artist-card-genres {
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.8);
+    font-weight: 500;
+    margin-bottom: 12px;
+    line-height: 1.3;
+    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.artist-card-popularity {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: rgba(29, 185, 84, 0.9);
+    font-weight: 600;
+    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.popularity-icon {
+    font-size: 12px;
+}
+
+/* Artist Card Animation States */
+.artist-card.loading {
+    animation: artistCardPulse 2s ease-in-out infinite;
+    pointer-events: none;
+}
+
+.artist-card.loading .artist-card-background {
+    background: linear-gradient(
+        90deg,
+        rgba(26, 26, 26, 0.8) 0%,
+        rgba(40, 40, 40, 0.8) 50%,
+        rgba(26, 26, 26, 0.8) 100%
+    ) !important;
+    background-size: 200% 100%;
+    animation: artistCardShimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes artistCardPulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.7;
+    }
+}
+
+@keyframes artistCardShimmer {
+    0% {
+        background-position: -200% 0;
+    }
+    100% {
+        background-position: 200% 0;
+    }
+}
+
+/* Search loading indicator */
+.artists-search-status.searching::after {
+    content: '';
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    margin-left: 8px;
+    border: 2px solid rgba(29, 185, 84, 0.3);
+    border-radius: 50%;
+    border-top-color: rgba(29, 185, 84, 0.8);
+    animation: searchSpinner 0.8s ease-in-out infinite;
+}
+
+@keyframes searchSpinner {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .artists-cards-container {
+        gap: 16px;
+        padding: 15px 0 25px 0;
+    }
+    
+    .artist-card {
+        width: 250px;
+        height: 300px;
+    }
+    
+    .artist-card-name {
+        font-size: 20px;
+    }
+}
+
+/* Artist Detail State */
+.artist-detail-state {
+    opacity: 0;
+    transform: translateY(20px);
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    padding: 20px;
+}
+
+.artist-detail-state.show {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.artist-detail-header {
+    display: flex;
+    align-items: center;
+    gap: 30px;
+    margin-bottom: 40px;
+    padding-bottom: 30px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.artist-detail-back-button {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 20px;
+    font-size: 14px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.8);
+    
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 16px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    outline: none;
+    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.artist-detail-back-button:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #ffffff;
+    transform: translateY(-1px);
+}
+
+.artist-detail-info {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    flex: 1;
+}
+
+.artist-detail-image {
+    width: 80px;
+    height: 80px;
+    border-radius: 40px;
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    border: 3px solid rgba(29, 185, 84, 0.3);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    
+    /* Fallback gradient if no image */
+    background-image: linear-gradient(135deg, 
+        rgba(29, 185, 84, 0.3) 0%, 
+        rgba(24, 156, 71, 0.2) 100%);
+}
+
+.artist-detail-name {
+    font-size: 32px;
+    font-weight: 700;
+    color: #ffffff;
+    margin-bottom: 8px;
+    line-height: 1.2;
+    font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.artist-detail-genres {
+    font-size: 16px;
+    color: rgba(255, 255, 255, 0.7);
+    font-weight: 500;
+    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.artist-detail-content {
+    margin-bottom: 40px;
+}
+
+.artist-detail-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 30px;
+    padding: 6px;
+    
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.artist-tab {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 24px;
+    font-size: 14px;
+    font-weight: 600;
+    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
+    
+    background: transparent;
+    color: rgba(255, 255, 255, 0.6);
+    border: none;
+    border-radius: 16px;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    outline: none;
+}
+
+.artist-tab.active {
+    background: linear-gradient(135deg, 
+        rgba(29, 185, 84, 0.2) 0%, 
+        rgba(24, 156, 71, 0.15) 100%);
+    color: rgba(29, 185, 84, 1.0);
+    box-shadow: 
+        0 4px 12px rgba(29, 185, 84, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.artist-tab:not(.active):hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.8);
+    transform: translateY(-1px);
+}
+
+.tab-icon {
+    font-size: 16px;
+}
+
+.artist-detail-discography {
+    min-height: 400px;
+}
+
+.tab-content {
+    display: none;
+    opacity: 0;
+    transform: translateY(10px);
+    transition: all 0.3s ease;
+}
+
+.tab-content.active {
+    display: block;
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.album-cards-container,
+.singles-cards-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 24px;
+}
+
+/* Album Card Styles */
+.album-card {
+    position: relative;
+    background: linear-gradient(135deg, 
+        rgba(26, 26, 26, 0.95) 0%, 
+        rgba(18, 18, 18, 0.98) 100%);
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    overflow: hidden;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    
+    box-shadow: 
+        0 8px 24px rgba(0, 0, 0, 0.4),
+        0 0 0 1px rgba(29, 185, 84, 0.05),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.album-card:hover {
+    transform: translateY(-6px) scale(1.03);
+    
+    box-shadow: 
+        0 16px 40px rgba(0, 0, 0, 0.5),
+        0 0 0 1px rgba(29, 185, 84, 0.15),
+        0 0 20px rgba(29, 185, 84, 0.08),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.album-card-image {
+    width: 100%;
+    aspect-ratio: 1;
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    position: relative;
+    
+    /* Fallback gradient if no image */
+    background-image: linear-gradient(135deg, 
+        rgba(29, 185, 84, 0.2) 0%, 
+        rgba(24, 156, 71, 0.1) 100%);
+}
+
+.album-card-image::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(
+        180deg,
+        transparent 0%,
+        transparent 60%,
+        rgba(0, 0, 0, 0.3) 100%
+    );
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.album-card:hover .album-card-image::after {
+    opacity: 1;
+}
+
+.album-card-content {
+    padding: 20px;
+}
+
+.album-card-name {
+    font-size: 16px;
+    font-weight: 700;
+    color: #ffffff;
+    margin-bottom: 6px;
+    line-height: 1.3;
+    font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
+    
+    /* Text overflow handling */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.album-card-year {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.6);
+    font-weight: 500;
+    margin-bottom: 8px;
+    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.album-card-type {
+    display: inline-block;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    
+    background: rgba(29, 185, 84, 0.15);
+    color: rgba(29, 185, 84, 0.9);
+    border-radius: 8px;
+    border: 1px solid rgba(29, 185, 84, 0.2);
+    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* Loading states for album cards */
+.album-card.loading .album-card-image {
+    background: linear-gradient(
+        90deg,
+        rgba(26, 26, 26, 0.8) 0%,
+        rgba(40, 40, 40, 0.8) 50%,
+        rgba(26, 26, 26, 0.8) 100%
+    );
+    background-size: 200% 100%;
+    animation: albumCardShimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes albumCardShimmer {
+    0% {
+        background-position: -200% 0;
+    }
+    100% {
+        background-position: 200% 0;
+    }
+}
+
+/* Responsive adjustments for detail view */
+@media (max-width: 768px) {
+    .artist-detail-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 20px;
+    }
+    
+    .artist-detail-info {
+        width: 100%;
+    }
+    
+    .artist-detail-name {
+        font-size: 24px;
+    }
+    
+    .album-cards-container,
+    .singles-cards-container {
+        grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+        gap: 16px;
+    }
+    
+    .artist-detail-tabs {
+        overflow-x: auto;
+        padding-bottom: 5px;
+    }
+}
