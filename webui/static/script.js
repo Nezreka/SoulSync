@@ -3632,9 +3632,15 @@ function startModalDownloadPolling(playlistId) {
         } catch (error) {
             console.error(`❌ [Polling] Error for ${playlistId} (batch: ${process.batchId}):`, error);
             
-            // Don't stop polling for temporary errors, but stop if the batch is no longer valid
-            if (error.message.includes('404') || error.message.includes('Batch not found')) {
+            // Check for 404 or connection errors that indicate batch no longer exists
+            const is404Error = error.message.includes('404') || 
+                              error.message.includes('Batch not found') ||
+                              (error instanceof TypeError && error.message.includes('Failed to fetch'));
+            
+            if (is404Error) {
                 console.warn(`🛑 [Polling] Stopping polling for ${playlistId} - batch no longer exists`);
+                
+                // Immediately clear polling to prevent further requests
                 clearInterval(process.poller);
                 process.poller = null;
                 
@@ -3644,11 +3650,14 @@ function startModalDownloadPolling(playlistId) {
                     updatePlaylistCardUI(playlistId);
                 }
                 
-                // For artist downloads, ensure cleanup happens
+                // For artist downloads, ensure proper cleanup happens
                 if (playlistId.startsWith('artist_album_')) {
                     console.log(`🧹 Cleaning up orphaned artist download: ${playlistId}`);
-                    // The toast deduplication will prevent spam here
+                    // Trigger artist download status refresh to update UI
+                    updateArtistDownloadsSection();
                 }
+                
+                return; // Exit the polling function entirely
             }
         }
     }, 500);
@@ -9669,8 +9678,7 @@ async function checkDiscographyCompletion(artistId, discography) {
     console.log(`🔍 Starting streaming completion check for artist: ${artistId}`);
     
     try {
-        // Use EventSource for Server-Sent Events streaming
-        const eventSource = new EventSource('data:text/plain,'); // Dummy EventSource
+        // Use fetch with streaming response (Server-Sent Events)
         
         // Use fetch with streaming response
         const response = await fetch(`/api/artist/${artistId}/completion-stream`, {
