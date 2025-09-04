@@ -65,6 +65,10 @@ let artistsPageState = {
     },
     isInitialized: false // Track if the page has been initialized
 };
+
+// --- Artist Downloads Management State ---
+let artistDownloadBubbles = {}; // Track artist download bubbles: artistId -> { artist, downloads: [], element }
+let artistDownloadModalOpen = false; // Track if artist download modal is open
 let artistsSearchTimeout = null;
 let artistsSearchController = null;
 
@@ -3115,6 +3119,11 @@ async function closeDownloadMissingModal(playlistId) {
             console.log('📱 [Modal State] Cleared wishlist modal state on full close');
         }
         
+        // Clean up artist download if this is an artist album playlist
+        if (playlistId.startsWith('artist_album_')) {
+            cleanupArtistDownload(playlistId);
+        }
+        
         cleanupDownloadProcess(playlistId);
     }
 }
@@ -5253,6 +5262,11 @@ window.handleWishlistButtonClick = handleWishlistButtonClick;
 // Helper functions
 window.escapeHtml = escapeHtml;
 window.formatArtists = formatArtists;
+
+// Artist Download Management functions
+window.closeArtistDownloadModal = closeArtistDownloadModal;
+window.openArtistDownloadProcess = openArtistDownloadProcess;
+window.bulkCompleteArtistDownloads = bulkCompleteArtistDownloads;
 
 
 // APPEND THIS JAVASCRIPT SNIPPET (B)
@@ -9523,7 +9537,7 @@ function displayArtistDiscography(discography) {
         if (discography.albums?.length > 0) {
             albumsContainer.innerHTML = discography.albums.map(album => createAlbumCard(album)).join('');
             
-            // Add dynamic glow effects to album cards
+            // Add dynamic glow effects and click handlers to album cards
             albumsContainer.querySelectorAll('.album-card').forEach((card, index) => {
                 const album = discography.albums[index];
                 if (album.image_url) {
@@ -9531,6 +9545,10 @@ function displayArtistDiscography(discography) {
                         applyDynamicGlow(card, colors);
                     });
                 }
+                
+                // Add click handler for download missing tracks modal
+                card.addEventListener('click', () => handleArtistAlbumClick(album, 'albums'));
+                card.style.cursor = 'pointer';
             });
         } else {
             albumsContainer.innerHTML = `
@@ -9548,7 +9566,7 @@ function displayArtistDiscography(discography) {
         if (discography.singles?.length > 0) {
             singlesContainer.innerHTML = discography.singles.map(single => createAlbumCard(single)).join('');
             
-            // Add dynamic glow effects to singles cards
+            // Add dynamic glow effects and click handlers to singles cards
             singlesContainer.querySelectorAll('.album-card').forEach((card, index) => {
                 const single = discography.singles[index];
                 if (single.image_url) {
@@ -9556,6 +9574,10 @@ function displayArtistDiscography(discography) {
                         applyDynamicGlow(card, colors);
                     });
                 }
+                
+                // Add click handler for download missing tracks modal
+                card.addEventListener('click', () => handleArtistAlbumClick(single, 'singles'));
+                card.style.cursor = 'pointer';
             });
         } else {
             singlesContainer.innerHTML = `
@@ -9889,6 +9911,9 @@ function showArtistsSearchState() {
     
     artistsPageState.currentView = 'search';
     updateArtistsSearchStatus('default');
+    
+    // Show artist downloads section if there are active downloads
+    showArtistDownloadsSection();
 }
 
 function showArtistsResultsState() {
@@ -10094,6 +10119,615 @@ function showSearchLoadingCards() {
     
     // Show 6 loading cards
     container.innerHTML = loadingCardHtml.repeat(6);
+}
+
+// ===============================
+// ARTIST ALBUM DOWNLOAD MISSING TRACKS INTEGRATION
+// ===============================
+
+/**
+ * Handle album/single/EP click to open download missing tracks modal
+ */
+async function handleArtistAlbumClick(album, albumType) {
+    console.log(`🎵 Album clicked: ${album.name} (${album.album_type}) from artist: ${artistsPageState.selectedArtist?.name}`);
+    
+    if (!artistsPageState.selectedArtist) {
+        console.error('❌ No selected artist found');
+        showToast('Error: No artist selected', 'error');
+        return;
+    }
+    
+    try {
+        // Create virtual playlist ID
+        const virtualPlaylistId = `artist_album_${artistsPageState.selectedArtist.id}_${album.id}`;
+        
+        // Check if modal already exists and show it
+        if (activeDownloadProcesses[virtualPlaylistId]) {
+            console.log(`📱 Reopening existing modal for ${album.name}`);
+            const process = activeDownloadProcesses[virtualPlaylistId];
+            if (process.modalElement) {
+                if (process.status === 'complete') {
+                    showToast('Showing previous results. Close this modal to start a new analysis.', 'info');
+                }
+                process.modalElement.style.display = 'flex';
+                return;
+            }
+        }
+        
+        // Create virtual playlist and open modal
+        await createArtistAlbumVirtualPlaylist(album, albumType);
+        
+    } catch (error) {
+        console.error('❌ Error opening download missing tracks modal:', error);
+        showToast(`Error opening download modal: ${error.message}`, 'error');
+    }
+}
+
+/**
+ * Create virtual playlist for artist album and open download missing tracks modal
+ */
+async function createArtistAlbumVirtualPlaylist(album, albumType) {
+    const artist = artistsPageState.selectedArtist;
+    const virtualPlaylistId = `artist_album_${artist.id}_${album.id}`;
+    
+    console.log(`🎵 Creating virtual playlist for: ${artist.name} - ${album.name}`);
+    
+    try {
+        // Show loading toast
+        showToast(`Loading tracks for ${album.name}...`, 'info');
+        
+        // Fetch album tracks from backend
+        const response = await fetch(`/api/artist/${artist.id}/album/${album.id}/tracks`);
+        
+        if (!response.ok) {
+            if (response.status === 401) {
+                throw new Error('Spotify not authenticated. Please check your API settings.');
+            }
+            throw new Error(`Failed to load album tracks: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        if (!data.success || !data.tracks || data.tracks.length === 0) {
+            throw new Error('No tracks found for this album');
+        }
+        
+        console.log(`✅ Loaded ${data.tracks.length} tracks for ${album.name}`);
+        
+        // Format playlist name with artist and album info
+        const playlistName = `[${artist.name}] ${album.name}`;
+        
+        // Open download missing tracks modal with formatted tracks
+        await openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlistName, data.tracks, album, artist);
+        
+        // Track this download for artist bubble management
+        registerArtistDownload(artist, album, virtualPlaylistId, albumType);
+        
+    } catch (error) {
+        console.error('❌ Error creating virtual playlist:', error);
+        showToast(`Failed to load album: ${error.message}`, 'error');
+        throw error;
+    }
+}
+
+/**
+ * Open download missing tracks modal specifically for artist albums
+ * Similar to openDownloadMissingModalForYouTube but for artist albums
+ */
+async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlistName, spotifyTracks, album, artist) {
+    // Check if a process is already active for this virtual playlist
+    if (activeDownloadProcesses[virtualPlaylistId]) {
+        console.log(`Modal for ${virtualPlaylistId} already exists. Showing it.`);
+        const process = activeDownloadProcesses[virtualPlaylistId];
+        if (process.modalElement) {
+            if (process.status === 'complete') {
+                showToast('Showing previous results. Close this modal to start a new analysis.', 'info');
+            }
+            process.modalElement.style.display = 'flex';
+        }
+        return;
+    }
+
+    console.log(`📥 Opening Download Missing Tracks modal for artist album: ${virtualPlaylistId}`);
+    
+    // Create virtual playlist object for compatibility with existing modal logic
+    const virtualPlaylist = {
+        id: virtualPlaylistId,
+        name: playlistName,
+        track_count: spotifyTracks.length
+    };
+    
+    // Store the tracks in the cache for the modal to use
+    playlistTrackCache[virtualPlaylistId] = spotifyTracks;
+    currentPlaylistTracks = spotifyTracks;
+    currentModalPlaylistId = virtualPlaylistId;
+    
+    let modal = document.createElement('div');
+    modal.id = `download-missing-modal-${virtualPlaylistId}`;
+    modal.className = 'download-missing-modal';
+    modal.style.display = 'none';
+    document.body.appendChild(modal);
+
+    // Register the new process in our global state tracker using the same structure as other modals
+    activeDownloadProcesses[virtualPlaylistId] = {
+        status: 'idle',
+        modalElement: modal,
+        poller: null,
+        batchId: null,
+        playlist: virtualPlaylist,
+        tracks: spotifyTracks,
+        // Additional metadata for artist albums
+        artist: artist,
+        album: album,
+        albumType: album.album_type
+    };
+    
+    // Use the exact same modal HTML structure as the existing modals
+    modal.innerHTML = `
+        <div class="download-missing-modal-content">
+            <div class="download-missing-modal-header">
+                <h2 class="download-missing-modal-title">Download Missing Tracks - ${escapeHtml(playlistName)}</h2>
+                <span class="download-missing-modal-close" onclick="closeDownloadMissingModal('${virtualPlaylistId}')">&times;</span>
+            </div>
+            
+            <div class="download-missing-modal-body">
+                <div class="download-dashboard-stats">
+                    <div class="dashboard-stat stat-total">
+                        <div class="dashboard-stat-number" id="stat-total-${virtualPlaylistId}">${spotifyTracks.length}</div>
+                        <div class="dashboard-stat-label">Total Tracks</div>
+                    </div>
+                    <div class="dashboard-stat stat-found">
+                        <div class="dashboard-stat-number" id="stat-found-${virtualPlaylistId}">-</div>
+                        <div class="dashboard-stat-label">Found in Library</div>
+                    </div>
+                    <div class="dashboard-stat stat-missing">
+                        <div class="dashboard-stat-number" id="stat-missing-${virtualPlaylistId}">-</div>
+                        <div class="dashboard-stat-label">Missing Tracks</div>
+                    </div>
+                    <div class="dashboard-stat stat-downloaded">
+                        <div class="dashboard-stat-number" id="stat-downloaded-${virtualPlaylistId}">0</div>
+                        <div class="dashboard-stat-label">Downloaded</div>
+                    </div>
+                </div>
+                
+                <div class="download-progress-section">
+                    <div class="progress-item">
+                        <div class="progress-label">
+                            🔍 Library Analysis
+                            <span id="analysis-progress-text-${virtualPlaylistId}">Ready to start</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill analysis" id="analysis-progress-fill-${virtualPlaylistId}"></div>
+                        </div>
+                    </div>
+                    <div class="progress-item">
+                        <div class="progress-label">
+                            ⏬ Downloads
+                            <span id="download-progress-text-${virtualPlaylistId}">Waiting for analysis</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill download" id="download-progress-fill-${virtualPlaylistId}"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="download-tracks-section">
+                    <div class="download-tracks-header">
+                        <h3 class="download-tracks-title">📋 Track Analysis & Download Status</h3>
+                    </div>
+                    <div class="download-tracks-table-container">
+                        <table class="download-tracks-table">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Track Name</th>
+                                    <th>Artist(s)</th>
+                                    <th>Duration</th>
+                                    <th>Library Status</th>
+                                    <th>Download Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="download-tracks-tbody-${virtualPlaylistId}">
+                                ${spotifyTracks.map((track, index) => `
+                                    <tr data-track-index="${index}">
+                                        <td class="track-number">${index + 1}</td>
+                                        <td class="track-name" title="${escapeHtml(track.name)}">${escapeHtml(track.name)}</td>
+                                        <td class="track-artist" title="${escapeHtml(track.artists.join(', '))}">${track.artists.join(', ')}</td>
+                                        <td class="track-duration">${formatDuration(track.duration_ms)}</td>
+                                        <td class="track-match-status match-checking" id="match-${virtualPlaylistId}-${index}">🔍 Pending</td>
+                                        <td class="track-download-status" id="download-${virtualPlaylistId}-${index}">-</td>
+                                        <td class="track-actions" id="actions-${virtualPlaylistId}-${index}">-</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="download-missing-modal-footer">
+                <div class="download-phase-controls">
+                    <button class="download-control-btn primary" id="begin-analysis-btn-${virtualPlaylistId}" onclick="startMissingTracksProcess('${virtualPlaylistId}')">
+                        Begin Analysis
+                    </button>
+                    <button class="download-control-btn danger" id="cancel-all-btn-${virtualPlaylistId}" onclick="cancelAllOperations('${virtualPlaylistId}')" style="display: none;">
+                        Cancel All
+                    </button>
+                </div>
+                <div class="modal-close-section">
+                    <button class="download-control-btn secondary" onclick="closeDownloadMissingModal('${virtualPlaylistId}')">Close</button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    modal.style.display = 'flex';
+    
+    console.log(`✅ Successfully opened download missing tracks modal for: ${playlistName}`);
+}
+
+// ===============================
+// ARTIST DOWNLOADS MANAGEMENT SYSTEM
+// ===============================
+
+/**
+ * Register a new artist download for bubble management
+ */
+function registerArtistDownload(artist, album, virtualPlaylistId, albumType) {
+    console.log(`📝 Registering artist download: ${artist.name} - ${album.name}`);
+    
+    const artistId = artist.id;
+    
+    // Initialize artist bubble if it doesn't exist
+    if (!artistDownloadBubbles[artistId]) {
+        artistDownloadBubbles[artistId] = {
+            artist: artist,
+            downloads: [],
+            element: null,
+            hasCompletedDownloads: false
+        };
+    }
+    
+    // Add this download to the artist's downloads
+    const downloadInfo = {
+        virtualPlaylistId: virtualPlaylistId,
+        album: album,
+        albumType: albumType,
+        status: 'in_progress', // 'in_progress', 'completed', 'view_results'
+        startTime: new Date()
+    };
+    
+    artistDownloadBubbles[artistId].downloads.push(downloadInfo);
+    
+    // Show/update the artist downloads section
+    showArtistDownloadsSection();
+    
+    // Monitor this download for completion
+    monitorArtistDownload(artistId, virtualPlaylistId);
+}
+
+/**
+ * Show or update the artist downloads section in search state
+ */
+function showArtistDownloadsSection() {
+    // Only show in search state
+    if (artistsPageState.currentView !== 'search') {
+        return;
+    }
+    
+    const artistsSearchState = document.getElementById('artists-search-state');
+    if (!artistsSearchState) return;
+    
+    let downloadsSection = document.getElementById('artist-downloads-section');
+    
+    // Create section if it doesn't exist
+    if (!downloadsSection) {
+        downloadsSection = document.createElement('div');
+        downloadsSection.id = 'artist-downloads-section';
+        downloadsSection.className = 'artist-downloads-section';
+        
+        // Insert after the search container
+        const searchContainer = artistsSearchState.querySelector('.artists-search-container');
+        if (searchContainer) {
+            searchContainer.insertAdjacentElement('afterend', downloadsSection);
+        }
+    }
+    
+    // Count active artists (those with downloads)
+    const activeArtists = Object.keys(artistDownloadBubbles).filter(artistId => 
+        artistDownloadBubbles[artistId].downloads.length > 0
+    );
+    
+    if (activeArtists.length === 0) {
+        downloadsSection.style.display = 'none';
+        return;
+    }
+    
+    // Show and populate the section
+    downloadsSection.style.display = 'block';
+    downloadsSection.innerHTML = `
+        <div class="artist-downloads-header">
+            <h3 class="artist-downloads-title">Current Downloads</h3>
+            <p class="artist-downloads-subtitle">Active download processes</p>
+        </div>
+        <div class="artist-bubble-container" id="artist-bubble-container">
+            ${activeArtists.map(artistId => createArtistBubbleCard(artistDownloadBubbles[artistId])).join('')}
+        </div>
+    `;
+    
+    // Add event listeners to bubble cards
+    activeArtists.forEach(artistId => {
+        const bubbleCard = downloadsSection.querySelector(`[data-artist-id="${artistId}"]`);
+        if (bubbleCard) {
+            bubbleCard.addEventListener('click', () => openArtistDownloadModal(artistId));
+            
+            // Add dynamic glow effect
+            const artist = artistDownloadBubbles[artistId].artist;
+            if (artist.image_url) {
+                extractImageColors(artist.image_url, (colors) => {
+                    applyDynamicGlow(bubbleCard, colors);
+                });
+            }
+        }
+    });
+}
+
+/**
+ * Create HTML for an artist bubble card
+ */
+function createArtistBubbleCard(artistBubbleData) {
+    const { artist, downloads } = artistBubbleData;
+    const activeCount = downloads.filter(d => d.status === 'in_progress').length;
+    const completedCount = downloads.filter(d => d.status === 'view_results').length;
+    const allCompleted = activeCount === 0 && completedCount > 0;
+    
+    const imageUrl = artist.image_url || '';
+    const backgroundStyle = imageUrl ? 
+        `background-image: url('${imageUrl}');` :
+        `background: linear-gradient(135deg, rgba(29, 185, 84, 0.3) 0%, rgba(24, 156, 71, 0.2) 100%);`;
+    
+    return `
+        <div class="artist-bubble-card ${allCompleted ? 'all-completed' : ''}" 
+             data-artist-id="${artist.id}"
+             title="Click to manage downloads for ${escapeHtml(artist.name)}">
+            <div class="artist-bubble-image" style="${backgroundStyle}"></div>
+            <div class="artist-bubble-overlay"></div>
+            <div class="artist-bubble-content">
+                <div class="artist-bubble-name">${escapeHtml(artist.name)}</div>
+                <div class="artist-bubble-status">
+                    ${activeCount > 0 ? `${activeCount} active` : ''}
+                    ${completedCount > 0 ? `${completedCount} completed` : ''}
+                </div>
+            </div>
+            ${allCompleted ? `
+                <div class="bulk-complete-indicator" 
+                     onclick="event.stopPropagation(); bulkCompleteArtistDownloads('${artist.id}')"
+                     title="Complete all downloads">
+                    <span class="bulk-complete-icon">✅</span>
+                </div>
+            ` : ''}
+        </div>
+    `;
+}
+
+/**
+ * Monitor an artist download for completion status changes
+ */
+function monitorArtistDownload(artistId, virtualPlaylistId) {
+    // Check if the download process exists and monitor its status
+    const checkStatus = () => {
+        const process = activeDownloadProcesses[virtualPlaylistId];
+        if (!process || !artistDownloadBubbles[artistId]) {
+            return; // Process or artist bubble no longer exists
+        }
+        
+        // Find this download in the artist's downloads
+        const download = artistDownloadBubbles[artistId].downloads.find(d => d.virtualPlaylistId === virtualPlaylistId);
+        if (!download) return;
+        
+        // Update download status based on process status
+        if (process.status === 'complete' && download.status === 'in_progress') {
+            download.status = 'view_results';
+            console.log(`✅ Download completed for ${artistDownloadBubbles[artistId].artist.name} - ${download.album.name}`);
+            
+            // Update the downloads section
+            showArtistDownloadsSection();
+        }
+        
+        // Continue monitoring if still active
+        if (process.status !== 'complete') {
+            setTimeout(checkStatus, 2000); // Check every 2 seconds
+        }
+    };
+    
+    // Start monitoring after a brief delay
+    setTimeout(checkStatus, 1000);
+}
+
+/**
+ * Open the artist download management modal
+ */
+function openArtistDownloadModal(artistId) {
+    const artistBubbleData = artistDownloadBubbles[artistId];
+    if (!artistBubbleData || artistDownloadModalOpen) return;
+    
+    console.log(`🎵 Opening artist download modal for: ${artistBubbleData.artist.name}`);
+    artistDownloadModalOpen = true;
+    
+    const modal = document.createElement('div');
+    modal.id = 'artist-download-management-modal';
+    modal.className = 'artist-download-management-modal';
+    modal.innerHTML = `
+        <div class="artist-download-modal-content">
+            <div class="artist-download-modal-header">
+                <h2 class="artist-download-modal-title">Downloads for ${escapeHtml(artistBubbleData.artist.name)}</h2>
+                <span class="artist-download-modal-close" onclick="closeArtistDownloadModal()">&times;</span>
+            </div>
+            
+            <div class="artist-download-modal-body">
+                <div class="artist-download-items" id="artist-download-items-${artistId}">
+                    ${artistBubbleData.downloads.map((download, index) => createArtistDownloadItem(download, index)).join('')}
+                </div>
+            </div>
+        </div>
+        <div class="artist-download-modal-overlay" onclick="closeArtistDownloadModal()"></div>
+    `;
+    
+    document.body.appendChild(modal);
+    modal.style.display = 'flex';
+    
+    // Monitor for real-time updates
+    startArtistDownloadModalMonitoring(artistId);
+}
+
+/**
+ * Create HTML for an individual download item in the artist modal
+ */
+function createArtistDownloadItem(download, index) {
+    const { album, albumType, status, virtualPlaylistId } = download;
+    const buttonText = status === 'view_results' ? 'View Results' : 'View Progress';
+    const buttonClass = status === 'view_results' ? 'completed' : 'active';
+    
+    return `
+        <div class="artist-download-item" data-playlist-id="${virtualPlaylistId}">
+            <div class="download-item-info">
+                <div class="download-item-name">${escapeHtml(album.name)}</div>
+                <div class="download-item-type">${albumType === 'album' ? 'Album' : albumType === 'single' ? 'Single' : 'EP'}</div>
+            </div>
+            <div class="download-item-actions">
+                <button class="download-item-btn ${buttonClass}" 
+                        onclick="openArtistDownloadProcess('${virtualPlaylistId}')">
+                    ${buttonText}
+                </button>
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * Monitor artist download modal for real-time updates
+ */
+function startArtistDownloadModalMonitoring(artistId) {
+    if (!artistDownloadModalOpen) return;
+    
+    const updateModal = () => {
+        const modal = document.getElementById('artist-download-management-modal');
+        const itemsContainer = document.getElementById(`artist-download-items-${artistId}`);
+        
+        if (!modal || !itemsContainer || !artistDownloadBubbles[artistId]) return;
+        
+        // Check for completed downloads that need to be removed
+        const activeDownloads = artistDownloadBubbles[artistId].downloads.filter(download => {
+            const process = activeDownloadProcesses[download.virtualPlaylistId];
+            // Keep if process exists or if it's completed but not yet cleaned up
+            return process !== undefined;
+        });
+        
+        // Update the downloads array
+        artistDownloadBubbles[artistId].downloads = activeDownloads;
+        
+        // If no downloads left, close modal
+        if (activeDownloads.length === 0) {
+            closeArtistDownloadModal();
+            return;
+        }
+        
+        // Update modal content
+        itemsContainer.innerHTML = activeDownloads.map((download, index) => {
+            const process = activeDownloadProcesses[download.virtualPlaylistId];
+            if (process) {
+                download.status = process.status === 'complete' ? 'view_results' : 'in_progress';
+            }
+            return createArtistDownloadItem(download, index);
+        }).join('');
+        
+        // Continue monitoring
+        setTimeout(updateModal, 2000);
+    };
+    
+    setTimeout(updateModal, 1000);
+}
+
+/**
+ * Open a specific artist download process modal
+ */
+function openArtistDownloadProcess(virtualPlaylistId) {
+    const process = activeDownloadProcesses[virtualPlaylistId];
+    if (process && process.modalElement) {
+        // Close artist management modal first
+        closeArtistDownloadModal();
+        
+        // Show the download process modal
+        process.modalElement.style.display = 'flex';
+        
+        if (process.status === 'complete') {
+            showToast('Review download results and click "Close" to finish.', 'info');
+        }
+    }
+}
+
+/**
+ * Close the artist download management modal
+ */
+function closeArtistDownloadModal() {
+    const modal = document.getElementById('artist-download-management-modal');
+    if (modal) {
+        modal.remove();
+    }
+    artistDownloadModalOpen = false;
+}
+
+/**
+ * Bulk complete all downloads for an artist (when all are in 'view_results' state)
+ */
+function bulkCompleteArtistDownloads(artistId) {
+    console.log(`🎯 Bulk completing downloads for artist: ${artistId}`);
+    
+    const artistBubbleData = artistDownloadBubbles[artistId];
+    if (!artistBubbleData) return;
+    
+    // Find all downloads in 'view_results' state
+    const completedDownloads = artistBubbleData.downloads.filter(d => d.status === 'view_results');
+    
+    // Programmatically close all completed modals
+    completedDownloads.forEach(download => {
+        const process = activeDownloadProcesses[download.virtualPlaylistId];
+        if (process && process.modalElement) {
+            // Trigger the close function which handles cleanup
+            closeDownloadMissingModal(download.virtualPlaylistId);
+        }
+    });
+    
+    showToast(`Completed ${completedDownloads.length} downloads for ${artistBubbleData.artist.name}`, 'success');
+}
+
+/**
+ * Clean up artist download when a modal is closed
+ */
+function cleanupArtistDownload(virtualPlaylistId) {
+    // Find which artist this download belongs to
+    for (const artistId in artistDownloadBubbles) {
+        const downloads = artistDownloadBubbles[artistId].downloads;
+        const downloadIndex = downloads.findIndex(d => d.virtualPlaylistId === virtualPlaylistId);
+        
+        if (downloadIndex !== -1) {
+            console.log(`🧹 Cleaning up artist download: ${downloads[downloadIndex].album.name}`);
+            
+            // Remove this download from the artist's downloads
+            downloads.splice(downloadIndex, 1);
+            
+            // If no more downloads for this artist, remove the bubble
+            if (downloads.length === 0) {
+                delete artistDownloadBubbles[artistId];
+                console.log(`🧹 Removed artist bubble: ${artistId}`);
+            }
+            
+            // Update the downloads section
+            showArtistDownloadsSection();
+            break;
+        }
+    }
 }
 
 /**

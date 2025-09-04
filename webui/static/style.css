@@ -5634,15 +5634,18 @@ body {
 /* ARTISTS PAGE STYLES - ELEGANT GLASSMORPHIC DESIGN                          */
 /* ============================================================================ */
 
-/* Artists Search State - Initial centered interface */
+/* Artists Search State - Initial centered interface with downloads section support */
 .artists-search-state {
     display: flex;
+    flex-direction: column;
     align-items: center;
+    gap: 10vh;
     justify-content: center;
     min-height: 70vh;
     padding: 40px 20px;
     opacity: 1;
     transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    gap: 32px;
 }
 
 .artists-search-state.fade-out {
@@ -5654,6 +5657,14 @@ body {
     max-width: 600px;
     width: 100%;
     text-align: center;
+    margin-top: auto;
+    margin-bottom: auto;
+}
+
+/* When downloads section is present, adjust positioning */
+.artists-search-state:has(.artist-downloads-section) .artists-search-container {
+    margin-top: 0;
+    margin-bottom: 0;
 }
 
 .artists-welcome-section {
@@ -6542,4 +6553,359 @@ body {
         overflow-x: auto;
         padding-bottom: 5px;
     }
+}
+
+/* ===============================
+   ARTIST DOWNLOADS MANAGEMENT STYLES
+   =============================== */
+
+/* Artist Downloads Section */
+.artist-downloads-section {
+    max-width: 800px;
+    padding: 0 20px;
+    animation: fadeInUp 0.5s ease-out;
+    width: 100%;
+}
+
+.artist-downloads-header {
+    margin-bottom: 20px;
+    text-align: center;
+}
+
+.artist-downloads-title {
+    font-size: 20px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.9);
+    margin: 0 0 8px;
+    font-family: "SF Pro Display", -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.artist-downloads-subtitle {
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.6);
+    margin: 0;
+}
+
+.artist-bubble-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    justify-content: center;
+    align-items: center;
+}
+
+/* Artist Bubble Card */
+.artist-bubble-card {
+    position: relative;
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    overflow: hidden;
+    
+    background: linear-gradient(135deg, 
+        rgba(26, 26, 26, 0.95) 0%, 
+        rgba(18, 18, 18, 0.98) 100%);
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    
+    box-shadow: 
+        0 4px 12px rgba(0, 0, 0, 0.4),
+        0 0 0 1px rgba(29, 185, 84, 0.05),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.artist-bubble-card:hover {
+    transform: translateY(-3px) scale(1.05);
+    border-color: rgba(29, 185, 84, 0.3);
+    
+    box-shadow: 
+        0 8px 20px rgba(0, 0, 0, 0.5),
+        0 0 0 1px rgba(29, 185, 84, 0.2),
+        0 0 15px rgba(29, 185, 84, 0.1),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.artist-bubble-card.all-completed {
+    border-color: rgba(34, 197, 94, 0.4);
+}
+
+.artist-bubble-card.all-completed:hover {
+    border-color: rgba(34, 197, 94, 0.6);
+    box-shadow: 
+        0 8px 20px rgba(0, 0, 0, 0.5),
+        0 0 0 1px rgba(34, 197, 94, 0.3),
+        0 0 15px rgba(34, 197, 94, 0.15),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.artist-bubble-image {
+    position: absolute;
+    inset: 0;
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    border-radius: 50%;
+}
+
+.artist-bubble-overlay {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, 
+        rgba(0, 0, 0, 0.3) 0%, 
+        rgba(0, 0, 0, 0.6) 100%);
+    border-radius: 50%;
+}
+
+.artist-bubble-content {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 8px;
+    text-align: center;
+    z-index: 2;
+}
+
+.artist-bubble-name {
+    font-size: 10px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.95);
+    line-height: 1.2;
+    margin-bottom: 2px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.artist-bubble-status {
+    font-size: 8px;
+    color: rgba(255, 255, 255, 0.7);
+    line-height: 1.1;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.bulk-complete-indicator {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    width: 24px;
+    height: 24px;
+    background: linear-gradient(135deg, 
+        rgba(34, 197, 94, 0.95) 0%, 
+        rgba(21, 128, 61, 0.95) 100%);
+    border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, 0.9);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    z-index: 3;
+    transition: all 0.2s ease;
+    
+    box-shadow: 
+        0 2px 8px rgba(34, 197, 94, 0.4),
+        0 0 0 1px rgba(34, 197, 94, 0.2);
+}
+
+.bulk-complete-indicator:hover {
+    transform: scale(1.1);
+    box-shadow: 
+        0 4px 12px rgba(34, 197, 94, 0.6),
+        0 0 0 1px rgba(34, 197, 94, 0.3);
+}
+
+.bulk-complete-icon {
+    font-size: 12px;
+    color: white;
+}
+
+/* Artist Download Management Modal */
+.artist-download-management-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: fadeIn 0.3s ease-out;
+}
+
+.artist-download-modal-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.8);
+    backdrop-filter: blur(8px);
+    z-index: 1;
+}
+
+.artist-download-modal-content {
+    position: relative;
+    background: linear-gradient(135deg, 
+        rgba(20, 20, 20, 0.98) 0%, 
+        rgba(12, 12, 12, 0.98) 100%);
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    max-width: 500px;
+    width: 90%;
+    max-height: 70vh;
+    overflow: hidden;
+    z-index: 2;
+    
+    box-shadow: 
+        0 20px 40px rgba(0, 0, 0, 0.6),
+        0 0 0 1px rgba(29, 185, 84, 0.1),
+        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.artist-download-modal-header {
+    padding: 24px 24px 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    padding-bottom: 16px;
+    margin-bottom: 20px;
+}
+
+.artist-download-modal-title {
+    font-size: 20px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.95);
+    margin: 0;
+    flex: 1;
+    font-family: "SF Pro Display", -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.artist-download-modal-close {
+    font-size: 24px;
+    color: rgba(255, 255, 255, 0.6);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 6px;
+    transition: all 0.2s ease;
+    line-height: 1;
+}
+
+.artist-download-modal-close:hover {
+    color: rgba(255, 255, 255, 0.9);
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.artist-download-modal-body {
+    padding: 0 24px 24px;
+    overflow-y: auto;
+    max-height: calc(70vh - 100px);
+}
+
+.artist-download-items {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.artist-download-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px;
+    background: linear-gradient(135deg, 
+        rgba(26, 26, 26, 0.6) 0%, 
+        rgba(18, 18, 18, 0.8) 100%);
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    transition: all 0.2s ease;
+}
+
+.artist-download-item:hover {
+    background: linear-gradient(135deg, 
+        rgba(26, 26, 26, 0.8) 0%, 
+        rgba(18, 18, 18, 0.9) 100%);
+    border-color: rgba(255, 255, 255, 0.1);
+}
+
+.download-item-info {
+    flex: 1;
+}
+
+.download-item-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.9);
+    margin-bottom: 4px;
+    line-height: 1.3;
+}
+
+.download-item-type {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.6);
+    text-transform: capitalize;
+}
+
+.download-item-actions {
+    margin-left: 16px;
+}
+
+.download-item-btn {
+    padding: 8px 16px;
+    border-radius: 8px;
+    border: none;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    min-width: 100px;
+}
+
+.download-item-btn.active {
+    background: linear-gradient(135deg, 
+        rgba(29, 185, 84, 0.9) 0%, 
+        rgba(24, 156, 71, 0.9) 100%);
+    color: white;
+    box-shadow: 0 2px 8px rgba(29, 185, 84, 0.3);
+}
+
+.download-item-btn.active:hover {
+    background: linear-gradient(135deg, 
+        rgba(29, 185, 84, 1.0) 0%, 
+        rgba(24, 156, 71, 1.0) 100%);
+    box-shadow: 0 4px 12px rgba(29, 185, 84, 0.4);
+    transform: translateY(-1px);
+}
+
+.download-item-btn.completed {
+    background: linear-gradient(135deg, 
+        rgba(34, 197, 94, 0.9) 0%, 
+        rgba(21, 128, 61, 0.9) 100%);
+    color: white;
+    box-shadow: 0 2px 8px rgba(34, 197, 94, 0.3);
+}
+
+.download-item-btn.completed:hover {
+    background: linear-gradient(135deg, 
+        rgba(34, 197, 94, 1.0) 0%, 
+        rgba(21, 128, 61, 1.0) 100%);
+    box-shadow: 0 4px 12px rgba(34, 197, 94, 0.4);
+    transform: translateY(-1px);
+}
+
+/* Dynamic glow effects for artist bubble cards */
+.artist-bubble-card.has-dynamic-glow {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                filter 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.artist-bubble-card.has-dynamic-glow:hover {
+    filter: drop-shadow(0 0 6px var(--glow-color-1, #1db954)) 
+            drop-shadow(0 0 12px var(--glow-color-2, #1ed760));
+    border-color: var(--glow-color-1, rgba(29, 185, 84, 0.4));
 }
