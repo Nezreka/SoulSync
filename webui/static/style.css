@@ -6589,9 +6589,10 @@ body {
 .artist-bubble-container {
     display: flex;
     flex-wrap: wrap;
-    gap: 16px;
+    gap: 24px;
     justify-content: center;
     align-items: center;
+    padding: 12px;
 }
 
 /* Artist Bubble Card */
@@ -6602,7 +6603,6 @@ body {
     border-radius: 50%;
     cursor: pointer;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    overflow: hidden;
     
     background: linear-gradient(135deg, 
         rgba(26, 26, 26, 0.95) 0%, 
@@ -6646,6 +6646,7 @@ body {
     background-position: center;
     background-repeat: no-repeat;
     border-radius: 50%;
+    overflow: hidden;
 }
 
 .artist-bubble-overlay {
