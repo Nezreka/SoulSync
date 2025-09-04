@@ -1692,6 +1692,80 @@ def get_artist_discography(artist_id):
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/artist/<artist_id>/album/<album_id>/tracks', methods=['GET'])
+def get_artist_album_tracks(artist_id, album_id):
+    """Get tracks for specific album formatted for download missing tracks modal"""
+    try:
+        if not spotify_client or not spotify_client.is_authenticated():
+            return jsonify({"error": "Spotify not authenticated"}), 401
+        
+        print(f"🎵 Fetching tracks for album: {album_id} by artist: {artist_id}")
+        
+        # Get album information first
+        album_data = spotify_client.get_album(album_id)
+        if not album_data:
+            return jsonify({"error": "Album not found"}), 404
+        
+        # Get album tracks
+        tracks_data = spotify_client.get_album_tracks(album_id)
+        if not tracks_data or 'items' not in tracks_data:
+            return jsonify({"error": "No tracks found for album"}), 404
+        
+        # Handle both dict and object responses from spotify_client.get_album()
+        if isinstance(album_data, dict):
+            album_info = {
+                'id': album_data.get('id'),
+                'name': album_data.get('name'),
+                'image_url': album_data.get('images', [{}])[0].get('url') if album_data.get('images') else None,
+                'release_date': album_data.get('release_date'),
+                'album_type': album_data.get('album_type'),
+                'total_tracks': album_data.get('total_tracks')
+            }
+        else:
+            # Handle Album object case
+            album_info = {
+                'id': album_data.id,
+                'name': album_data.name,
+                'image_url': album_data.image_url,
+                'release_date': album_data.release_date,
+                'album_type': album_data.album_type,
+                'total_tracks': album_data.total_tracks
+            }
+        
+        # Format tracks for download missing tracks modal compatibility
+        formatted_tracks = []
+        for track_item in tracks_data['items']:
+            # Create track object compatible with download missing tracks modal
+            formatted_track = {
+                'id': track_item['id'],
+                'name': track_item['name'],
+                'artists': [artist['name'] for artist in track_item['artists']],
+                'duration_ms': track_item['duration_ms'],
+                'track_number': track_item['track_number'],
+                'disc_number': track_item.get('disc_number', 1),
+                'explicit': track_item.get('explicit', False),
+                'preview_url': track_item.get('preview_url'),
+                'external_urls': track_item.get('external_urls', {}),
+                'uri': track_item['uri'],
+                # Add album context for virtual playlist
+                'album': album_info
+            }
+            formatted_tracks.append(formatted_track)
+        
+        print(f"✅ Successfully formatted {len(formatted_tracks)} tracks for album: {album_info['name']}")
+        
+        return jsonify({
+            'success': True,
+            'album': album_info,
+            'tracks': formatted_tracks
+        })
+        
+    except Exception as e:
+        print(f"❌ Error fetching album tracks: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/api/artist/<artist_id>/completion', methods=['POST'])
 def check_artist_discography_completion(artist_id):
     """Check completion status for artist's albums and singles"""
@@ -1752,7 +1826,7 @@ def check_artist_discography_completion(artist_id):
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
-def _check_album_completion(db: 'MusicDatabase', album_data: dict, artist_name: str, test_mode: bool = False) -> dict:
+def _check_album_completion(db, album_data: dict, artist_name: str, test_mode: bool = False) -> dict:
     """Check completion status for a single album"""
     try:
         album_name = album_data.get('name', '')
@@ -1837,7 +1911,7 @@ def _check_album_completion(db: 'MusicDatabase', album_data: dict, artist_name: 
             "found_in_db": False
         }
 
-def _check_single_completion(db: 'MusicDatabase', single_data: dict, artist_name: str, test_mode: bool = False) -> dict:
+def _check_single_completion(db, single_data: dict, artist_name: str, test_mode: bool = False) -> dict:
     """Check completion status for a single/EP (treat EPs like albums, singles as single tracks)"""
     try:
         single_name = single_data.get('name', '')
