@@ -9375,7 +9375,10 @@ async function loadArtistDiscography(artistId) {
     // Check cache first
     if (artistsPageState.cache.discography[artistId]) {
         console.log('📦 Using cached discography');
-        displayArtistDiscography(artistsPageState.cache.discography[artistId]);
+        const cachedDiscography = artistsPageState.cache.discography[artistId];
+        displayArtistDiscography(cachedDiscography);
+        // Still check completion status for cached data
+        await checkDiscographyCompletion(artistId, cachedDiscography);
         return;
     }
     
@@ -9412,6 +9415,9 @@ async function loadArtistDiscography(artistId) {
         
         // Display results
         displayArtistDiscography(discography);
+        
+        // Check completion status for all albums and singles
+        await checkDiscographyCompletion(artistId, discography);
         
     } catch (error) {
         console.error('❌ Failed to load discography:', error);
@@ -9477,6 +9483,183 @@ function displayArtistDiscography(discography) {
 }
 
 /**
+ * Check completion status for entire discography with streaming updates
+ */
+async function checkDiscographyCompletion(artistId, discography) {
+    console.log(`🔍 Starting streaming completion check for artist: ${artistId}`);
+    
+    try {
+        // Use EventSource for Server-Sent Events streaming
+        const eventSource = new EventSource('data:text/plain,'); // Dummy EventSource
+        
+        // Use fetch with streaming response
+        const response = await fetch(`/api/artist/${artistId}/completion-stream`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                discography: discography,
+                artist_name: artistsPageState.selectedArtist?.name || 'Unknown Artist',
+                test_mode: window.location.search.includes('test=true')
+            })
+        });
+        
+        if (!response.ok) {
+            throw new Error(`Failed to start completion check: ${response.status}`);
+        }
+        
+        // Handle streaming response
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            
+            const chunk = decoder.decode(value);
+            const lines = chunk.split('\n');
+            
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    try {
+                        const data = JSON.parse(line.slice(6));
+                        handleStreamingCompletionUpdate(data);
+                    } catch (e) {
+                        console.warn('Failed to parse streaming data:', line);
+                    }
+                }
+            }
+        }
+        
+    } catch (error) {
+        console.error('❌ Failed to check completion status:', error);
+        showCompletionError();
+    }
+}
+
+/**
+ * Handle individual streaming completion updates
+ */
+function handleStreamingCompletionUpdate(data) {
+    console.log('🔄 Streaming update received:', data.type, data.name || data.artist_name);
+    
+    switch (data.type) {
+        case 'start':
+            console.log(`🎤 Starting completion check for ${data.artist_name} (${data.total_items} items)`);
+            // Could show a progress indicator here
+            break;
+            
+        case 'album_completion':
+            updateAlbumCompletionOverlay(data, 'albums');
+            console.log(`📀 Updated album: ${data.name} (${data.status})`);
+            break;
+            
+        case 'single_completion':
+            updateAlbumCompletionOverlay(data, 'singles');
+            console.log(`🎵 Updated single: ${data.name} (${data.status})`);
+            break;
+            
+        case 'error':
+            console.error('❌ Error processing item:', data.name, data.error);
+            // Could show error for specific item
+            break;
+            
+        case 'complete':
+            console.log(`✅ Completion check finished (${data.processed_count} items processed)`);
+            break;
+            
+        default:
+            console.log('Unknown streaming update type:', data.type);
+    }
+}
+
+/**
+ * Update completion overlay for a specific album/single
+ */
+function updateAlbumCompletionOverlay(completionData, containerType) {
+    const containerId = containerType === 'albums' ? 'album-cards-container' : 'singles-cards-container';
+    const container = document.getElementById(containerId);
+    
+    if (!container) {
+        console.warn(`Container ${containerId} not found`);
+        return;
+    }
+    
+    // Find the album card by data-album-id
+    const albumCard = container.querySelector(`[data-album-id="${completionData.id}"]`);
+    
+    if (!albumCard) {
+        console.warn(`Album card not found for ID: ${completionData.id}`);
+        return;
+    }
+    
+    const overlay = albumCard.querySelector('.completion-overlay');
+    if (!overlay) {
+        console.warn(`Completion overlay not found for album: ${completionData.name}`);
+        return;
+    }
+    
+    // Remove existing status classes
+    overlay.classList.remove('checking', 'completed', 'nearly_complete', 'partial', 'missing', 'error');
+    
+    // Add new status class
+    overlay.classList.add(completionData.status);
+    
+    // Update overlay text and content
+    const statusText = getCompletionStatusText(completionData);
+    const progressText = `${completionData.owned_tracks}/${completionData.expected_tracks}`;
+    
+    overlay.innerHTML = `
+        <span class="completion-status">${statusText}</span>
+        <span class="completion-progress">${progressText}</span>
+    `;
+    
+    // Add tooltip with more details
+    overlay.title = `${completionData.name}\n${statusText} (${completionData.completion_percentage}%)\nTracks: ${completionData.owned_tracks}/${completionData.expected_tracks}\nConfidence: ${completionData.confidence}`;
+    
+    // Add brief flash animation to indicate update
+    overlay.style.animation = 'none';
+    overlay.offsetHeight; // Trigger reflow
+    overlay.style.animation = 'completionOverlayFadeIn 0.6s cubic-bezier(0.4, 0, 0.2, 1)';
+    
+    console.log(`📊 Updated overlay for "${completionData.name}": ${statusText} (${completionData.completion_percentage}%)`);
+}
+
+/**
+ * Get human-readable status text for completion overlay
+ */
+function getCompletionStatusText(completionData) {
+    switch (completionData.status) {
+        case 'completed':
+            return 'Complete';
+        case 'nearly_complete':
+            return 'Nearly Complete';
+        case 'partial':
+            return 'Partial';
+        case 'missing':
+            return 'Missing';
+        case 'error':
+            return 'Error';
+        default:
+            return 'Unknown';
+    }
+}
+
+/**
+ * Show error state on all completion overlays
+ */
+function showCompletionError() {
+    const allOverlays = document.querySelectorAll('.completion-overlay.checking');
+    allOverlays.forEach(overlay => {
+        overlay.classList.remove('checking');
+        overlay.classList.add('error');
+        overlay.innerHTML = '<span class="completion-status">Error</span>';
+        overlay.title = 'Failed to check completion status';
+    });
+}
+
+/**
  * Create HTML for an album/single card
  */
 function createAlbumCard(album) {
@@ -9491,8 +9674,11 @@ function createAlbumCard(album) {
         `background: linear-gradient(135deg, rgba(29, 185, 84, 0.2) 0%, rgba(24, 156, 71, 0.1) 100%);`;
     
     return `
-        <div class="album-card" data-album-id="${album.id}">
+        <div class="album-card" data-album-id="${album.id}" data-album-name="${escapeHtml(album.name)}" data-album-type="${album.album_type}" data-total-tracks="${album.total_tracks || 0}">
             <div class="album-card-image" style="${backgroundStyle}"></div>
+            <div class="completion-overlay checking">
+                <span class="completion-status">Checking...</span>
+            </div>
             <div class="album-card-content">
                 <div class="album-card-name" title="${escapeHtml(album.name)}">${escapeHtml(album.name)}</div>
                 <div class="album-card-year">${year || 'Unknown'}</div>
