@@ -1596,8 +1596,9 @@ def get_artist_discography(artist_id):
         
         print(f"🎤 Fetching discography for artist: {artist_id}")
         
-        # Get all albums and singles for the artist
-        albums = spotify_client.get_artist_albums(artist_id, album_type='album,single,appears_on', limit=50)
+        # Get artist's albums and singles (temporarily include appears_on for debugging)
+        albums = spotify_client.get_artist_albums(artist_id, album_type='album,single', limit=50)
+        print(f"📊 Raw albums returned from Spotify: {len(albums)}")
         
         if not albums:
             return jsonify({
@@ -1618,13 +1619,22 @@ def get_artist_discography(artist_id):
                 continue
             seen_albums.add(album.id)
             
-            # Skip compilations and appears_on that aren't the main artist's work
-            if hasattr(album, 'album_type') and album.album_type == 'appears_on':
-                # Only include if the artist is the main artist
-                if hasattr(album, 'artists') and album.artists:
-                    main_artist_id = album.artists[0].id if hasattr(album.artists[0], 'id') else None
-                    if main_artist_id != artist_id:
-                        continue
+            # Debug: Check artist information
+            print(f"🔍 Checking album: {album.name}")
+            if hasattr(album, 'artists') and album.artists:
+                primary_artist_id = album.artists[0].id if hasattr(album.artists[0], 'id') else None
+                primary_artist_name = album.artists[0].name if hasattr(album.artists[0], 'name') else None
+                print(f"   Primary artist: {primary_artist_name} (ID: {primary_artist_id})")
+                print(f"   Requested artist ID: {artist_id}")
+                
+                # Skip if the primary artist doesn't match our requested artist
+                if primary_artist_id and primary_artist_id != artist_id:
+                    print(f"🚫 Skipping '{album.name}' - primary artist mismatch")
+                    continue
+                elif not primary_artist_id:
+                    print(f"⚠️ No primary artist ID found for '{album.name}' - including anyway")
+            else:
+                print(f"⚠️ No artists found for '{album.name}' - including anyway")
             
             album_data = {
                 "id": album.id,
@@ -1636,11 +1646,15 @@ def get_artist_discography(artist_id):
                 "external_urls": album.external_urls if hasattr(album, 'external_urls') else {}
             }
             
+            # Skip obvious compilation issues but be more lenient for now
+            if hasattr(album, 'album_type') and album.album_type == 'compilation':
+                print(f"📀 Found compilation: '{album.name}' - including for now")
+            
             # Categorize by album type
             if hasattr(album, 'album_type'):
                 if album.album_type in ['single', 'ep']:
                     singles_list.append(album_data)
-                else:  # 'album' or 'compilation'
+                else:  # 'album' or approved 'compilation'
                     album_list.append(album_data)
             else:
                 # Default to album if no type specified
@@ -1659,7 +1673,13 @@ def get_artist_discography(artist_id):
         album_list.sort(key=get_release_year, reverse=True)
         singles_list.sort(key=get_release_year, reverse=True)
         
-        print(f"✅ Found {len(album_list)} albums and {len(singles_list)} singles for artist")
+        print(f"✅ Found {len(album_list)} albums and {len(singles_list)} singles for artist {artist_id}")
+        
+        # Debug: Log the final album list
+        for album in album_list:
+            print(f"📀 Album: {album['name']} ({album['album_type']}) - {album['release_date']}")
+        for single in singles_list:
+            print(f"🎵 Single/EP: {single['name']} ({single['album_type']}) - {single['release_date']}")
         
         return jsonify({
             "albums": album_list,

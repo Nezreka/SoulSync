@@ -5861,7 +5861,7 @@ body {
     gap: 20px;
     overflow-x: auto;
     overflow-y: visible;
-    padding: 20px;
+    padding: 30px;
     scroll-behavior: smooth;
     
     /* Custom scrollbar styling */
@@ -5914,14 +5914,27 @@ body {
 }
 
 .artist-card:hover {
-    transform: translateY(-8px) scale(1.02);
-    z-index: 10;
-    
-    box-shadow: 
-        0 20px 50px rgba(0, 0, 0, 0.6),
-        0 0 0 1px rgba(29, 185, 84, 0.15),
-        0 0 30px rgba(29, 185, 84, 0.1),
-        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  transform: translateY(-5px) scale(1.01);
+  z-index: 10;
+  
+  box-shadow: 
+    0 12px 15px rgba(0, 0, 0, 0.4),
+    0 0 0 1px rgba(29, 185, 84, 0.15),
+    0 0 20px rgba(29, 185, 84, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+/* Dynamic glow effects based on image colors */
+.artist-card.has-dynamic-glow {
+    position: relative;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                filter 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.artist-card.has-dynamic-glow:hover {
+    filter: drop-shadow(0 0 8px var(--glow-color-1, #1db954)) 
+            drop-shadow(0 0 16px var(--glow-color-2, #1ed760));
+    border-color: var(--glow-color-1, rgba(29, 185, 84, 0.3));
 }
 
 .artist-card-background {
@@ -6257,6 +6270,19 @@ body {
         0 0 0 1px rgba(29, 185, 84, 0.15),
         0 0 20px rgba(29, 185, 84, 0.08),
         inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+/* Dynamic glow effects for album cards */
+.album-card.has-dynamic-glow {
+    position: relative;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                filter 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.album-card.has-dynamic-glow:hover {
+    filter: drop-shadow(0 0 6px var(--glow-color-1, #1db954)) 
+            drop-shadow(0 0 12px var(--glow-color-2, #1ed760));
+    border-color: var(--glow-color-1, rgba(29, 185, 84, 0.3));
 }
 
 .album-card-image {
