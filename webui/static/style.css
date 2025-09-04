@@ -5908,7 +5908,7 @@ body {
     
     /* Elegant shadow system */
     box-shadow: 
-        0 10px 30px rgba(0, 0, 0, 0.5),
+        0 10px 20px rgba(0, 0, 0, 0.5),
         0 0 0 1px rgba(29, 185, 84, 0.05),
         inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
@@ -6359,6 +6359,140 @@ body {
     border-radius: 8px;
     border: 1px solid rgba(29, 185, 84, 0.2);
     font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* Completion Status Overlay */
+.completion-overlay {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    padding: 6px 12px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    border-radius: 12px;
+    backdrop-filter: blur(8px);
+    border: 1px solid;
+    z-index: 10;
+    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
+    
+    /* Smooth entrance animation */
+    animation: completionOverlayFadeIn 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+/* Completion status variants */
+.completion-overlay.completed {
+    background: linear-gradient(135deg, 
+        rgba(46, 204, 64, 0.9) 0%, 
+        rgba(34, 139, 47, 0.95) 100%);
+    color: #ffffff;
+    border-color: rgba(46, 204, 64, 0.6);
+    box-shadow: 
+        0 4px 12px rgba(0, 0, 0, 0.3),
+        0 0 0 1px rgba(46, 204, 64, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+.completion-overlay.nearly_complete {
+    background: linear-gradient(135deg, 
+        rgba(255, 193, 7, 0.9) 0%, 
+        rgba(255, 152, 0, 0.95) 100%);
+    color: #ffffff;
+    border-color: rgba(255, 193, 7, 0.6);
+    box-shadow: 
+        0 4px 12px rgba(0, 0, 0, 0.3),
+        0 0 0 1px rgba(255, 193, 7, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+.completion-overlay.partial {
+    background: linear-gradient(135deg, 
+        rgba(255, 111, 97, 0.9) 0%, 
+        rgba(255, 87, 51, 0.95) 100%);
+    color: #ffffff;
+    border-color: rgba(255, 111, 97, 0.6);
+    box-shadow: 
+        0 4px 12px rgba(0, 0, 0, 0.3),
+        0 0 0 1px rgba(255, 111, 97, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+.completion-overlay.missing {
+    background: linear-gradient(135deg, 
+        rgba(108, 117, 125, 0.9) 0%, 
+        rgba(73, 80, 87, 0.95) 100%);
+    color: rgba(255, 255, 255, 0.9);
+    border-color: rgba(108, 117, 125, 0.6);
+    box-shadow: 
+        0 4px 12px rgba(0, 0, 0, 0.3),
+        0 0 0 1px rgba(108, 117, 125, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.completion-overlay.error {
+    background: linear-gradient(135deg, 
+        rgba(220, 53, 69, 0.9) 0%, 
+        rgba(176, 42, 55, 0.95) 100%);
+    color: #ffffff;
+    border-color: rgba(220, 53, 69, 0.6);
+    box-shadow: 
+        0 4px 12px rgba(0, 0, 0, 0.3),
+        0 0 0 1px rgba(220, 53, 69, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+/* Hover effects for completion overlays */
+.album-card:hover .completion-overlay,
+.artist-card:hover .completion-overlay {
+    transform: scale(1.05);
+    box-shadow: 
+        0 6px 16px rgba(0, 0, 0, 0.4),
+        0 0 0 1px currentColor,
+        inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+/* Loading state for completion overlay */
+.completion-overlay.checking {
+    background: linear-gradient(135deg, 
+        rgba(29, 185, 84, 0.9) 0%, 
+        rgba(24, 156, 71, 0.95) 100%);
+    color: #ffffff;
+    border-color: rgba(29, 185, 84, 0.6);
+    animation: completionOverlayPulse 2s ease-in-out infinite;
+}
+
+/* Progress indicator inside overlay for detailed completion info */
+.completion-overlay .completion-progress {
+    display: block;
+    font-size: 9px;
+    margin-top: 2px;
+    opacity: 0.8;
+    font-weight: 500;
+}
+
+/* Completion overlay animations */
+@keyframes completionOverlayFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-4px) scale(0.8);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+@keyframes completionOverlayPulse {
+    0%, 100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.7;
+        transform: scale(1.05);
+    }
 }
 
 /* Loading states for album cards */
