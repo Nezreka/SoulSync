@@ -2481,9 +2481,15 @@ async function cleanupDownloadProcess(playlistId) {
     const process = activeDownloadProcesses[playlistId];
     if (!process) return;
 
-    console.log(`Cleaning up download process for playlist ${playlistId}`);
+    console.log(`🧹 Cleaning up download process for playlist ${playlistId}`);
 
-    // --- THIS IS THE FIX ---
+    // Stop any active polling first
+    if (process.poller) {
+        console.log(`🛑 Stopping polling for ${playlistId}`);
+        clearInterval(process.poller);
+        process.poller = null;
+    }
+
     // If the process has a batchId, tell the server to clean it up.
     if (process.batchId) {
         try {
@@ -2493,15 +2499,11 @@ async function cleanupDownloadProcess(playlistId) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ batch_id: process.batchId })
             });
+            console.log(`✅ Server cleanup completed for batch: ${process.batchId}`);
         } catch (error) {
-            console.error('Failed to send cleanup request to server:', error);
+            console.warn(`⚠️ Failed to send cleanup request to server:`, error);
+            // Don't show toast for cleanup failures - they're not user-facing
         }
-    }
-    // --- END OF FIX ---
-
-    // Stop client-side polling
-    if (process.poller) {
-        clearInterval(process.poller);
     }
 
     // Remove modal from DOM
@@ -3635,6 +3637,18 @@ function startModalDownloadPolling(playlistId) {
                 console.warn(`🛑 [Polling] Stopping polling for ${playlistId} - batch no longer exists`);
                 clearInterval(process.poller);
                 process.poller = null;
+                
+                // Mark process as complete to prevent further issues
+                if (process.status !== 'complete') {
+                    process.status = 'complete';
+                    updatePlaylistCardUI(playlistId);
+                }
+                
+                // For artist downloads, ensure cleanup happens
+                if (playlistId.startsWith('artist_album_')) {
+                    console.log(`🧹 Cleaning up orphaned artist download: ${playlistId}`);
+                    // The toast deduplication will prevent spam here
+                }
             }
         }
     }, 500);
@@ -4904,8 +4918,35 @@ function hideLoadingOverlay() {
     document.getElementById('loading-overlay').classList.add('hidden');
 }
 
+// Toast deduplication cache
+let recentToasts = new Map();
+
 function showToast(message, type = 'success') {
     const container = document.getElementById('toast-container');
+    
+    // Create a unique key for this toast
+    const toastKey = `${type}:${message}`;
+    const now = Date.now();
+    
+    // Check if we've shown this exact toast recently (within 5 seconds)
+    if (recentToasts.has(toastKey)) {
+        const lastShown = recentToasts.get(toastKey);
+        if (now - lastShown < 5000) {
+            console.log(`🚫 Suppressing duplicate toast: "${message}"`);
+            return; // Don't show duplicate
+        }
+    }
+    
+    // Record this toast
+    recentToasts.set(toastKey, now);
+    
+    // Clean up old entries (older than 10 seconds)
+    for (const [key, timestamp] of recentToasts.entries()) {
+        if (now - timestamp > 10000) {
+            recentToasts.delete(key);
+        }
+    }
+    
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
     toast.textContent = message;
