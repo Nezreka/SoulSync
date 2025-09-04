@@ -60,8 +60,10 @@ let artistsPageState = {
     cache: {
         searches: {}, // Cache search results by query
         discography: {}, // Cache discography by artist ID
-        colors: {} // Cache extracted colors by image URL
-    }
+        colors: {}, // Cache extracted colors by image URL
+        completionData: {} // Cache completion data by artist ID
+    },
+    isInitialized: false // Track if the page has been initialized
 };
 let artistsSearchTimeout = null;
 let artistsSearchController = null;
@@ -362,7 +364,13 @@ async function loadPageData(pageId) {
                 break;
             case 'artists':
                 stopDownloadPolling();
-                initializeArtistsPage();
+                // Only fully initialize if not already initialized
+                if (!artistsPageState.isInitialized) {
+                    initializeArtistsPage();
+                } else {
+                    // Just restore state if already initialized
+                    restoreArtistsPageState();
+                }
                 break;
             case 'settings':
                 initializeSettings();
@@ -9065,10 +9073,10 @@ async function resetYouTubePlaylist(urlHash) {
 // ============================================================================
 
 /**
- * Initialize the artists page when navigated to
+ * Initialize the artists page when navigated to (only runs once)
  */
 function initializeArtistsPage() {
-    console.log('🎵 Initializing Artists Page');
+    console.log('🎵 Initializing Artists Page (first time)');
     
     // Get DOM elements
     const searchInput = document.getElementById('artists-search-input');
@@ -9077,7 +9085,7 @@ function initializeArtistsPage() {
     const backButton = document.getElementById('artists-back-button');
     const detailBackButton = document.getElementById('artist-detail-back-button');
     
-    // Set up event listeners
+    // Set up event listeners (only need to do this once)
     if (searchInput) {
         searchInput.addEventListener('input', handleArtistsSearchInput);
         searchInput.addEventListener('keypress', handleArtistsSearchKeypress);
@@ -9096,12 +9104,90 @@ function initializeArtistsPage() {
         detailBackButton.addEventListener('click', () => showArtistsResultsState());
     }
     
-    // Initialize tabs
+    // Initialize tabs (only need to do this once)
     initializeArtistTabs();
     
-    // Reset to search state
-    showArtistsSearchState();
-    console.log('✅ Artists Page initialized successfully');
+    // Mark as initialized
+    artistsPageState.isInitialized = true;
+    
+    // Restore previous state instead of always resetting to search
+    restoreArtistsPageState();
+    console.log('✅ Artists Page initialized successfully (ready for navigation)');
+}
+
+/**
+ * Restore the artists page to its previous state
+ */
+function restoreArtistsPageState() {
+    console.log(`🔄 Restoring artists page state: ${artistsPageState.currentView}`);
+    
+    switch (artistsPageState.currentView) {
+        case 'results':
+            // Restore search results state
+            if (artistsPageState.searchQuery && artistsPageState.searchResults.length > 0) {
+                console.log(`📦 Restoring search results for: "${artistsPageState.searchQuery}"`);
+                
+                // Restore search input values
+                const searchInput = document.getElementById('artists-search-input');
+                const headerSearchInput = document.getElementById('artists-header-search-input');
+                
+                if (searchInput) searchInput.value = artistsPageState.searchQuery;
+                if (headerSearchInput) headerSearchInput.value = artistsPageState.searchQuery;
+                
+                // Display the cached results
+                displayArtistsResults(artistsPageState.searchQuery, artistsPageState.searchResults);
+            } else {
+                // No valid results state, fall back to search
+                showArtistsSearchState();
+            }
+            break;
+            
+        case 'detail':
+            // Restore artist detail state
+            if (artistsPageState.selectedArtist && artistsPageState.artistDiscography) {
+                console.log(`🎤 Restoring artist detail for: ${artistsPageState.selectedArtist.name}`);
+                
+                // First restore search results if they exist
+                if (artistsPageState.searchQuery && artistsPageState.searchResults.length > 0) {
+                    const searchInput = document.getElementById('artists-search-input');
+                    const headerSearchInput = document.getElementById('artists-header-search-input');
+                    
+                    if (searchInput) searchInput.value = artistsPageState.searchQuery;
+                    if (headerSearchInput) headerSearchInput.value = artistsPageState.searchQuery;
+                }
+                
+                // Show artist detail state
+                showArtistDetailState();
+                
+                // Update artist info in header
+                updateArtistDetailHeader(artistsPageState.selectedArtist);
+                
+                // Display cached discography
+                if (artistsPageState.artistDiscography.albums || artistsPageState.artistDiscography.singles) {
+                    displayArtistDiscography(artistsPageState.artistDiscography);
+                    // Restore cached completion data instead of re-scanning
+                    restoreCachedCompletionData(artistsPageState.selectedArtist.id);
+                }
+            } else {
+                // No valid detail state, fall back to search or results
+                if (artistsPageState.searchQuery && artistsPageState.searchResults.length > 0) {
+                    displayArtistsResults(artistsPageState.searchQuery, artistsPageState.searchResults);
+                } else {
+                    showArtistsSearchState();
+                }
+            }
+            break;
+            
+        default:
+        case 'search':
+            // Show search state (but preserve any existing search query)
+            if (artistsPageState.searchQuery) {
+                const searchInput = document.getElementById('artists-search-input');
+                if (searchInput) searchInput.value = artistsPageState.searchQuery;
+            }
+            showArtistsSearchState();
+            break;
+    }
 }
 
 /**
@@ -9483,6 +9569,35 @@ function displayArtistDiscography(discography) {
 }
 
 /**
+ * Restore cached completion data without re-scanning the database
+ */
+function restoreCachedCompletionData(artistId) {
+    console.log(`📦 Restoring cached completion data for artist: ${artistId}`);
+    
+    const cachedData = artistsPageState.cache.completionData[artistId];
+    if (!cachedData) {
+        console.log('⚠️ No cached completion data found, skipping restoration');
+        return;
+    }
+    
+    // Restore album completion overlays
+    if (cachedData.albums) {
+        cachedData.albums.forEach(albumCompletion => {
+            updateAlbumCompletionOverlay(albumCompletion, 'albums');
+        });
+        console.log(`✅ Restored ${cachedData.albums.length} album completion overlays`);
+    }
+    
+    // Restore singles completion overlays  
+    if (cachedData.singles) {
+        cachedData.singles.forEach(singleCompletion => {
+            updateAlbumCompletionOverlay(singleCompletion, 'singles');
+        });
+        console.log(`✅ Restored ${cachedData.singles.length} single completion overlays`);
+    }
+}
+
+/**
  * Check completion status for entire discography with streaming updates
  */
 async function checkDiscographyCompletion(artistId, discography) {
@@ -9547,16 +9662,27 @@ function handleStreamingCompletionUpdate(data) {
     switch (data.type) {
         case 'start':
             console.log(`🎤 Starting completion check for ${data.artist_name} (${data.total_items} items)`);
-            // Could show a progress indicator here
+            // Initialize cache for this artist if not exists
+            const artistId = artistsPageState.selectedArtist?.id;
+            if (artistId && !artistsPageState.cache.completionData[artistId]) {
+                artistsPageState.cache.completionData[artistId] = {
+                    albums: [],
+                    singles: []
+                };
+            }
             break;
             
         case 'album_completion':
             updateAlbumCompletionOverlay(data, 'albums');
+            // Cache the completion data
+            cacheCompletionData(data, 'albums');
             console.log(`📀 Updated album: ${data.name} (${data.status})`);
             break;
             
         case 'single_completion':
             updateAlbumCompletionOverlay(data, 'singles');
+            // Cache the completion data
+            cacheCompletionData(data, 'singles');
             console.log(`🎵 Updated single: ${data.name} (${data.status})`);
             break;
             
@@ -9571,6 +9697,29 @@ function handleStreamingCompletionUpdate(data) {
             
         default:
             console.log('Unknown streaming update type:', data.type);
+    }
+}
+
+/**
+ * Cache completion data for future restoration
+ */
+function cacheCompletionData(completionData, type) {
+    const artistId = artistsPageState.selectedArtist?.id;
+    if (!artistId) return;
+    
+    // Ensure cache structure exists
+    if (!artistsPageState.cache.completionData[artistId]) {
+        artistsPageState.cache.completionData[artistId] = {
+            albums: [],
+            singles: []
+        };
+    }
+    
+    // Add to appropriate cache array
+    if (type === 'albums') {
+        artistsPageState.cache.completionData[artistId].albums.push(completionData);
+    } else if (type === 'singles') {
+        artistsPageState.cache.completionData[artistId].singles.push(completionData);
     }
 }
 
@@ -9744,6 +9893,21 @@ function showArtistsSearchState() {
 
 function showArtistsResultsState() {
     console.log('🔄 Showing results state');
+    
+    // Clear artist-specific data when navigating back to results
+    // This ensures that selecting the same artist again will trigger a fresh scan
+    if (artistsPageState.selectedArtist) {
+        const artistId = artistsPageState.selectedArtist.id;
+        console.log(`🗑️ Clearing cached data for artist: ${artistsPageState.selectedArtist.name}`);
+        
+        // Clear artist-specific cache data
+        delete artistsPageState.cache.completionData[artistId];
+        delete artistsPageState.cache.discography[artistId];
+        
+        // Clear artist state
+        artistsPageState.selectedArtist = null;
+        artistsPageState.artistDiscography = { albums: [], singles: [] };
+    }
     
     const searchState = document.getElementById('artists-search-state');
     const resultsState = document.getElementById('artists-results-state');
