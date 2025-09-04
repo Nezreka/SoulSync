@@ -209,8 +209,6 @@ class WebUIDownloadMonitor:
     
     def _monitor_loop(self):
         """Main monitoring loop - checks downloads every 1 second for responsive web UX"""
-        import time
-        
         while self.monitoring and self.monitored_batches:
             try:
                 self._check_all_downloads()
@@ -314,7 +312,7 @@ class WebUIDownloadMonitor:
                 return False
             else:
                 queue_time = current_time - task['queued_start_time']
-                if queue_time > 90:
+                if queue_time > 120:  # Increased timeout to reduce retry spam
                     # Track retry attempts to prevent rapid loops
                     retry_count = task.get('stuck_retry_count', 0)
                     last_retry = task.get('last_retry_time', 0)
@@ -333,6 +331,9 @@ class WebUIDownloadMonitor:
                         print(f"❌ Task failed after 3 retry attempts (queue timeout)")
                         task['status'] = 'failed'
                         task['error_message'] = 'Failed after multiple queue timeout retries'
+                        # Clear timers to prevent further retry loops
+                        task.pop('queued_start_time', None)
+                        task.pop('downloading_start_time', None)
                         return False
                 
         # Check for downloading at 0% timeout (90 seconds like GUI) 
@@ -342,7 +343,7 @@ class WebUIDownloadMonitor:
                 return False
             else:
                 download_time = current_time - task['downloading_start_time']
-                if download_time > 90:
+                if download_time > 120:  # Increased timeout to reduce retry spam
                     retry_count = task.get('stuck_retry_count', 0)
                     last_retry = task.get('last_retry_time', 0)
                     
@@ -359,6 +360,9 @@ class WebUIDownloadMonitor:
                         print(f"❌ Task failed after 3 retry attempts (0% progress timeout)")
                         task['status'] = 'failed'
                         task['error_message'] = 'Failed after multiple 0% progress retries'
+                        # Clear timers to prevent further retry loops
+                        task.pop('queued_start_time', None)
+                        task.pop('downloading_start_time', None)
                         return False
         else:
             # Progress being made, reset timers and retry counts
@@ -404,21 +408,21 @@ class WebUIDownloadMonitor:
             
             # Only attempt cancellation if we have what looks like a proper download ID
             # (not a filename fallback which would be much longer)
-            if download_id and username and len(download_id) < 100:
-                print(f"🚫 Attempting to cancel stuck download: {os.path.basename(download_id)} from {username} (task: {task_id[:8]}...)")
+            if download_id and username and isinstance(download_id, str) and len(download_id) < 100:
+                print(f"🚫 Attempting to cancel stuck download: {os.path.basename(str(download_id))} from {username} (task: {task_id[:8]}...)")
                 try:
                     success = asyncio.run(soulseek_client.cancel_download(download_id, username, remove=False))
                     if success:
-                        print(f"✅ Successfully cancelled download {download_id[:8]}... from {username}")
+                        print(f"✅ Successfully cancelled download {str(download_id)[:8]}... from {username}")
                         # Clear any stored download info to prevent status conflicts
                         task.pop('soulseek_download_id', None)
                         task.pop('soulseek_username', None)
                     else:
-                        print(f"⚠️ Cancel request failed for {download_id[:8]}... - all API endpoints returned errors, proceeding with retry anyway")
+                        print(f"⚠️ Cancel request failed for {str(download_id)[:8]}... - all API endpoints returned errors, proceeding with retry anyway")
                 except Exception as e:
-                    print(f"⚠️ Cancel exception for {download_id[:8]}...: {str(e)[:150]}, proceeding with retry anyway")
+                    print(f"⚠️ Cancel exception for {str(download_id)[:8]}...: {str(e)[:150]}, proceeding with retry anyway")
             else:
-                print(f"⚠️ Invalid download ID for cancellation (len={len(download_id) if download_id else 0}, username={bool(username)}), proceeding with retry")
+                print(f"⚠️ Skipping cancellation - invalid data (ID len={len(str(download_id)) if download_id else 0}, username='{username}'), proceeding with retry")
                     
         except Exception as e:
             print(f"⚠️ Error in cancellation logic, proceeding with retry: {e}")
@@ -469,7 +473,6 @@ def cleanup_monitor():
         download_monitor.monitoring = False
         download_monitor.monitored_batches.clear()
         # Give the thread a moment to exit cleanly
-        import time
         time.sleep(0.5)
 
 def signal_handler(signum, frame):
@@ -2054,7 +2057,6 @@ def check_artist_discography_completion_stream(artist_id):
                     yield f"data: {json.dumps(completion_data)}\n\n"
                     
                     # Small delay to make the streaming effect visible
-                    import time
                     time.sleep(0.1)  # 100ms delay between items
                     
                 except Exception as e:
@@ -7321,7 +7323,6 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json):
     """The actual sync function that runs in the background thread."""
     global sync_states, sync_service
     
-    import time
     task_start_time = time.time()
     print(f"🚀 [TIMING] _run_sync_task STARTED for playlist '{playlist_name}' at {time.strftime('%H:%M:%S')}")
     print(f"📊 Received {len(tracks_json)} tracks from frontend")
@@ -7528,7 +7529,6 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json):
 @app.route('/api/sync/start', methods=['POST'])
 def start_playlist_sync():
     """Starts a new sync process for a given playlist."""
-    import time
     request_start_time = time.time()
     print(f"⏱️ [TIMING] Sync request received at {time.strftime('%H:%M:%S')}")
     
