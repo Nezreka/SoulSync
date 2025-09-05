@@ -392,8 +392,13 @@ class WebUIDownloadMonitor:
             # Cancel the stuck download first (like GUI)
             self._cancel_download_before_retry(task, task_id)
             
-            # Update task for retry
-            with tasks_lock:
+            # Update task for retry with timeout to prevent deadlock
+            lock_acquired = tasks_lock.acquire(timeout=2.0)  # 2-second timeout
+            if not lock_acquired:
+                print(f"⚠️ Could not acquire lock for retry {task_id}, will try again next cycle")
+                return
+            
+            try:
                 if task_id in download_tasks:
                     task['retry_count'] = task.get('retry_count', 0) + 1
                     if task['retry_count'] > 2:  # Max 3 attempts total like GUI
@@ -406,7 +411,8 @@ class WebUIDownloadMonitor:
                     task.pop('queued_start_time', None)
                     task.pop('downloading_start_time', None)
                     task['status_change_time'] = time.time()
-                    
+            finally:
+                tasks_lock.release()
             # Submit retry to executor
             missing_download_executor.submit(self._retry_task_with_fallback, batch_id, task_id, task)
             
