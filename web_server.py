@@ -5616,11 +5616,94 @@ def get_active_processes():
     print(f"📊 Active processes check: {len([p for p in active_processes if p['type'] == 'batch'])} download batches, {len([p for p in active_processes if p['type'] == 'youtube_playlist'])} YouTube playlists")
     return jsonify({"active_processes": active_processes})
 
+def _build_batch_status_data(batch_id, batch, live_transfers_lookup):
+    """
+    Helper function to build status data for a single batch.
+    Extracted from get_batch_download_status for reuse in batched endpoint.
+    """
+    response_data = {
+        "phase": batch.get('phase', 'unknown'),
+        "error": batch.get('error'),
+        "auto_initiated": batch.get('auto_initiated', False)
+    }
+
+    if response_data["phase"] == 'analysis':
+        response_data['analysis_progress'] = {
+            'total': batch.get('analysis_total', 0),
+            'processed': batch.get('analysis_processed', 0)
+        }
+        response_data['analysis_results'] = batch.get('analysis_results', [])
+
+    elif response_data["phase"] in ['downloading', 'complete', 'error']:
+        response_data['analysis_results'] = batch.get('analysis_results', [])
+        batch_tasks = []
+        for task_id in batch.get('queue', []):
+            task = download_tasks.get(task_id)
+            if not task: continue
+
+            task_status = {
+                'task_id': task_id,
+                'track_index': task['track_index'],
+                'status': task['status'],
+                'track_info': task['track_info'],
+                'progress': 0
+            }
+            task_filename = task.get('filename') or task['track_info'].get('filename')
+            task_username = task.get('username') or task['track_info'].get('username')
+            if task_filename and task_username:
+                lookup_key = f"{task_username}::{os.path.basename(task_filename)}"
+                
+                if lookup_key in live_transfers_lookup:
+                    live_info = live_transfers_lookup[lookup_key]
+                    state_str = live_info.get('state', 'Unknown')
+                    
+                    # Don't override tasks that are already completed/failed/cancelled
+                    if task['status'] not in ['completed', 'failed', 'cancelled']:
+                        if 'Completed' in state_str or 'Succeeded' in state_str: 
+                            task_status['status'] = 'completed'
+                            # Permanently update the stored task status
+                            task['status'] = 'completed'
+                        elif 'Cancelled' in state_str or 'Canceled' in state_str: 
+                            task_status['status'] = 'cancelled'
+                            task['status'] = 'cancelled'
+                        elif 'Failed' in state_str or 'Errored' in state_str: 
+                            # Don't mark as failed immediately - trigger retry like GUI
+                            batch_id_for_retry = None
+                            for bid, batch_check in download_batches.items():
+                                if task_id in batch_check.get('queue', []):
+                                    batch_id_for_retry = bid
+                                    break
+                            if batch_id_for_retry:
+                                _handle_failed_download(batch_id_for_retry, task_id, task, task_status)
+                            else:
+                                # Fallback if batch not found
+                                task_status['status'] = 'failed'
+                                task['status'] = 'failed'
+                        elif 'InProgress' in state_str: task_status['status'] = 'downloading'
+                        else: task_status['status'] = 'queued'
+                        task_status['progress'] = live_info.get('percentComplete', 0)
+                    # For completed tasks, keep the existing progress at 100%
+                    elif task['status'] == 'completed':
+                        task_status['progress'] = 100
+                else:
+                    # If task is completed but not in live transfers, keep it completed with 100%
+                    if task['status'] == 'completed':
+                        task_status['progress'] = 100
+            batch_tasks.append(task_status)
+        batch_tasks.sort(key=lambda x: x['track_index'])
+        response_data['tasks'] = batch_tasks
+        
+        # Add wishlist summary if batch is complete (matching sync.py behavior)
+        if response_data["phase"] == 'complete' and 'wishlist_summary' in batch:
+            response_data['wishlist_summary'] = batch['wishlist_summary']
+
+    return response_data
+
 @app.route('/api/playlists/<batch_id>/download_status', methods=['GET'])
 def get_batch_download_status(batch_id):
     """
-    Returns real-time status for a batch, now including the
-    current phase (analysis, downloading, etc.) and analysis progress.
+    Returns real-time status for a single batch.
+    Now uses shared helper function for consistency with batched endpoint.
     """
     try:
         # Use cached transfer data to reduce API calls with multiple concurrent modals
@@ -5631,83 +5714,65 @@ def get_batch_download_status(batch_id):
                 return jsonify({"error": "Batch not found"}), 404
 
             batch = download_batches[batch_id]
-            response_data = {
-                "phase": batch.get('phase', 'unknown'),
-                "error": batch.get('error'),
-                "auto_initiated": batch.get('auto_initiated', False)
-            }
-
-            if response_data["phase"] == 'analysis':
-                response_data['analysis_progress'] = {
-                    'total': batch.get('analysis_total', 0),
-                    'processed': batch.get('analysis_processed', 0)
-                }
-                response_data['analysis_results'] = batch.get('analysis_results', [])
-
-            elif response_data["phase"] in ['downloading', 'complete', 'error']:
-                response_data['analysis_results'] = batch.get('analysis_results', [])
-                batch_tasks = []
-                for task_id in batch.get('queue', []):
-                    task = download_tasks.get(task_id)
-                    if not task: continue
-
-                    task_status = {
-                        'task_id': task_id,
-                        'track_index': task['track_index'],
-                        'status': task['status'],
-                        'track_info': task['track_info'],
-                        'progress': 0
-                    }
-                    task_filename = task.get('filename') or task['track_info'].get('filename')
-                    task_username = task.get('username') or task['track_info'].get('username')
-                    if task_filename and task_username:
-                        lookup_key = f"{task_username}::{os.path.basename(task_filename)}"
-                        
-                        if lookup_key in live_transfers_lookup:
-                            live_info = live_transfers_lookup[lookup_key]
-                            state_str = live_info.get('state', 'Unknown')
-                            
-                            # Don't override tasks that are already completed/failed/cancelled
-                            if task['status'] not in ['completed', 'failed', 'cancelled']:
-                                if 'Completed' in state_str or 'Succeeded' in state_str: 
-                                    task_status['status'] = 'completed'
-                                    # Permanently update the stored task status
-                                    task['status'] = 'completed'
-                                elif 'Cancelled' in state_str or 'Canceled' in state_str: 
-                                    task_status['status'] = 'cancelled'
-                                    task['status'] = 'cancelled'
-                                elif 'Failed' in state_str or 'Errored' in state_str: 
-                                    # Don't mark as failed immediately - trigger retry like GUI
-                                    batch_id_for_retry = None
-                                    for bid, batch in download_batches.items():
-                                        if task_id in batch.get('queue', []):
-                                            batch_id_for_retry = bid
-                                            break
-                                    if batch_id_for_retry:
-                                        _handle_failed_download(batch_id_for_retry, task_id, task, task_status)
-                                    else:
-                                        # Fallback if batch not found
-                                        task_status['status'] = 'failed'
-                                        task['status'] = 'failed'
-                                elif 'InProgress' in state_str: task_status['status'] = 'downloading'
-                                else: task_status['status'] = 'queued'
-                                task_status['progress'] = live_info.get('percentComplete', 0)
-                            # For completed tasks, keep the existing progress at 100%
-                            elif task['status'] == 'completed':
-                                task_status['progress'] = 100
-                        else:
-                            # If task is completed but not in live transfers, keep it completed with 100%
-                            if task['status'] == 'completed':
-                                task_status['progress'] = 100
-                    batch_tasks.append(task_status)
-                batch_tasks.sort(key=lambda x: x['track_index'])
-                response_data['tasks'] = batch_tasks
-                
-                # Add wishlist summary if batch is complete (matching sync.py behavior)
-                if response_data["phase"] == 'complete' and 'wishlist_summary' in batch:
-                    response_data['wishlist_summary'] = batch['wishlist_summary']
-
+            response_data = _build_batch_status_data(batch_id, batch, live_transfers_lookup)
             return jsonify(response_data)
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/download_status/batch', methods=['GET'])
+def get_batched_download_statuses():
+    """
+    NEW: Returns status for multiple download batches in a single request.
+    Dramatically reduces API calls when multiple download modals are active.
+    
+    Query params:
+    - batch_ids: Optional list of specific batch IDs to include
+    - If no batch_ids provided, returns all active batches
+    """
+    try:
+        # Get optional batch ID filtering from query params
+        requested_batch_ids = request.args.getlist('batch_ids')
+        
+        # Use shared cached transfer data - single lookup for all batches
+        live_transfers_lookup = get_cached_transfer_data()
+        
+        response = {"batches": {}}
+        
+        with tasks_lock:
+            # Determine which batches to include
+            if requested_batch_ids:
+                # Filter to only requested batch IDs that exist
+                target_batches = {
+                    bid: batch for bid, batch in download_batches.items() 
+                    if bid in requested_batch_ids
+                }
+            else:
+                # Return all active batches
+                target_batches = download_batches.copy()
+            
+            # Build status data for each batch using shared helper
+            for batch_id, batch in target_batches.items():
+                try:
+                    response["batches"][batch_id] = _build_batch_status_data(
+                        batch_id, batch, live_transfers_lookup
+                    )
+                except Exception as batch_error:
+                    # Don't fail entire request if one batch has issues
+                    print(f"❌ Error processing batch {batch_id}: {batch_error}")
+                    response["batches"][batch_id] = {"error": str(batch_error)}
+        
+        # Add metadata for debugging/monitoring
+        response["metadata"] = {
+            "total_batches": len(response["batches"]),
+            "requested_batch_ids": requested_batch_ids,
+            "timestamp": time.time()
+        }
+        
+        print(f"📊 [Batched Status] Returning status for {len(response['batches'])} batches")
+        return jsonify(response)
 
     except Exception as e:
         import traceback

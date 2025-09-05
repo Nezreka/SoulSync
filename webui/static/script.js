@@ -2485,9 +2485,14 @@ async function cleanupDownloadProcess(playlistId) {
 
     // Stop any active polling first
     if (process.poller) {
-        console.log(`🛑 Stopping polling for ${playlistId}`);
+        console.log(`🛑 Stopping individual polling for ${playlistId}`);
         clearInterval(process.poller);
         process.poller = null;
+    }
+    
+    // Mark process as no longer running
+    if (process.status === 'running') {
+        process.status = 'complete';
     }
 
     // If the process has a batchId, tell the server to clean it up.
@@ -2513,6 +2518,9 @@ async function cleanupDownloadProcess(playlistId) {
 
     // Remove from client-side global state
     delete activeDownloadProcesses[playlistId];
+
+    // Check if global polling should be stopped
+    checkAndCleanupGlobalPolling();
 
     // Restore card UI (only for non-wishlist playlists)
     if (playlistId !== 'wishlist') {
@@ -3409,258 +3417,355 @@ function updateTrackAnalysisResults(playlistId, results) {
 
 
 
-function startModalDownloadPolling(playlistId) {
-    const process = activeDownloadProcesses[playlistId];
-    if (!process || !process.batchId) return;
-    if (process.poller) clearInterval(process.poller);
+// ============================================================================
+// GLOBAL BATCHED POLLING SYSTEM - Optimized for multiple concurrent modals
+// ============================================================================
 
-    console.log(`🔄 [Polling] Starting status polling for playlistId: ${playlistId}, batchId: ${process.batchId}`);
+let globalDownloadStatusPoller = null;
 
-    process.poller = setInterval(async () => {
-        if (!activeDownloadProcesses[playlistId]) {
-            clearInterval(process.poller);
+function startGlobalDownloadPolling() {
+    if (globalDownloadStatusPoller) {
+        console.debug('🔄 [Global Polling] Already running, skipping start');
+        return; // Prevent duplicate pollers
+    }
+    
+    console.log('🔄 [Global Polling] Starting batched download status polling');
+    
+    globalDownloadStatusPoller = setInterval(async () => {
+        // Get all active processes that need polling
+        const activeBatchIds = [];
+        const batchToPlaylistMap = {};
+        
+        Object.entries(activeDownloadProcesses).forEach(([playlistId, process]) => {
+            if (process.batchId && process.status === 'running') {
+                activeBatchIds.push(process.batchId);
+                batchToPlaylistMap[process.batchId] = playlistId;
+            }
+        });
+        
+        if (activeBatchIds.length === 0) {
+            console.log('🛑 [Global Polling] No active processes, stopping global poller');
+            stopGlobalDownloadPolling();
             return;
         }
+        
         try {
-            const response = await fetch(`/api/playlists/${process.batchId}/download_status`);
+            // Single batched API call for all active processes
+            const queryParams = activeBatchIds.map(id => `batch_ids=${id}`).join('&');
+            const response = await fetch(`/api/download_status/batch?${queryParams}`);
+            
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
             }
             
             const data = await response.json();
-            if (data.error) throw new Error(data.error);
+            console.debug(`📊 [Global Polling] Received batched update for ${Object.keys(data.batches).length} processes`);
             
-            console.debug(`📊 [Polling] Status update for ${playlistId}: phase=${data.phase}, tasks=${(data.tasks || []).length}`);
-            
-            // Auto-show wishlist modal during active auto-processing
-            const isWishlist = (playlistId === 'wishlist');
-            const isAutoInitiated = data.auto_initiated || false;
-            const isModalHidden = process.modalElement && process.modalElement.style.display === 'none';
-            
-            if (isWishlist && isAutoInitiated && isModalHidden && currentPage === 'dashboard' && !WishlistModalState.wasUserClosed()) {
-                console.log('🤖 [Polling] Auto-showing wishlist modal during active auto-processing');
-                process.modalElement.style.display = 'flex';
-                WishlistModalState.setVisible();
-            }
-
-            if (data.phase === 'analysis') {
-                const progress = data.analysis_progress;
-                const percent = progress.total > 0 ? (progress.processed / progress.total) * 100 : 0;
-                document.getElementById(`analysis-progress-fill-${playlistId}`).style.width = `${percent}%`;
-                document.getElementById(`analysis-progress-text-${playlistId}`).textContent = 
-                    `${progress.processed}/${progress.total} tracks analyzed`;
-                if (data.analysis_results) {
-                    updateTrackAnalysisResults(playlistId, data.analysis_results);
-                    // Update stats when we first get analysis results
-                    const foundCount = data.analysis_results.filter(r => r.found).length;
-                    const missingCount = data.analysis_results.filter(r => !r.found).length;
-                    document.getElementById(`stat-found-${playlistId}`).textContent = foundCount;
-                    document.getElementById(`stat-missing-${playlistId}`).textContent = missingCount;
-                }
-            } else if (data.phase === 'downloading' || data.phase === 'complete' || data.phase === 'error') {
-                console.debug(`📊 [Status Update] Processing ${data.phase} phase for playlistId: ${playlistId}, tasks: ${(data.tasks || []).length}`);
-                
-                if (document.getElementById(`analysis-progress-fill-${playlistId}`).style.width !== '100%') {
-                     document.getElementById(`analysis-progress-fill-${playlistId}`).style.width = '100%';
-                     document.getElementById(`analysis-progress-text-${playlistId}`).textContent = 'Analysis complete!';
-                     if(data.analysis_results) {
-                         updateTrackAnalysisResults(playlistId, data.analysis_results);
-                         const foundCount = data.analysis_results.filter(r => r.found).length;
-                         const missingCount = data.analysis_results.filter(r => !r.found).length;
-                         document.getElementById(`stat-found-${playlistId}`).textContent = foundCount;
-                         document.getElementById(`stat-missing-${playlistId}`).textContent = missingCount;
-                     }
-                }
-                const missingTracks = (data.analysis_results || []).filter(r => !r.found);
-                const missingCount = missingTracks.length;
-                let completedCount = 0;
-                let failedOrCancelledCount = 0;
-                
-                // Verify modal exists before processing tasks
-                const modal = document.getElementById(`download-missing-modal-${playlistId}`);
-                if (!modal) {
-                    console.error(`❌ [Status Update] Modal not found: download-missing-modal-${playlistId}`);
+            // Process each batch's status data using existing logic
+            Object.entries(data.batches).forEach(([batchId, statusData]) => {
+                const playlistId = batchToPlaylistMap[batchId];
+                if (!playlistId || statusData.error) {
+                    if (statusData.error) {
+                        console.error(`❌ [Global Polling] Error for batch ${batchId}:`, statusData.error);
+                    }
                     return;
                 }
-
-                (data.tasks || []).forEach(task => {
-                    const row = document.querySelector(`#download-missing-modal-${playlistId} tr[data-track-index="${task.track_index}"]`);
-                    if (!row) {
-                        console.debug(`❌ [Status Update] Row not found for playlistId: ${playlistId}, track_index: ${task.track_index}`);
-                        return;
-                    }
-                    
-                    // Stronger protection: Don't override locally cancelled tracks with any backend updates
-                    if (row.dataset.locallyCancelled === 'true') {
-                        failedOrCancelledCount++;
-                        return; // Completely skip processing this task to avoid any UI conflicts
-                    }
-                    
-                    row.dataset.taskId = task.task_id;
-                    const statusEl = document.getElementById(`download-${playlistId}-${task.track_index}`);
-                    const actionsEl = document.getElementById(`actions-${playlistId}-${task.track_index}`);
-                    let statusText = '';
-                    switch (task.status) {
-                        case 'pending': statusText = '⏸️ Pending'; break;
-                        case 'searching': statusText = '🔍 Searching...'; break;
-                        case 'downloading': statusText = `⏬ Downloading... ${Math.round(task.progress || 0)}%`; break;
-                        case 'completed': statusText = '✅ Completed'; completedCount++; break;
-                        case 'failed': statusText = '❌ Failed'; failedOrCancelledCount++; break;
-                        case 'cancelled': statusText = '🚫 Cancelled'; failedOrCancelledCount++; break;
-                        default: statusText = `⚪ ${task.status}`; break;
-                    }
-                    if(statusEl) {
-                        statusEl.textContent = statusText;
-                        console.debug(`✅ [Status Update] Updated track ${task.track_index} to: ${statusText}`);
-                    } else {
-                        console.warn(`❌ [Status Update] Status element not found: download-${playlistId}-${task.track_index}`);
-                    }
-                    if (actionsEl && !['completed', 'failed', 'cancelled'].includes(task.status) && actionsEl.innerHTML === '-') {
-                        actionsEl.innerHTML = `<button class="cancel-track-btn" title="Cancel this download" onclick="cancelTrackDownload('${playlistId}', ${task.track_index})">×</button>`;
-                    } 
-                    if (actionsEl && ['completed', 'failed', 'cancelled'].includes(task.status)) {
-                        actionsEl.innerHTML = '-';
-                    }
-                });
-
-                const totalFinished = completedCount + failedOrCancelledCount;
-                const progressPercent = missingCount > 0 ? (totalFinished / missingCount) * 100 : 0;
-                document.getElementById(`download-progress-fill-${playlistId}`).style.width = `${progressPercent}%`;
-                document.getElementById(`download-progress-text-${playlistId}`).textContent = `${completedCount}/${missingCount} completed (${progressPercent.toFixed(0)}%)`;
-                document.getElementById(`stat-downloaded-${playlistId}`).textContent = completedCount;
-
-                if (data.phase === 'complete' || data.phase === 'error' || (missingCount > 0 && totalFinished >= missingCount)) {
-                    // Enhanced check for background auto-processing for wishlist
-                    const isWishlist = (playlistId === 'wishlist');
-                    const isModalHidden = (process.modalElement && process.modalElement.style.display === 'none');
-                    const isAutoInitiated = data.auto_initiated || false; // Server indicates if batch was auto-started
-                    const isBackgroundWishlist = isWishlist && (isModalHidden || isAutoInitiated);
-                    
-                    // Auto-show modal for wishlist auto-processing if user is on dashboard and hasn't closed it
-                    if (isWishlist && isAutoInitiated && isModalHidden && currentPage === 'dashboard' && !WishlistModalState.wasUserClosed()) {
-                        console.log('🤖 [Polling] Auto-showing wishlist modal for live updates during auto-processing');
-                        process.modalElement.style.display = 'flex';
-                        WishlistModalState.setVisible();
-                        showToast('Auto-processing wishlist - showing live updates', 'info', 2000);
-                    }
-                    
-                    if (data.phase === 'cancelled') {
-                        process.status = 'cancelled';
-                        
-                        // Reset YouTube playlist phase to 'discovered' if this is a YouTube playlist on cancel
-                        if (playlistId.startsWith('youtube_')) {
-                            const urlHash = playlistId.replace('youtube_', '');
-                            updateYouTubeCardPhase(urlHash, 'discovered');
-                        }
-                        
-                        showToast(`Process cancelled for ${process.playlist.name}.`, 'info');
-                    } else if (data.phase === 'error') {
-                        process.status = 'complete'; // Treat as complete to allow cleanup
-                        updatePlaylistCardUI(playlistId); // Update card to show ready for review
-                        
-                        // Reset YouTube playlist phase to 'discovered' if this is a YouTube playlist on error
-                        if (playlistId.startsWith('youtube_')) {
-                            const urlHash = playlistId.replace('youtube_', '');
-                            updateYouTubeCardPhase(urlHash, 'discovered');
-                        }
-                        
-                        showToast(`Process for ${process.playlist.name} failed!`, 'error');
-                    } else {
-                        process.status = 'complete';
-                        updatePlaylistCardUI(playlistId); // Update card to show ready for review
-                        
-                        // Update YouTube playlist phase to 'download_complete' if this is a YouTube playlist
-                        if (playlistId.startsWith('youtube_')) {
-                            const urlHash = playlistId.replace('youtube_', '');
-                            updateYouTubeCardPhase(urlHash, 'download_complete');
-                        }
-                        
-                        // Update Tidal playlist phase to 'download_complete' if this is a Tidal playlist
-                        if (playlistId.startsWith('tidal_')) {
-                            const tidalPlaylistId = playlistId.replace('tidal_', '');
-                            if (tidalPlaylistStates[tidalPlaylistId]) {
-                                tidalPlaylistStates[tidalPlaylistId].phase = 'download_complete';
-                                // Store the download process ID for potential modal rehydration
-                                tidalPlaylistStates[tidalPlaylistId].download_process_id = process.batchId;
-                                updateTidalCardPhase(tidalPlaylistId, 'download_complete');
-                                console.log(`✅ [Status Complete] Updated Tidal playlist ${tidalPlaylistId} to download_complete phase`);
-                            }
-                        }
-                        
-                        // Handle background wishlist processing completion specially
-                        if (isBackgroundWishlist) {
-                            console.log(`🎉 Background wishlist processing complete: ${completedCount} downloaded, ${failedOrCancelledCount} failed`);
-                            
-                            // Clean up polling first
-                            clearInterval(process.poller);
-                            
-                            // Reset modal to idle state to prevent "complete" phase disruption
-                            setTimeout(() => {
-                                resetWishlistModalToIdleState();
-                                // Server-side auto-processing will handle next cycle automatically
-                            }, 500);
-                            
-                            return; // Skip normal completion handling
-                        }
-                        
-                        // Show completion summary with wishlist stats (matching sync.py behavior)
-                        let completionMessage = `Process complete for ${process.playlist.name}!`;
-                        let messageType = 'success';
-                        
-                        // Check for wishlist summary from backend (added when failed/cancelled tracks are processed)
-                        if (data.wishlist_summary) {
-                            const summary = data.wishlist_summary;
-                            completionMessage = `Download process complete! Downloaded: ${completedCount}, Failed/Cancelled: ${failedOrCancelledCount}.`;
-                            
-                            if (summary.tracks_added > 0) {
-                                completionMessage += ` Added ${summary.tracks_added} failed track${summary.tracks_added !== 1 ? 's' : ''} to wishlist for automatic retry.`;
-                            } else if (summary.total_failed > 0) {
-                                completionMessage += ` ${summary.total_failed} track${summary.total_failed !== 1 ? 's' : ''} could not be added to wishlist.`;
-                                messageType = 'warning';
-                            }
-                        }
-                        
-                        showToast(completionMessage, messageType);
-                    }
-                    
-                    document.getElementById(`cancel-all-btn-${playlistId}`).style.display = 'none';
-                    clearInterval(process.poller);
-                    process.poller = null;
-                    updatePlaylistCardUI(playlistId);
-                }
-            }
+                
+                // Use existing modal update logic - zero changes needed!
+                processModalStatusUpdate(playlistId, statusData);
+            });
+            
         } catch (error) {
-            console.error(`❌ [Polling] Error for ${playlistId} (batch: ${process.batchId}):`, error);
+            console.error('❌ [Global Polling] Batched request failed:', error);
             
-            // Check for 404 or connection errors that indicate batch no longer exists
-            const is404Error = error.message.includes('404') || 
-                              error.message.includes('Batch not found') ||
-                              (error instanceof TypeError && error.message.includes('Failed to fetch'));
-            
-            if (is404Error) {
-                console.warn(`🛑 [Polling] Stopping polling for ${playlistId} - batch no longer exists`);
-                
-                // Immediately clear polling to prevent further requests
-                clearInterval(process.poller);
-                process.poller = null;
-                
-                // Mark process as complete to prevent further issues
-                if (process.status !== 'complete') {
-                    process.status = 'complete';
-                    updatePlaylistCardUI(playlistId);
-                }
-                
-                // For artist downloads, ensure proper cleanup happens
-                if (playlistId.startsWith('artist_album_')) {
-                    console.log(`🧹 Cleaning up orphaned artist download: ${playlistId}`);
-                    // Trigger artist download status refresh to update UI
-                    updateArtistDownloadsSection();
-                }
-                
-                return; // Exit the polling function entirely
-            }
+            // Fallback: If batched request fails, don't break individual modals
+            // Individual error handling will be preserved in processModalStatusUpdate
         }
-    }, 500);
+    }, 1000); // 1 second polling (was 500ms individual = 2x less aggressive)
+}
+
+function stopGlobalDownloadPolling() {
+    if (globalDownloadStatusPoller) {
+        console.log('🛑 [Global Polling] Stopping batched download status polling');
+        clearInterval(globalDownloadStatusPoller);
+        globalDownloadStatusPoller = null;
+    }
+}
+
+function processModalStatusUpdate(playlistId, data) {
+    // This function contains ALL the existing polling logic from startModalDownloadPolling
+    // Extracted so it can be called from both individual and batched polling
+    const process = activeDownloadProcesses[playlistId];
+    if (!process) {
+        console.debug(`⚠️ [Status Update] No process found for ${playlistId}, skipping update`);
+        return;
+    }
+    
+    if (data.error) {
+        console.error(`❌ [Status Update] Error for ${playlistId}: ${data.error}`);
+        return;
+    }
+    
+    console.debug(`📊 [Status Update] Processing update for ${playlistId}: phase=${data.phase}, tasks=${(data.tasks || []).length}`);
+    
+    // Auto-show wishlist modal during active auto-processing
+    const isWishlist = (playlistId === 'wishlist');
+    const isAutoInitiated = data.auto_initiated || false;
+    const isModalHidden = process.modalElement && process.modalElement.style.display === 'none';
+    
+    if (isWishlist && isAutoInitiated && isModalHidden && currentPage === 'dashboard' && !WishlistModalState.wasUserClosed()) {
+        console.log('🤖 [Status Update] Auto-showing wishlist modal during active auto-processing');
+        process.modalElement.style.display = 'flex';
+        WishlistModalState.setVisible();
+    }
+
+    if (data.phase === 'analysis') {
+        const progress = data.analysis_progress;
+        const percent = progress.total > 0 ? (progress.processed / progress.total) * 100 : 0;
+        document.getElementById(`analysis-progress-fill-${playlistId}`).style.width = `${percent}%`;
+        document.getElementById(`analysis-progress-text-${playlistId}`).textContent = 
+            `${progress.processed}/${progress.total} tracks analyzed`;
+        if (data.analysis_results) {
+            updateTrackAnalysisResults(playlistId, data.analysis_results);
+            // Update stats when we first get analysis results
+            const foundCount = data.analysis_results.filter(r => r.found).length;
+            const missingCount = data.analysis_results.filter(r => !r.found).length;
+            document.getElementById(`stat-found-${playlistId}`).textContent = foundCount;
+            document.getElementById(`stat-missing-${playlistId}`).textContent = missingCount;
+        }
+    } else if (data.phase === 'downloading' || data.phase === 'complete' || data.phase === 'error') {
+        console.debug(`📊 [Status Update] Processing ${data.phase} phase for playlistId: ${playlistId}, tasks: ${(data.tasks || []).length}`);
+        
+        if (document.getElementById(`analysis-progress-fill-${playlistId}`).style.width !== '100%') {
+             document.getElementById(`analysis-progress-fill-${playlistId}`).style.width = '100%';
+             document.getElementById(`analysis-progress-text-${playlistId}`).textContent = 'Analysis complete!';
+             if(data.analysis_results) {
+                 updateTrackAnalysisResults(playlistId, data.analysis_results);
+                 const foundCount = data.analysis_results.filter(r => r.found).length;
+                 const missingCount = data.analysis_results.filter(r => !r.found).length;
+                 document.getElementById(`stat-found-${playlistId}`).textContent = foundCount;
+                 document.getElementById(`stat-missing-${playlistId}`).textContent = missingCount;
+             }
+        }
+        const missingTracks = (data.analysis_results || []).filter(r => !r.found);
+        const missingCount = missingTracks.length;
+        let completedCount = 0;
+        let failedOrCancelledCount = 0;
+        
+        // Verify modal exists before processing tasks
+        const modal = document.getElementById(`download-missing-modal-${playlistId}`);
+        if (!modal) {
+            console.error(`❌ [Status Update] Modal not found: download-missing-modal-${playlistId}`);
+            return;
+        }
+
+        (data.tasks || []).forEach(task => {
+            const row = document.querySelector(`#download-missing-modal-${playlistId} tr[data-track-index="${task.track_index}"]`);
+            if (!row) {
+                console.debug(`❌ [Status Update] Row not found for playlistId: ${playlistId}, track_index: ${task.track_index}`);
+                return;
+            }
+            
+            // Stronger protection: Don't override locally cancelled tracks with any backend updates
+            if (row.dataset.locallyCancelled === 'true') {
+                failedOrCancelledCount++;
+                return; // Completely skip processing this task to avoid any UI conflicts
+            }
+            
+            row.dataset.taskId = task.task_id;
+            const statusEl = document.getElementById(`download-${playlistId}-${task.track_index}`);
+            const actionsEl = document.getElementById(`actions-${playlistId}-${task.track_index}`);
+            let statusText = '';
+            switch (task.status) {
+                case 'pending': statusText = '⏸️ Pending'; break;
+                case 'searching': statusText = '🔍 Searching...'; break;
+                case 'downloading': statusText = `⏬ Downloading... ${Math.round(task.progress || 0)}%`; break;
+                case 'completed': statusText = '✅ Completed'; completedCount++; break;
+                case 'failed': statusText = '❌ Failed'; failedOrCancelledCount++; break;
+                case 'cancelled': statusText = '🚫 Cancelled'; failedOrCancelledCount++; break;
+                default: statusText = `⚪ ${task.status}`; break;
+            }
+            if(statusEl) {
+                statusEl.textContent = statusText;
+                console.debug(`✅ [Status Update] Updated track ${task.track_index} to: ${statusText}`);
+            } else {
+                console.warn(`❌ [Status Update] Status element not found: download-${playlistId}-${task.track_index}`);
+            }
+            if (actionsEl && !['completed', 'failed', 'cancelled'].includes(task.status) && actionsEl.innerHTML === '-') {
+                actionsEl.innerHTML = `<button class="cancel-track-btn" title="Cancel this download" onclick="cancelTrackDownload('${playlistId}', ${task.track_index})">×</button>`;
+            } 
+            if (actionsEl && ['completed', 'failed', 'cancelled'].includes(task.status)) {
+                actionsEl.innerHTML = '-';
+            }
+        });
+
+        const totalFinished = completedCount + failedOrCancelledCount;
+        const progressPercent = missingCount > 0 ? (totalFinished / missingCount) * 100 : 0;
+        document.getElementById(`download-progress-fill-${playlistId}`).style.width = `${progressPercent}%`;
+        document.getElementById(`download-progress-text-${playlistId}`).textContent = `${completedCount}/${missingCount} completed (${progressPercent.toFixed(0)}%)`;
+        document.getElementById(`stat-downloaded-${playlistId}`).textContent = completedCount;
+
+        if (data.phase === 'complete' || data.phase === 'error' || (missingCount > 0 && totalFinished >= missingCount)) {
+            // Enhanced check for background auto-processing for wishlist
+            const isWishlist = (playlistId === 'wishlist');
+            const isModalHidden = (process.modalElement && process.modalElement.style.display === 'none');
+            const isAutoInitiated = data.auto_initiated || false; // Server indicates if batch was auto-started
+            const isBackgroundWishlist = isWishlist && (isModalHidden || isAutoInitiated);
+            
+            // Auto-show modal for wishlist auto-processing if user is on dashboard and hasn't closed it
+            if (isWishlist && isAutoInitiated && isModalHidden && currentPage === 'dashboard' && !WishlistModalState.wasUserClosed()) {
+                console.log('🤖 [Status Update] Auto-showing wishlist modal for live updates during auto-processing');
+                process.modalElement.style.display = 'flex';
+                WishlistModalState.setVisible();
+                showToast('Auto-processing wishlist - showing live updates', 'info', 2000);
+            }
+            
+            if (data.phase === 'cancelled') {
+                process.status = 'cancelled';
+                
+                // Reset YouTube playlist phase to 'discovered' if this is a YouTube playlist on cancel
+                if (playlistId.startsWith('youtube_')) {
+                    const urlHash = playlistId.replace('youtube_', '');
+                    updateYouTubeCardPhase(urlHash, 'discovered');
+                }
+                
+                showToast(`Process cancelled for ${process.playlist.name}.`, 'info');
+            } else if (data.phase === 'error') {
+                process.status = 'complete'; // Treat as complete to allow cleanup
+                updatePlaylistCardUI(playlistId); // Update card to show ready for review
+                
+                // Reset YouTube playlist phase to 'discovered' if this is a YouTube playlist on error
+                if (playlistId.startsWith('youtube_')) {
+                    const urlHash = playlistId.replace('youtube_', '');
+                    updateYouTubeCardPhase(urlHash, 'discovered');
+                }
+                
+                showToast(`Process for ${process.playlist.name} failed!`, 'error');
+            } else {
+                process.status = 'complete';
+                updatePlaylistCardUI(playlistId); // Update card to show ready for review
+                
+                // Update YouTube playlist phase to 'download_complete' if this is a YouTube playlist
+                if (playlistId.startsWith('youtube_')) {
+                    const urlHash = playlistId.replace('youtube_', '');
+                    updateYouTubeCardPhase(urlHash, 'download_complete');
+                }
+                
+                // Update Tidal playlist phase to 'download_complete' if this is a Tidal playlist
+                if (playlistId.startsWith('tidal_')) {
+                    const tidalPlaylistId = playlistId.replace('tidal_', '');
+                    if (tidalPlaylistStates[tidalPlaylistId]) {
+                        tidalPlaylistStates[tidalPlaylistId].phase = 'download_complete';
+                        // Store the download process ID for potential modal rehydration
+                        tidalPlaylistStates[tidalPlaylistId].download_process_id = process.batchId;
+                        updateTidalCardPhase(tidalPlaylistId, 'download_complete');
+                        console.log(`✅ [Status Complete] Updated Tidal playlist ${tidalPlaylistId} to download_complete phase`);
+                    }
+                }
+                
+                // Handle background wishlist processing completion specially
+                if (isBackgroundWishlist) {
+                    console.log(`🎉 Background wishlist processing complete: ${completedCount} downloaded, ${failedOrCancelledCount} failed`);
+                    
+                    // Reset modal to idle state to prevent "complete" phase disruption
+                    setTimeout(() => {
+                        resetWishlistModalToIdleState();
+                        // Server-side auto-processing will handle next cycle automatically
+                    }, 500);
+                    
+                    return; // Skip normal completion handling
+                }
+                
+                // Show completion summary with wishlist stats (matching sync.py behavior)
+                let completionMessage = `Process complete for ${process.playlist.name}!`;
+                let messageType = 'success';
+                
+                // Check for wishlist summary from backend (added when failed/cancelled tracks are processed)
+                if (data.wishlist_summary) {
+                    const summary = data.wishlist_summary;
+                    completionMessage = `Download process complete! Downloaded: ${completedCount}, Failed/Cancelled: ${failedOrCancelledCount}.`;
+                    
+                    if (summary.tracks_added > 0) {
+                        completionMessage += ` Added ${summary.tracks_added} failed track${summary.tracks_added !== 1 ? 's' : ''} to wishlist for automatic retry.`;
+                    } else if (summary.total_failed > 0) {
+                        completionMessage += ` ${summary.total_failed} track${summary.total_failed !== 1 ? 's' : ''} could not be added to wishlist.`;
+                        messageType = 'warning';
+                    }
+                }
+                
+                showToast(completionMessage, messageType);
+            }
+            
+            document.getElementById(`cancel-all-btn-${playlistId}`).style.display = 'none';
+            
+            // Mark process as complete and trigger cleanup check
+            process.status = 'complete';
+            updatePlaylistCardUI(playlistId);
+            
+            // Check if any other processes still need polling
+            checkAndCleanupGlobalPolling();
+        }
+    }
+}
+
+function checkAndCleanupGlobalPolling() {
+    // Check if any processes still need polling
+    const hasActivePolling = Object.values(activeDownloadProcesses)
+        .some(p => p.batchId && p.status === 'running');
+    
+    if (!hasActivePolling) {
+        console.log('🧹 [Cleanup] No more active processes, stopping global polling');
+        stopGlobalDownloadPolling();
+    }
+}
+
+// LEGACY FUNCTION: Keep for backward compatibility, but now uses global polling
+function startModalDownloadPolling(playlistId) {
+    const process = activeDownloadProcesses[playlistId];
+    if (!process || !process.batchId) return;
+    
+    console.log(`🔄 [Legacy Polling] Starting polling for ${playlistId}, delegating to global poller`);
+    
+    // Clear any existing individual poller (cleanup)
+    if (process.poller) {
+        clearInterval(process.poller);
+        process.poller = null;
+    }
+    
+    // Mark process as running to be picked up by global poller
+    process.status = 'running';
+    
+    // Start global polling if not already running
+    startGlobalDownloadPolling();
+    
+    // Create dummy poller for backward compatibility with cleanup functions
+    ensureLegacyCompatibility(playlistId);
+}
+
+// For backward compatibility with cleanup functions that expect process.poller
+// Creates a dummy poller that will be cleaned up by the existing cleanup logic
+function createLegacyPoller(playlistId) {
+    const process = activeDownloadProcesses[playlistId];
+    if (!process) return;
+    
+    // Create a dummy interval that just checks if the process is still active
+    // This ensures existing cleanup logic that calls clearInterval(process.poller) works
+    process.poller = setInterval(() => {
+        // This dummy poller doesn't do anything - global poller handles updates
+        if (!activeDownloadProcesses[playlistId] || process.status === 'complete') {
+            clearInterval(process.poller);
+            process.poller = null;
+            return;
+        }
+    }, 5000); // Very infrequent check, just for cleanup compatibility
+}
+
+// Call this to create the legacy poller after starting global polling
+function ensureLegacyCompatibility(playlistId) {
+    const process = activeDownloadProcesses[playlistId];
+    if (process && !process.poller) {
+        createLegacyPoller(playlistId);
+    }
 }
 async function updateModalWithLiveDownloadProgress() {
     try {
