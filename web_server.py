@@ -392,6 +392,19 @@ class WebUIDownloadMonitor:
             # Cancel the stuck download first (like GUI)
             self._cancel_download_before_retry(task, task_id)
             
+            # CRITICAL: Mark current source as used to prevent retry loops (like sync.py does)
+            username = task.get('username')
+            filename = task.get('filename')
+            if username and filename:
+                used_sources = task.get('used_sources', set())
+                source_key = f"{username}_{os.path.basename(filename)}"
+                used_sources.add(source_key)
+                task['used_sources'] = used_sources
+                print(f"🚫 Marked failed source as used: {source_key}")
+            
+            # NOTE: Don't call _on_download_completed here - let the retry handle it
+            # The error system doesn't call _on_download_completed during retry either
+            
             # Update task for retry with timeout to prevent deadlock
             lock_acquired = tasks_lock.acquire(timeout=2.0)  # 2-second timeout
             if not lock_acquired:
@@ -440,8 +453,8 @@ class WebUIDownloadMonitor:
                         print(f"⚠️ Original download ID is filename, cannot cancel: {str(original_id)[:50]}...")
                     else:
                         print(f"⚠️ No usable original download ID for cancellation")
-                elif len(download_id) < 100:
-                    # This looks like a proper slskd download ID, try to cancel it
+                elif '\\' not in str(download_id) and '/' not in str(download_id) and len(download_id) < 200:
+                    # This looks like a proper slskd download ID (no path separators), try to cancel it
                     print(f"🚫 Attempting to cancel stuck download: {download_id[:8]}... from {username} (task: {task_id[:8]}...)")
                     try:
                         success = asyncio.run(soulseek_client.cancel_download(download_id, username, remove=False))
@@ -455,12 +468,57 @@ class WebUIDownloadMonitor:
                     except Exception as e:
                         print(f"⚠️ Cancel exception for {download_id[:8]}...: {str(e)[:100]}, proceeding with retry anyway")
                 else:
-                    print(f"⚠️ Download ID too long ({len(download_id)} chars) - likely filename, cannot cancel")
+                    # Download ID is too long - likely a filename, need to find real download ID via API
+                    print(f"🔍 Download ID appears to be filename ({len(download_id)} chars), searching for real download ID...")
+                    real_download_id = self._find_download_id_by_filename(username, filename or download_id)
+                    if real_download_id:
+                        print(f"✅ Found real download ID: {real_download_id[:8]}... for file path")
+                        try:
+                            success = asyncio.run(soulseek_client.cancel_download(real_download_id, username, remove=False))
+                            if success:
+                                print(f"✅ Successfully cancelled download {real_download_id[:8]}... from {username}")
+                                task.pop('soulseek_download_id', None)
+                                task.pop('soulseek_username', None)
+                            else:
+                                print(f"⚠️ Cancel request failed for {real_download_id[:8]}... - API error, proceeding with retry anyway")
+                        except Exception as e:
+                            print(f"⚠️ Cancel exception for {real_download_id[:8]}...: {str(e)[:100]}, proceeding with retry anyway")
+                    else:
+                        print(f"⚠️ Could not find real download ID for filename, proceeding with retry anyway")
             else:
                 print(f"⚠️ Missing download ID or username for cancellation, proceeding with retry")
                     
         except Exception as e:
             print(f"⚠️ Error in cancellation logic, proceeding with retry: {e}")
+
+    def _find_download_id_by_filename(self, username, filename):
+        """Find the real download ID by looking up filename in slskd transfers"""
+        try:
+            transfers_data = asyncio.run(soulseek_client._make_request('GET', 'transfers/downloads'))
+            if not transfers_data:
+                return None
+                
+            target_basename = os.path.basename(filename).lower()
+            
+            for user_data in transfers_data:
+                if user_data.get('username') == username:
+                    # Check files in directories
+                    for directory in user_data.get('directories', []):
+                        for file_info in directory.get('files', []):
+                            file_basename = os.path.basename(file_info.get('filename', '')).lower()
+                            if file_basename == target_basename:
+                                return file_info.get('id')
+                    
+                    # Also check files directly under user (some API responses structure this way)
+                    for file_info in user_data.get('files', []):
+                        file_basename = os.path.basename(file_info.get('filename', '')).lower()
+                        if file_basename == target_basename:
+                            return file_info.get('id')
+            
+            return None
+        except Exception as e:
+            print(f"⚠️ Error finding download ID by filename: {e}")
+            return None
     
     def _retry_task_with_fallback(self, batch_id, task_id, task):
         """Retry task with next candidate (matches GUI retry logic)"""
@@ -5472,17 +5530,9 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
                                 _on_download_completed(batch_id, task_id, success=False)
                             return False
                         
-                        # Store download information with proper ID handling
-                        # If download_id is actually a filename (long path), generate a proper ID
-                        if download_id and len(str(download_id)) > 100:
-                            # This is likely a filename fallback, generate a proper download ID
-                            import uuid
-                            actual_download_id = f"web_dl_{uuid.uuid4().hex[:8]}"
-                            print(f"⚠️ Generated synthetic download ID {actual_download_id} for filename fallback: {str(download_id)[:50]}...")
-                            download_tasks[task_id]['download_id'] = actual_download_id
-                            download_tasks[task_id]['original_download_id'] = download_id  # Keep original for reference
-                        else:
-                            download_tasks[task_id]['download_id'] = download_id
+                        # Store download information - use real download ID from soulseek_client
+                        # CRITICAL FIX: Trust the download ID returned by soulseek_client.download()
+                        download_tasks[task_id]['download_id'] = download_id
                         
                         download_tasks[task_id]['username'] = username
                         download_tasks[task_id]['filename'] = filename
