@@ -3422,6 +3422,8 @@ function updateTrackAnalysisResults(playlistId, results) {
 // ============================================================================
 
 let globalDownloadStatusPoller = null;
+let globalPollingFailureCount = 0; // Track consecutive failures for exponential backoff
+let globalPollingBaseInterval = 2000; // Base polling interval in ms - MATCHES sync.py exactly
 
 function startGlobalDownloadPolling() {
     if (globalDownloadStatusPoller) {
@@ -3475,13 +3477,121 @@ function startGlobalDownloadPolling() {
                 processModalStatusUpdate(playlistId, statusData);
             });
             
+            // ENHANCED: Reset failure count on successful polling
+            globalPollingFailureCount = 0;
+            
         } catch (error) {
             console.error('❌ [Global Polling] Batched request failed:', error);
             
-            // Fallback: If batched request fails, don't break individual modals
-            // Individual error handling will be preserved in processModalStatusUpdate
+            // ENHANCED: Implement exponential backoff on failure
+            globalPollingFailureCount++;
+            
+            if (globalPollingFailureCount >= 5) {
+                console.error(`🚨 [Global Polling] ${globalPollingFailureCount} consecutive failures, stopping poller`);
+                stopGlobalDownloadPolling();
+                
+                // Try to restart after a delay
+                setTimeout(() => {
+                    console.log('🔄 [Global Polling] Attempting to restart after failures');
+                    if (Object.keys(activeDownloadProcesses).length > 0) {
+                        startGlobalDownloadPolling();
+                    }
+                }, 10000); // 10 second delay before restart
+                return;
+            }
+            
+            // Exponential backoff: increase interval temporarily
+            const backoffInterval = Math.min(globalPollingBaseInterval * Math.pow(2, globalPollingFailureCount - 1), 8000);
+            console.warn(`⚠️ [Global Polling] Failure ${globalPollingFailureCount}/5, backing off to ${backoffInterval}ms`);
+            
+            // Temporarily adjust the polling interval
+            if (globalDownloadStatusPoller) {
+                clearInterval(globalDownloadStatusPoller);
+                globalDownloadStatusPoller = null;
+                
+                // Restart with backoff interval
+                setTimeout(() => {
+                    if (Object.keys(activeDownloadProcesses).length > 0) {
+                        startGlobalDownloadPollingWithInterval(backoffInterval);
+                    }
+                }, backoffInterval);
+            }
         }
-    }, 1000); // 1 second polling (was 500ms individual = 2x less aggressive)
+    }, globalPollingBaseInterval); // Use base interval initially
+}
+
+function startGlobalDownloadPollingWithInterval(interval) {
+    if (globalDownloadStatusPoller) {
+        console.debug('🔄 [Global Polling] Already running, skipping start with interval');
+        return;
+    }
+    
+    console.log(`🔄 [Global Polling] Starting with interval ${interval}ms`);
+    
+    // Use the exact same logic as startGlobalDownloadPolling but with custom interval
+    globalDownloadStatusPoller = setInterval(async () => {
+        const activeBatchIds = [];
+        const batchToPlaylistMap = {};
+        
+        Object.entries(activeDownloadProcesses).forEach(([playlistId, process]) => {
+            if (process.batchId && process.status === 'running') {
+                activeBatchIds.push(process.batchId);
+                batchToPlaylistMap[process.batchId] = playlistId;
+            }
+        });
+        
+        if (activeBatchIds.length === 0) {
+            console.log('🛑 [Global Polling] No active processes, stopping global poller');
+            stopGlobalDownloadPolling();
+            return;
+        }
+        
+        try {
+            const queryParams = activeBatchIds.map(id => `batch_ids=${id}`).join('&');
+            const response = await fetch(`/api/download_status/batch?${queryParams}`);
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            
+            const data = await response.json();
+            console.debug(`📊 [Global Polling] Received batched update for ${Object.keys(data.batches).length} processes`);
+            
+            Object.entries(data.batches).forEach(([batchId, statusData]) => {
+                const playlistId = batchToPlaylistMap[batchId];
+                if (!playlistId || statusData.error) {
+                    if (statusData.error) {
+                        console.error(`❌ [Global Polling] Error for batch ${batchId}:`, statusData.error);
+                    }
+                    return;
+                }
+                processModalStatusUpdate(playlistId, statusData);
+            });
+            
+            // Success - reset to normal interval if we were backing off
+            globalPollingFailureCount = 0;
+            if (interval !== globalPollingBaseInterval) {
+                console.log('✅ [Global Polling] Recovered from backoff, returning to normal interval');
+                clearInterval(globalDownloadStatusPoller);
+                globalDownloadStatusPoller = null;
+                startGlobalDownloadPolling(); // Restart with normal interval
+            }
+            
+        } catch (error) {
+            console.error('❌ [Global Polling] Request failed:', error);
+            globalPollingFailureCount++;
+            
+            if (globalPollingFailureCount >= 5) {
+                console.error(`🚨 [Global Polling] Too many failures, stopping`);
+                stopGlobalDownloadPolling();
+                setTimeout(() => {
+                    if (Object.keys(activeDownloadProcesses).length > 0) {
+                        startGlobalDownloadPolling();
+                    }
+                }, 10000);
+            }
+        }
+    }, interval);
 }
 
 function stopGlobalDownloadPolling() {
@@ -3503,6 +3613,18 @@ function processModalStatusUpdate(playlistId, data) {
     
     if (data.error) {
         console.error(`❌ [Status Update] Error for ${playlistId}: ${data.error}`);
+        return;
+    }
+    
+    // ENHANCED: Validate response data to prevent UI corruption
+    if (!data || typeof data !== 'object') {
+        console.error(`❌ [Status Update] Invalid data for ${playlistId}:`, data);
+        return;
+    }
+    
+    // ENHANCED: Validate task data structure
+    if (data.tasks && !Array.isArray(data.tasks)) {
+        console.error(`❌ [Status Update] Invalid tasks data for ${playlistId} - not an array:`, data.tasks);
         return;
     }
     
@@ -3599,6 +3721,28 @@ function processModalStatusUpdate(playlistId, data) {
             }
         });
 
+        // ENHANCED: Validate worker counts from server data
+        const serverActiveWorkers = data.active_count || 0;
+        const maxWorkers = data.max_concurrent || 3;
+        
+        // Count actual active workers based on task statuses
+        const clientActiveWorkers = (data.tasks || []).filter(task => 
+            ['searching', 'downloading', 'queued'].includes(task.status) && 
+            !document.querySelector(`tr[data-track-index="${task.track_index}"][data-locally-cancelled="true"]`)
+        ).length;
+        
+        // Log discrepancies for debugging
+        if (serverActiveWorkers !== clientActiveWorkers) {
+            console.warn(`🔍 [Worker Validation] ${playlistId}: server reports ${serverActiveWorkers} active, client sees ${clientActiveWorkers} active tasks`);
+            
+            // If server reports 0 but client sees active tasks, this might indicate ghost workers were fixed
+            if (serverActiveWorkers === 0 && clientActiveWorkers > 0) {
+                console.warn(`🚨 [Worker Validation] Server reports 0 workers but client sees ${clientActiveWorkers} active tasks - potential UI desync`);
+            }
+        }
+        
+        console.debug(`📊 [Worker Status] ${playlistId}: ${serverActiveWorkers}/${maxWorkers} active workers, ${clientActiveWorkers} client-side active tasks`);
+        
         const totalFinished = completedCount + failedOrCancelledCount;
         const progressPercent = missingCount > 0 ? (totalFinished / missingCount) * 100 : 0;
         document.getElementById(`download-progress-fill-${playlistId}`).style.width = `${progressPercent}%`;
