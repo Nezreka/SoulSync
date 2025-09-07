@@ -3702,6 +3702,7 @@ function processModalStatusUpdate(playlistId, data) {
                 case 'pending': statusText = '⏸️ Pending'; break;
                 case 'searching': statusText = '🔍 Searching...'; break;
                 case 'downloading': statusText = `⏬ Downloading... ${Math.round(task.progress || 0)}%`; break;
+                case 'post_processing': statusText = '⌛ Processing...'; break; // NEW VERIFICATION WORKFLOW
                 case 'completed': statusText = '✅ Completed'; completedCount++; break;
                 case 'failed': statusText = '❌ Failed'; failedOrCancelledCount++; break;
                 case 'cancelled': statusText = '🚫 Cancelled'; failedOrCancelledCount++; break;
@@ -3713,11 +3714,11 @@ function processModalStatusUpdate(playlistId, data) {
             } else {
                 console.warn(`❌ [Status Update] Status element not found: download-${playlistId}-${task.track_index}`);
             }
-            if (actionsEl && !['completed', 'failed', 'cancelled'].includes(task.status) && actionsEl.innerHTML === '-') {
+            if (actionsEl && !['completed', 'failed', 'cancelled', 'post_processing'].includes(task.status) && actionsEl.innerHTML === '-') {
                 actionsEl.innerHTML = `<button class="cancel-track-btn" title="Cancel this download" onclick="cancelTrackDownload('${playlistId}', ${task.track_index})">×</button>`;
             } 
-            if (actionsEl && ['completed', 'failed', 'cancelled'].includes(task.status)) {
-                actionsEl.innerHTML = '-';
+            if (actionsEl && ['completed', 'failed', 'cancelled', 'post_processing'].includes(task.status)) {
+                actionsEl.innerHTML = '-'; // No actions available for terminal or processing states
             }
         });
 
@@ -3725,9 +3726,9 @@ function processModalStatusUpdate(playlistId, data) {
         const serverActiveWorkers = data.active_count || 0;
         const maxWorkers = data.max_concurrent || 3;
         
-        // Count actual active workers based on task statuses
+        // Count actual active workers based on task statuses (including post_processing)
         const clientActiveWorkers = (data.tasks || []).filter(task => 
-            ['searching', 'downloading', 'queued'].includes(task.status) && 
+            ['searching', 'downloading', 'queued', 'post_processing'].includes(task.status) && 
             !document.querySelector(`tr[data-track-index="${task.track_index}"][data-locally-cancelled="true"]`)
         ).length;
         
@@ -7144,6 +7145,7 @@ function updateCompletedModalResults(playlistId, downloadData) {
                 case 'pending': statusText = '⏸️ Pending'; break;
                 case 'searching': statusText = '🔍 Searching...'; break;
                 case 'downloading': statusText = `⏬ Downloading... ${Math.round(task.progress || 0)}%`; break;
+                case 'post_processing': statusText = '⌛ Processing...'; break; // NEW VERIFICATION WORKFLOW
                 case 'completed': statusText = '✅ Completed'; completedCount++; break;
                 case 'failed': statusText = '❌ Failed'; failedOrCancelledCount++; break;
                 case 'cancelled': statusText = '🚫 Cancelled'; failedOrCancelledCount++; break;

@@ -4142,6 +4142,94 @@ def _match_track_to_spotify_title(slsk_track_meta: dict, spotify_tracks: list) -
 
 
 # --- Post-Processing Logic ---
+def _post_process_matched_download_with_verification(context_key, context, file_path, task_id, batch_id):
+    """
+    NEW VERIFICATION WORKFLOW: Enhanced post-processing with file verification.
+    Only sets task status to 'completed' after successful file verification and move operation.
+    """
+    try:
+        print(f"🎯 [Verification] Starting enhanced post-processing for: {context_key}")
+        
+        # Call the existing post-processing logic
+        _post_process_matched_download(context_key, context, file_path)
+        
+        # CRITICAL VERIFICATION STEP: Verify the final file exists
+        # Extract the expected final path from the context or reconstruct it
+        spotify_artist = context.get("spotify_artist")
+        if not spotify_artist:
+            raise Exception("Missing spotify_artist context for verification")
+            
+        is_album_download = context.get("is_album_download", False)
+        has_clean_spotify_data = context.get("has_clean_spotify_data", False)
+        
+        # Reconstruct the final path logic (mirrors the logic in _post_process_matched_download)
+        if is_album_download and has_clean_spotify_data:
+            original_search = context.get("original_search_result", {})
+            spotify_album = context.get("spotify_album", {})
+            clean_track_name = original_search.get('spotify_clean_title', 'Unknown Track')
+            clean_album_name = original_search.get('spotify_clean_album', 'Unknown Album')
+            track_number = original_search.get('track_number', 1)
+            
+            # Construct the expected final path
+            artist_name_sanitized = spotify_artist.name.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
+            album_name_sanitized = clean_album_name.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
+            track_name_sanitized = clean_track_name.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
+            
+            transfer_dir = config_manager.get('soulseek.transfer_path', './transfers')
+            artist_dir = os.path.join(transfer_dir, artist_name_sanitized)
+            album_folder_name = f"{clean_album_name} ({spotify_album.get('release_date', '').split('-')[0] if spotify_album.get('release_date') else 'Unknown'})"
+            album_folder_name = album_folder_name.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
+            album_dir = os.path.join(artist_dir, album_folder_name)
+            
+            file_ext = os.path.splitext(file_path)[1]
+            new_filename = f"{track_number:02d} - {track_name_sanitized}{file_ext}"
+            expected_final_path = os.path.join(album_dir, new_filename)
+            
+        else:
+            # For singles or fallback logic
+            original_search = context.get("original_search_result", {})
+            track_name = original_search.get('spotify_clean_title') or original_search.get('title', 'Unknown Track')
+            track_name_sanitized = track_name.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
+            
+            transfer_dir = config_manager.get('soulseek.transfer_path', './transfers')
+            artist_name_sanitized = spotify_artist.name.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
+            artist_dir = os.path.join(transfer_dir, artist_name_sanitized)
+            single_dir = os.path.join(artist_dir, "Singles")
+            
+            file_ext = os.path.splitext(file_path)[1]
+            new_filename = f"{track_name_sanitized}{file_ext}"
+            expected_final_path = os.path.join(single_dir, new_filename)
+        
+        # VERIFICATION: Check if file exists at expected final path
+        if os.path.exists(expected_final_path):
+            print(f"✅ [Verification] File verified at final path: {expected_final_path}")
+            # Mark task as completed only after successful verification
+            with tasks_lock:
+                if task_id in download_tasks:
+                    download_tasks[task_id]['status'] = 'completed'
+                    print(f"✅ [Verification] Task {task_id} marked as completed after verification")
+            # NOTE: _on_download_completed is already called by the original post-processing
+            # Do not call it again to avoid double-completion issues
+            print(f"✅ [Verification] Task {task_id} verification complete - batch callback handled by original post-processing")
+        else:
+            print(f"❌ [Verification] File move verification failed - not found at: {expected_final_path}")
+            with tasks_lock:
+                if task_id in download_tasks:
+                    download_tasks[task_id]['status'] = 'failed'
+                    download_tasks[task_id]['error_message'] = "File move to transfer folder failed."
+            _on_download_completed(batch_id, task_id, success=False)
+            
+    except Exception as e:
+        print(f"❌ [Verification] Post-processing with verification failed: {e}")
+        import traceback
+        traceback.print_exc()
+        with tasks_lock:
+            if task_id in download_tasks:
+                download_tasks[task_id]['status'] = 'failed'
+                download_tasks[task_id]['error_message'] = f"Post-processing verification failed: {str(e)}"
+        _on_download_completed(batch_id, task_id, success=False)
+
+
 def _post_process_matched_download(context_key, context, file_path):
     """
     This is the final, corrected post-processing function. It now mirrors the
@@ -5408,6 +5496,103 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                         youtube_playlist_states[url_hash]['phase'] = 'discovered'
                         print(f"📋 Reset YouTube playlist {url_hash} to discovered phase (error)")
 
+def _run_post_processing_worker(task_id, batch_id):
+    """
+    NEW VERIFICATION WORKFLOW: Post-processing worker that only sets 'completed' status
+    after successful file verification and processing. This matches sync.py's reliability.
+    """
+    try:
+        print(f"🔧 [Post-Processing] Starting verification for task {task_id}")
+        
+        # Retrieve task details from global state
+        with tasks_lock:
+            if task_id not in download_tasks:
+                print(f"❌ [Post-Processing] Task {task_id} not found in download_tasks")
+                return
+            task = download_tasks[task_id].copy()
+            
+        # Check if task was cancelled during post-processing
+        if task['status'] == 'cancelled':
+            print(f"❌ [Post-Processing] Task {task_id} was cancelled, skipping verification")
+            return
+            
+        # Extract file information for verification
+        track_info = task.get('track_info', {})
+        task_filename = task.get('filename') or track_info.get('filename')
+        task_username = task.get('username') or track_info.get('username')
+        
+        if not task_filename or not task_username:
+            print(f"❌ [Post-Processing] Missing filename or username for task {task_id}")
+            with tasks_lock:
+                if task_id in download_tasks:
+                    download_tasks[task_id]['status'] = 'failed'
+            _on_download_completed(batch_id, task_id, success=False)
+            return
+            
+        download_dir = config_manager.get('soulseek.download_path', './downloads')
+        
+        # RESILIENT FILE-FINDING LOOP: Try up to 3 times with delays
+        found_file = None
+        for retry_count in range(3):
+            print(f"🔍 [Post-Processing] Attempt {retry_count + 1}/3 to find file: {os.path.basename(task_filename)}")
+            found_file = _find_completed_file_robust(download_dir, task_filename)
+            
+            if found_file:
+                print(f"✅ [Post-Processing] Found file after {retry_count + 1} attempts: {found_file}")
+                break
+            else:
+                if retry_count < 2:  # Don't sleep on final attempt
+                    print(f"⏳ [Post-Processing] File not found, waiting 3 seconds before retry...")
+                    time.sleep(3)
+        
+        if not found_file:
+            print(f"❌ [Post-Processing] File not found on disk after 3 attempts: {os.path.basename(task_filename)}")
+            with tasks_lock:
+                if task_id in download_tasks:
+                    download_tasks[task_id]['status'] = 'failed'
+                    download_tasks[task_id]['error_message'] = "File not found on disk after download completed."
+            _on_download_completed(batch_id, task_id, success=False)
+            return
+            
+        # File found - now attempt post-processing
+        try:
+            # Create context for post-processing (similar to existing matched download logic)
+            context_key = f"{task_username}::{os.path.basename(task_filename)}"
+            
+            # Check if this download has matched context for post-processing
+            with matched_context_lock:
+                context = matched_downloads_context.get(context_key)
+                
+            if context:
+                print(f"🎯 [Post-Processing] Found matched context, running full post-processing for: {context_key}")
+                # Run the existing post-processing logic with verification
+                _post_process_matched_download_with_verification(context_key, context, found_file, task_id, batch_id)
+            else:
+                # No matched context - just mark as completed since file exists
+                print(f"📁 [Post-Processing] No matched context, marking as completed: {os.path.basename(found_file)}")
+                with tasks_lock:
+                    if task_id in download_tasks:
+                        download_tasks[task_id]['status'] = 'completed'
+                # Call completion callback since there's no other post-processing to handle it
+                _on_download_completed(batch_id, task_id, success=True)
+                
+        except Exception as processing_error:
+            print(f"❌ [Post-Processing] Processing failed for task {task_id}: {processing_error}")
+            with tasks_lock:
+                if task_id in download_tasks:
+                    download_tasks[task_id]['status'] = 'failed'
+                    download_tasks[task_id]['error_message'] = f"Post-processing failed: {str(processing_error)}"
+            _on_download_completed(batch_id, task_id, success=False)
+            
+    except Exception as e:
+        print(f"❌ [Post-Processing] Critical error in post-processing worker for task {task_id}: {e}")
+        with tasks_lock:
+            if task_id in download_tasks:
+                download_tasks[task_id]['status'] = 'failed'
+                download_tasks[task_id]['error_message'] = f"Critical post-processing error: {str(e)}"
+        _on_download_completed(batch_id, task_id, success=False)
+
+
 def _download_track_worker(task_id, batch_id=None):
     """
     Enhanced download worker that matches the GUI's exact retry logic.
@@ -5950,18 +6135,14 @@ def _build_batch_status_data(batch_id, batch, live_transfers_lookup):
                     live_info = live_transfers_lookup[lookup_key]
                     state_str = live_info.get('state', 'Unknown')
                     
-                    # Don't override tasks that are already completed/failed/cancelled
-                    if task['status'] not in ['completed', 'failed', 'cancelled']:
-                        if 'Completed' in state_str or 'Succeeded' in state_str:
-                            # SYNC.PY PARITY: Mark as completed based solely on Soulseek API status
-                            # This matches sync.py's behavior exactly (no additional file verification)
-                            task_status['status'] = 'completed'
-                            # Permanently update the stored task status
-                            task['status'] = 'completed'
-                        elif 'Cancelled' in state_str or 'Canceled' in state_str: 
+                    # Don't override tasks that are already in terminal states or post-processing
+                    if task['status'] not in ['completed', 'failed', 'cancelled', 'post_processing']:
+                        # SYNC.PY PARITY: Prioritized state checking (Errored/Cancelled before Completed)
+                        # This prevents "Completed, Errored" states from being marked as completed
+                        if 'Cancelled' in state_str or 'Canceled' in state_str:
                             task_status['status'] = 'cancelled'
                             task['status'] = 'cancelled'
-                        elif 'Failed' in state_str or 'Errored' in state_str: 
+                        elif 'Failed' in state_str or 'Errored' in state_str:
                             # Don't mark as failed immediately - trigger retry like GUI
                             batch_id_for_retry = None
                             for bid, batch_check in download_batches.items():
@@ -5974,16 +6155,35 @@ def _build_batch_status_data(batch_id, batch, live_transfers_lookup):
                                 # Fallback if batch not found
                                 task_status['status'] = 'failed'
                                 task['status'] = 'failed'
-                        elif 'InProgress' in state_str: task_status['status'] = 'downloading'
-                        else: task_status['status'] = 'queued'
+                        elif 'Completed' in state_str or 'Succeeded' in state_str:
+                            # NEW VERIFICATION WORKFLOW: Use intermediate post_processing status
+                            # Only set this status once to prevent multiple worker submissions
+                            if task['status'] != 'post_processing':
+                                task_status['status'] = 'post_processing'
+                                task['status'] = 'post_processing'
+                                print(f"🔄 Task {task_id} API reports 'Succeeded' - starting post-processing verification")
+                                
+                                # Submit post-processing worker to verify file and complete the task
+                                missing_download_executor.submit(_run_post_processing_worker, task_id, batch_id)
+                            else:
+                                # Keep showing post_processing status until worker completes
+                                task_status['status'] = 'post_processing'
+                        elif 'InProgress' in state_str: 
+                            task_status['status'] = 'downloading'
+                        else: 
+                            task_status['status'] = 'queued'
                         task_status['progress'] = live_info.get('percentComplete', 0)
-                    # For completed tasks, keep the existing progress at 100%
+                    # For completed/post-processing tasks, keep appropriate progress
                     elif task['status'] == 'completed':
                         task_status['progress'] = 100
+                    elif task['status'] == 'post_processing':
+                        task_status['progress'] = 95  # Nearly complete, just verifying
                 else:
-                    # If task is completed but not in live transfers, keep it completed with 100%
+                    # If task is completed but not in live transfers, keep appropriate status
                     if task['status'] == 'completed':
                         task_status['progress'] = 100
+                    elif task['status'] == 'post_processing':
+                        task_status['progress'] = 95  # Nearly complete, just verifying
             batch_tasks.append(task_status)
         batch_tasks.sort(key=lambda x: x['track_index'])
         response_data['tasks'] = batch_tasks
