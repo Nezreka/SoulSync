@@ -232,8 +232,7 @@ class WebUIDownloadMonitor:
         live_transfers_lookup = self._get_live_transfers()
         
         with tasks_lock:
-            tasks_to_retry = []
-            
+            # Check all monitored batches for timeouts and errors
             for batch_id in list(self.monitored_batches):
                 if batch_id not in download_batches:
                     self.monitored_batches.discard(batch_id)
@@ -244,14 +243,8 @@ class WebUIDownloadMonitor:
                     if not task or task['status'] not in ['downloading', 'queued']:
                         continue
                         
-                    # Check if task needs retry due to timeout
-                    if self._should_retry_task(task, live_transfers_lookup, current_time):
-                        tasks_to_retry.append((batch_id, task_id, task))
-            
-            # Process retries outside the lock to avoid deadlocks
-            for batch_id, task_id, task in tasks_to_retry:
-                print(f"🔄 Monitor triggered retry for task {task_id}")
-                self._trigger_retry(batch_id, task_id, task)
+                    # Check for timeouts and errors - retries handled directly in _should_retry_task
+                    self._should_retry_task(task, live_transfers_lookup, current_time)
                 
         # ENHANCED: Add worker count validation to detect ghost workers
         self._validate_worker_counts()
@@ -309,8 +302,29 @@ class WebUIDownloadMonitor:
         state_str = live_info.get('state', '')
         progress = live_info.get('percentComplete', 0)
         
+        # IMMEDIATE ERROR RETRY: Check for errored downloads first (no timeout needed)
+        if 'Errored' in state_str or 'Failed' in state_str:
+            retry_count = task.get('error_retry_count', 0)
+            last_retry = task.get('last_error_retry_time', 0)
+            
+            # Don't retry too frequently (wait at least 5 seconds between error retries)  
+            if retry_count < 3 and (current_time - last_retry) > 5:  # Max 3 error retry attempts
+                print(f"🚨 Task errored (state: {state_str}) - immediate retry {retry_count + 1}/3")
+                task['error_retry_count'] = retry_count + 1
+                task['last_error_retry_time'] = current_time
+                return True
+            elif retry_count < 3:
+                # Wait a bit before next error retry
+                return False
+            else:
+                # Too many error retries, mark as failed
+                print(f"❌ Task failed after 3 error retry attempts")
+                task['status'] = 'failed'
+                task['error_message'] = 'Failed after multiple error retries'
+                return False
+        
         # Check for queued timeout (90 seconds like GUI)
-        if 'Queued' in state_str or task['status'] == 'queued':
+        elif 'Queued' in state_str or task['status'] == 'queued':
             if 'queued_start_time' not in task:
                 task['queued_start_time'] = current_time
                 return False
@@ -330,10 +344,28 @@ class WebUIDownloadMonitor:
                     
                     # Don't retry too frequently (wait at least 30 seconds between retries)
                     if retry_count < 3 and (current_time - last_retry) > 30:  # Max 3 retry attempts
-                        print(f"⚠️ Task stuck in queue for {queue_time:.1f}s (retry {retry_count + 1}/3)")
+                        print(f"⚠️ Task stuck in queue for {queue_time:.1f}s - immediate retry {retry_count + 1}/3")
                         task['stuck_retry_count'] = retry_count + 1
                         task['last_retry_time'] = current_time
-                        return True
+                        
+                        # UNIFIED RETRY LOGIC: Handle timeout retry exactly like error retry
+                        # Mark current source as used to prevent retry loops
+                        username = task.get('username') or task['track_info'].get('username')
+                        filename = task.get('filename') or task['track_info'].get('filename')
+                        if username and filename:
+                            used_sources = task.get('used_sources', set())
+                            source_key = f"{username}_{os.path.basename(filename)}"
+                            used_sources.add(source_key)
+                            task['used_sources'] = used_sources
+                            print(f"🚫 Marked timeout source as used: {source_key}")
+                        
+                        # Reset task state for immediate retry (like error retry)
+                        task['status'] = 'searching'
+                        task.pop('queued_start_time', None)
+                        task.pop('downloading_start_time', None)
+                        task['status_change_time'] = current_time
+                        print(f"🔄 Task {task.get('track_info', {}).get('name', 'Unknown')} reset for timeout retry")
+                        return False  # Don't trigger monitor retry - task will be picked up by normal flow
                     elif retry_count < 3:
                         # Wait longer before next retry
                         return False
@@ -367,10 +399,28 @@ class WebUIDownloadMonitor:
                     
                     # Don't retry too frequently (wait at least 30 seconds between retries)
                     if retry_count < 3 and (current_time - last_retry) > 30:  # Max 3 retry attempts
-                        print(f"⚠️ Task stuck at 0% for {download_time:.1f}s (retry {retry_count + 1}/3)")
+                        print(f"⚠️ Task stuck at 0% for {download_time:.1f}s - immediate retry {retry_count + 1}/3")
                         task['stuck_retry_count'] = retry_count + 1
                         task['last_retry_time'] = current_time
-                        return True
+                        
+                        # UNIFIED RETRY LOGIC: Handle 0% timeout retry exactly like error retry
+                        # Mark current source as used to prevent retry loops
+                        username = task.get('username') or task['track_info'].get('username')
+                        filename = task.get('filename') or task['track_info'].get('filename')
+                        if username and filename:
+                            used_sources = task.get('used_sources', set())
+                            source_key = f"{username}_{os.path.basename(filename)}"
+                            used_sources.add(source_key)
+                            task['used_sources'] = used_sources
+                            print(f"🚫 Marked 0% progress source as used: {source_key}")
+                        
+                        # Reset task state for immediate retry (like error retry)
+                        task['status'] = 'searching'
+                        task.pop('queued_start_time', None)
+                        task.pop('downloading_start_time', None)
+                        task['status_change_time'] = current_time
+                        print(f"🔄 Task {task.get('track_info', {}).get('name', 'Unknown')} reset for 0% retry")
+                        return False  # Don't trigger monitor retry - task will be picked up by normal flow
                     elif retry_count < 3:
                         # Wait longer before next retry
                         return False
@@ -390,170 +440,6 @@ class WebUIDownloadMonitor:
             
         return False
     
-    def _trigger_retry(self, batch_id, task_id, task):
-        """Trigger retry for a stuck/failed task"""
-        try:
-            # Cancel the stuck download first (like GUI)
-            self._cancel_download_before_retry(task, task_id)
-            
-            # CRITICAL: Mark current source as used to prevent retry loops (like sync.py does)
-            username = task.get('username')
-            filename = task.get('filename')
-            if username and filename:
-                used_sources = task.get('used_sources', set())
-                source_key = f"{username}_{os.path.basename(filename)}"
-                used_sources.add(source_key)
-                task['used_sources'] = used_sources
-                print(f"🚫 Marked failed source as used: {source_key}")
-            
-            # NOTE: Don't call _on_download_completed here - let the retry handle it
-            # The error system doesn't call _on_download_completed during retry either
-            
-            # Update task for retry with timeout to prevent deadlock
-            lock_acquired = tasks_lock.acquire(timeout=2.0)  # 2-second timeout
-            if not lock_acquired:
-                print(f"⚠️ Could not acquire lock for retry {task_id}, will try again next cycle")
-                return
-            
-            try:
-                if task_id in download_tasks:
-                    task['retry_count'] = task.get('retry_count', 0) + 1
-                    if task['retry_count'] > 2:  # Max 3 attempts total like GUI
-                        task['status'] = 'failed'
-                        print(f"❌ Task {task_id} failed after 3 retry attempts")
-                        return
-                    
-                    # Reset for retry
-                    task['status'] = 'pending'
-                    task.pop('queued_start_time', None)
-                    task.pop('downloading_start_time', None)
-                    task['status_change_time'] = time.time()
-            finally:
-                tasks_lock.release()
-            # Submit retry to executor
-            missing_download_executor.submit(self._retry_task_with_fallback, batch_id, task_id, task)
-            
-        except Exception as e:
-            print(f"❌ Error triggering retry for task {task_id}: {e}")
-    
-    def _cancel_download_before_retry(self, task, task_id):
-        """Cancel current download before retry (matches GUI cancel_download_before_retry)"""
-        try:
-            download_id = task.get('download_id')
-            username = task.get('username') or task['track_info'].get('username')
-            filename = task.get('filename') or task['track_info'].get('filename')
-            
-            # Only attempt cancellation if we have what looks like a proper download ID
-            # (not a filename fallback which would be much longer)
-            # Handle cancellation attempts based on download ID type
-            if download_id and username and isinstance(download_id, str):
-                # Check if this is a synthetic download ID (generated by web server)
-                if download_id.startswith('web_dl_'):
-                    print(f"⚠️ Skipping cancellation for synthetic download ID {download_id} - cannot cancel via slskd API")
-                    # Use original download ID for potential cancellation if available
-                    original_id = task.get('original_download_id')
-                    if original_id and len(str(original_id)) > 100:
-                        # This is still a filename, can't cancel
-                        print(f"⚠️ Original download ID is filename, cannot cancel: {str(original_id)[:50]}...")
-                    else:
-                        print(f"⚠️ No usable original download ID for cancellation")
-                elif '\\' not in str(download_id) and '/' not in str(download_id) and len(download_id) < 200:
-                    # This looks like a proper slskd download ID (no path separators), try to cancel it
-                    print(f"🚫 Attempting to cancel stuck download: {download_id[:8]}... from {username} (task: {task_id[:8]}...)")
-                    try:
-                        success = asyncio.run(soulseek_client.cancel_download(download_id, username, remove=False))
-                        if success:
-                            print(f"✅ Successfully cancelled download {download_id[:8]}... from {username}")
-                            # Clear any stored download info to prevent status conflicts
-                            task.pop('soulseek_download_id', None)
-                            task.pop('soulseek_username', None)
-                        else:
-                            print(f"⚠️ Cancel request failed for {download_id[:8]}... - API error, proceeding with retry anyway")
-                    except Exception as e:
-                        print(f"⚠️ Cancel exception for {download_id[:8]}...: {str(e)[:100]}, proceeding with retry anyway")
-                else:
-                    # Download ID is too long - likely a filename, need to find real download ID via API
-                    print(f"🔍 Download ID appears to be filename ({len(download_id)} chars), searching for real download ID...")
-                    real_download_id = self._find_download_id_by_filename(username, filename or download_id)
-                    if real_download_id:
-                        print(f"✅ Found real download ID: {real_download_id[:8]}... for file path")
-                        try:
-                            success = asyncio.run(soulseek_client.cancel_download(real_download_id, username, remove=False))
-                            if success:
-                                print(f"✅ Successfully cancelled download {real_download_id[:8]}... from {username}")
-                                task.pop('soulseek_download_id', None)
-                                task.pop('soulseek_username', None)
-                            else:
-                                print(f"⚠️ Cancel request failed for {real_download_id[:8]}... - API error, proceeding with retry anyway")
-                        except Exception as e:
-                            print(f"⚠️ Cancel exception for {real_download_id[:8]}...: {str(e)[:100]}, proceeding with retry anyway")
-                    else:
-                        print(f"⚠️ Could not find real download ID for filename, proceeding with retry anyway")
-            else:
-                print(f"⚠️ Missing download ID or username for cancellation, proceeding with retry")
-                    
-        except Exception as e:
-            print(f"⚠️ Error in cancellation logic, proceeding with retry: {e}")
-
-    def _find_download_id_by_filename(self, username, filename):
-        """Find the real download ID by looking up filename in slskd transfers"""
-        try:
-            transfers_data = asyncio.run(soulseek_client._make_request('GET', 'transfers/downloads'))
-            if not transfers_data:
-                return None
-                
-            target_basename = os.path.basename(filename).lower()
-            
-            for user_data in transfers_data:
-                if user_data.get('username') == username:
-                    # Check files in directories
-                    for directory in user_data.get('directories', []):
-                        for file_info in directory.get('files', []):
-                            file_basename = os.path.basename(file_info.get('filename', '')).lower()
-                            if file_basename == target_basename:
-                                return file_info.get('id')
-                    
-                    # Also check files directly under user (some API responses structure this way)
-                    for file_info in user_data.get('files', []):
-                        file_basename = os.path.basename(file_info.get('filename', '')).lower()
-                        if file_basename == target_basename:
-                            return file_info.get('id')
-            
-            return None
-        except Exception as e:
-            print(f"⚠️ Error finding download ID by filename: {e}")
-            return None
-    
-    def _retry_task_with_fallback(self, batch_id, task_id, task):
-        """Retry task with next candidate (matches GUI retry logic)"""
-        try:
-            candidates = task.get('cached_candidates', [])
-            used_sources = task.get('used_sources', set())
-            
-            # Find next unused candidate
-            next_candidate = None
-            for candidate in candidates:
-                source_key = f"{candidate.username}_{candidate.filename}"
-                if source_key not in used_sources:
-                    next_candidate = candidate
-                    break
-            
-            if not next_candidate:
-                with tasks_lock:
-                    if task_id in download_tasks:
-                        download_tasks[task_id]['status'] = 'failed'
-                print(f"❌ No alternative candidates for task {task_id}")
-                return
-            
-            print(f"🔄 Retrying task {task_id} with candidate: {next_candidate.filename}")
-            
-            # Use the existing retry logic from _attempt_download_with_candidates
-            track = task['track_info'].get('spotify_track')
-            if track:
-                _attempt_download_with_candidates(task_id, [next_candidate], track, batch_id)
-                
-        except Exception as e:
-            print(f"❌ Error in retry with fallback for task {task_id}: {e}")
     
     def _validate_worker_counts(self):
         """
@@ -4150,8 +4036,16 @@ def _post_process_matched_download_with_verification(context_key, context, file_
     try:
         print(f"🎯 [Verification] Starting enhanced post-processing for: {context_key}")
         
-        # Call the existing post-processing logic
+        # Call the existing post-processing logic (but skip its completion callback)
+        # We'll handle the completion callback ourselves after verification
+        original_task_id = context.pop('task_id', None)  # Temporarily remove to prevent double callback
+        original_batch_id = context.pop('batch_id', None)
         _post_process_matched_download(context_key, context, file_path)
+        # Restore the IDs for our own callback
+        if original_task_id:
+            context['task_id'] = original_task_id
+        if original_batch_id:
+            context['batch_id'] = original_batch_id
         
         # CRITICAL VERIFICATION STEP: Verify the final file exists
         # Extract the expected final path from the context or reconstruct it
@@ -4208,9 +4102,9 @@ def _post_process_matched_download_with_verification(context_key, context, file_
                 if task_id in download_tasks:
                     download_tasks[task_id]['status'] = 'completed'
                     print(f"✅ [Verification] Task {task_id} marked as completed after verification")
-            # NOTE: _on_download_completed is already called by the original post-processing
-            # Do not call it again to avoid double-completion issues
-            print(f"✅ [Verification] Task {task_id} verification complete - batch callback handled by original post-processing")
+            # FIXED: Call completion callback now since we prevented original post-processing from calling it
+            print(f"✅ [Verification] Task {task_id} verification complete - calling batch completion callback")
+            _on_download_completed(batch_id, task_id, success=True)
         else:
             print(f"❌ [Verification] File move verification failed - not found at: {expected_final_path}")
             with tasks_lock:
@@ -4441,6 +4335,13 @@ def _post_process_matched_download(context_key, context, file_path):
         batch_id = context.get('batch_id')
         if task_id and batch_id:
             print(f"🎯 [Post-Process] Calling completion callback for task {task_id} in batch {batch_id}")
+            
+            # CRITICAL: Mark task as stream processed to prevent verification workflow from running
+            with tasks_lock:
+                if task_id in download_tasks:
+                    download_tasks[task_id]['stream_processed'] = True
+                    print(f"✅ [Post-Process] Marked task {task_id} as stream processed")
+            
             _on_download_completed(batch_id, task_id, success=True)
 
     except Exception as e:
@@ -5337,13 +5238,37 @@ def _on_download_completed(batch_id, task_id, success=True):
         
         print(f"🔄 [Batch Manager] Task {task_id} completed ({'success' if success else 'failed/cancelled'}). Active workers: {old_active} → {new_active}/{download_batches[batch_id]['max_concurrent']}")
         
-        # Check if batch is fully complete (all downloads processed and no active workers)
+        # FIXED: Check if batch is truly complete (all tasks finished, not just workers freed)
         batch = download_batches[batch_id]
-        all_processed = batch['queue_index'] >= len(batch['queue'])
-        no_active = batch['active_count'] == 0
+        all_tasks_started = batch['queue_index'] >= len(batch['queue'])
+        no_active_workers = batch['active_count'] == 0
         
-        if all_processed and no_active:
-            print(f"🎉 [Batch Manager] Batch {batch_id} fully complete - processing failed tracks to wishlist")
+        # Count actually finished tasks (completed, failed, or cancelled)
+        # CRITICAL: Don't include 'post_processing' as finished - it's still in progress!
+        # CRITICAL: Don't include 'searching' as finished - task is being retried!
+        finished_count = 0
+        retrying_count = 0
+        queue = batch.get('queue', [])
+        for task_id in queue:
+            if task_id in download_tasks:
+                task_status = download_tasks[task_id]['status']
+                if task_status in ['completed', 'failed', 'cancelled']:
+                    finished_count += 1
+                elif task_status == 'searching':
+                    retrying_count += 1
+        
+        all_tasks_truly_finished = finished_count >= len(queue)
+        has_retrying_tasks = retrying_count > 0
+        
+        if all_tasks_started and no_active_workers and all_tasks_truly_finished and not has_retrying_tasks:
+            print(f"🎉 [Batch Manager] Batch {batch_id} truly complete - all {finished_count}/{len(queue)} tasks finished - processing failed tracks to wishlist")
+        elif all_tasks_started and no_active_workers and has_retrying_tasks:
+            print(f"🔄 [Batch Manager] Batch {batch_id}: all workers free but {retrying_count} tasks retrying - continuing monitoring")
+        elif all_tasks_started and no_active_workers:
+            # This used to incorrectly mark batch as complete!
+            print(f"📊 [Batch Manager] Batch {batch_id}: all workers free but only {finished_count}/{len(queue)} tasks finished - continuing monitoring")
+        
+        if all_tasks_started and no_active_workers and all_tasks_truly_finished and not has_retrying_tasks:
             
             # Check if this is an auto-initiated batch
             is_auto_batch = batch.get('auto_initiated', False)
@@ -6143,22 +6068,21 @@ def _build_batch_status_data(batch_id, batch, live_transfers_lookup):
                             task_status['status'] = 'cancelled'
                             task['status'] = 'cancelled'
                         elif 'Failed' in state_str or 'Errored' in state_str:
-                            # Don't mark as failed immediately - trigger retry like GUI
-                            batch_id_for_retry = None
-                            for bid, batch_check in download_batches.items():
-                                if task_id in batch_check.get('queue', []):
-                                    batch_id_for_retry = bid
-                                    break
-                            if batch_id_for_retry:
-                                _handle_failed_download(batch_id_for_retry, task_id, task, task_status)
+                            # UNIFIED ERROR HANDLING: Let monitor handle errors for consistency
+                            # Monitor will detect errored state and trigger retry within 5 seconds
+                            print(f"🔍 Task {task_id} API shows error state: {state_str} - letting monitor handle retry")
+                            
+                            # Keep task in current status (downloading/queued) so monitor can detect error
+                            # Don't mark as failed here - let the unified retry system handle it
+                            if task['status'] in ['searching', 'downloading', 'queued']:
+                                task_status['status'] = task['status']  # Keep current status for monitor
                             else:
-                                # Fallback if batch not found
-                                task_status['status'] = 'failed'
-                                task['status'] = 'failed'
+                                task_status['status'] = 'downloading'  # Default to downloading for error detection
+                                task['status'] = 'downloading'
                         elif 'Completed' in state_str or 'Succeeded' in state_str:
                             # NEW VERIFICATION WORKFLOW: Use intermediate post_processing status
                             # Only set this status once to prevent multiple worker submissions
-                            if task['status'] != 'post_processing':
+                            if task['status'] != 'post_processing' and not task.get('stream_processed', False):
                                 task_status['status'] = 'post_processing'
                                 task['status'] = 'post_processing'
                                 print(f"🔄 Task {task_id} API reports 'Succeeded' - starting post-processing verification")
@@ -6166,8 +6090,13 @@ def _build_batch_status_data(batch_id, batch, live_transfers_lookup):
                                 # Submit post-processing worker to verify file and complete the task
                                 missing_download_executor.submit(_run_post_processing_worker, task_id, batch_id)
                             else:
-                                # Keep showing post_processing status until worker completes
-                                task_status['status'] = 'post_processing'
+                                # Keep showing post_processing status until worker completes, or mark completed if already stream processed
+                                if task.get('stream_processed', False):
+                                    print(f"⏭️ Task {task_id} already processed by stream worker, marking as completed")
+                                    task_status['status'] = 'completed'
+                                    task['status'] = 'completed'  # Update internal status too
+                                else:
+                                    task_status['status'] = 'post_processing'
                         elif 'InProgress' in state_str: 
                             task_status['status'] = 'downloading'
                         else: 
@@ -6187,6 +6116,11 @@ def _build_batch_status_data(batch_id, batch, live_transfers_lookup):
             batch_tasks.append(task_status)
         batch_tasks.sort(key=lambda x: x['track_index'])
         response_data['tasks'] = batch_tasks
+        
+        # CRITICAL: Add batch worker management metadata (was missing!)
+        # This is essential for client-side worker validation and prevents false desync warnings
+        response_data['active_count'] = batch.get('active_count', 0)
+        response_data['max_concurrent'] = batch.get('max_concurrent', 3)
         
         # Add wishlist summary if batch is complete (matching sync.py behavior)
         if response_data["phase"] == 'complete' and 'wishlist_summary' in batch:
