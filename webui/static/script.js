@@ -1796,6 +1796,9 @@ async function startDownload(index) {
 
 async function loadInitialData() {
     try {
+        // Load artist bubble state first
+        await hydrateArtistBubblesFromSnapshot();
+        
         // Load dashboard data by default
         await loadDashboardData();
     } catch (error) {
@@ -1877,6 +1880,82 @@ async function checkForActiveProcesses() {
     }
 }
 
+async function rehydrateArtistAlbumModal(virtualPlaylistId, playlistName, batchId) {
+    /**
+     * Rehydrates an artist album download modal from backend process data.
+     * Extracts artist/album info from virtual playlist ID and recreates the modal.
+     */
+    try {
+        console.log(`💧 Rehydrating artist album modal: ${virtualPlaylistId} (${playlistName})`);
+        
+        // Extract artist_id and album_id from virtualPlaylistId format: artist_album_[artist_id]_[album_id]
+        const parts = virtualPlaylistId.split('_');
+        if (parts.length < 4 || parts[0] !== 'artist' || parts[1] !== 'album') {
+            console.error(`❌ Invalid virtual playlist ID format: ${virtualPlaylistId}`);
+            return;
+        }
+        
+        const artistId = parts[2];
+        const albumId = parts.slice(3).join('_'); // Handle album IDs that might contain underscores
+        
+        console.log(`🔍 Extracted from virtual playlist: artistId=${artistId}, albumId=${albumId}`);
+        
+        // Fetch the album tracks to get proper artist and album data
+        try {
+            const response = await fetch(`/api/artist/${artistId}/album/${albumId}/tracks`);
+            const data = await response.json();
+            
+            if (!data.success || !data.album || !data.tracks) {
+                console.error('❌ Failed to fetch album data for rehydration:', data.error);
+                return;
+            }
+            
+            const album = data.album;
+            const tracks = data.tracks;
+            
+            // Extract artist info from the first track (all tracks should have same artist)
+            const artist = {
+                id: artistId,
+                name: tracks[0].artists[0] // Use first artist name from first track
+            };
+            
+            console.log(`✅ Retrieved album data: "${album.name}" by ${artist.name} (${tracks.length} tracks)`);
+            
+            // Create the modal using the same function as normal artist album downloads
+            await openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlistName, tracks, album, artist);
+            
+            // Update the rehydrated process with batch info and hide modal for background rehydration
+            const process = activeDownloadProcesses[virtualPlaylistId];
+            if (process) {
+                process.status = 'running';
+                process.batchId = batchId;
+                
+                // Update button states to reflect running status
+                const beginBtn = document.getElementById(`begin-analysis-btn-${virtualPlaylistId}`);
+                const cancelBtn = document.getElementById(`cancel-all-btn-${virtualPlaylistId}`);
+                if (beginBtn) beginBtn.style.display = 'none';
+                if (cancelBtn) cancelBtn.style.display = 'inline-block';
+                
+                // Hide the modal - this is background rehydration, not user-requested
+                if (process.modalElement) {
+                    process.modalElement.style.display = 'none';
+                    console.log(`🔍 Hiding rehydrated modal for background processing: ${album.name}`);
+                }
+                
+                console.log(`✅ Rehydrated artist album modal: ${artist.name} - ${album.name}`);
+            } else {
+                console.error(`❌ Failed to find rehydrated process for ${virtualPlaylistId}`);
+            }
+            
+        } catch (error) {
+            console.error(`❌ Error fetching album data for rehydration:`, error);
+        }
+        
+    } catch (error) {
+        console.error(`❌ Error rehydrating artist album modal:`, error);
+    }
+}
+
 async function rehydrateModal(processInfo, userRequested = false) {
     const { playlist_id, playlist_name, batch_id } = processInfo;
     console.log(`💧 Rehydrating modal for "${playlist_name}" (batch: ${batch_id}) - User requested: ${userRequested}`);
@@ -1884,6 +1963,13 @@ async function rehydrateModal(processInfo, userRequested = false) {
     // Handle YouTube virtual playlists - skip rehydration here, handled by YouTube system
     if (playlist_id.startsWith('youtube_')) {
         console.log(`⏭️ Skipping YouTube virtual playlist rehydration - handled by YouTube system`);
+        return;
+    }
+
+    // Handle artist album virtual playlists
+    if (playlist_id.startsWith('artist_album_')) {
+        console.log(`💧 Rehydrating artist album virtual playlist: ${playlist_id}`);
+        await rehydrateArtistAlbumModal(playlist_id, playlist_name, batch_id);
         return;
     }
 
@@ -10693,6 +10779,9 @@ function registerArtistDownload(artist, album, virtualPlaylistId, albumType) {
     // Show/update the artist downloads section
     updateArtistDownloadsSection();
     
+    // Save snapshot of current state
+    saveArtistBubbleSnapshot();
+    
     // Monitor this download for completion
     monitorArtistDownload(artistId, virtualPlaylistId);
 }
@@ -10707,6 +10796,140 @@ function updateArtistDownloadsSection() {
     downloadsUpdateTimeout = setTimeout(() => {
         showArtistDownloadsSection();
     }, 300); // 300ms debounce
+}
+
+// --- Artist Bubble Snapshot System ---
+
+let snapshotSaveTimeout = null; // Debounce snapshot saves
+
+async function saveArtistBubbleSnapshot() {
+    /**
+     * Saves current artistDownloadBubbles state to backend for persistence.
+     * Debounced to prevent excessive backend calls.
+     */
+    
+    // Clear any existing timeout
+    if (snapshotSaveTimeout) {
+        clearTimeout(snapshotSaveTimeout);
+    }
+    
+    // Debounce the actual save
+    snapshotSaveTimeout = setTimeout(async () => {
+        try {
+            const bubbleCount = Object.keys(artistDownloadBubbles).length;
+            
+            // Don't save empty state
+            if (bubbleCount === 0) {
+                console.log('📸 Skipping snapshot save - no artist bubbles to save');
+                return;
+            }
+            
+            console.log(`📸 Saving artist bubble snapshot: ${bubbleCount} artists`);
+            
+            // Prepare snapshot data (clean up DOM references)
+            const cleanBubbles = {};
+            for (const [artistId, bubbleData] of Object.entries(artistDownloadBubbles)) {
+                cleanBubbles[artistId] = {
+                    artist: bubbleData.artist,
+                    downloads: bubbleData.downloads.map(download => ({
+                        virtualPlaylistId: download.virtualPlaylistId,
+                        album: download.album,
+                        albumType: download.albumType,
+                        status: download.status,
+                        startTime: download.startTime instanceof Date ? download.startTime.toISOString() : download.startTime
+                    })),
+                    hasCompletedDownloads: bubbleData.hasCompletedDownloads
+                };
+            }
+            
+            const response = await fetch('/api/artist_bubbles/snapshot', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    bubbles: cleanBubbles
+                })
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                console.log(`✅ Artist bubble snapshot saved: ${bubbleCount} artists`);
+            } else {
+                console.error('❌ Failed to save artist bubble snapshot:', data.error);
+            }
+            
+        } catch (error) {
+            console.error('❌ Error saving artist bubble snapshot:', error);
+        }
+    }, 1000); // 1 second debounce
+}
+
+async function hydrateArtistBubblesFromSnapshot() {
+    /**
+     * Hydrates artist download bubbles from backend snapshot with live status.
+     * Called on page load to restore bubble state.
+     */
+    try {
+        console.log('🔄 Loading artist bubble snapshot from backend...');
+        
+        const response = await fetch('/api/artist_bubbles/hydrate');
+        const data = await response.json();
+        
+        if (!data.success) {
+            console.error('❌ Failed to load artist bubble snapshot:', data.error);
+            return;
+        }
+        
+        const bubbles = data.bubbles || {};
+        const stats = data.stats || {};
+        
+        console.log(`🔄 Loaded bubble snapshot: ${stats.total_artists || 0} artists, ${stats.active_downloads || 0} active, ${stats.completed_downloads || 0} completed`);
+        
+        if (Object.keys(bubbles).length === 0) {
+            console.log('ℹ️ No artist bubbles to hydrate');
+            return;
+        }
+        
+        // Clear existing state
+        artistDownloadBubbles = {};
+        
+        // Restore artistDownloadBubbles with hydrated data
+        for (const [artistId, bubbleData] of Object.entries(bubbles)) {
+            artistDownloadBubbles[artistId] = {
+                artist: bubbleData.artist,
+                downloads: bubbleData.downloads.map(download => ({
+                    virtualPlaylistId: download.virtualPlaylistId,
+                    album: download.album,
+                    albumType: download.albumType,
+                    status: download.status, // Live status from backend
+                    startTime: new Date(download.startTime)
+                })),
+                element: null, // Will be created when UI updates
+                hasCompletedDownloads: bubbleData.hasCompletedDownloads
+            };
+            
+            console.log(`🔄 Hydrated artist: ${bubbleData.artist.name} (${bubbleData.downloads.length} downloads)`);
+            
+            // Start monitoring for any in-progress downloads
+            for (const download of bubbleData.downloads) {
+                if (download.status === 'in_progress') {
+                    console.log(`📡 Starting monitoring for: ${download.album.name}`);
+                    monitorArtistDownload(artistId, download.virtualPlaylistId);
+                }
+            }
+        }
+        
+        // Update UI to show hydrated bubbles
+        updateArtistDownloadsSection();
+        
+        const totalArtists = Object.keys(artistDownloadBubbles).length;
+        console.log(`✅ Successfully hydrated ${totalArtists} artist download bubbles`);
+        
+    } catch (error) {
+        console.error('❌ Error hydrating artist bubbles from snapshot:', error);
+    }
 }
 
 /**
@@ -10862,6 +11085,9 @@ function monitorArtistDownload(artistId, virtualPlaylistId) {
             
             // Update the downloads section
             updateArtistDownloadsSection();
+            
+            // Save snapshot of updated state
+            saveArtistBubbleSnapshot();
             
             // Check if all downloads for this artist are now completed
             const artistDownloads = artistDownloadBubbles[artistId].downloads;
@@ -11117,6 +11343,9 @@ function cleanupArtistDownload(virtualPlaylistId) {
             // Update the downloads section
             console.log(`🔄 [CLEANUP] Updating artist downloads section...`);
             updateArtistDownloadsSection();
+            
+            // Save snapshot of updated state
+            saveArtistBubbleSnapshot();
             break;
         }
     }
