@@ -4472,7 +4472,25 @@ def _post_process_matched_download(context_key, context, file_path):
         
         print(f"🚚 Moving '{os.path.basename(file_path)}' to '{final_path}'")
         if os.path.exists(final_path):
-            os.remove(final_path)
+            # PROTECTION: Check if existing file already has metadata enhancement
+            # This prevents race conditions where later downloads overwrite properly processed files
+            try:
+                from mutagen import File as MutagenFile
+                existing_file = MutagenFile(final_path)
+                has_metadata = existing_file is not None and len(existing_file.tags or {}) > 2  # More than basic tags
+                
+                if has_metadata:
+                    print(f"⚠️ [Protection] Existing file already has metadata enhancement - skipping overwrite: {os.path.basename(final_path)}")
+                    print(f"🗑️ [Protection] Removing redundant download file: {os.path.basename(file_path)}")
+                    os.remove(file_path)  # Remove the redundant file
+                    return  # Don't overwrite the good file
+                else:
+                    print(f"🔄 [Protection] Existing file lacks metadata - safe to overwrite: {os.path.basename(final_path)}")
+                    os.remove(final_path)
+            except Exception as check_error:
+                print(f"⚠️ [Protection] Error checking existing file metadata, proceeding with overwrite: {check_error}")
+                os.remove(final_path)
+        
         shutil.move(file_path, final_path)
         
         _download_cover_art(album_info, os.path.dirname(final_path))
@@ -6101,15 +6119,19 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
         if source_key in used_sources:
             print(f"⏭️ [Modal Worker] Skipping already tried source: {source_key}")
             continue
+        
+        # CRITICAL: Add source to used_sources IMMEDIATELY to prevent race conditions
+        # This must happen BEFORE starting download to prevent multiple retries from picking same source
+        with tasks_lock:
+            if task_id in download_tasks:
+                download_tasks[task_id]['used_sources'].add(source_key)
+                print(f"🚫 [Modal Worker] Marked source as used before download attempt: {source_key}")
             
         print(f"🎯 [Modal Worker] Trying candidate {candidate_index + 1}/{len(candidates)}: {candidate.filename} (Confidence: {candidate.confidence:.2f})")
         
         try:
             # Update task status to downloading
             _update_task_status(task_id, 'downloading')
-            with tasks_lock:
-                if task_id in download_tasks:
-                    download_tasks[task_id]['used_sources'].add(source_key)
             
             # Prepare download (using existing infrastructure)
             spotify_artist_context = {'id': 'from_sync_modal', 'name': track.artists[0] if track.artists else 'Unknown', 'genres': []}
@@ -6124,7 +6146,19 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
                 print(f"❌ [Modal Worker] Invalid candidate data: missing username or filename")
                 continue
 
+            # PROTECTION: Check if there's already an active download for this task
+            current_download_id = None
+            with tasks_lock:
+                if task_id in download_tasks:
+                    current_download_id = download_tasks[task_id].get('download_id')
+            
+            if current_download_id:
+                print(f"⚠️ [Modal Worker] Task {task_id} already has active download {current_download_id} - skipping new download attempt")
+                print(f"🔄 [Modal Worker] This prevents race condition where multiple retries start overlapping downloads")
+                continue
+
             # Initiate download
+            print(f"🚀 [Modal Worker] Starting download: {username} / {os.path.basename(filename)}")
             download_id = asyncio.run(soulseek_client.download(username, filename, size))
 
             if download_id:
