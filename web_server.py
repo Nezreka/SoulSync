@@ -4015,9 +4015,17 @@ def _extract_spotify_metadata(context: dict, artist: dict, album_info: dict) -> 
         metadata['track_number'] = album_info.get('track_number', 1)
         metadata['total_tracks'] = spotify_album.get('total_tracks', 1) if spotify_album else 1
     else:
-        metadata['album'] = metadata['title'] # For singles, album is the title
-        metadata['track_number'] = 1
-        metadata['total_tracks'] = 1
+        # SAFEGUARD: If we have spotify_album context, never use track title as album name
+        # This prevents album tracks from being tagged as singles due to classification errors
+        if spotify_album and spotify_album.get('name'):
+            print(f"🛡️ [SAFEGUARD] Using spotify_album name instead of track title for album metadata")
+            metadata['album'] = spotify_album['name']
+            metadata['track_number'] = album_info.get('track_number', 1) if album_info else 1
+            metadata['total_tracks'] = spotify_album.get('total_tracks', 1)
+        else:
+            metadata['album'] = metadata['title'] # For true singles, album is the title
+            metadata['track_number'] = 1
+            metadata['total_tracks'] = 1
 
     if spotify_album and spotify_album.get('release_date'):
         metadata['date'] = spotify_album['release_date'][:4]
@@ -4333,29 +4341,37 @@ def _post_process_matched_download(context_key, context, file_path):
             
             print(f"🎯 Using clean Spotify album: '{clean_album_name}' for track: '{clean_track_name}'")
         elif is_album_download:
-            # Fallback for album context without clean Spotify data
-            print("⚠️ Album context found but no clean Spotify data - using fallback")
+            # CRITICAL FIX: Album context without clean Spotify data - still force album treatment
+            print("⚠️ Album context found but no clean Spotify data - using enhanced fallback")
             original_search = context.get("original_search_result", {})
             spotify_album = context.get("spotify_album", {})
             clean_track_name = original_search.get('spotify_clean_title') or original_search.get('title', 'Unknown Track')
             
             # DEBUG: Check what's in original_search for path 2
-            print(f"🔍 [DEBUG] Path 2 - Fallback album context path:")
+            print(f"🔍 [DEBUG] Path 2 - Enhanced fallback album context path:")
             print(f"   original_search keys: {list(original_search.keys())}")
             print(f"   track_number in original_search: {'track_number' in original_search}")
             print(f"   track_number value: {original_search.get('track_number', 'NOT_FOUND')}")
+            print(f"   spotify_album name: {spotify_album.get('name', 'NOT_FOUND')}")
+            
+            # ENHANCEMENT: Use spotify_clean_album if available for consistency 
+            album_name = (original_search.get('spotify_clean_album') or 
+                         spotify_album.get('name') or 
+                         'Unknown Album')
             
             album_info = {
-                'is_album': True,
-                'album_name': spotify_album.get('name') or 'Unknown Album',
+                'is_album': True,  # FORCE TRUE - user explicitly selected album for download
+                'album_name': album_name,
                 'track_number': original_search.get('track_number', 1),
                 'clean_track_name': clean_track_name,
                 'album_image_url': spotify_album.get('image_url'),
-                'confidence': 0.8,
-                'source': 'fallback_album_context'
+                'confidence': 0.9,  # Higher confidence - user explicitly chose album
+                'source': 'enhanced_fallback_album_context'
             }
+            print(f"🎯 [FORCED ALBUM] Using album: '{album_name}' for track: '{clean_track_name}'")
         else:
             # For singles, we still need to detect if they belong to an album.
+            print("🎵 Single track download - attempting album detection")
             album_info = _detect_album_info_web(context, spotify_artist)
 
         # --- CRITICAL FIX: Add GUI album grouping resolution ---
