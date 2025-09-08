@@ -4012,16 +4012,21 @@ def _extract_spotify_metadata(context: dict, artist: dict, album_info: dict) -> 
 
     if album_info.get('is_album'):
         metadata['album'] = album_info.get('album_name', 'Unknown Album')
-        metadata['track_number'] = album_info.get('track_number', 1)
+        track_num = album_info.get('track_number', 1)
+        metadata['track_number'] = track_num
         metadata['total_tracks'] = spotify_album.get('total_tracks', 1) if spotify_album else 1
+        print(f"🎵 [METADATA] Album track - track_number: {track_num}, album: {metadata['album']}")
     else:
         # SAFEGUARD: If we have spotify_album context, never use track title as album name
         # This prevents album tracks from being tagged as singles due to classification errors
         if spotify_album and spotify_album.get('name'):
             print(f"🛡️ [SAFEGUARD] Using spotify_album name instead of track title for album metadata")
             metadata['album'] = spotify_album['name']
-            metadata['track_number'] = album_info.get('track_number', 1) if album_info else 1
+            # Use corrected track_number from album_info (which should be updated by post-processing)
+            corrected_track_number = album_info.get('track_number', 1) if album_info else 1
+            metadata['track_number'] = corrected_track_number
             metadata['total_tracks'] = spotify_album.get('total_tracks', 1)
+            print(f"🛡️ [SAFEGUARD] Using track_number: {corrected_track_number}")
         else:
             metadata['album'] = metadata['title'] # For true singles, album is the title
             metadata['track_number'] = 1
@@ -4442,6 +4447,10 @@ def _post_process_matched_download(context_key, context, file_path):
                 track_number = 1
                 
             print(f"🎯 [DEBUG] FINAL track_number used for filename: {track_number}")
+            
+            # CRITICAL FIX: Update album_info with corrected track_number for metadata enhancement
+            album_info['track_number'] = track_number
+            print(f"✅ [FIX] Updated album_info track_number to {track_number} for consistent metadata")
 
             album_folder_name = f"{artist_name_sanitized} - {album_name_sanitized}"
             album_dir = os.path.join(artist_dir, album_folder_name)
@@ -5789,13 +5798,39 @@ def _run_post_processing_worker(task_id, batch_id):
                         spotify_album = context.get("spotify_album")
                         
                         if spotify_artist and spotify_album:
-                            # Create album_info dict for metadata enhancement  
+                            # CRITICAL FIX: Create album_info dict with proper structure for metadata enhancement
+                            # This must match the format used in main stream processor to ensure consistency
+                            
+                            # Extract track number from context (should be available from fuzzy match)
+                            original_search = context.get("original_search_result", {})
+                            track_number = original_search.get('track_number', 1)
+                            
+                            # If no track number in context, extract from filename 
+                            if track_number == 1 and found_file:
+                                print(f"⚠️ [Verification] No track_number in context, extracting from filename: {os.path.basename(found_file)}")
+                                track_number = _extract_track_number_from_filename(found_file)
+                                print(f"   -> Extracted track number: {track_number}")
+                            
+                            # Ensure track_number is valid
+                            if not isinstance(track_number, int) or track_number < 1:
+                                print(f"⚠️ [Verification] Invalid track number ({track_number}), defaulting to 1")
+                                track_number = 1
+                            
+                            # Get clean track name 
+                            clean_track_name = (original_search.get('spotify_clean_title') or 
+                                              original_search.get('title', 'Unknown Track'))
+                            
                             album_info = {
-                                'id': spotify_album.get('id'),
-                                'name': spotify_album.get('name', 'Unknown Album'),
-                                'release_date': spotify_album.get('release_date', ''),
-                                'images': spotify_album.get('images', [])
+                                'is_album': True,  # CRITICAL: Mark as album track
+                                'album_name': spotify_album.get('name', 'Unknown Album'),  # CORRECT KEY
+                                'track_number': track_number,  # CORRECTED TRACK NUMBER
+                                'clean_track_name': clean_track_name,
+                                'album_image_url': spotify_album.get('images', [{}])[0].get('url') if spotify_album.get('images') else None,
+                                'confidence': 0.9,
+                                'source': 'verification_worker_corrected'
                             }
+                            
+                            print(f"🎯 [Verification] Created proper album_info - track_number: {track_number}, album: {spotify_album.get('name')}")
                             
                             print(f"🎵 [Post-Processing] Attempting metadata enhancement for: {found_file}")
                             enhancement_success = _enhance_file_metadata(found_file, context, spotify_artist, album_info)
