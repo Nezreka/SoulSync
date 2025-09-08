@@ -3131,7 +3131,9 @@ async function closeDownloadMissingModal(playlistId) {
         
         // Clean up artist download if this is an artist album playlist
         if (playlistId.startsWith('artist_album_')) {
+            console.log(`🧹 [MODAL CLOSE] Cleaning up artist download for completed modal: ${playlistId}`);
             cleanupArtistDownload(playlistId);
+            console.log(`✅ [MODAL CLOSE] Artist download cleanup completed for: ${playlistId}`);
         }
         
         cleanupDownloadProcess(playlistId);
@@ -10711,13 +10713,20 @@ function updateArtistDownloadsSection() {
  * Show or update the artist downloads section in search state
  */
 function showArtistDownloadsSection() {
+    console.log(`🔄 [SHOW] showArtistDownloadsSection() called - refreshing artist bubbles`);
+    console.log(`🔄 [SHOW] Current view: ${artistsPageState.currentView}, artistDownloadBubbles count: ${Object.keys(artistDownloadBubbles).length}`);
+    
     // Only show in search state
     if (artistsPageState.currentView !== 'search') {
+        console.log(`⏭️ [SHOW] Skipping - not in search state (current: ${artistsPageState.currentView})`);
         return;
     }
     
     const artistsSearchState = document.getElementById('artists-search-state');
-    if (!artistsSearchState) return;
+    if (!artistsSearchState) {
+        console.log(`⏭️ [SHOW] Skipping - no artists-search-state element found`);
+        return;
+    }
     
     let downloadsSection = document.getElementById('artist-downloads-section');
     
@@ -10782,14 +10791,24 @@ function createArtistBubbleCard(artistBubbleData) {
     const completedCount = downloads.filter(d => d.status === 'view_results').length;
     const allCompleted = activeCount === 0 && completedCount > 0;
     
-    // Debug logging for bubble card creation
-    console.log(`🔵 Creating bubble for ${artist.name}:`, {
+    // Enhanced debug logging for bubble card creation and green checkmark detection
+    console.log(`🔵 [BUBBLE] Creating bubble for ${artist.name}:`, {
         totalDownloads: downloads.length,
         activeCount,
         completedCount,
         allCompleted,
         downloadStatuses: downloads.map(d => `${d.album.name}: ${d.status}`)
     });
+    
+    // CRITICAL: Green checkmark detection logging
+    if (allCompleted) {
+        console.log(`🟢 [BUBBLE] GREEN CHECKMARK DETECTED for ${artist.name} - all ${downloads.length} downloads completed`);
+        console.log(`✅ [BUBBLE] This bubble will have 'all-completed' class and green checkmark`);
+    } else if (activeCount === 0 && completedCount === 0) {
+        console.log(`⭕ [BUBBLE] No active or completed downloads for ${artist.name} - this shouldn't happen`);
+    } else {
+        console.log(`⏳ [BUBBLE] Still waiting for completion: ${activeCount} active, ${completedCount} completed`);
+    }
     
     const imageUrl = artist.image_url || '';
     const backgroundStyle = imageUrl ? 
@@ -10849,6 +10868,9 @@ function monitorArtistDownload(artistId, virtualPlaylistId) {
             const allCompleted = artistDownloads.every(d => d.status === 'view_results');
             if (allCompleted) {
                 console.log(`🟢 All downloads completed for ${artistDownloadBubbles[artistId].artist.name} - green checkmark should appear`);
+                console.log(`🎯 [STATUS DEBUG] Green checkmark trigger - forcing bubble refresh`);
+                // Force immediate bubble refresh to show green checkmark
+                setTimeout(updateArtistDownloadsSection, 100);
             }
         }
         
@@ -10869,7 +10891,8 @@ function openArtistDownloadModal(artistId) {
     const artistBubbleData = artistDownloadBubbles[artistId];
     if (!artistBubbleData || artistDownloadModalOpen) return;
     
-    console.log(`🎵 Opening artist download modal for: ${artistBubbleData.artist.name}`);
+    console.log(`🎵 [MODAL OPEN] Opening artist download modal for: ${artistBubbleData.artist.name}`);
+    console.log(`📊 [MODAL OPEN] Current download statuses:`, artistBubbleData.downloads.map(d => `${d.album.name}: ${d.status}`));
     artistDownloadModalOpen = true;
     
     const modal = document.createElement('div');
@@ -10905,6 +10928,9 @@ function createArtistDownloadItem(download, index) {
     const { album, albumType, status, virtualPlaylistId } = download;
     const buttonText = status === 'view_results' ? 'View Results' : 'View Progress';
     const buttonClass = status === 'view_results' ? 'completed' : 'active';
+    
+    // Enhanced debugging for button text generation
+    console.log(`🎯 [BUTTON] Creating item for ${album.name}: status='${status}' → buttonText='${buttonText}'`);
     
     return `
         <div class="artist-download-item" data-playlist-id="${virtualPlaylistId}">
@@ -10950,18 +10976,38 @@ function startArtistDownloadModalMonitoring(artistId) {
             return;
         }
         
-        // Update modal content
+        // Update modal content and synchronize with bubble state
+        let statusChanged = false;
         itemsContainer.innerHTML = activeDownloads.map((download, index) => {
             const process = activeDownloadProcesses[download.virtualPlaylistId];
             if (process) {
                 const newStatus = process.status === 'complete' ? 'view_results' : 'in_progress';
                 if (download.status !== newStatus) {
-                    console.log(`🔄 Modal: Updating ${download.album.name} status from ${download.status} to ${newStatus}`);
+                    console.log(`🔄 [ARTIST MODAL] Updating ${download.album.name} status from ${download.status} to ${newStatus}`);
                     download.status = newStatus;
+                    statusChanged = true;
                 }
             }
             return createArtistDownloadItem(download, index);
         }).join('');
+        
+        // CRITICAL: If any status changed, immediately refresh artist bubble to show green checkmarks
+        if (statusChanged) {
+            console.log(`🎯 [SYNC] Status change detected in artist modal - refreshing bubble display`);
+            updateArtistDownloadsSection();
+            
+            // Check if all downloads for this artist are now completed
+            const artistDownloads = artistDownloadBubbles[artistId].downloads;
+            const allCompleted = artistDownloads.every(d => d.status === 'view_results');
+            if (allCompleted) {
+                console.log(`🟢 [ARTIST MODAL] All downloads completed for artist ${artistId} - triggering green checkmark`);
+                // Force additional refresh after a brief delay to ensure UI updates
+                setTimeout(() => {
+                    console.log(`✨ [ARTIST MODAL] Forcing final refresh for green checkmark`);
+                    updateArtistDownloadsSection();
+                }, 200);
+            }
+        }
         
         // Continue monitoring
         setTimeout(updateModal, 2000);
@@ -11041,28 +11087,40 @@ function bulkCompleteArtistDownloads(artistId) {
  * Clean up artist download when a modal is closed
  */
 function cleanupArtistDownload(virtualPlaylistId) {
+    console.log(`🔍 [CLEANUP] Looking for download to cleanup: ${virtualPlaylistId}`);
+    console.log(`🔍 [CLEANUP] Current artist bubbles:`, Object.keys(artistDownloadBubbles));
+    
     // Find which artist this download belongs to
     for (const artistId in artistDownloadBubbles) {
         const downloads = artistDownloadBubbles[artistId].downloads;
         const downloadIndex = downloads.findIndex(d => d.virtualPlaylistId === virtualPlaylistId);
         
+        console.log(`🔍 [CLEANUP] Checking artist ${artistId}: ${downloads.length} downloads`);
+        downloads.forEach(d => console.log(`  - ${d.album.name} (${d.virtualPlaylistId}): ${d.status}`));
+        
         if (downloadIndex !== -1) {
-            console.log(`🧹 Cleaning up artist download: ${downloads[downloadIndex].album.name}`);
+            const downloadToRemove = downloads[downloadIndex];
+            console.log(`🧹 [CLEANUP] Found download to cleanup: ${downloadToRemove.album.name} (status: ${downloadToRemove.status})`);
             
             // Remove this download from the artist's downloads
             downloads.splice(downloadIndex, 1);
+            console.log(`✅ [CLEANUP] Removed download from artist ${artistId}. Remaining: ${downloads.length}`);
             
             // If no more downloads for this artist, remove the bubble
             if (downloads.length === 0) {
                 delete artistDownloadBubbles[artistId];
-                console.log(`🧹 Removed artist bubble: ${artistId}`);
+                console.log(`🧹 [CLEANUP] No more downloads - removed artist bubble: ${artistId}`);
+            } else {
+                console.log(`📊 [CLEANUP] Artist ${artistId} still has ${downloads.length} downloads remaining`);
             }
             
             // Update the downloads section
+            console.log(`🔄 [CLEANUP] Updating artist downloads section...`);
             updateArtistDownloadsSection();
             break;
         }
     }
+    console.log(`✅ [CLEANUP] Cleanup process completed for ${virtualPlaylistId}`);
 }
 
 /**
