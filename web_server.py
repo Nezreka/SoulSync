@@ -5648,13 +5648,39 @@ def _run_post_processing_worker(task_id, batch_id):
                 traceback.print_exc()
         else:
             print(f"❌ [Post-Processing] No context found for key: {context_key}")
-            # Try to find similar keys to debug the issue
+            # Try fuzzy matching with similar keys containing the filename
             similar_keys = [k for k in matched_downloads_context.keys() if os.path.basename(task_filename) in k]
             if similar_keys:
-                print(f"🔍 [Post-Processing] Similar keys found: {similar_keys}")
+                # Use the first similar key found
+                fuzzy_key = similar_keys[0]
+                context = matched_downloads_context.get(fuzzy_key)
+                print(f"✅ [Post-Processing] Found context using fuzzy key matching: {fuzzy_key}")
+                
+                # Generate expected final filename using the found context
+                try:
+                    original_search = context.get("original_search_result", {})
+                    print(f"🔍 [Post-Processing] fuzzy context original_search keys: {list(original_search.keys())}")
+                    
+                    spotify_clean_title = original_search.get('spotify_clean_title')
+                    track_number = original_search.get('track_number')
+                    
+                    print(f"🔍 [Post-Processing] fuzzy context spotify_clean_title: '{spotify_clean_title}', track_number: {track_number}")
+                    
+                    if spotify_clean_title and track_number:
+                        # Generate expected final filename that stream processor would create
+                        # Pattern: f"{track_number:02d} - {clean_title}.flac"
+                        sanitized_title = spotify_clean_title.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
+                        expected_final_filename = f"{track_number:02d} - {sanitized_title}.flac"
+                        print(f"🎯 [Post-Processing] Generated expected final filename from fuzzy match: {expected_final_filename}")
+                    else:
+                        print(f"❌ [Post-Processing] Missing required data from fuzzy match - spotify_clean_title: {bool(spotify_clean_title)}, track_number: {bool(track_number)}")
+                except Exception as e:
+                    print(f"⚠️ [Post-Processing] Error generating expected filename from fuzzy match: {e}")
+                    import traceback
+                    traceback.print_exc()
             else:
                 print(f"🔍 [Post-Processing] No similar keys found containing '{os.path.basename(task_filename)}'")
-                # Show a sample of what keys actually exist
+                # Show a sample of what keys actually exist for debugging
                 sample_keys = list(matched_downloads_context.keys())[:5]
                 print(f"🔍 [Post-Processing] Sample of existing keys: {sample_keys}")
         
@@ -5662,25 +5688,41 @@ def _run_post_processing_worker(task_id, batch_id):
         found_file = None
         file_location = None
         for retry_count in range(3):
-            print(f"🔍 [Post-Processing] Attempt {retry_count + 1}/3 to find file: {os.path.basename(task_filename)}")
+            print(f"🔍 [Post-Processing] Attempt {retry_count + 1}/3 to find file")
+            print(f"🔍 [Post-Processing] Original filename: {os.path.basename(task_filename)}")
+            if expected_final_filename:
+                print(f"🔍 [Post-Processing] Expected final filename: {expected_final_filename}")
+            else:
+                print(f"⚠️ [Post-Processing] No expected final filename available")
             
-            # First try with original filename
+            # Strategy 1: Try with original filename in both downloads and transfer
+            print(f"🔍 [Post-Processing] Strategy 1: Searching with original filename...")
             found_file, file_location = _find_completed_file_robust(download_dir, task_filename, transfer_dir)
             
-            # If not found and we have an expected final filename, try that in transfer folder
+            if found_file:
+                print(f"✅ [Post-Processing] Strategy 1 SUCCESS: Found file with original filename in {file_location}: {found_file}")
+            else:
+                print(f"❌ [Post-Processing] Strategy 1 FAILED: Original filename not found in either location")
+            
+            # Strategy 2: If not found and we have an expected final filename, try that in transfer folder
             if not found_file and expected_final_filename:
-                print(f"🔍 [Post-Processing] Trying with expected final filename: {expected_final_filename}")
+                print(f"🔍 [Post-Processing] Strategy 2: Searching transfer folder with expected final filename...")
                 found_result = _find_completed_file_robust(transfer_dir, expected_final_filename)
                 if found_result and found_result[0]:
                     found_file, file_location = found_result[0], 'transfer'
-                    print(f"✅ [Post-Processing] Found file with expected final filename: {found_file}")
+                    print(f"✅ [Post-Processing] Strategy 2 SUCCESS: Found file with expected final filename: {found_file}")
+                else:
+                    print(f"❌ [Post-Processing] Strategy 2 FAILED: Expected final filename not found in transfer folder")
+            elif not expected_final_filename:
+                print(f"⏭️ [Post-Processing] Strategy 2 SKIPPED: No expected final filename available")
             
             if found_file:
-                print(f"✅ [Post-Processing] Found file after {retry_count + 1} attempts in {file_location}: {found_file}")
+                print(f"🎯 [Post-Processing] FILE FOUND after {retry_count + 1} attempts in {file_location}: {found_file}")
                 break
             else:
+                print(f"❌ [Post-Processing] All search strategies failed on attempt {retry_count + 1}/3")
                 if retry_count < 2:  # Don't sleep on final attempt
-                    print(f"⏳ [Post-Processing] File not found, waiting 3 seconds before retry...")
+                    print(f"⏳ [Post-Processing] Waiting 3 seconds before next attempt...")
                     time.sleep(3)
         
         if not found_file:
