@@ -4231,7 +4231,8 @@ def _post_process_matched_download_with_verification(context_key, context, file_
             with tasks_lock:
                 if task_id in download_tasks:
                     download_tasks[task_id]['status'] = 'completed'
-                    print(f"✅ [Verification] Task {task_id} marked as completed after verification")
+                    download_tasks[task_id]['metadata_enhanced'] = True
+                    print(f"✅ [Verification] Task {task_id} marked as completed with metadata enhanced")
             
             # Clean up context now that both stream processor and verification worker are done
             with matched_context_lock:
@@ -5550,7 +5551,8 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                     'playlist_id': playlist_id, 'batch_id': batch_id,
                     'track_index': res['track_index'], 'retry_count': 0,
                     'cached_candidates': [], 'used_sources': set(),
-                    'status_change_time': time.time()
+                    'status_change_time': time.time(),
+                    'metadata_enhanced': False
                 }
                 download_batches[batch_id]['queue'].append(task_id)
 
@@ -5693,6 +5695,51 @@ def _run_post_processing_worker(task_id, batch_id):
         # Handle file found in transfer folder - already completed by stream processor
         if file_location == 'transfer':
             print(f"🎯 [Post-Processing] File found in transfer folder - already completed by stream processor: {found_file}")
+            
+            # Check if metadata enhancement was completed
+            metadata_enhanced = False
+            with tasks_lock:
+                if task_id in download_tasks:
+                    metadata_enhanced = download_tasks[task_id].get('metadata_enhanced', False)
+            
+            if not metadata_enhanced:
+                print(f"⚠️ [Post-Processing] File in transfer folder missing metadata enhancement - completing now")
+                # Attempt to complete metadata enhancement using context
+                if context and expected_final_filename:
+                    try:
+                        # Extract required data from context
+                        original_search = context.get("original_search_result", {})
+                        spotify_artist = context.get("spotify_artist")
+                        spotify_album = context.get("spotify_album")
+                        
+                        if spotify_artist and spotify_album:
+                            # Create album_info dict for metadata enhancement  
+                            album_info = {
+                                'id': spotify_album.get('id'),
+                                'name': spotify_album.get('name', 'Unknown Album'),
+                                'release_date': spotify_album.get('release_date', ''),
+                                'images': spotify_album.get('images', [])
+                            }
+                            
+                            print(f"🎵 [Post-Processing] Attempting metadata enhancement for: {found_file}")
+                            enhancement_success = _enhance_file_metadata(found_file, context, spotify_artist, album_info)
+                            
+                            if enhancement_success:
+                                with tasks_lock:
+                                    if task_id in download_tasks:
+                                        download_tasks[task_id]['metadata_enhanced'] = True
+                                print(f"✅ [Post-Processing] Successfully completed metadata enhancement for: {os.path.basename(found_file)}")
+                            else:
+                                print(f"⚠️ [Post-Processing] Metadata enhancement failed for: {os.path.basename(found_file)}")
+                        else:
+                            print(f"⚠️ [Post-Processing] Missing spotify_artist or spotify_album in context")
+                    except Exception as enhancement_error:
+                        print(f"❌ [Post-Processing] Error during metadata enhancement: {enhancement_error}")
+                else:
+                    print(f"⚠️ [Post-Processing] Cannot complete metadata enhancement - missing context or expected filename")
+            else:
+                print(f"✅ [Post-Processing] File already has metadata enhancement completed")
+            
             with tasks_lock:
                 if task_id in download_tasks:
                     download_tasks[task_id]['status'] = 'completed'
