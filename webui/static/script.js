@@ -290,6 +290,9 @@ document.addEventListener('DOMContentLoaded', function() {
     updateServiceStatus();
     setInterval(updateServiceStatus, 5000); // Every 5 seconds
     
+    // Start always-on download polling (batched, minimal overhead)
+    startGlobalDownloadPolling();
+    
     // Load initial data
     loadInitialData();
     
@@ -354,11 +357,9 @@ async function loadPageData(pageId) {
         stopWishlistCountPolling();
         switch (pageId) {
             case 'dashboard':
-                stopDownloadPolling();
                 await loadDashboardData();
                 break;
             case 'sync':
-                stopDownloadPolling();
                 initializeSyncPage();
                 await loadSyncData();
                 break;
@@ -368,7 +369,6 @@ async function loadPageData(pageId) {
                 await loadDownloadsData();
                 break;
             case 'artists':
-                stopDownloadPolling();
                 // Only fully initialize if not already initialized
                 if (!artistsPageState.isInitialized) {
                     initializeArtistsPage();
@@ -379,7 +379,6 @@ async function loadPageData(pageId) {
                 break;
             case 'settings':
                 initializeSettings();
-                stopDownloadPolling();
                 await loadSettingsData();
                 break;
         }
@@ -3446,8 +3445,7 @@ function startGlobalDownloadPolling() {
         });
         
         if (activeBatchIds.length === 0) {
-            console.log('🛑 [Global Polling] No active processes, stopping global poller');
-            stopGlobalDownloadPolling();
+            console.debug('📊 [Global Polling] No active processes, continuing polling');
             return;
         }
         
@@ -3487,17 +3485,8 @@ function startGlobalDownloadPolling() {
             globalPollingFailureCount++;
             
             if (globalPollingFailureCount >= 5) {
-                console.error(`🚨 [Global Polling] ${globalPollingFailureCount} consecutive failures, stopping poller`);
-                stopGlobalDownloadPolling();
-                
-                // Try to restart after a delay
-                setTimeout(() => {
-                    console.log('🔄 [Global Polling] Attempting to restart after failures');
-                    if (Object.keys(activeDownloadProcesses).length > 0) {
-                        startGlobalDownloadPolling();
-                    }
-                }, 10000); // 10 second delay before restart
-                return;
+                console.error(`🚨 [Global Polling] ${globalPollingFailureCount} consecutive failures, continuing with backoff`);
+                // Don't stop polling - just continue with exponential backoff
             }
             
             // Exponential backoff: increase interval temporarily
@@ -3541,8 +3530,7 @@ function startGlobalDownloadPollingWithInterval(interval) {
         });
         
         if (activeBatchIds.length === 0) {
-            console.log('🛑 [Global Polling] No active processes, stopping global poller');
-            stopGlobalDownloadPolling();
+            console.debug('📊 [Global Polling] No active processes, continuing polling');
             return;
         }
         
@@ -3582,13 +3570,8 @@ function startGlobalDownloadPollingWithInterval(interval) {
             globalPollingFailureCount++;
             
             if (globalPollingFailureCount >= 5) {
-                console.error(`🚨 [Global Polling] Too many failures, stopping`);
-                stopGlobalDownloadPolling();
-                setTimeout(() => {
-                    if (Object.keys(activeDownloadProcesses).length > 0) {
-                        startGlobalDownloadPolling();
-                    }
-                }, 10000);
+                console.error(`🚨 [Global Polling] Too many failures, continuing with backoff`);
+                // Don't stop polling - just continue with exponential backoff
             }
         }
     }, interval);
@@ -3702,7 +3685,7 @@ function processModalStatusUpdate(playlistId, data) {
                 case 'pending': statusText = '⏸️ Pending'; break;
                 case 'searching': statusText = '🔍 Searching...'; break;
                 case 'downloading': statusText = `⏬ Downloading... ${Math.round(task.progress || 0)}%`; break;
-                case 'post_processing': statusText = '⌛ Processing...'; break; // NEW VERIFICATION WORKFLOW
+                case 'post_processing': statusText = '⌛ Processing...'; break; // NEW VERIFICATION WORKFLOW - NOT COUNTED AS FINISHED
                 case 'completed': statusText = '✅ Completed'; completedCount++; break;
                 case 'failed': statusText = '❌ Failed'; failedOrCancelledCount++; break;
                 case 'cancelled': statusText = '🚫 Cancelled'; failedOrCancelledCount++; break;
@@ -3726,9 +3709,10 @@ function processModalStatusUpdate(playlistId, data) {
         const serverActiveWorkers = data.active_count || 0;
         const maxWorkers = data.max_concurrent || 3;
         
-        // Count actual active workers based on task statuses (including post_processing)
+        // FIXED: Count actual active workers based on task statuses 
+        // CRITICAL: Don't count post_processing as active workers since they don't consume worker slots
         const clientActiveWorkers = (data.tasks || []).filter(task => 
-            ['searching', 'downloading', 'queued', 'post_processing'].includes(task.status) && 
+            ['searching', 'downloading', 'queued'].includes(task.status) && 
             !document.querySelector(`tr[data-track-index="${task.track_index}"][data-locally-cancelled="true"]`)
         ).length;
         
@@ -3750,7 +3734,9 @@ function processModalStatusUpdate(playlistId, data) {
         document.getElementById(`download-progress-text-${playlistId}`).textContent = `${completedCount}/${missingCount} completed (${progressPercent.toFixed(0)}%)`;
         document.getElementById(`stat-downloaded-${playlistId}`).textContent = completedCount;
 
-        if (data.phase === 'complete' || data.phase === 'error' || (missingCount > 0 && totalFinished >= missingCount)) {
+        // FIXED: Only trigger completion logic when backend actually reports batch as complete
+        // Don't assume completion based on task counts - let backend determine when truly complete
+        if (data.phase === 'complete' || data.phase === 'error') {
             // Enhanced check for background auto-processing for wishlist
             const isWishlist = (playlistId === 'wishlist');
             const isModalHidden = (process.modalElement && process.modalElement.style.display === 'none');
@@ -3859,8 +3845,8 @@ function checkAndCleanupGlobalPolling() {
         .some(p => p.batchId && p.status === 'running');
     
     if (!hasActivePolling) {
-        console.log('🧹 [Cleanup] No more active processes, stopping global polling');
-        stopGlobalDownloadPolling();
+        console.debug('🧹 [Cleanup] No more active processes, continuing polling');
+        // Keep polling active - no need to stop
     }
 }
 
