@@ -5085,12 +5085,25 @@ def _start_next_batch_of_downloads(batch_id):
             while active_count < max_concurrent and queue_index < len(queue):
                 task_id = queue[queue_index]
                 
-                # IMPORTANT: Set status to 'searching' BEFORE starting worker (like GUI)
-                # Must be done INSIDE the lock to prevent race conditions with status polling
+                # CRITICAL V2 FIX: Skip cancelled tasks instead of trying to restart them
                 if task_id in download_tasks:
+                    current_status = download_tasks[task_id]['status']
+                    if current_status == 'cancelled':
+                        print(f"⏭️ [Batch Lock] Skipping cancelled task {task_id} (queue position {queue_index + 1})")
+                        download_batches[batch_id]['queue_index'] += 1
+                        queue_index += 1
+                        continue  # Skip to next task without consuming worker slot
+                    
+                    # IMPORTANT: Set status to 'searching' BEFORE starting worker (like GUI)
+                    # Must be done INSIDE the lock to prevent race conditions with status polling
                     download_tasks[task_id]['status'] = 'searching'
                     download_tasks[task_id]['status_change_time'] = time.time()
                     print(f"🔧 [Batch Manager] Set task {task_id} status to 'searching'")
+                else:
+                    print(f"⚠️ [Batch Lock] Task {task_id} not found in download_tasks - skipping")
+                    download_batches[batch_id]['queue_index'] += 1
+                    queue_index += 1
+                    continue
                 
                 # CRITICAL FIX: Submit to executor BEFORE incrementing counters to prevent ghost workers
                 try:
@@ -5930,8 +5943,15 @@ def _download_track_worker(task_id, batch_id=None):
                 return
             if download_tasks[task_id]['status'] == 'cancelled':
                 print(f"❌ [Modal Worker] Task {task_id} cancelled before starting")
-                # Free worker slot when cancelled
-                if batch_id:
+                # V2 FIX: Don't call _on_download_completed for cancelled V2 tasks
+                # V2 system handles worker slot freeing in atomic cancel function
+                task_playlist_id = download_tasks[task_id].get('playlist_id')
+                if task_playlist_id:
+                    print(f"⏭️ [Modal Worker] V2 task {task_id} cancelled - worker slot already freed by V2 system")
+                    return  # V2 system already handled worker slot management
+                elif batch_id:
+                    # Legacy system - use old completion callback
+                    print(f"⏭️ [Modal Worker] Legacy task {task_id} cancelled - using legacy completion callback")
                     _on_download_completed(batch_id, task_id, success=False)
                 return
 
@@ -6457,7 +6477,12 @@ def _build_batch_status_data(batch_id, batch, live_transfers_lookup):
                 'track_index': task['track_index'],
                 'status': task['status'],
                 'track_info': task['track_info'],
-                'progress': 0
+                'progress': 0,
+                # V2 SYSTEM: Add persistent state information
+                'cancel_requested': task.get('cancel_requested', False),
+                'cancel_timestamp': task.get('cancel_timestamp'),
+                'ui_state': task.get('ui_state', 'normal'),  # normal|cancelling|cancelled
+                'playlist_id': task.get('playlist_id'),      # For V2 system identification
             }
             task_filename = task.get('filename') or task['track_info'].get('filename')
             task_username = task.get('username') or task['track_info'].get('username')
@@ -6787,6 +6812,400 @@ def cancel_download_task():
 
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
+
+# ===============================
+# NEW ATOMIC CANCEL SYSTEM V2
+# ===============================
+
+def _find_task_by_playlist_track(playlist_id, track_index):
+    """
+    Find task_id by playlist_id and track_index.
+    This enables the new v2 API to work without requiring task_id from frontend.
+    """
+    for task_id, task in download_tasks.items():
+        if (task.get('playlist_id') == playlist_id and 
+            task.get('track_index') == track_index):
+            return task_id, task
+    return None, None
+
+def _atomic_cancel_task(playlist_id, track_index):
+    """
+    Atomically cancel a single task with proper worker slot management.
+    This is the core of the new cancel system - everything in one transaction.
+    Returns: (success: bool, message: str, task_info: dict)
+    """
+    try:
+        # Find the task to cancel
+        task_id, task = _find_task_by_playlist_track(playlist_id, track_index)
+        if not task_id:
+            return False, f"Task not found for playlist {playlist_id}, track {track_index}", None
+            
+        # Check if already cancelled
+        if task.get('status') == 'cancelled':
+            return False, "Task already cancelled", {'task_id': task_id, 'status': 'cancelled'}
+            
+        current_status = task.get('status', 'unknown')
+        batch_id = task.get('batch_id')
+        
+        print(f"🎯 [Atomic Cancel] Starting atomic cancel: playlist={playlist_id}, track={track_index}, task={task_id}, status={current_status}")
+        
+        # Mark task as cancelled immediately (within same lock context)
+        task['status'] = 'cancelled'
+        task['cancel_requested'] = True
+        task['cancel_timestamp'] = __import__('time').time()
+        task['ui_state'] = 'cancelled'
+        
+        # Ensure task has persistent identifiers for V2 system
+        if 'playlist_id' not in task:
+            task['playlist_id'] = playlist_id
+        
+        # Handle worker slot management
+        worker_slot_freed = False
+        if batch_id and batch_id in download_batches:
+            batch = download_batches[batch_id]
+            active_count = batch['active_count']
+            
+            # Free worker slot if task was consuming one
+            # More precise check: only free if task was actually running
+            if active_count > 0 and current_status in ['pending', 'searching', 'downloading', 'queued']:
+                print(f"🔄 [Atomic Cancel] Freeing worker slot for {task_id} (was {current_status})")
+                
+                # CRITICAL: Direct worker slot management to prevent _on_download_completed race
+                old_active = batch['active_count']
+                batch['active_count'] = max(0, old_active - 1)  # Prevent negative counts
+                worker_slot_freed = True
+                
+                print(f"🔄 [Atomic Cancel] Worker count: {old_active} → {batch['active_count']}")
+                
+                # Try to start next task if available (still within lock)
+                if (batch['queue_index'] < len(batch['queue']) and 
+                    batch['active_count'] < batch['max_concurrent']):
+                    print(f"🚀 [Atomic Cancel] Starting next task in queue")
+                    # Call the existing function to start next downloads
+                    # Note: This will be called outside the lock to prevent deadlock
+                else:
+                    print(f"🚫 [Atomic Cancel] No next task to start (queue_index: {batch['queue_index']}/{len(batch['queue'])}, active: {batch['active_count']}/{batch['max_concurrent']})")
+        
+        # Build result info
+        task_info = {
+            'task_id': task_id,
+            'status': 'cancelled',
+            'track_name': task.get('track_info', {}).get('name', 'Unknown'),
+            'playlist_id': playlist_id,
+            'track_index': track_index,
+            'worker_slot_freed': worker_slot_freed
+        }
+        
+        print(f"✅ [Atomic Cancel] Successfully cancelled task {task_id}")
+        return True, "Task cancelled successfully", task_info
+        
+    except Exception as e:
+        print(f"❌ [Atomic Cancel] Error in atomic cancel: {e}")
+        import traceback
+        traceback.print_exc()
+        return False, f"Internal error: {str(e)}", None
+
+@app.route('/api/downloads/cancel_task_v2', methods=['POST'])
+def cancel_task_v2():
+    """
+    NEW ATOMIC CANCEL SYSTEM V2
+    
+    Accepts playlist_id and track_index instead of task_id.
+    Performs atomic cancellation with proper worker slot management.
+    No race conditions, no dual state management.
+    """
+    data = request.get_json()
+    playlist_id = data.get('playlist_id')
+    track_index = data.get('track_index')
+    
+    if not playlist_id or track_index is None:
+        return jsonify({
+            "success": False, 
+            "error": "Missing playlist_id or track_index"
+        }), 400
+
+    try:
+        # Everything in one atomic operation within the lock
+        with tasks_lock:
+            success, message, task_info = _atomic_cancel_task(playlist_id, track_index)
+            
+        if not success:
+            return jsonify({"success": False, "error": message}), 400
+            
+        # Handle post-cancel operations (outside the lock to prevent deadlock)
+        task_id = task_info['task_id']
+        task = download_tasks.get(task_id)
+        
+        # Try to start next batch of downloads (this may start new workers)
+        if task and task.get('batch_id'):
+            batch_id = task['batch_id']
+            # Call existing function to manage batch progression
+            try:
+                _start_next_batch_of_downloads(batch_id)
+            except Exception as e:
+                print(f"⚠️ [Atomic Cancel] Warning: Could not start next downloads: {e}")
+            
+            # CRITICAL: Check for batch completion after V2 cancel
+            # V2 system bypasses _on_download_completed, so we need to check completion manually
+            try:
+                _check_batch_completion_v2(batch_id)
+            except Exception as e:
+                print(f"⚠️ [Atomic Cancel] Warning: Could not check batch completion: {e}")
+        
+        # Cancel Soulseek download if active (non-blocking)
+        if task:
+            download_id = task.get('download_id')
+            username = task.get('username')
+            current_status = task.get('status')
+            
+            print(f"🔍 [Atomic Cancel] Task {task_id} state: status='{current_status}', download_id='{download_id}', username='{username}'")
+            print(f"🔍 [Atomic Cancel] Download ID type: {type(download_id)}, length: {len(str(download_id)) if download_id else 0}")
+            print(f"🔍 [Atomic Cancel] Download ID looks like filename: {download_id and ('/' in str(download_id) or '\\' in str(download_id))}")
+            
+            if download_id and username:
+                # Only try to cancel if task was actually downloading (has real slskd download)
+                # For pending/searching tasks, the cancellation is already handled by status='cancelled'
+                if current_status in ['downloading', 'queued']:  # Remove 'searching' - those aren't in slskd yet
+                    try:
+                        print(f"🚫 [Atomic Cancel] Attempting to cancel Soulseek download:")
+                        print(f"   Username: {username}")  
+                        print(f"   Download ID: {download_id}")
+                        print(f"   Base URL: {soulseek_client.base_url}")
+                        print(f"   Expected URL: {soulseek_client.base_url}/transfers/downloads/{username}/{download_id}?remove=true")
+                        
+                        # CRITICAL: Must use REAL download ID from slskd, not filename
+                        success = False
+                        real_download_id = None
+                        
+                        # Step 1: Always search for real download ID first
+                        print(f"🔍 [Atomic Cancel] Searching slskd transfers for real download ID")
+                        try:
+                            all_transfers = asyncio.run(soulseek_client._make_request('GET', 'transfers/downloads'))
+                            if all_transfers:
+                                # Look through transfers to find matching download
+                                for user_data in all_transfers:
+                                    if user_data.get('username') == username:
+                                        for directory in user_data.get('directories', []):
+                                            for file_data in directory.get('files', []):
+                                                file_filename = file_data.get('filename', '')
+                                                # Match by filename (our download_id might be filename)
+                                                if (file_filename == download_id or 
+                                                    __import__('os').path.basename(file_filename) == __import__('os').path.basename(str(download_id))):
+                                                    real_download_id = file_data.get('id')
+                                                    print(f"🎯 [Atomic Cancel] Found real download ID: {real_download_id} for file: {file_filename}")
+                                                    break
+                                            if real_download_id:
+                                                break
+                                    if real_download_id:
+                                        break
+                        except Exception as search_error:
+                            print(f"⚠️ [Atomic Cancel] Error searching transfers: {search_error}")
+                        
+                        # Step 2: Try cancellation with real ID if found
+                        if real_download_id:
+                            print(f"🔄 [Atomic Cancel] Attempting cancel with real ID: {real_download_id}")
+                            try:
+                                # Use both approaches that work
+                                # Approach A: Simple DELETE (like sync.py)
+                                response = asyncio.run(soulseek_client._make_request('DELETE', f'transfers/downloads/{real_download_id}'))
+                                if response is not None:
+                                    print(f"✅ [Atomic Cancel] Successfully cancelled with simple DELETE: {real_download_id}")
+                                    success = True
+                                else:
+                                    # Approach B: Complex method (like downloads.py)
+                                    print(f"🔄 [Atomic Cancel] Simple DELETE failed, trying complex method")
+                                    complex_success = asyncio.run(soulseek_client.cancel_download(real_download_id, username, remove=True))
+                                    if complex_success:
+                                        print(f"✅ [Atomic Cancel] Successfully cancelled with complex method: {real_download_id}")
+                                        success = True
+                                    else:
+                                        print(f"⚠️ [Atomic Cancel] Both methods failed for real ID: {real_download_id}")
+                            except Exception as cancel_error:
+                                print(f"⚠️ [Atomic Cancel] Exception cancelling real ID {real_download_id}: {cancel_error}")
+                        else:
+                            print(f"⚠️ [Atomic Cancel] Could not find real download ID in slskd transfers")
+                            print(f"🔄 [Atomic Cancel] This might be a pending download not yet in slskd - relying on status='cancelled' to prevent it")
+                            # For pending downloads, the status='cancelled' will prevent them from starting
+                            success = True  # Consider this success since pending downloads are prevented
+                        
+                        if not success:
+                            print(f"❌ [Atomic Cancel] Failed to cancel download in slskd API")
+                    except Exception as e:
+                        print(f"⚠️ [Atomic Cancel] Exception cancelling Soulseek download {download_id}: {e}")
+                        # Print more details about the error
+                        import traceback
+                        print(f"⚠️ [Atomic Cancel] Cancel error traceback: {traceback.format_exc()}")
+                else:
+                    print(f"⏭️ [Atomic Cancel] Skipping Soulseek cancel - task was '{current_status}' (not actively downloading)")
+            elif current_status in ['downloading', 'queued', 'searching']:
+                print(f"⚠️ [Atomic Cancel] Task was '{current_status}' but missing download_id or username for Soulseek cancel")
+            else:
+                print(f"ℹ️ [Atomic Cancel] No Soulseek cancel needed - task was '{current_status}'")
+        
+        # Add to wishlist (non-blocking, best effort)
+        try:
+            _add_cancelled_task_to_wishlist(task)
+        except Exception as e:
+            print(f"⚠️ [Atomic Cancel] Warning: Could not add to wishlist: {e}")
+        
+        return jsonify({
+            "success": True,
+            "message": message,
+            "task_info": {
+                'task_id': task_info['task_id'],
+                'track_name': task_info['track_name'],
+                'status': 'cancelled'
+            }
+        })
+        
+    except Exception as e:
+        print(f"❌ [Cancel V2] Unexpected error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+def _check_batch_completion_v2(batch_id):
+    """
+    V2 SYSTEM: Check if batch is complete after worker slot changes.
+    
+    This is needed because V2 atomic cancel bypasses _on_download_completed,
+    so we need to manually check for batch completion.
+    """
+    try:
+        with tasks_lock:
+            if batch_id not in download_batches:
+                print(f"⚠️ [Completion Check V2] Batch {batch_id} not found")
+                return
+            
+            batch = download_batches[batch_id]
+            all_tasks_started = batch['queue_index'] >= len(batch['queue'])
+            no_active_workers = batch['active_count'] == 0
+            
+            # Count actually finished tasks (completed, failed, or cancelled)
+            finished_count = 0
+            retrying_count = 0
+            queue = batch.get('queue', [])
+            
+            for task_id in queue:
+                if task_id in download_tasks:
+                    task_status = download_tasks[task_id]['status']
+                    if task_status in ['completed', 'failed', 'cancelled']:
+                        finished_count += 1
+                    elif task_status == 'searching':
+                        retrying_count += 1
+            
+            all_tasks_truly_finished = finished_count >= len(queue)
+            has_retrying_tasks = retrying_count > 0
+            
+            print(f"🔍 [Completion Check V2] Batch {batch_id}: tasks_started={all_tasks_started}, workers={no_active_workers}, finished={finished_count}/{len(queue)}, retrying={retrying_count}")
+            
+            if all_tasks_started and no_active_workers and all_tasks_truly_finished and not has_retrying_tasks:
+                print(f"🎉 [Completion Check V2] Batch {batch_id} is complete - marking as finished")
+                
+                # Check if this is an auto-initiated batch
+                is_auto_batch = batch.get('auto_initiated', False)
+                
+                # Mark batch as complete
+                batch['phase'] = 'complete'
+                
+                # Update YouTube playlist phase to 'download_complete' if this is a YouTube playlist
+                playlist_id = batch.get('playlist_id')
+                if playlist_id and playlist_id.startswith('youtube_'):
+                    url_hash = playlist_id.replace('youtube_', '')
+                    if url_hash in youtube_playlist_states:
+                        youtube_playlist_states[url_hash]['phase'] = 'download_complete'
+                        print(f"📋 [Completion Check V2] Updated YouTube playlist {url_hash} to download_complete phase")
+                
+                # Update Tidal playlist phase to 'download_complete' if this is a Tidal playlist
+                if playlist_id and playlist_id.startswith('tidal_'):
+                    tidal_playlist_id = playlist_id.replace('tidal_', '')
+                    if tidal_playlist_id in tidal_discovery_states:
+                        tidal_discovery_states[tidal_playlist_id]['phase'] = 'download_complete'
+                        print(f"📋 [Completion Check V2] Updated Tidal playlist {tidal_playlist_id} to download_complete phase")
+                
+                print(f"🎉 [Completion Check V2] Batch {batch_id} complete - stopping monitor")
+                download_monitor.stop_monitoring(batch_id)
+                
+        # Process wishlist outside of the lock to prevent threading issues
+        if all_tasks_started and no_active_workers and all_tasks_truly_finished and not has_retrying_tasks:
+            # Call wishlist processing outside the lock
+            if is_auto_batch:
+                print(f"🤖 [Completion Check V2] Processing auto-initiated batch completion")
+                # Use the existing auto-completion function
+                _process_failed_tracks_to_wishlist_exact_with_auto_completion(batch_id)
+            else:
+                print(f"📋 [Completion Check V2] Processing regular batch completion")
+                # Use the regular completion function
+                _process_failed_tracks_to_wishlist_exact(batch_id)
+            
+            return True  # Batch was completed
+        else:
+            print(f"📊 [Completion Check V2] Batch {batch_id} not yet complete: finished={finished_count}/{len(queue)}, retrying={retrying_count}, workers={batch['active_count']}")
+            return False  # Batch still in progress
+                
+    except Exception as e:
+        print(f"❌ [Completion Check V2] Error checking batch completion: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+def _add_cancelled_task_to_wishlist(task):
+    """
+    Helper function to add cancelled task to wishlist.
+    Separated for clarity and error isolation.
+    """
+    if not task:
+        return
+        
+    try:
+        from core.wishlist_service import get_wishlist_service
+        wishlist_service = get_wishlist_service()
+        
+        track_info = task.get('track_info', {})
+        artists_data = track_info.get('artists', [])
+        formatted_artists = []
+        
+        for artist in artists_data:
+            if isinstance(artist, str):
+                formatted_artists.append({'name': artist})
+            elif isinstance(artist, dict):
+                if 'name' in artist and isinstance(artist['name'], str):
+                    formatted_artists.append(artist)
+                elif 'name' in artist and isinstance(artist['name'], dict) and 'name' in artist['name']:
+                    formatted_artists.append({'name': artist['name']['name']})
+                else:
+                    formatted_artists.append({'name': str(artist)})
+            else:
+                formatted_artists.append({'name': str(artist)})
+        
+        spotify_track_data = {
+            'id': track_info.get('id'),
+            'name': track_info.get('name'),
+            'artists': formatted_artists,
+            'album': {'name': track_info.get('album')},
+            'duration_ms': track_info.get('duration_ms')
+        }
+        
+        source_context = {
+            'playlist_name': task.get('playlist_name', 'Unknown Playlist'),
+            'playlist_id': task.get('playlist_id'),
+            'added_from': 'modal_cancellation_v2'
+        }
+
+        success = wishlist_service.add_spotify_track_to_wishlist(
+            spotify_track_data=spotify_track_data,
+            failure_reason="Download cancelled by user (v2)",
+            source_type="playlist", 
+            source_context=source_context
+        )
+        
+        if success:
+            print(f"✅ [Atomic Cancel] Added '{track_info.get('name')}' to wishlist")
+        else:
+            print(f"❌ [Atomic Cancel] Failed to add '{track_info.get('name')}' to wishlist")
+            
+    except Exception as e:
+        print(f"❌ [Atomic Cancel] Critical error adding to wishlist: {e}")
 
 @app.route('/api/playlists/<batch_id>/cancel_batch', methods=['POST'])
 def cancel_batch(batch_id):
