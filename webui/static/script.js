@@ -3759,36 +3759,63 @@ function processModalStatusUpdate(playlistId, data) {
                 return;
             }
             
-            // Stronger protection: Don't override locally cancelled tracks with any backend updates
-            if (row.dataset.locallyCancelled === 'true') {
+            // V2 SYSTEM: Check for persistent cancel state from backend
+            const isV2Task = task.playlist_id !== undefined; // V2 tasks have playlist_id
+            const cancelRequested = task.cancel_requested || false;
+            const uiState = task.ui_state || 'normal';
+            
+            // Legacy protection for old system compatibility
+            if (row.dataset.locallyCancelled === 'true' && !isV2Task) {
                 failedOrCancelledCount++;
-                return; // Completely skip processing this task to avoid any UI conflicts
+                return; // Only skip for legacy system tasks
+            }
+            
+            // Mark row with V2 system info
+            if (isV2Task) {
+                row.dataset.useV2System = 'true';
+                row.dataset.cancelRequested = cancelRequested.toString();
+                row.dataset.uiState = uiState;
             }
             
             row.dataset.taskId = task.task_id;
             const statusEl = document.getElementById(`download-${playlistId}-${task.track_index}`);
             const actionsEl = document.getElementById(`actions-${playlistId}-${task.track_index}`);
+            
             let statusText = '';
-            switch (task.status) {
-                case 'pending': statusText = '⏸️ Pending'; break;
-                case 'searching': statusText = '🔍 Searching...'; break;
-                case 'downloading': statusText = `⏬ Downloading... ${Math.round(task.progress || 0)}%`; break;
-                case 'post_processing': statusText = '⌛ Processing...'; break; // NEW VERIFICATION WORKFLOW - NOT COUNTED AS FINISHED
-                case 'completed': statusText = '✅ Completed'; completedCount++; break;
-                case 'failed': statusText = '❌ Failed'; failedOrCancelledCount++; break;
-                case 'cancelled': statusText = '🚫 Cancelled'; failedOrCancelledCount++; break;
-                default: statusText = `⚪ ${task.status}`; break;
+            // V2 SYSTEM: Handle UI state override for cancelling tasks
+            if (isV2Task && uiState === 'cancelling' && task.status !== 'cancelled') {
+                statusText = '🔄 Cancelling...';
+            } else {
+                switch (task.status) {
+                    case 'pending': statusText = '⏸️ Pending'; break;
+                    case 'searching': statusText = '🔍 Searching...'; break;
+                    case 'downloading': statusText = `⏬ Downloading... ${Math.round(task.progress || 0)}%`; break;
+                    case 'post_processing': statusText = '⌛ Processing...'; break;
+                    case 'completed': statusText = '✅ Completed'; completedCount++; break;
+                    case 'failed': statusText = '❌ Failed'; failedOrCancelledCount++; break;
+                    case 'cancelled': statusText = '🚫 Cancelled'; failedOrCancelledCount++; break;
+                    default: statusText = `⚪ ${task.status}`; break;
+                }
             }
+            
             if(statusEl) {
                 statusEl.textContent = statusText;
-                console.debug(`✅ [Status Update] Updated track ${task.track_index} to: ${statusText}`);
+                console.debug(`✅ [Status Update] Updated track ${task.track_index} to: ${statusText}${isV2Task ? ' (V2)' : ''}`);
             } else {
                 console.warn(`❌ [Status Update] Status element not found: download-${playlistId}-${task.track_index}`);
             }
-            if (actionsEl && !['completed', 'failed', 'cancelled', 'post_processing'].includes(task.status) && actionsEl.innerHTML === '-') {
-                actionsEl.innerHTML = `<button class="cancel-track-btn" title="Cancel this download" onclick="cancelTrackDownload('${playlistId}', ${task.track_index})">×</button>`;
-            } 
-            if (actionsEl && ['completed', 'failed', 'cancelled', 'post_processing'].includes(task.status)) {
+            
+            // V2 SYSTEM: Smart button management with persistent state awareness
+            if (actionsEl && !['completed', 'failed', 'cancelled', 'post_processing'].includes(task.status)) {
+                // Check if we're in a cancelling state
+                if (isV2Task && uiState === 'cancelling') {
+                    actionsEl.innerHTML = '<span style="color: #666;">Cancelling...</span>';
+                } else {
+                    // Create V2 cancel button for all active tasks
+                    const onclickHandler = isV2Task ? 'cancelTrackDownloadV2' : 'cancelTrackDownload';
+                    actionsEl.innerHTML = `<button class="cancel-track-btn" title="Cancel this download" onclick="${onclickHandler}('${playlistId}', ${task.track_index})">×</button>`;
+                }
+            } else if (actionsEl && ['completed', 'failed', 'cancelled', 'post_processing'].includes(task.status)) {
                 actionsEl.innerHTML = '-'; // No actions available for terminal or processing states
             }
         });
@@ -3797,12 +3824,13 @@ function processModalStatusUpdate(playlistId, data) {
         const serverActiveWorkers = data.active_count || 0;
         const maxWorkers = data.max_concurrent || 3;
         
-        // FIXED: Count actual active workers based on task statuses 
-        // CRITICAL: Don't count post_processing as active workers since they don't consume worker slots
-        const clientActiveWorkers = (data.tasks || []).filter(task => 
-            ['searching', 'downloading', 'queued'].includes(task.status) && 
-            !document.querySelector(`tr[data-track-index="${task.track_index}"][data-locally-cancelled="true"]`)
-        ).length;
+        // V2 SYSTEM: Simplified worker counting - backend is authoritative
+        // Count active tasks, excluding locally cancelled legacy tasks only
+        const clientActiveWorkers = (data.tasks || []).filter(task => {
+            const row = document.querySelector(`tr[data-track-index="${task.track_index}"]`);
+            const isLegacyCancelled = row && row.dataset.locallyCancelled === 'true' && !row.dataset.useV2System;
+            return ['searching', 'downloading', 'queued'].includes(task.status) && !isLegacyCancelled;
+        }).length;
         
         // Log discrepancies for debugging
         if (serverActiveWorkers !== clientActiveWorkers) {
@@ -4133,6 +4161,108 @@ function resetToInitialState() {
     analysisResults = [];
     missingTracks = [];
 }
+
+// ===============================
+// NEW ATOMIC CANCEL SYSTEM V2
+// ===============================
+
+async function cancelTrackDownloadV2(playlistId, trackIndex) {
+    /**
+     * NEW ATOMIC CANCEL SYSTEM V2
+     * 
+     * - No optimistic UI updates
+     * - Single API call handles everything atomically
+     * - Backend is single source of truth for all state
+     * - No race conditions or dual state management
+     */
+    const process = activeDownloadProcesses[playlistId];
+    if (!process) {
+        console.warn(`❌ [Cancel V2] No process found for playlist: ${playlistId}`);
+        return;
+    }
+
+    const row = document.querySelector(`#download-missing-modal-${playlistId} tr[data-track-index="${trackIndex}"]`);
+    if (!row) {
+        console.warn(`❌ [Cancel V2] No row found for track index: ${trackIndex}`);
+        return;
+    }
+
+    // Check if already in cancelling state
+    const statusEl = document.getElementById(`download-${playlistId}-${trackIndex}`);
+    const currentStatus = statusEl ? statusEl.textContent : '';
+    
+    if (currentStatus.includes('Cancelling') || currentStatus.includes('Cancelled')) {
+        console.log(`⚠️ [Cancel V2] Task already being cancelled or cancelled: ${currentStatus}`);
+        return;
+    }
+    
+    console.log(`🎯 [Cancel V2] Starting atomic cancel: playlist=${playlistId}, track=${trackIndex}`);
+    
+    // V2 SYSTEM: Set temporary UI state - will be confirmed by server
+    row.dataset.uiState = 'cancelling';
+    
+    // Show loading state only - no optimistic "cancelled" state
+    if (statusEl) {
+        statusEl.textContent = '🔄 Cancelling...';
+    }
+    
+    // Disable the cancel button to prevent double-clicks
+    const actionsEl = document.getElementById(`actions-${playlistId}-${trackIndex}`);
+    if (actionsEl) {
+        actionsEl.innerHTML = '<span style="color: #666;">Cancelling...</span>';
+    }
+    
+    try {
+        const response = await fetch('/api/downloads/cancel_task_v2', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                playlist_id: playlistId, 
+                track_index: trackIndex 
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            console.log(`✅ [Cancel V2] Successfully cancelled: ${data.task_info.track_name}`);
+            showToast(`Cancelled "${data.task_info.track_name}" and added to wishlist.`, 'success');
+            
+            // Let the status polling system update the UI with server truth
+            // No manual UI updates - backend is authoritative
+            
+        } else {
+            console.error(`❌ [Cancel V2] Cancel failed: ${data.error}`);
+            showToast(`Cancel failed: ${data.error}`, 'error');
+            
+            // Reset UI to previous state on failure
+            row.dataset.uiState = 'normal'; // Reset UI state
+            if (statusEl) {
+                statusEl.textContent = '❌ Cancel Failed';
+            }
+            if (actionsEl) {
+                actionsEl.innerHTML = `<button class="cancel-track-btn" title="Cancel this download" onclick="cancelTrackDownloadV2('${playlistId}', ${trackIndex})">×</button>`;
+            }
+        }
+        
+    } catch (error) {
+        console.error(`❌ [Cancel V2] Network/API error:`, error);
+        showToast(`Cancel request failed: ${error.message}`, 'error');
+        
+        // Reset UI on network error
+        row.dataset.uiState = 'normal'; // Reset UI state
+        if (statusEl) {
+            statusEl.textContent = '❌ Cancel Failed';
+        }
+        if (actionsEl) {
+            actionsEl.innerHTML = `<button class="cancel-track-btn" title="Cancel this download" onclick="cancelTrackDownloadV2('${playlistId}', ${trackIndex})">×</button>`;
+        }
+    }
+}
+
+// ===============================
+// LEGACY CANCEL SYSTEM (OLD)
+// ===============================
 
 async function cancelTrackDownload(playlistId, trackIndex) {
     const process = activeDownloadProcesses[playlistId];
@@ -5626,7 +5756,8 @@ window.openDownloadMissingModal = openDownloadMissingModal;
 window.closeDownloadMissingModal = closeDownloadMissingModal;
 window.startMissingTracksProcess = startMissingTracksProcess;
 window.cancelAllOperations = cancelAllOperations;
-window.cancelTrackDownload = cancelTrackDownload;
+window.cancelTrackDownload = cancelTrackDownload; // Legacy system
+window.cancelTrackDownloadV2 = cancelTrackDownloadV2; // NEW V2 system
 window.handleViewProgressClick = handleViewProgressClick;
 
 // Wishlist Modal functions
