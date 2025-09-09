@@ -6845,6 +6845,7 @@ def _atomic_cancel_task(playlist_id, track_index):
             return False, "Task already cancelled", {'task_id': task_id, 'status': 'cancelled'}
             
         current_status = task.get('status', 'unknown')
+        original_status = current_status  # Store original status before changing it
         batch_id = task.get('batch_id')
         
         print(f"🎯 [Atomic Cancel] Starting atomic cancel: playlist={playlist_id}, track={track_index}, task={task_id}, status={current_status}")
@@ -6890,6 +6891,7 @@ def _atomic_cancel_task(playlist_id, track_index):
         task_info = {
             'task_id': task_id,
             'status': 'cancelled',
+            'original_status': original_status,  # Pass original status for slskd cancellation
             'track_name': task.get('track_info', {}).get('name', 'Unknown'),
             'playlist_id': playlist_id,
             'track_index': track_index,
@@ -6957,16 +6959,16 @@ def cancel_task_v2():
             download_id = task.get('download_id')
             username = task.get('username')
             current_status = task.get('status')
+            original_status = task_info.get('original_status', current_status)  # Get original status from task_info
             
-            print(f"🔍 [Atomic Cancel] Task {task_id} state: status='{current_status}', download_id='{download_id}', username='{username}'")
+            print(f"🔍 [Atomic Cancel] Task {task_id} state: status='{current_status}', original_status='{original_status}', download_id='{download_id}', username='{username}'")
             print(f"🔍 [Atomic Cancel] Download ID type: {type(download_id)}, length: {len(str(download_id)) if download_id else 0}")
             print(f"🔍 [Atomic Cancel] Download ID looks like filename: {download_id and ('/' in str(download_id) or '\\' in str(download_id))}")
             
             if download_id and username:
-                # Only try to cancel if task was actually downloading (has real slskd download)
-                # For pending/searching tasks, the cancellation is already handled by status='cancelled'
-                if current_status in ['downloading', 'queued']:  # Remove 'searching' - those aren't in slskd yet
-                    try:
+                # Always try to cancel in slskd - doesn't matter what status it was
+                # If it's not there or already done, the DELETE request will just fail harmlessly
+                try:
                         print(f"🚫 [Atomic Cancel] Attempting to cancel Soulseek download:")
                         print(f"   Username: {username}")  
                         print(f"   Download ID: {download_id}")
@@ -7005,21 +7007,32 @@ def cancel_task_v2():
                         if real_download_id:
                             print(f"🔄 [Atomic Cancel] Attempting cancel with real ID: {real_download_id}")
                             try:
-                                # Use both approaches that work
-                                # Approach A: Simple DELETE (like sync.py)
-                                response = asyncio.run(soulseek_client._make_request('DELETE', f'transfers/downloads/{real_download_id}'))
+                                # Use EXACT format from slskd web UI: DELETE /api/v0/transfers/downloads/{username}/{download_id}?remove=false
+                                endpoint = f'transfers/downloads/{username}/{real_download_id}?remove=true'
+                                print(f"🌐 [Atomic Cancel] Using slskd web UI format: {endpoint}")
+                                
+                                response = asyncio.run(soulseek_client._make_request('DELETE', endpoint))
                                 if response is not None:
-                                    print(f"✅ [Atomic Cancel] Successfully cancelled with simple DELETE: {real_download_id}")
+                                    print(f"✅ [Atomic Cancel] Successfully cancelled with slskd web UI format: {real_download_id}")
                                     success = True
                                 else:
-                                    # Approach B: Complex method (like downloads.py)
-                                    print(f"🔄 [Atomic Cancel] Simple DELETE failed, trying complex method")
-                                    complex_success = asyncio.run(soulseek_client.cancel_download(real_download_id, username, remove=True))
-                                    if complex_success:
-                                        print(f"✅ [Atomic Cancel] Successfully cancelled with complex method: {real_download_id}")
+                                    print(f"⚠️ [Atomic Cancel] Web UI format failed, trying alternative formats")
+                                    
+                                    # Fallback: Try without remove parameter
+                                    endpoint2 = f'transfers/downloads/{username}/{real_download_id}'
+                                    response2 = asyncio.run(soulseek_client._make_request('DELETE', endpoint2))
+                                    if response2 is not None:
+                                        print(f"✅ [Atomic Cancel] Successfully cancelled without remove param: {real_download_id}")
                                         success = True
                                     else:
-                                        print(f"⚠️ [Atomic Cancel] Both methods failed for real ID: {real_download_id}")
+                                        # Final fallback: Try simple format (sync.py style)
+                                        endpoint3 = f'transfers/downloads/{real_download_id}'
+                                        response3 = asyncio.run(soulseek_client._make_request('DELETE', endpoint3))
+                                        if response3 is not None:
+                                            print(f"✅ [Atomic Cancel] Successfully cancelled with simple format: {real_download_id}")
+                                            success = True
+                                        else:
+                                            print(f"⚠️ [Atomic Cancel] All DELETE formats failed for real ID: {real_download_id}")
                             except Exception as cancel_error:
                                 print(f"⚠️ [Atomic Cancel] Exception cancelling real ID {real_download_id}: {cancel_error}")
                         else:
@@ -7030,17 +7043,13 @@ def cancel_task_v2():
                         
                         if not success:
                             print(f"❌ [Atomic Cancel] Failed to cancel download in slskd API")
-                    except Exception as e:
-                        print(f"⚠️ [Atomic Cancel] Exception cancelling Soulseek download {download_id}: {e}")
-                        # Print more details about the error
-                        import traceback
-                        print(f"⚠️ [Atomic Cancel] Cancel error traceback: {traceback.format_exc()}")
-                else:
-                    print(f"⏭️ [Atomic Cancel] Skipping Soulseek cancel - task was '{current_status}' (not actively downloading)")
-            elif current_status in ['downloading', 'queued', 'searching']:
-                print(f"⚠️ [Atomic Cancel] Task was '{current_status}' but missing download_id or username for Soulseek cancel")
+                except Exception as e:
+                    print(f"⚠️ [Atomic Cancel] Exception cancelling Soulseek download {download_id}: {e}")
+                    # Print more details about the error
+                    import traceback
+                    print(f"⚠️ [Atomic Cancel] Cancel error traceback: {traceback.format_exc()}")
             else:
-                print(f"ℹ️ [Atomic Cancel] No Soulseek cancel needed - task was '{current_status}'")
+                print(f"ℹ️ [Atomic Cancel] No download_id or username available - skipping slskd cancel")
         
         # Add to wishlist (non-blocking, best effort)
         try:
