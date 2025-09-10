@@ -284,6 +284,7 @@ document.addEventListener('DOMContentLoaded', function() {
     initializeMediaPlayer();
     initializeDonationWidget();
     initializeSyncPage();
+    initializeWatchlist();
 
     
     // Start periodic updates
@@ -323,6 +324,22 @@ function initializeNavigation() {
             navigateToPage(page);
         });
     });
+}
+
+function initializeWatchlist() {
+    // Add watchlist button click handler
+    const watchlistButton = document.getElementById('watchlist-button');
+    if (watchlistButton) {
+        watchlistButton.addEventListener('click', showWatchlistModal);
+    }
+    
+    // Update watchlist count initially
+    updateWatchlistButtonCount();
+    
+    // Update count every 30 seconds
+    setInterval(updateWatchlistButtonCount, 30000);
+    
+    console.log('Watchlist system initialized');
 }
 
 function navigateToPage(pageId) {
@@ -10031,6 +10048,9 @@ function displayArtistsResults(query, results) {
         }
     });
     
+    // Update watchlist status for all cards
+    updateArtistCardWatchlistStatus();
+    
     // Add mouse wheel horizontal scrolling
     container.addEventListener('wheel', (event) => {
         if (event.deltaY !== 0) {
@@ -10067,6 +10087,12 @@ function createArtistCard(artist) {
                 <div class="artist-card-popularity">
                     <span class="popularity-icon">🔥</span>
                     <span>${popularityText}</span>
+                </div>
+                <div class="artist-card-actions">
+                    <button class="watchlist-toggle-btn" data-artist-id="${artist.id}" data-artist-name="${escapeHtml(artist.name)}" onclick="toggleWatchlist(event, '${artist.id}', '${escapeHtml(artist.name)}')">
+                        <span class="watchlist-icon">👁️</span>
+                        <span class="watchlist-text">Add to Watchlist</span>
+                    </button>
                 </div>
             </div>
         </div>
@@ -10677,6 +10703,140 @@ function updateArtistDetailHeader(artist) {
     if (genresElement) {
         const genres = artist.genres?.slice(0, 4).join(' • ') || 'Various genres';
         genresElement.textContent = genres;
+    }
+    
+    // Initialize watchlist button
+    initializeArtistDetailWatchlistButton(artist);
+}
+
+/**
+ * Initialize watchlist button for artist detail page
+ */
+async function initializeArtistDetailWatchlistButton(artist) {
+    const button = document.getElementById('artist-detail-watchlist-btn');
+    if (!button) return;
+    
+    // Set up click handler
+    button.onclick = (event) => toggleArtistDetailWatchlist(event, artist.id, artist.name);
+    
+    // Check and update current status
+    await updateArtistDetailWatchlistButton(artist.id);
+}
+
+/**
+ * Toggle watchlist status for artist detail page
+ */
+async function toggleArtistDetailWatchlist(event, artistId, artistName) {
+    event.preventDefault();
+    
+    const button = document.getElementById('artist-detail-watchlist-btn');
+    const icon = button.querySelector('.watchlist-icon');
+    const text = button.querySelector('.watchlist-text');
+    
+    // Show loading state
+    const originalText = text.textContent;
+    text.textContent = 'Loading...';
+    button.disabled = true;
+    
+    try {
+        // Check current status
+        const checkResponse = await fetch('/api/watchlist/check', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ artist_id: artistId })
+        });
+        
+        const checkData = await checkResponse.json();
+        if (!checkData.success) {
+            throw new Error(checkData.error || 'Failed to check watchlist status');
+        }
+        
+        const isWatching = checkData.is_watching;
+        
+        // Toggle watchlist status
+        const endpoint = isWatching ? '/api/watchlist/remove' : '/api/watchlist/add';
+        const payload = isWatching ? 
+            { artist_id: artistId } : 
+            { artist_id: artistId, artist_name: artistName };
+        
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        
+        const data = await response.json();
+        if (!data.success) {
+            throw new Error(data.error || 'Failed to update watchlist');
+        }
+        
+        // Update button appearance
+        if (isWatching) {
+            // Was watching, now removed
+            icon.textContent = '👁️';
+            text.textContent = 'Add to Watchlist';
+            button.classList.remove('watching');
+            console.log(`❌ Removed ${artistName} from watchlist`);
+        } else {
+            // Was not watching, now added
+            icon.textContent = '👁️';
+            text.textContent = 'Remove from Watchlist';
+            button.classList.add('watching');
+            console.log(`✅ Added ${artistName} to watchlist`);
+        }
+        
+        // Update dashboard watchlist count
+        updateWatchlistButtonCount();
+        
+        // Update any visible artist cards
+        updateArtistCardWatchlistStatus();
+        
+    } catch (error) {
+        console.error('Error toggling watchlist:', error);
+        text.textContent = originalText;
+        
+        // Show error feedback
+        const originalBackground = button.style.background;
+        button.style.background = 'rgba(255, 59, 48, 0.3)';
+        setTimeout(() => {
+            button.style.background = originalBackground;
+        }, 2000);
+    } finally {
+        button.disabled = false;
+    }
+}
+
+/**
+ * Update artist detail watchlist button status
+ */
+async function updateArtistDetailWatchlistButton(artistId) {
+    const button = document.getElementById('artist-detail-watchlist-btn');
+    if (!button) return;
+    
+    try {
+        const response = await fetch('/api/watchlist/check', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ artist_id: artistId })
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            const icon = button.querySelector('.watchlist-icon');
+            const text = button.querySelector('.watchlist-text');
+            
+            if (data.is_watching) {
+                icon.textContent = '👁️';
+                text.textContent = 'Remove from Watchlist';
+                button.classList.add('watching');
+            } else {
+                icon.textContent = '👁️';
+                text.textContent = 'Add to Watchlist';
+                button.classList.remove('watching');
+            }
+        }
+    } catch (error) {
+        console.error('Error checking watchlist status:', error);
     }
 }
 
@@ -11818,6 +11978,447 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+// --- Watchlist Functions ---
+
+/**
+ * Toggle an artist's watchlist status
+ */
+async function toggleWatchlist(event, artistId, artistName) {
+    // Prevent event bubbling to parent card
+    event.stopPropagation();
+    
+    const button = event.currentTarget;
+    const icon = button.querySelector('.watchlist-icon');
+    const text = button.querySelector('.watchlist-text');
+    
+    // Show loading state
+    const originalText = text.textContent;
+    text.textContent = 'Loading...';
+    button.disabled = true;
+    
+    try {
+        // Check current status
+        const checkResponse = await fetch('/api/watchlist/check', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ artist_id: artistId })
+        });
+        
+        const checkData = await checkResponse.json();
+        if (!checkData.success) {
+            throw new Error(checkData.error || 'Failed to check watchlist status');
+        }
+        
+        const isWatching = checkData.is_watching;
+        
+        // Toggle watchlist status
+        const endpoint = isWatching ? '/api/watchlist/remove' : '/api/watchlist/add';
+        const payload = isWatching ? 
+            { artist_id: artistId } : 
+            { artist_id: artistId, artist_name: artistName };
+        
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        
+        const data = await response.json();
+        if (!data.success) {
+            throw new Error(data.error || 'Failed to update watchlist');
+        }
+        
+        // Update button appearance
+        if (isWatching) {
+            // Was watching, now removed
+            icon.textContent = '👁️';
+            text.textContent = 'Add to Watchlist';
+            button.classList.remove('watching');
+            console.log(`❌ Removed ${artistName} from watchlist`);
+        } else {
+            // Was not watching, now added
+            icon.textContent = '👁️';
+            text.textContent = 'Watching...';
+            button.classList.add('watching');
+            console.log(`✅ Added ${artistName} to watchlist`);
+        }
+        
+        // Update dashboard watchlist count
+        updateWatchlistButtonCount();
+        
+    } catch (error) {
+        console.error('Error toggling watchlist:', error);
+        text.textContent = originalText;
+        
+        // Show error feedback
+        const originalBackground = button.style.background;
+        button.style.background = 'rgba(255, 59, 48, 0.3)';
+        setTimeout(() => {
+            button.style.background = originalBackground;
+        }, 2000);
+    } finally {
+        button.disabled = false;
+    }
+}
+
+/**
+ * Update the watchlist button count on dashboard
+ */
+async function updateWatchlistButtonCount() {
+    try {
+        const response = await fetch('/api/watchlist/count');
+        const data = await response.json();
+        
+        if (data.success) {
+            const watchlistButton = document.getElementById('watchlist-button');
+            if (watchlistButton) {
+                watchlistButton.textContent = `👁️ Watchlist (${data.count})`;
+            }
+        }
+    } catch (error) {
+        console.error('Error updating watchlist count:', error);
+    }
+}
+
+/**
+ * Check and update watchlist status for all visible artist cards
+ */
+async function updateArtistCardWatchlistStatus() {
+    const artistCards = document.querySelectorAll('.artist-card');
+    
+    for (const card of artistCards) {
+        const artistId = card.dataset.artistId;
+        if (!artistId) continue;
+        
+        try {
+            const response = await fetch('/api/watchlist/check', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ artist_id: artistId })
+            });
+            
+            const data = await response.json();
+            if (data.success) {
+                const button = card.querySelector('.watchlist-toggle-btn');
+                const icon = button.querySelector('.watchlist-icon');
+                const text = button.querySelector('.watchlist-text');
+                
+                if (data.is_watching) {
+                    icon.textContent = '👁️';
+                    text.textContent = 'Watching...';
+                    button.classList.add('watching');
+                } else {
+                    icon.textContent = '👁️';
+                    text.textContent = 'Add to Watchlist';
+                    button.classList.remove('watching');
+                }
+            }
+        } catch (error) {
+            console.error(`Error checking watchlist status for artist ${artistId}:`, error);
+        }
+    }
+}
+
+/**
+ * Show watchlist modal
+ */
+async function showWatchlistModal() {
+    try {
+        // Check if watchlist has any artists
+        const countResponse = await fetch('/api/watchlist/count');
+        const countData = await countResponse.json();
+        
+        if (!countData.success) {
+            console.error('Error getting watchlist count:', countData.error);
+            return;
+        }
+        
+        if (countData.count === 0) {
+            // Show empty state message
+            alert('Your watchlist is empty!\n\nAdd artists to your watchlist from the Artists page to monitor them for new releases.');
+            return;
+        }
+        
+        // Get watchlist artists
+        const artistsResponse = await fetch('/api/watchlist/artists');
+        const artistsData = await artistsResponse.json();
+        
+        if (!artistsData.success) {
+            console.error('Error getting watchlist artists:', artistsData.error);
+            return;
+        }
+        
+        // Create modal if it doesn't exist
+        let modal = document.getElementById('watchlist-modal');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'watchlist-modal';
+            modal.className = 'modal-overlay';
+            document.body.appendChild(modal);
+        }
+        
+        // Get scan status
+        const statusResponse = await fetch('/api/watchlist/scan/status');
+        const statusData = await statusResponse.json();
+        const scanStatus = statusData.success ? statusData.status : 'idle';
+        
+        // Build modal content
+        modal.innerHTML = `
+            <div class="modal-container playlist-modal">
+                <div class="playlist-modal-header">
+                    <div class="playlist-header-content">
+                        <h2>👁️ Watchlist</h2>
+                        <div class="playlist-quick-info">
+                            <span class="playlist-track-count">${countData.count} artist${countData.count !== 1 ? 's' : ''}</span>
+                        </div>
+                        <div class="playlist-modal-sync-status" id="watchlist-scan-status" style="display: ${scanStatus !== 'idle' ? 'block' : 'none'};">
+                            <div class="scan-status-main">
+                                <span class="sync-stat"><span id="scan-status-text">${scanStatus}</span></span>
+                            </div>
+                            ${statusData.summary ? `
+                                <div class="scan-status-summary" style="margin-top: 8px; font-size: 13px; opacity: 0.8;">
+                                    <span class="sync-stat">Artists: ${statusData.summary.total_artists || 0}</span>
+                                    <span class="sync-separator"> • </span>
+                                    <span class="sync-stat">New tracks: ${statusData.summary.new_tracks_found || 0}</span>
+                                    <span class="sync-separator"> • </span>
+                                    <span class="sync-stat">Added to wishlist: ${statusData.summary.tracks_added_to_wishlist || 0}</span>
+                                </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                    <span class="playlist-modal-close" onclick="closeWatchlistModal()">&times;</span>
+                </div>
+                
+                <div class="playlist-modal-body">
+                    <div class="watchlist-actions" style="margin-bottom: 20px;">
+                        <button class="playlist-modal-btn playlist-modal-btn-primary" 
+                                id="scan-watchlist-btn" 
+                                onclick="startWatchlistScan()"
+                                ${scanStatus === 'scanning' ? 'disabled' : ''}>
+                            ${scanStatus === 'scanning' ? 'Scanning...' : 'Scan for New Releases'}
+                        </button>
+                    </div>
+                    
+                    <div class="watchlist-artists-list">
+                        ${artistsData.artists.map(artist => `
+                            <div class="watchlist-artist-item">
+                                <div class="watchlist-artist-info">
+                                    <span class="watchlist-artist-name">${escapeHtml(artist.artist_name)}</span>
+                                    <span class="watchlist-artist-date">Added ${new Date(artist.date_added).toLocaleDateString()}</span>
+                                    ${artist.last_scan_timestamp ? `
+                                        <span class="watchlist-artist-scan">Last scanned ${new Date(artist.last_scan_timestamp).toLocaleDateString()}</span>
+                                    ` : ''}
+                                </div>
+                                <button class="playlist-modal-btn playlist-modal-btn-secondary" 
+                                        onclick="removeFromWatchlistModal('${artist.spotify_artist_id}', '${escapeHtml(artist.artist_name)}')">
+                                    Remove
+                                </button>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+                
+                <div class="playlist-modal-footer">
+                    <button class="playlist-modal-btn playlist-modal-btn-secondary" onclick="closeWatchlistModal()">
+                        Close
+                    </button>
+                </div>
+            </div>
+        `;
+        
+        // Show modal
+        modal.style.display = 'flex';
+        
+        // Start polling for scan status if scanning
+        if (scanStatus === 'scanning') {
+            pollWatchlistScanStatus();
+        }
+        
+    } catch (error) {
+        console.error('Error showing watchlist modal:', error);
+    }
+}
+
+/**
+ * Close watchlist modal
+ */
+function closeWatchlistModal() {
+    const modal = document.getElementById('watchlist-modal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+/**
+ * Start watchlist scan
+ */
+async function startWatchlistScan() {
+    try {
+        const button = document.getElementById('scan-watchlist-btn');
+        button.disabled = true;
+        button.textContent = 'Starting scan...';
+        
+        const response = await fetch('/api/watchlist/scan', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        const data = await response.json();
+        if (!data.success) {
+            throw new Error(data.error || 'Failed to start scan');
+        }
+        
+        button.textContent = 'Scanning...';
+        
+        // Show scan status
+        const statusDiv = document.getElementById('watchlist-scan-status');
+        if (statusDiv) {
+            statusDiv.style.display = 'flex';
+            document.getElementById('scan-status-text').textContent = 'scanning';
+        }
+        
+        // Start polling for updates
+        pollWatchlistScanStatus();
+        
+    } catch (error) {
+        console.error('Error starting watchlist scan:', error);
+        const button = document.getElementById('scan-watchlist-btn');
+        button.disabled = false;
+        button.textContent = 'Scan for New Releases';
+        alert(`Error starting scan: ${error.message}`);
+    }
+}
+
+/**
+ * Poll watchlist scan status
+ */
+async function pollWatchlistScanStatus() {
+    try {
+        const response = await fetch('/api/watchlist/scan/status');
+        const data = await response.json();
+        
+        if (data.success) {
+            const statusText = document.getElementById('scan-status-text');
+            const button = document.getElementById('scan-watchlist-btn');
+            
+            if (statusText) {
+                // Show detailed progress if scanning
+                if (data.status === 'scanning' && data.current_artist_name) {
+                    const artistProgress = `${data.current_artist_index || 0}/${data.total_artists || 0}`;
+                    let detailText = `Scanning ${data.current_artist_name} (${artistProgress})`;
+                    
+                    if (data.current_phase === 'fetching_discography') {
+                        detailText += ' - Fetching releases...';
+                    } else if (data.current_phase === 'checking_albums' && data.albums_to_check > 0) {
+                        const albumProgress = `${data.albums_checked || 0}/${data.albums_to_check}`;
+                        detailText += ` - Checking albums (${albumProgress})`;
+                    } else if (data.current_phase && data.current_phase.startsWith('checking_album_')) {
+                        detailText += ` - "${data.current_album || 'Unknown Album'}"`;
+                    } else if (data.current_phase === 'rate_limiting') {
+                        detailText += ' - Rate limiting...';
+                    }
+                    
+                    // Add running totals
+                    if (data.tracks_found_this_scan > 0 || data.tracks_added_this_scan > 0) {
+                        detailText += ` | Found: ${data.tracks_found_this_scan || 0}, Added: ${data.tracks_added_this_scan || 0}`;
+                    }
+                    
+                    statusText.textContent = detailText;
+                } else {
+                    statusText.textContent = data.status;
+                }
+            }
+            
+            if (data.status === 'completed') {
+                if (button) {
+                    button.disabled = false;
+                    button.textContent = 'Scan for New Releases';
+                }
+                
+                // Update status display with results
+                const statusDiv = document.getElementById('watchlist-scan-status');
+                if (statusDiv && data.summary) {
+                    const newTracks = data.summary.new_tracks_found || 0;
+                    const addedTracks = data.summary.tracks_added_to_wishlist || 0;
+                    const totalArtists = data.summary.total_artists || 0;
+                    const successfulScans = data.summary.successful_scans || 0;
+                    
+                    let completionMessage = `Scan completed: ${successfulScans}/${totalArtists} artists scanned`;
+                    if (newTracks > 0) {
+                        completionMessage += `, found ${newTracks} new track${newTracks !== 1 ? 's' : ''}`;
+                        if (addedTracks > 0) {
+                            completionMessage += `, added ${addedTracks} to wishlist`;
+                        }
+                    } else {
+                        completionMessage += ', no new tracks found';
+                    }
+                    
+                    statusDiv.innerHTML = `
+                        <div class="scan-status-main">
+                            <span class="sync-stat">${completionMessage}</span>
+                        </div>
+                    `;
+                }
+                
+                // Update watchlist count
+                updateWatchlistButtonCount();
+                
+                console.log('Watchlist scan completed:', data.summary);
+                return; // Stop polling
+                
+            } else if (data.status === 'error') {
+                if (button) {
+                    button.disabled = false;
+                    button.textContent = 'Scan for New Releases';
+                }
+                console.error('Watchlist scan error:', data.error);
+                return; // Stop polling
+            }
+        }
+        
+        // Continue polling if still scanning
+        if (data.success && data.status === 'scanning') {
+            setTimeout(pollWatchlistScanStatus, 2000); // Poll every 2 seconds
+        }
+        
+    } catch (error) {
+        console.error('Error polling watchlist scan status:', error);
+    }
+}
+
+/**
+ * Remove artist from watchlist via modal
+ */
+async function removeFromWatchlistModal(artistId, artistName) {
+    try {
+        const response = await fetch('/api/watchlist/remove', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ artist_id: artistId })
+        });
+        
+        const data = await response.json();
+        if (!data.success) {
+            throw new Error(data.error || 'Failed to remove from watchlist');
+        }
+        
+        console.log(`❌ Removed ${artistName} from watchlist`);
+        
+        // Refresh the modal
+        showWatchlistModal();
+        
+        // Update button count
+        updateWatchlistButtonCount();
+        
+        // Update any visible artist cards
+        updateArtistCardWatchlistStatus();
+        
+    } catch (error) {
+        console.error('Error removing from watchlist:', error);
+        alert(`Error removing ${artistName} from watchlist: ${error.message}`);
+    }
 }
 
 

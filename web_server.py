@@ -4969,6 +4969,15 @@ def _process_wishlist_automatically():
                 schedule_next_wishlist_processing()
                 return
             
+            # Check if watchlist scan is currently running
+            global watchlist_scan_state
+            if (watchlist_scan_state and 
+                isinstance(watchlist_scan_state, dict) and 
+                watchlist_scan_state.get('status') == 'scanning'):
+                print("👁️ Watchlist scan in progress, skipping automatic wishlist processing to avoid conflicts.")
+                schedule_next_wishlist_processing()
+                return
+            
             wishlist_auto_processing = True
         
         # Use app context for database operations
@@ -9733,6 +9742,416 @@ def hydrate_artist_bubbles():
             'error': str(e)
         }), 500
 
+# --- Watchlist API Endpoints ---
+
+@app.route('/api/watchlist/count', methods=['GET'])
+def get_watchlist_count():
+    """Get the number of artists in the watchlist"""
+    try:
+        database = get_database()
+        count = database.get_watchlist_count()
+        return jsonify({"success": True, "count": count})
+    except Exception as e:
+        print(f"Error getting watchlist count: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/watchlist/artists', methods=['GET'])
+def get_watchlist_artists():
+    """Get all artists in the watchlist"""
+    try:
+        database = get_database()
+        watchlist_artists = database.get_watchlist_artists()
+        
+        # Convert to JSON serializable format
+        artists_data = []
+        for artist in watchlist_artists:
+            artists_data.append({
+                "id": artist.id,
+                "spotify_artist_id": artist.spotify_artist_id,
+                "artist_name": artist.artist_name,
+                "date_added": artist.date_added.isoformat() if artist.date_added else None,
+                "last_scan_timestamp": artist.last_scan_timestamp.isoformat() if artist.last_scan_timestamp else None,
+                "created_at": artist.created_at.isoformat() if artist.created_at else None,
+                "updated_at": artist.updated_at.isoformat() if artist.updated_at else None
+            })
+        
+        return jsonify({"success": True, "artists": artists_data})
+    except Exception as e:
+        print(f"Error getting watchlist artists: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/watchlist/add', methods=['POST'])
+def add_to_watchlist():
+    """Add an artist to the watchlist"""
+    try:
+        data = request.get_json()
+        artist_id = data.get('artist_id')
+        artist_name = data.get('artist_name')
+        
+        if not artist_id or not artist_name:
+            return jsonify({"success": False, "error": "Missing artist_id or artist_name"}), 400
+        
+        database = get_database()
+        success = database.add_artist_to_watchlist(artist_id, artist_name)
+        
+        if success:
+            return jsonify({"success": True, "message": f"Added {artist_name} to watchlist"})
+        else:
+            return jsonify({"success": False, "error": "Failed to add artist to watchlist"}), 500
+            
+    except Exception as e:
+        print(f"Error adding to watchlist: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/watchlist/remove', methods=['POST'])
+def remove_from_watchlist():
+    """Remove an artist from the watchlist"""
+    try:
+        data = request.get_json()
+        artist_id = data.get('artist_id')
+        
+        if not artist_id:
+            return jsonify({"success": False, "error": "Missing artist_id"}), 400
+        
+        database = get_database()
+        success = database.remove_artist_from_watchlist(artist_id)
+        
+        if success:
+            return jsonify({"success": True, "message": "Removed artist from watchlist"})
+        else:
+            return jsonify({"success": False, "error": "Failed to remove artist from watchlist"}), 500
+            
+    except Exception as e:
+        print(f"Error removing from watchlist: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/watchlist/check', methods=['POST'])
+def check_watchlist_status():
+    """Check if an artist is in the watchlist"""
+    try:
+        data = request.get_json()
+        artist_id = data.get('artist_id')
+        
+        if not artist_id:
+            return jsonify({"success": False, "error": "Missing artist_id"}), 400
+        
+        database = get_database()
+        is_watching = database.is_artist_in_watchlist(artist_id)
+        
+        return jsonify({"success": True, "is_watching": is_watching})
+        
+    except Exception as e:
+        print(f"Error checking watchlist status: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/watchlist/scan', methods=['POST'])
+def start_watchlist_scan():
+    """Start a watchlist scan for new releases"""
+    try:
+        if not spotify_client or not spotify_client.is_authenticated():
+            return jsonify({"success": False, "error": "Spotify client not available or not authenticated"}), 400
+        
+        # Check if wishlist auto-processing is currently running
+        global wishlist_auto_processing
+        if wishlist_auto_processing:
+            return jsonify({"success": False, "error": "Wishlist auto-processing is currently running. Please wait for it to complete before starting a watchlist scan."}), 409
+        
+        # Start the scan in a background thread
+        def run_scan():
+            try:
+                global watchlist_scan_state
+                from core.watchlist_scanner import get_watchlist_scanner
+                from database.music_database import get_database
+                
+                # Get list of artists to scan
+                database = get_database()
+                watchlist_artists = database.get_watchlist_artists()
+                
+                if not watchlist_artists:
+                    watchlist_scan_state['status'] = 'completed'
+                    watchlist_scan_state['summary'] = {
+                        'total_artists': 0,
+                        'successful_scans': 0,
+                        'new_tracks_found': 0,
+                        'tracks_added_to_wishlist': 0
+                    }
+                    return
+                
+                scanner = get_watchlist_scanner(spotify_client)
+                
+                # Initialize detailed progress tracking
+                watchlist_scan_state.update({
+                    'total_artists': len(watchlist_artists),
+                    'current_artist_index': 0,
+                    'current_artist_name': '',
+                    'current_phase': 'starting',
+                    'albums_to_check': 0,
+                    'albums_checked': 0,
+                    'current_album': '',
+                    'tracks_found_this_scan': 0,
+                    'tracks_added_this_scan': 0
+                })
+                
+                scan_results = []
+                
+                for i, artist in enumerate(watchlist_artists):
+                    try:
+                        # Update progress
+                        watchlist_scan_state.update({
+                            'current_artist_index': i + 1,
+                            'current_artist_name': artist.artist_name,
+                            'current_phase': 'fetching_discography',
+                            'albums_to_check': 0,
+                            'albums_checked': 0,
+                            'current_album': ''
+                        })
+                        
+                        # Get artist discography
+                        albums = scanner.get_artist_discography(artist.spotify_artist_id, artist.last_scan_timestamp)
+                        
+                        if albums is None:
+                            scan_results.append(type('ScanResult', (), {
+                                'artist_name': artist.artist_name,
+                                'spotify_artist_id': artist.spotify_artist_id,
+                                'albums_checked': 0,
+                                'new_tracks_found': 0,
+                                'tracks_added_to_wishlist': 0,
+                                'success': False,
+                                'error_message': "Failed to get artist discography"
+                            })())
+                            continue
+                        
+                        # Update with album count
+                        watchlist_scan_state.update({
+                            'current_phase': 'checking_albums',
+                            'albums_to_check': len(albums),
+                            'albums_checked': 0
+                        })
+                        
+                        # Track progress for this artist
+                        artist_new_tracks = 0
+                        artist_added_tracks = 0
+                        
+                        # Scan each album
+                        for album_index, album in enumerate(albums):
+                            watchlist_scan_state.update({
+                                'albums_checked': album_index + 1,
+                                'current_album': album.name,
+                                'current_phase': f'checking_album_{album_index + 1}_of_{len(albums)}'
+                            })
+                            
+                            try:
+                                # Get album tracks
+                                album_data = scanner.spotify_client.get_album(album.id)
+                                if not album_data or 'tracks' not in album_data:
+                                    continue
+                                
+                                tracks = album_data['tracks']['items']
+                                
+                                # Check each track
+                                for track in tracks:
+                                    if scanner.is_track_missing_from_library(track):
+                                        artist_new_tracks += 1
+                                        watchlist_scan_state['tracks_found_this_scan'] += 1
+                                        
+                                        # Add to wishlist
+                                        if scanner.add_track_to_wishlist(track, album_data, artist):
+                                            artist_added_tracks += 1
+                                            watchlist_scan_state['tracks_added_this_scan'] += 1
+                                
+                                # Small delay between albums
+                                import time
+                                time.sleep(0.5)
+                                
+                            except Exception as e:
+                                print(f"Error checking album {album.name}: {e}")
+                                continue
+                        
+                        # Update scan timestamp
+                        scanner.update_artist_scan_timestamp(artist.spotify_artist_id)
+                        
+                        # Store result
+                        scan_results.append(type('ScanResult', (), {
+                            'artist_name': artist.artist_name,
+                            'spotify_artist_id': artist.spotify_artist_id,
+                            'albums_checked': len(albums),
+                            'new_tracks_found': artist_new_tracks,
+                            'tracks_added_to_wishlist': artist_added_tracks,
+                            'success': True,
+                            'error_message': None
+                        })())
+                        
+                        print(f"✅ Scanned {artist.artist_name}: {artist_new_tracks} new tracks found, {artist_added_tracks} added to wishlist")
+                        
+                        # Delay between artists
+                        if i < len(watchlist_artists) - 1:
+                            watchlist_scan_state['current_phase'] = 'rate_limiting'
+                            time.sleep(2.0)
+                        
+                    except Exception as e:
+                        print(f"Error scanning artist {artist.artist_name}: {e}")
+                        scan_results.append(type('ScanResult', (), {
+                            'artist_name': artist.artist_name,
+                            'spotify_artist_id': artist.spotify_artist_id,
+                            'albums_checked': 0,
+                            'new_tracks_found': 0,
+                            'tracks_added_to_wishlist': 0,
+                            'success': False,
+                            'error_message': str(e)
+                        })())
+                
+                # Store final results
+                watchlist_scan_state['status'] = 'completed'
+                watchlist_scan_state['results'] = scan_results
+                watchlist_scan_state['completed_at'] = datetime.now()
+                watchlist_scan_state['current_phase'] = 'completed'
+                
+                # Calculate summary
+                successful_scans = [r for r in scan_results if r.success]
+                total_new_tracks = sum(r.new_tracks_found for r in successful_scans)
+                total_added_to_wishlist = sum(r.tracks_added_to_wishlist for r in successful_scans)
+                
+                watchlist_scan_state['summary'] = {
+                    'total_artists': len(scan_results),
+                    'successful_scans': len(successful_scans),
+                    'new_tracks_found': total_new_tracks,
+                    'tracks_added_to_wishlist': total_added_to_wishlist
+                }
+                
+                print(f"Watchlist scan completed: {len(successful_scans)}/{len(scan_results)} artists scanned successfully")
+                print(f"Found {total_new_tracks} new tracks, added {total_added_to_wishlist} to wishlist")
+                
+            except Exception as e:
+                print(f"Error during watchlist scan: {e}")
+                watchlist_scan_state['status'] = 'error'
+                watchlist_scan_state['error'] = str(e)
+        
+        # Initialize scan state
+        global watchlist_scan_state
+        watchlist_scan_state = {
+            'status': 'scanning',
+            'started_at': datetime.now(),
+            'results': [],
+            'summary': {},
+            'error': None
+        }
+        
+        # Start scan in background
+        thread = threading.Thread(target=run_scan)
+        thread.daemon = True
+        thread.start()
+        
+        return jsonify({"success": True, "message": "Watchlist scan started"})
+        
+    except Exception as e:
+        print(f"Error starting watchlist scan: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/watchlist/scan/status', methods=['GET'])
+def get_watchlist_scan_status():
+    """Get the current status of watchlist scanning"""
+    try:
+        global watchlist_scan_state
+        if 'watchlist_scan_state' not in globals():
+            return jsonify({
+                "success": True,
+                "status": "idle",
+                "summary": {}
+            })
+        
+        # Convert datetime objects to ISO format for JSON serialization
+        state = watchlist_scan_state.copy()
+        if 'started_at' in state and state['started_at']:
+            state['started_at'] = state['started_at'].isoformat()
+        if 'completed_at' in state and state['completed_at']:
+            state['completed_at'] = state['completed_at'].isoformat()
+        
+        return jsonify({"success": True, **state})
+        
+    except Exception as e:
+        print(f"Error getting watchlist scan status: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+# --- Watchlist Auto-Scanning System ---
+
+watchlist_scan_state = {
+    'status': 'idle',
+    'results': [],
+    'summary': {},
+    'error': None
+}
+
+def start_watchlist_auto_scanning():
+    """Start automatic daily watchlist scanning"""
+    def daily_scan():
+        while True:
+            try:
+                # Wait 24 hours (86400 seconds)
+                time.sleep(86400)
+                
+                # Check if we have artists to scan and Spotify client is available
+                database = get_database()
+                watchlist_count = database.get_watchlist_count()
+                
+                if watchlist_count > 0 and spotify_client and spotify_client.is_authenticated():
+                    # Check if wishlist auto-processing is currently running
+                    global wishlist_auto_processing
+                    if wishlist_auto_processing:
+                        print("👁️ Skipping automatic daily watchlist scan: wishlist auto-processing is currently running")
+                        continue  # Skip this cycle, will try again in 24 hours
+                    
+                    print(f"Starting automatic daily watchlist scan for {watchlist_count} artists...")
+                    
+                    # Update global scan state
+                    global watchlist_scan_state
+                    watchlist_scan_state = {
+                        'status': 'scanning',
+                        'started_at': datetime.now(),
+                        'results': [],
+                        'summary': {},
+                        'error': None
+                    }
+                    
+                    # Run the scan
+                    from core.watchlist_scanner import get_watchlist_scanner
+                    scanner = get_watchlist_scanner(spotify_client)
+                    results = scanner.scan_all_watchlist_artists()
+                    
+                    # Update state with results
+                    watchlist_scan_state['status'] = 'completed'
+                    watchlist_scan_state['results'] = results
+                    watchlist_scan_state['completed_at'] = datetime.now()
+                    
+                    # Calculate summary
+                    successful_scans = [r for r in results if r.success]
+                    total_new_tracks = sum(r.new_tracks_found for r in successful_scans)
+                    total_added_to_wishlist = sum(r.tracks_added_to_wishlist for r in successful_scans)
+                    
+                    watchlist_scan_state['summary'] = {
+                        'total_artists': len(results),
+                        'successful_scans': len(successful_scans),
+                        'new_tracks_found': total_new_tracks,
+                        'tracks_added_to_wishlist': total_added_to_wishlist
+                    }
+                    
+                    print(f"Automatic watchlist scan completed: {len(successful_scans)}/{len(results)} artists scanned successfully")
+                    print(f"Found {total_new_tracks} new tracks, added {total_added_to_wishlist} to wishlist")
+                    
+                else:
+                    print("Skipping automatic watchlist scan: no artists in watchlist or Spotify client unavailable")
+                    
+            except Exception as e:
+                print(f"Error during automatic watchlist scan: {e}")
+                if 'watchlist_scan_state' in globals():
+                    watchlist_scan_state['status'] = 'error'
+                    watchlist_scan_state['error'] = str(e)
+    
+    # Start the daily scanning thread
+    thread = threading.Thread(target=daily_scan)
+    thread.daemon = True
+    thread.start()
+    print("✅ Automatic daily watchlist scanning started")
+
 # --- Main Execution ---
 
 if __name__ == '__main__':
@@ -9748,5 +10167,10 @@ if __name__ == '__main__':
     print("🔧 Starting automatic wishlist processing...")
     start_wishlist_auto_processing()
     print("✅ Automatic wishlist processing started")
+    
+    # Start automatic watchlist scanning when server starts
+    print("🔧 Starting automatic watchlist scanning...")
+    start_watchlist_auto_scanning()
+    print("✅ Automatic watchlist scanning started")
     
     app.run(host='0.0.0.0', port=5001, debug=True)
