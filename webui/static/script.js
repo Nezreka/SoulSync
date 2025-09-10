@@ -287,9 +287,9 @@ document.addEventListener('DOMContentLoaded', function() {
     initializeWatchlist();
 
     
-    // Start periodic updates
-    updateServiceStatus();
-    setInterval(updateServiceStatus, 5000); // Every 5 seconds
+    // Start global service status polling for sidebar (works on all pages)
+    fetchAndUpdateServiceStatus();
+    setInterval(fetchAndUpdateServiceStatus, 10000); // Every 10 seconds
     
     // Start always-on download polling (batched, minimal overhead)
     startGlobalDownloadPolling();
@@ -409,41 +409,10 @@ async function loadPageData(pageId) {
 // SERVICE STATUS MONITORING
 // ===============================
 
-async function updateServiceStatus() {
-    try {
-        const response = await fetch(API.status);
-        const data = await response.json();
-        
-        // Update sidebar status indicators
-        updateStatusIndicator('spotify', data.spotify);
-        updateStatusIndicator('media-server', data.media_server);
-        updateStatusIndicator('soulseek', data.soulseek);
-        
-        // Update media server name
-        const serverName = data.active_media_server === 'plex' ? 'Plex' : 'Jellyfin';
-        document.getElementById('media-server-name').textContent = serverName;
-        
-    } catch (error) {
-        console.error('Error fetching status:', error);
-        // Set all to disconnected on error
-        updateStatusIndicator('spotify', false);
-        updateStatusIndicator('media-server', false);
-        updateStatusIndicator('soulseek', false);
-    }
-}
+// Legacy function - now handled by fetchAndUpdateServiceStatus
+// Keeping this for compatibility but it's no longer actively used
 
-function updateStatusIndicator(service, connected) {
-    const indicator = document.getElementById(`${service}-indicator`);
-    const dot = indicator.querySelector('.status-dot');
-    
-    if (connected) {
-        dot.classList.remove('disconnected');
-        dot.classList.add('connected');
-    } else {
-        dot.classList.remove('connected');
-        dot.classList.add('disconnected');
-    }
-}
+// Old updateStatusIndicator function removed - replaced by updateSidebarServiceStatus
 
 // ===============================
 // MEDIA PLAYER FUNCTIONALITY
@@ -12029,10 +11998,15 @@ async function fetchAndUpdateServiceStatus() {
         
         const data = await response.json();
         
-        // Update service status indicators and text
+        // Update service status indicators and text (dashboard)
         updateServiceStatus('spotify', data.spotify);
         updateServiceStatus('media-server', data.media_server);
         updateServiceStatus('soulseek', data.soulseek);
+        
+        // Update sidebar service status indicators
+        updateSidebarServiceStatus('spotify', data.spotify);
+        updateSidebarServiceStatus('media-server', data.media_server);
+        updateSidebarServiceStatus('soulseek', data.soulseek);
         
     } catch (error) {
         console.warn('Could not fetch service status:', error);
@@ -12052,6 +12026,31 @@ function updateServiceStatus(service, statusData) {
             indicator.className = 'service-card-indicator disconnected';
             statusText.textContent = 'Disconnected';
             statusText.className = 'service-card-status-text disconnected';
+        }
+    }
+}
+
+function updateSidebarServiceStatus(service, statusData) {
+    const indicator = document.getElementById(`${service}-indicator`);
+    if (indicator) {
+        const dot = indicator.querySelector('.status-dot');
+        const nameElement = indicator.querySelector('.status-name');
+        
+        if (dot) {
+            if (statusData.connected) {
+                dot.className = 'status-dot connected';
+            } else {
+                dot.className = 'status-dot disconnected';
+            }
+        }
+        
+        // Update media server name if it's the media server indicator
+        if (service === 'media-server' && statusData.type) {
+            const mediaServerNameElement = document.getElementById('media-server-name');
+            if (mediaServerNameElement) {
+                const serverName = statusData.type.charAt(0).toUpperCase() + statusData.type.slice(1);
+                mediaServerNameElement.textContent = serverName;
+            }
         }
     }
 }
