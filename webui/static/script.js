@@ -9663,6 +9663,13 @@ async function startYouTubeDownloadMissing(urlHash) {
         // Store reference for card navigation
         state.convertedSpotifyPlaylistId = virtualPlaylistId;
         
+        // Close the discovery modal if it's open
+        const discoveryModal = document.getElementById(`youtube-discovery-modal-${urlHash}`);
+        if (discoveryModal) {
+            discoveryModal.classList.add('hidden');
+            console.log('🔄 Closed YouTube discovery modal to show download modal');
+        }
+        
         // Open download missing tracks modal for YouTube playlist
         await openDownloadMissingModalForYouTube(virtualPlaylistId, playlistName, spotifyTracks);
         
