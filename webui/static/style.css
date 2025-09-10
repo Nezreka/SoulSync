@@ -5099,6 +5099,66 @@ body {
     transform: translateY(-1px);
 }
 
+/* Watchlist Modal Styles */
+.watchlist-artists-list {
+    max-height: 400px;
+    overflow-y: auto;
+    margin-top: 20px;
+}
+
+.watchlist-artist-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px 16px 24px;
+    margin-bottom: 12px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    transition: all 0.2s ease;
+}
+
+.watchlist-artist-item:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(29, 185, 84, 0.2);
+    transform: translateY(-1px);
+}
+
+.watchlist-artist-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+}
+
+.watchlist-artist-name {
+    font-size: 16px;
+    font-weight: 600;
+    color: #ffffff;
+    margin-bottom: 4px;
+}
+
+.watchlist-artist-date {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.6);
+    font-weight: 400;
+}
+
+.watchlist-artist-scan {
+    font-size: 12px;
+    color: rgba(29, 185, 84, 0.7);
+    font-weight: 500;
+}
+
+.watchlist-actions {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    justify-content: center;
+    padding: 20px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
 /* Add these styles to the end of style.css */
 
 .sync-progress-indicator {
@@ -6022,6 +6082,66 @@ body {
     font-size: 12px;
 }
 
+/* Artist Card Actions (Watchlist) */
+.artist-card-actions {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.watchlist-toggle-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    border: none;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.08);
+    color: #e0e0e0;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    width: 100%;
+    justify-content: center;
+    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.watchlist-toggle-btn:hover:not(:disabled) {
+    background: rgba(29, 185, 84, 0.15);
+    color: #ffffff;
+    border-color: rgba(29, 185, 84, 0.3);
+    transform: translateY(-1px);
+}
+
+.watchlist-toggle-btn.watching {
+    background: rgba(255, 193, 7, 0.15);
+    color: #ffc107;
+    border-color: rgba(255, 193, 7, 0.3);
+}
+
+.watchlist-toggle-btn.watching:hover:not(:disabled) {
+    background: rgba(255, 193, 7, 0.25);
+    color: #ffffff;
+    border-color: rgba(255, 193, 7, 0.5);
+}
+
+.watchlist-toggle-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.watchlist-icon {
+    font-size: 14px;
+}
+
+.watchlist-text {
+    flex: 1;
+    text-align: center;
+}
+
 /* Artist Card Animation States */
 .artist-card.loading {
     animation: artistCardPulse 2s ease-in-out infinite;
@@ -6109,10 +6229,18 @@ body {
 .artist-detail-header {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 30px;
     margin-bottom: 40px;
     padding-bottom: 30px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.artist-detail-header-left {
+    display: flex;
+    align-items: center;
+    gap: 30px;
+    flex: 1;
 }
 
 .artist-detail-back-button {
@@ -6137,6 +6265,49 @@ body {
     background: rgba(255, 255, 255, 0.12);
     color: #ffffff;
     transform: translateY(-1px);
+}
+
+.artist-detail-watchlist-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 18px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #e0e0e0;
+    
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 16px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    outline: none;
+    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.artist-detail-watchlist-btn:hover:not(:disabled) {
+    background: rgba(29, 185, 84, 0.15);
+    color: #ffffff;
+    border-color: rgba(29, 185, 84, 0.3);
+    transform: translateY(-1px);
+}
+
+.artist-detail-watchlist-btn.watching {
+    background: rgba(255, 193, 7, 0.15);
+    color: #ffc107;
+    border-color: rgba(255, 193, 7, 0.3);
+}
+
+.artist-detail-watchlist-btn.watching:hover:not(:disabled) {
+    background: rgba(255, 193, 7, 0.25);
+    color: #ffffff;
+    border-color: rgba(255, 193, 7, 0.5);
+}
+
+.artist-detail-watchlist-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
 }
 
 .artist-detail-info {
