@@ -1975,41 +1975,69 @@ async function rehydrateModal(processInfo, userRequested = false) {
 
     // Handle wishlist processes specially
     if (playlist_id === "wishlist") {
-        console.log(`🔍 Current activeDownloadProcesses keys: [${Object.keys(activeDownloadProcesses).join(', ')}]`);
+        console.log(`💧 [Rehydrate] Handling wishlist modal for active process: ${batch_id}`);
         
-        await openDownloadMissingWishlistModal();
-        const process = activeDownloadProcesses[playlist_id];
-        if (!process) {
-            console.error('❌ Failed to create wishlist process in activeDownloadProcesses');
-            return;
-        }
-
-        console.log(`✅ Setting wishlist process state - batchId: ${batch_id}, status: running`);
-        process.status = 'running';
-        process.batchId = batch_id;
-        // Note: Wishlist processes don't affect sync page refresh button state
-
-        const beginBtn = document.getElementById(`begin-analysis-btn-${playlist_id}`);
-        const cancelBtn = document.getElementById(`cancel-all-btn-${playlist_id}`);
+        // Check if modal already exists and is visible
+        const existingProcess = activeDownloadProcesses[playlist_id];
+        const modalAlreadyOpen = existingProcess && existingProcess.modalElement && 
+                                 existingProcess.modalElement.style.display === 'flex';
         
-        if (beginBtn) beginBtn.style.display = 'none';
-        if (cancelBtn) cancelBtn.style.display = 'inline-block';
-
-        startModalDownloadPolling(playlist_id);
-
-        // Enhanced logic: Show modal if user-requested OR if it was previously visible before page refresh
-        const wasModalPreviouslyVisible = WishlistModalState.wasVisible();
-        const shouldShowModal = userRequested || (wasModalPreviouslyVisible && !WishlistModalState.wasUserClosed());
-        
-        if (shouldShowModal) {
-            process.modalElement.style.display = 'flex';
-            WishlistModalState.setVisible(); // Track that modal is now visible
-            WishlistModalState.clearUserClosed(); // Clear any user closed state since we're showing it
-            console.log(`🔍 Showing wishlist modal - User requested: ${userRequested}, Previously visible: ${wasModalPreviouslyVisible}`);
+        if (modalAlreadyOpen) {
+            console.log(`💧 [Rehydrate] Wishlist modal already open - updating existing modal with auto-process state`);
+            
+            // Update existing process with new batch info
+            existingProcess.status = 'running';
+            existingProcess.batchId = batch_id;
+            
+            // Update UI to reflect running state
+            const beginBtn = document.getElementById(`begin-analysis-btn-${playlist_id}`);
+            const cancelBtn = document.getElementById(`cancel-all-btn-${playlist_id}`);
+            if (beginBtn) beginBtn.style.display = 'none';
+            if (cancelBtn) cancelBtn.style.display = 'inline-block';
+            
+            // Ensure polling is active for live updates
+            if (!existingProcess.intervalId) {
+                console.log(`💧 [Rehydrate] Starting polling for existing modal`);
+                startModalDownloadPolling(playlist_id);
+            }
+            
+            console.log(`✅ [Rehydrate] Successfully updated existing wishlist modal for auto-process`);
         } else {
-            process.modalElement.style.display = 'none';
-            WishlistModalState.setHidden(); // Track that modal is hidden
-            console.log('🔍 Hiding wishlist modal for background rehydration');
+            console.log(`💧 [Rehydrate] Creating new wishlist modal for active process: ${batch_id}`);
+            
+            // Create the modal with current server state
+            await openDownloadMissingWishlistModal();
+            const process = activeDownloadProcesses[playlist_id];
+            if (!process) {
+                console.error('❌ [Rehydrate] Failed to create wishlist process in activeDownloadProcesses');
+                return;
+            }
+
+            // Sync process state with server
+            console.log(`✅ [Rehydrate] Syncing wishlist process state - batchId: ${batch_id}, status: running`);
+            process.status = 'running';
+            process.batchId = batch_id;
+
+            // Update UI to reflect running state
+            const beginBtn = document.getElementById(`begin-analysis-btn-${playlist_id}`);
+            const cancelBtn = document.getElementById(`cancel-all-btn-${playlist_id}`);
+            if (beginBtn) beginBtn.style.display = 'none';
+            if (cancelBtn) cancelBtn.style.display = 'inline-block';
+
+            // Start polling for live updates
+            startModalDownloadPolling(playlist_id);
+
+            // SIMPLIFIED VISIBILITY LOGIC: Show modal if user requested it, otherwise keep hidden for background sync
+            if (userRequested) {
+                console.log('👤 [Rehydrate] User requested - showing wishlist modal');
+                process.modalElement.style.display = 'flex';
+                WishlistModalState.setVisible();
+                WishlistModalState.clearUserClosed();
+            } else {
+                console.log('🔄 [Rehydrate] Background sync - keeping modal hidden until user interaction');
+                process.modalElement.style.display = 'none';
+                WishlistModalState.setHidden();
+            }
         }
         return;
     }
@@ -3524,13 +3552,40 @@ function startGlobalDownloadPolling() {
         // Get all active processes that need polling
         const activeBatchIds = [];
         const batchToPlaylistMap = {};
+        let hasOpenWishlistModal = false;
         
         Object.entries(activeDownloadProcesses).forEach(([playlistId, process]) => {
             if (process.batchId && process.status === 'running') {
                 activeBatchIds.push(process.batchId);
                 batchToPlaylistMap[process.batchId] = playlistId;
             }
+            
+            // Check if there's an open wishlist modal (visible and idle/waiting)
+            if (playlistId === 'wishlist' && process.modalElement && 
+                process.modalElement.style.display === 'flex' &&
+                (!process.batchId || process.status !== 'running')) {
+                hasOpenWishlistModal = true;
+            }
         });
+        
+        // Special handling for open wishlist modal - check for new auto-processing
+        if (hasOpenWishlistModal) {
+            try {
+                const response = await fetch('/api/active-processes');
+                if (response.ok) {
+                    const data = await response.json();
+                    const processes = data.active_processes || [];
+                    const serverWishlistProcess = processes.find(p => p.playlist_id === 'wishlist');
+                    
+                    if (serverWishlistProcess) {
+                        console.log('🔄 [Global Polling] Detected auto-processing for open wishlist modal - rehydrating');
+                        await rehydrateModal(serverWishlistProcess, false); // false = not user-requested
+                    }
+                }
+            } catch (error) {
+                console.debug('⚠️ [Global Polling] Failed to check for wishlist auto-processing:', error);
+            }
+        }
         
         if (activeBatchIds.length === 0) {
             console.debug('📊 [Global Polling] No active processes, continuing polling');
@@ -3609,13 +3664,40 @@ function startGlobalDownloadPollingWithInterval(interval) {
     globalDownloadStatusPoller = setInterval(async () => {
         const activeBatchIds = [];
         const batchToPlaylistMap = {};
+        let hasOpenWishlistModal = false;
         
         Object.entries(activeDownloadProcesses).forEach(([playlistId, process]) => {
             if (process.batchId && process.status === 'running') {
                 activeBatchIds.push(process.batchId);
                 batchToPlaylistMap[process.batchId] = playlistId;
             }
+            
+            // Check if there's an open wishlist modal (visible and idle/waiting)
+            if (playlistId === 'wishlist' && process.modalElement && 
+                process.modalElement.style.display === 'flex' &&
+                (!process.batchId || process.status !== 'running')) {
+                hasOpenWishlistModal = true;
+            }
         });
+        
+        // Special handling for open wishlist modal - check for new auto-processing
+        if (hasOpenWishlistModal) {
+            try {
+                const response = await fetch('/api/active-processes');
+                if (response.ok) {
+                    const data = await response.json();
+                    const processes = data.active_processes || [];
+                    const serverWishlistProcess = processes.find(p => p.playlist_id === 'wishlist');
+                    
+                    if (serverWishlistProcess) {
+                        console.log('🔄 [Global Polling] Detected auto-processing for open wishlist modal - rehydrating');
+                        await rehydrateModal(serverWishlistProcess, false); // false = not user-requested
+                    }
+                }
+            } catch (error) {
+                console.debug('⚠️ [Global Polling] Failed to check for wishlist auto-processing:', error);
+            }
+        }
         
         if (activeBatchIds.length === 0) {
             console.debug('📊 [Global Polling] No active processes, continuing polling');
@@ -3701,16 +3783,8 @@ function processModalStatusUpdate(playlistId, data) {
     
     console.debug(`📊 [Status Update] Processing update for ${playlistId}: phase=${data.phase}, tasks=${(data.tasks || []).length}`);
     
-    // Auto-show wishlist modal during active auto-processing
-    const isWishlist = (playlistId === 'wishlist');
-    const isAutoInitiated = data.auto_initiated || false;
-    const isModalHidden = process.modalElement && process.modalElement.style.display === 'none';
-    
-    if (isWishlist && isAutoInitiated && isModalHidden && currentPage === 'dashboard' && !WishlistModalState.wasUserClosed()) {
-        console.log('🤖 [Status Update] Auto-showing wishlist modal during active auto-processing');
-        process.modalElement.style.display = 'flex';
-        WishlistModalState.setVisible();
-    }
+    // Note: Wishlist modal visibility is now managed by handleWishlistButtonClick() only
+    // Auto-show logic has been simplified to prevent conflicts
 
     if (data.phase === 'analysis') {
         const progress = data.analysis_progress;
@@ -3859,13 +3933,7 @@ function processModalStatusUpdate(playlistId, data) {
             const isAutoInitiated = data.auto_initiated || false; // Server indicates if batch was auto-started
             const isBackgroundWishlist = isWishlist && (isModalHidden || isAutoInitiated);
             
-            // Auto-show modal for wishlist auto-processing if user is on dashboard and hasn't closed it
-            if (isWishlist && isAutoInitiated && isModalHidden && currentPage === 'dashboard' && !WishlistModalState.wasUserClosed()) {
-                console.log('🤖 [Status Update] Auto-showing wishlist modal for live updates during auto-processing');
-                process.modalElement.style.display = 'flex';
-                WishlistModalState.setVisible();
-                showToast('Auto-processing wishlist - showing live updates', 'info', 2000);
-            }
+            // Note: Auto-show logic removed - wishlist modal visibility managed by user interaction only
             
             if (data.phase === 'cancelled') {
                 process.status = 'cancelled';
@@ -6919,34 +6987,19 @@ async function checkForAutoInitiatedWishlistProcess() {
         if (serverWishlistProcess && serverWishlistProcess.auto_initiated) {
             console.log('🤖 [Auto-Processing] Detected auto-initiated wishlist process during polling');
             
-            // Check if we need to show the modal (no existing modal or modal is hidden)
-            const needsModalDisplay = !clientWishlistProcess || 
+            // Only sync frontend state if needed, but don't auto-show modal
+            const needsSync = !clientWishlistProcess || 
+                clientWishlistProcess.batchId !== serverWishlistProcess.batch_id ||
                 !clientWishlistProcess.modalElement ||
-                clientWishlistProcess.modalElement.style.display === 'none' ||
                 !document.body.contains(clientWishlistProcess.modalElement);
                 
-            if (needsModalDisplay) {
-                console.log('🤖 [Auto-Processing] Auto-showing wishlist modal for auto-processing');
-                
-                // Rehydrate or create the modal
-                if (clientWishlistProcess && clientWishlistProcess.modalElement && document.body.contains(clientWishlistProcess.modalElement)) {
-                    // Just show existing modal
-                    clientWishlistProcess.modalElement.style.display = 'flex';
-                    WishlistModalState.setVisible();
-                } else {
-                    // Rehydrate the modal with userRequested=false but show it due to auto-processing
-                    await rehydrateModal(serverWishlistProcess, false); // Don't mark as user-requested
-                    // But then force show it since it's auto-initiated and should be visible
-                    if (activeDownloadProcesses[playlistId] && activeDownloadProcesses[playlistId].modalElement) {
-                        activeDownloadProcesses[playlistId].modalElement.style.display = 'flex';
-                        WishlistModalState.setVisible();
-                        console.log('🤖 [Auto-Processing] Forced display of rehydrated modal for auto-processing');
-                    }
-                }
-                
-                // Show a toast to inform user about auto-processing
-                showToast('Auto-processing wishlist tracks...', 'info', 3000);
+            if (needsSync) {
+                console.log('🔄 [Auto-Processing] Syncing frontend state for auto-processing (background mode)');
+                await rehydrateModal(serverWishlistProcess, false); // Background sync only
             }
+            
+            // Note: Modal visibility is controlled by user interaction only
+            // User must click wishlist button to see auto-processing progress
         }
         
     } catch (error) {
@@ -8369,70 +8422,68 @@ async function handleWishlistButtonClick() {
     try {
         const playlistId = 'wishlist';
         
-        // Always check server state first to detect any active wishlist processes
+        console.log('🎵 [Wishlist Button] User clicked wishlist button - checking server state first');
+        
+        // STEP 1: Always check server state first to detect any active wishlist processes
         const response = await fetch('/api/active-processes');
-        if (response.ok) {
-            const data = await response.json();
-            const processes = data.active_processes || [];
-            
-            // Look for active wishlist process on server
-            const serverWishlistProcess = processes.find(p => p.playlist_id === playlistId);
-            const clientWishlistProcess = activeDownloadProcesses[playlistId];
-            
-            if (serverWishlistProcess) {
-                console.log('Server has active wishlist process:', serverWishlistProcess.batch_id);
-                
-                // Check if this is an auto-initiated batch (from auto-processing)
-                const isAutoInitiated = serverWishlistProcess.auto_initiated || false;
-                if (isAutoInitiated) {
-                    console.log('🤖 [Auto-Processing] Detected auto-initiated wishlist batch');
-                    // Clear any user closed state since user is actively requesting to see it
-                    WishlistModalState.clearUserClosed();
-                }
-                
-                // Check if client state is properly synchronized with server
-                const isClientStateMismatched = !clientWishlistProcess || 
-                    clientWishlistProcess.batchId !== serverWishlistProcess.batch_id ||
-                    clientWishlistProcess.status !== 'running';
-                
-                const isModalElementMissing = !clientWishlistProcess?.modalElement || 
-                    !document.body.contains(clientWishlistProcess.modalElement);
-                
-                if (isClientStateMismatched || isModalElementMissing) {
-                    console.log('Server/client wishlist state mismatch or missing modal, rehydrating...');
-                    console.log('Client batch ID:', clientWishlistProcess?.batchId, 'Server batch ID:', serverWishlistProcess.batch_id);
-                    console.log('Client status:', clientWishlistProcess?.status, 'Modal exists:', !isModalElementMissing);
-                    
-                    await rehydrateModal(serverWishlistProcess, true); // Force rehydration with user request
-                    return;
-                } else {
-                    // Client state is properly synchronized, just show existing modal
-                    console.log('Found properly synced wishlist process, showing modal');
-                    if (clientWishlistProcess.modalElement) {
-                        clientWishlistProcess.modalElement.style.display = 'flex';
-                        WishlistModalState.setVisible(); // Track that modal is now visible
-                        return;
-                    }
-                }
-            }
+        if (!response.ok) {
+            throw new Error(`Failed to fetch active processes: ${response.status}`);
         }
         
-        // No active wishlist process on server, proceed with normal modal creation
-        // First check if there are any tracks in the wishlist
-        const countResponse = await fetch('/api/wishlist/count');
-        const countData = await countResponse.json();
+        const data = await response.json();
+        const processes = data.active_processes || [];
+        const serverWishlistProcess = processes.find(p => p.playlist_id === playlistId);
         
+        // STEP 2: Handle active server process - show current state immediately
+        if (serverWishlistProcess) {
+            console.log('🎯 [Wishlist Button] Server has active wishlist process:', {
+                batch_id: serverWishlistProcess.batch_id,
+                phase: serverWishlistProcess.phase,
+                auto_initiated: serverWishlistProcess.auto_initiated,
+                should_show: serverWishlistProcess.should_show_modal
+            });
+            
+            // Clear any user-closed state since user explicitly requested to see modal
+            WishlistModalState.clearUserClosed();
+            
+            // Check if we need to create/sync the frontend modal
+            const clientWishlistProcess = activeDownloadProcesses[playlistId];
+            const needsRehydration = !clientWishlistProcess || 
+                clientWishlistProcess.batchId !== serverWishlistProcess.batch_id ||
+                !clientWishlistProcess.modalElement ||
+                !document.body.contains(clientWishlistProcess.modalElement);
+            
+            if (needsRehydration) {
+                console.log('🔄 [Wishlist Button] Frontend modal needs sync/creation');
+                await rehydrateModal(serverWishlistProcess, true); // user-requested = true
+            } else {
+                console.log('✅ [Wishlist Button] Frontend modal already synced, showing existing modal');
+                clientWishlistProcess.modalElement.style.display = 'flex';
+                WishlistModalState.setVisible();
+            }
+            return;
+        }
+        
+        // STEP 3: No active server process - check wishlist count and create fresh modal
+        console.log('📭 [Wishlist Button] No active server process, checking wishlist content');
+        
+        const countResponse = await fetch('/api/wishlist/count');
+        if (!countResponse.ok) {
+            throw new Error(`Failed to fetch wishlist count: ${countResponse.status}`);
+        }
+        
+        const countData = await countResponse.json();
         if (countData.count === 0) {
             showToast('Wishlist is empty. No tracks to download.', 'info');
             return;
         }
         
-        // Open the wishlist download modal for new process
-        console.log('No active server process, creating new wishlist modal');
+        // STEP 4: Create fresh modal for new wishlist process
+        console.log(`🆕 [Wishlist Button] Creating fresh modal for ${countData.count} wishlist tracks`);
         await openDownloadMissingWishlistModal();
         
     } catch (error) {
-        console.error('Error handling wishlist button click:', error);
+        console.error('❌ [Wishlist Button] Error handling wishlist button click:', error);
         showToast(`Error opening wishlist: ${error.message}`, 'error');
     }
 }

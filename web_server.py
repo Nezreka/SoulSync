@@ -4641,9 +4641,56 @@ def start_simple_background_monitor():
 # == AUTOMATIC WISHLIST PROCESSING ==
 # ===============================
 
+def _sanitize_track_data_for_processing(track_data):
+    """
+    Sanitizes track data from wishlist service to ensure consistent format.
+    Handles album field conversion from dict to string and artist field normalization.
+    """
+    if not isinstance(track_data, dict):
+        print(f"⚠️ [Sanitize] Unexpected track data type: {type(track_data)}")
+        return track_data
+    
+    # Create a copy to avoid modifying original data
+    sanitized = track_data.copy()
+    
+    # Handle album field - convert dictionary to string if needed
+    raw_album = sanitized.get('album', '')
+    if isinstance(raw_album, dict) and 'name' in raw_album:
+        sanitized['album'] = raw_album['name']
+        print(f"🔧 [Sanitize] Converted album from dict to string: '{raw_album['name']}'")
+    elif not isinstance(raw_album, str):
+        sanitized['album'] = str(raw_album)
+        print(f"🔧 [Sanitize] Converted album to string: '{sanitized['album']}'")
+    
+    # Handle artists field - ensure it's a list of strings
+    raw_artists = sanitized.get('artists', [])
+    if isinstance(raw_artists, list):
+        processed_artists = []
+        for artist in raw_artists:
+            if isinstance(artist, str):
+                processed_artists.append(artist)
+            elif isinstance(artist, dict) and 'name' in artist:
+                processed_artists.append(artist['name'])
+                print(f"🔧 [Sanitize] Converted artist from dict to string: '{artist['name']}'")
+            else:
+                processed_artists.append(str(artist))
+                print(f"🔧 [Sanitize] Converted artist to string: '{str(artist)}'")
+        sanitized['artists'] = processed_artists
+    else:
+        print(f"⚠️ [Sanitize] Unexpected artists format: {type(raw_artists)}")
+        sanitized['artists'] = [str(raw_artists)] if raw_artists else []
+    
+    return sanitized
+
 def start_wishlist_auto_processing():
     """Start automatic wishlist processing with 1-minute initial delay."""
     global wishlist_auto_timer
+    
+    # Skip if this is Flask's debug reloader process
+    import os
+    if os.environ.get('WERKZEUG_RUN_MAIN') != 'true':
+        print("🔄 Skipping auto-processing start in Flask debug reloader")
+        return
     
     with wishlist_timer_lock:
         # Stop any existing timer to prevent duplicates
@@ -4721,13 +4768,21 @@ def _process_wishlist_automatically():
                         return
             
             # Get wishlist tracks for processing
-            wishlist_tracks = wishlist_service.get_wishlist_tracks_for_download()
-            if not wishlist_tracks:
+            raw_wishlist_tracks = wishlist_service.get_wishlist_tracks_for_download()
+            if not raw_wishlist_tracks:
                 print("⚠️ No tracks returned from wishlist service.")
                 with wishlist_timer_lock:
                     wishlist_auto_processing = False
                 schedule_next_wishlist_processing()
                 return
+            
+            # SANITIZE: Ensure consistent data format from wishlist service
+            wishlist_tracks = []
+            for track in raw_wishlist_tracks:
+                sanitized_track = _sanitize_track_data_for_processing(track)
+                wishlist_tracks.append(sanitized_track)
+            
+            print(f"🔧 [Auto-Wishlist] Sanitized {len(wishlist_tracks)} tracks from wishlist service")
             
             # Create batch for automatic processing
             batch_id = str(uuid.uuid4())
@@ -4857,8 +4912,15 @@ def get_wishlist_tracks():
     try:
         from core.wishlist_service import get_wishlist_service
         wishlist_service = get_wishlist_service()
-        tracks = wishlist_service.get_wishlist_tracks_for_download()
-        return jsonify({"tracks": tracks})
+        raw_tracks = wishlist_service.get_wishlist_tracks_for_download()
+        
+        # SANITIZE: Ensure consistent data format for frontend
+        sanitized_tracks = []
+        for track in raw_tracks:
+            sanitized_track = _sanitize_track_data_for_processing(track)
+            sanitized_tracks.append(sanitized_track)
+        
+        return jsonify({"tracks": sanitized_tracks})
     except Exception as e:
         print(f"Error getting wishlist tracks: {e}")
         return jsonify({"error": str(e)}), 500
@@ -4874,9 +4936,17 @@ def start_wishlist_missing_downloads():
         wishlist_service = get_wishlist_service()
         
         # Get wishlist tracks formatted for download modal
-        wishlist_tracks = wishlist_service.get_wishlist_tracks_for_download()
-        if not wishlist_tracks:
+        raw_wishlist_tracks = wishlist_service.get_wishlist_tracks_for_download()
+        if not raw_wishlist_tracks:
             return jsonify({"success": False, "error": "No tracks in wishlist"}), 400
+
+        # SANITIZE: Ensure consistent data format from wishlist service
+        wishlist_tracks = []
+        for track in raw_wishlist_tracks:
+            sanitized_track = _sanitize_track_data_for_processing(track)
+            wishlist_tracks.append(sanitized_track)
+        
+        print(f"🔧 [Manual-Wishlist] Sanitized {len(wishlist_tracks)} tracks from wishlist service")
 
         batch_id = str(uuid.uuid4())
         
@@ -6418,13 +6488,28 @@ def get_active_processes():
     with tasks_lock:
         for batch_id, batch_data in download_batches.items():
             if batch_data.get('phase') not in ['complete', 'error', 'cancelled']:
-                active_processes.append({
+                process_info = {
                     "type": "batch",
                     "playlist_id": batch_data.get('playlist_id'),
                     "playlist_name": batch_data.get('playlist_name'),
                     "batch_id": batch_id,
                     "phase": batch_data.get('phase')
-                })
+                }
+                
+                # Enhanced wishlist information for better frontend state management
+                if batch_data.get('playlist_id') == 'wishlist':
+                    process_info.update({
+                        "auto_initiated": batch_data.get('auto_initiated', False),
+                        "auto_processing_timestamp": batch_data.get('auto_processing_timestamp'),
+                        "should_show_modal": True,  # Wishlist processes should always be visible
+                        "is_background_process": batch_data.get('auto_initiated', False)
+                    })
+                    
+                    # Add current auto-processing state for frontend awareness
+                    with wishlist_timer_lock:
+                        process_info["auto_processing_active"] = wishlist_auto_processing
+                
+                active_processes.append(process_info)
     
     # Add YouTube playlists in non-fresh phases for rehydration
     for url_hash, state in youtube_playlist_states.items():
@@ -8759,12 +8844,21 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json):
         print(f"🔄 Converting JSON tracks to SpotifyTrack objects...")
         tracks = []
         for i, t in enumerate(tracks_json):
+            # Handle album field - extract name if it's a dictionary
+            raw_album = t.get('album', '')
+            if isinstance(raw_album, dict) and 'name' in raw_album:
+                album_name = raw_album['name']
+            elif isinstance(raw_album, str):
+                album_name = raw_album
+            else:
+                album_name = str(raw_album)
+            
             # Create SpotifyTrack objects with proper default values for missing fields
             track = SpotifyTrack(
                 id=t.get('id', ''),  # Provide default empty string
                 name=t.get('name', ''),
                 artists=t.get('artists', []),
-                album=t.get('album', ''),
+                album=album_name,
                 duration_ms=t.get('duration_ms', 0),
                 popularity=t.get('popularity', 0),  # Default value
                 preview_url=t.get('preview_url'),
