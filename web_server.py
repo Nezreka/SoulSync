@@ -4525,6 +4525,12 @@ def _post_process_matched_download(context_key, context, file_path):
 
         print(f"✅ Post-processing complete for: {final_path}")
         
+        # WISHLIST REMOVAL: Check if this track should be removed from wishlist after successful download
+        try:
+            _check_and_remove_from_wishlist(context)
+        except Exception as wishlist_error:
+            print(f"⚠️ [Post-Process] Error checking wishlist removal: {wishlist_error}")
+        
         # Call completion callback for missing downloads tasks to start next batch
         task_id = context.get('task_id')
         batch_id = context.get('batch_id')
@@ -4558,6 +4564,232 @@ def _post_process_matched_download(context_key, context, file_path):
 
 # Keep track of processed downloads to avoid re-processing
 _processed_download_ids = set()
+
+def _check_and_remove_from_wishlist(context):
+    """
+    Check if a successfully downloaded track should be removed from wishlist.
+    Extracts Spotify track data from download context and removes from wishlist if found.
+    """
+    try:
+        from core.wishlist_service import get_wishlist_service
+        wishlist_service = get_wishlist_service()
+        
+        # Try to extract Spotify track ID from various sources in the context
+        spotify_track_id = None
+        
+        # Method 1: Direct track_info with id
+        track_info = context.get('track_info', {})
+        if track_info.get('id'):
+            spotify_track_id = track_info['id']
+            print(f"📋 [Wishlist] Found Spotify ID from track_info: {spotify_track_id}")
+        
+        # Method 2: From original search result
+        elif context.get('original_search_result', {}).get('id'):
+            spotify_track_id = context['original_search_result']['id']
+            print(f"📋 [Wishlist] Found Spotify ID from original_search_result: {spotify_track_id}")
+        
+        # Method 3: Check if this is a wishlist download (context has wishlist_id)
+        elif 'wishlist_id' in track_info:
+            wishlist_id = track_info['wishlist_id']
+            print(f"📋 [Wishlist] Found wishlist_id in context: {wishlist_id}")
+            
+            # Get the Spotify track ID from the wishlist entry
+            wishlist_tracks = wishlist_service.get_wishlist_tracks_for_download()
+            for wl_track in wishlist_tracks:
+                if wl_track.get('wishlist_id') == wishlist_id:
+                    spotify_track_id = wl_track.get('spotify_track_id') or wl_track.get('id')
+                    print(f"📋 [Wishlist] Found Spotify ID from wishlist entry: {spotify_track_id}")
+                    break
+        
+        # Method 4: Try to construct ID from track metadata for fuzzy matching
+        if not spotify_track_id:
+            track_name = track_info.get('name') or context.get('original_search_result', {}).get('title', '')
+            artist_name = _get_track_artist_name(track_info) or _get_track_artist_name(context.get('original_search_result', {}))
+            
+            if track_name and artist_name:
+                print(f"📋 [Wishlist] No Spotify ID found, checking for fuzzy match: '{track_name}' by '{artist_name}'")
+                
+                # Get all wishlist tracks and find potential matches
+                wishlist_tracks = wishlist_service.get_wishlist_tracks_for_download()
+                for wl_track in wishlist_tracks:
+                    wl_name = wl_track.get('name', '').lower()
+                    wl_artists = wl_track.get('artists', [])
+                    wl_artist_name = ''
+                    
+                    # Extract artist name from wishlist track
+                    if wl_artists:
+                        if isinstance(wl_artists[0], dict):
+                            wl_artist_name = wl_artists[0].get('name', '').lower()
+                        else:
+                            wl_artist_name = str(wl_artists[0]).lower()
+                    
+                    # Simple fuzzy matching
+                    if (wl_name == track_name.lower() and wl_artist_name == artist_name.lower()):
+                        spotify_track_id = wl_track.get('spotify_track_id') or wl_track.get('id')
+                        print(f"📋 [Wishlist] Found fuzzy match - Spotify ID: {spotify_track_id}")
+                        break
+        
+        # If we found a Spotify track ID, remove it from wishlist
+        if spotify_track_id:
+            print(f"📋 [Wishlist] Attempting to remove track from wishlist: {spotify_track_id}")
+            removed = wishlist_service.mark_track_download_result(spotify_track_id, success=True)
+            if removed:
+                print(f"✅ [Wishlist] Successfully removed track from wishlist: {spotify_track_id}")
+            else:
+                print(f"ℹ️ [Wishlist] Track not found in wishlist or already removed: {spotify_track_id}")
+        else:
+            print(f"ℹ️ [Wishlist] No Spotify track ID found for wishlist removal check")
+            
+    except Exception as e:
+        print(f"❌ [Wishlist] Error in wishlist removal check: {e}")
+        import traceback
+        traceback.print_exc()
+
+def _check_and_remove_track_from_wishlist_by_metadata(track_data):
+    """
+    Check if a track found during database analysis should be removed from wishlist.
+    Uses track metadata (name, artists, id) to find and remove from wishlist.
+    """
+    try:
+        from core.wishlist_service import get_wishlist_service
+        wishlist_service = get_wishlist_service()
+        
+        # Extract track info
+        track_name = track_data.get('name', '')
+        track_id = track_data.get('id', '')
+        artists = track_data.get('artists', [])
+        
+        print(f"📋 [Analysis] Checking if track should be removed from wishlist: '{track_name}' (ID: {track_id})")
+        
+        # Method 1: Direct Spotify ID match
+        if track_id:
+            removed = wishlist_service.mark_track_download_result(track_id, success=True)
+            if removed:
+                print(f"✅ [Analysis] Removed track from wishlist via direct ID match: {track_id}")
+                return True
+        
+        # Method 2: Fuzzy matching by name and artist if no direct ID match
+        if track_name and artists:
+            # Extract primary artist name
+            primary_artist = ''
+            if isinstance(artists[0], dict) and 'name' in artists[0]:
+                primary_artist = artists[0]['name']
+            elif isinstance(artists[0], str):
+                primary_artist = artists[0]
+            else:
+                primary_artist = str(artists[0])
+            
+            print(f"📋 [Analysis] No direct ID match, trying fuzzy match: '{track_name}' by '{primary_artist}'")
+            
+            # Get all wishlist tracks and find matches
+            wishlist_tracks = wishlist_service.get_wishlist_tracks_for_download()
+            for wl_track in wishlist_tracks:
+                wl_name = wl_track.get('name', '').lower()
+                wl_artists = wl_track.get('artists', [])
+                wl_artist_name = ''
+                
+                # Extract artist name from wishlist track
+                if wl_artists:
+                    if isinstance(wl_artists[0], dict):
+                        wl_artist_name = wl_artists[0].get('name', '').lower()
+                    else:
+                        wl_artist_name = str(wl_artists[0]).lower()
+                
+                # Fuzzy matching - normalize strings for comparison
+                if (wl_name == track_name.lower() and wl_artist_name == primary_artist.lower()):
+                    spotify_track_id = wl_track.get('spotify_track_id') or wl_track.get('id')
+                    if spotify_track_id:
+                        removed = wishlist_service.mark_track_download_result(spotify_track_id, success=True)
+                        if removed:
+                            print(f"✅ [Analysis] Removed track from wishlist via fuzzy match: {spotify_track_id}")
+                            return True
+        
+        print(f"ℹ️ [Analysis] Track not found in wishlist or already removed: '{track_name}'")
+        return False
+        
+    except Exception as e:
+        print(f"❌ [Analysis] Error checking wishlist removal by metadata: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+def _automatic_wishlist_cleanup_after_db_update():
+    """
+    Automatic wishlist cleanup that runs after database updates.
+    This is a simplified version of the cleanup API endpoint designed for background execution.
+    """
+    try:
+        from core.wishlist_service import get_wishlist_service
+        from database.music_database import MusicDatabase
+        
+        wishlist_service = get_wishlist_service()
+        db = MusicDatabase()
+        active_server = config_manager.get_active_media_server()
+        
+        print("📋 [Auto Cleanup] Starting automatic wishlist cleanup after database update...")
+        
+        # Get all wishlist tracks
+        wishlist_tracks = wishlist_service.get_wishlist_tracks_for_download()
+        if not wishlist_tracks:
+            print("📋 [Auto Cleanup] No tracks in wishlist to clean up")
+            return
+        
+        print(f"📋 [Auto Cleanup] Found {len(wishlist_tracks)} tracks in wishlist")
+        
+        removed_count = 0
+        
+        for track in wishlist_tracks:
+            track_name = track.get('name', '')
+            artists = track.get('artists', [])
+            spotify_track_id = track.get('spotify_track_id') or track.get('id')
+            
+            # Skip if no essential data
+            if not track_name or not artists or not spotify_track_id:
+                continue
+            
+            # Check each artist
+            found_in_db = False
+            for artist in artists:
+                # Handle both string format and dict format
+                if isinstance(artist, str):
+                    artist_name = artist
+                elif isinstance(artist, dict) and 'name' in artist:
+                    artist_name = artist['name']
+                else:
+                    artist_name = str(artist)
+                
+                try:
+                    db_track, confidence = db.check_track_exists(
+                        track_name, artist_name, 
+                        confidence_threshold=0.7, 
+                        server_source=active_server
+                    )
+                    
+                    if db_track and confidence >= 0.7:
+                        found_in_db = True
+                        print(f"📋 [Auto Cleanup] Track found in database: '{track_name}' by {artist_name} (confidence: {confidence:.2f})")
+                        break
+                        
+                except Exception as db_error:
+                    print(f"⚠️ [Auto Cleanup] Error checking database for track '{track_name}': {db_error}")
+                    continue
+            
+            # If found in database, remove from wishlist
+            if found_in_db:
+                try:
+                    removed = wishlist_service.mark_track_download_result(spotify_track_id, success=True)
+                    if removed:
+                        removed_count += 1
+                        print(f"✅ [Auto Cleanup] Removed track from wishlist: '{track_name}' ({spotify_track_id})")
+                except Exception as remove_error:
+                    print(f"❌ [Auto Cleanup] Error removing track from wishlist: {remove_error}")
+        
+        print(f"📋 [Auto Cleanup] Completed automatic cleanup: {removed_count} tracks removed from wishlist")
+        
+    except Exception as e:
+        print(f"❌ [Auto Cleanup] Error in automatic wishlist cleanup: {e}")
+        import traceback
+        traceback.print_exc()
 
 @app.route('/api/version-info', methods=['GET'])
 def get_version_info():
@@ -4846,6 +5078,14 @@ def _db_update_finished_callback(total_artists, total_albums, total_tracks, succ
     with db_update_lock:
         db_update_state["status"] = "finished"
         db_update_state["phase"] = f"Completed: {successful} successful, {failed} failed."
+    
+    # WISHLIST CLEANUP: Automatically clean up wishlist after database update
+    try:
+        print("📋 [DB Update] Database update completed, starting automatic wishlist cleanup...")
+        # Run cleanup in background to avoid blocking the UI
+        missing_download_executor.submit(_automatic_wishlist_cleanup_after_db_update)
+    except Exception as cleanup_error:
+        print(f"⚠️ [DB Update] Error starting automatic wishlist cleanup: {cleanup_error}")
 
 def _db_update_error_callback(error_message):
     with db_update_lock:
@@ -5000,6 +5240,95 @@ def clear_wishlist():
             
     except Exception as e:
         print(f"Error clearing wishlist: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/wishlist/cleanup', methods=['POST'])
+def cleanup_wishlist():
+    """Endpoint to remove tracks from wishlist that already exist in the database."""
+    try:
+        from core.wishlist_service import get_wishlist_service
+        from database.music_database import MusicDatabase
+        
+        wishlist_service = get_wishlist_service()
+        db = MusicDatabase()
+        active_server = config_manager.get_active_media_server()
+        
+        print("📋 [Wishlist Cleanup] Starting wishlist cleanup process...")
+        
+        # Get all wishlist tracks
+        wishlist_tracks = wishlist_service.get_wishlist_tracks_for_download()
+        if not wishlist_tracks:
+            return jsonify({"success": True, "message": "No tracks in wishlist to clean up", "removed_count": 0})
+        
+        print(f"📋 [Wishlist Cleanup] Found {len(wishlist_tracks)} tracks in wishlist")
+        
+        removed_count = 0
+        processed_count = 0
+        
+        for track in wishlist_tracks:
+            processed_count += 1
+            track_name = track.get('name', '')
+            artists = track.get('artists', [])
+            spotify_track_id = track.get('spotify_track_id') or track.get('id')
+            
+            # Skip if no essential data
+            if not track_name or not artists or not spotify_track_id:
+                continue
+            
+            print(f"📋 [Wishlist Cleanup] Checking track {processed_count}/{len(wishlist_tracks)}: '{track_name}'")
+            
+            # Check each artist
+            found_in_db = False
+            for artist in artists:
+                # Handle both string format and dict format
+                if isinstance(artist, str):
+                    artist_name = artist
+                elif isinstance(artist, dict) and 'name' in artist:
+                    artist_name = artist['name']
+                else:
+                    artist_name = str(artist)
+                
+                try:
+                    db_track, confidence = db.check_track_exists(
+                        track_name, artist_name, 
+                        confidence_threshold=0.7, 
+                        server_source=active_server
+                    )
+                    
+                    if db_track and confidence >= 0.7:
+                        found_in_db = True
+                        print(f"📋 [Wishlist Cleanup] Track found in database: '{track_name}' by {artist_name} (confidence: {confidence:.2f})")
+                        break
+                        
+                except Exception as db_error:
+                    print(f"⚠️ [Wishlist Cleanup] Error checking database for track '{track_name}': {db_error}")
+                    continue
+            
+            # If found in database, remove from wishlist
+            if found_in_db:
+                try:
+                    removed = wishlist_service.mark_track_download_result(spotify_track_id, success=True)
+                    if removed:
+                        removed_count += 1
+                        print(f"✅ [Wishlist Cleanup] Removed track from wishlist: '{track_name}' ({spotify_track_id})")
+                    else:
+                        print(f"⚠️ [Wishlist Cleanup] Failed to remove track from wishlist: '{track_name}' ({spotify_track_id})")
+                except Exception as remove_error:
+                    print(f"❌ [Wishlist Cleanup] Error removing track from wishlist: {remove_error}")
+        
+        print(f"📋 [Wishlist Cleanup] Completed cleanup: {removed_count} tracks removed from wishlist")
+        
+        return jsonify({
+            "success": True, 
+            "message": f"Wishlist cleanup completed: {removed_count} tracks removed",
+            "removed_count": removed_count,
+            "processed_count": processed_count
+        })
+        
+    except Exception as e:
+        print(f"Error in wishlist cleanup: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/database/update', methods=['POST'])
@@ -5510,6 +5839,24 @@ def _on_download_completed(batch_id, task_id, success=True):
                 download_batches[batch_id]['permanently_failed_tracks'].append(track_info)
                 print(f"❌ [Batch Manager] Added failed track to batch tracking: {track_info['track_name']}")
             
+        # WISHLIST REMOVAL: Handle successful downloads for wishlist removal
+        if success and task_id in download_tasks:
+            try:
+                task = download_tasks[task_id]
+                track_info = task.get('track_info', {})
+                print(f"📋 [Batch Manager] Successful download - checking wishlist removal for task {task_id}")
+                
+                # Try to remove from wishlist using track info
+                if track_info:
+                    # Create a context-like structure for the wishlist removal function
+                    context = {
+                        'track_info': track_info,
+                        'original_search_result': track_info  # fallback
+                    }
+                    _check_and_remove_from_wishlist(context)
+            except Exception as wishlist_error:
+                print(f"⚠️ [Batch Manager] Error checking wishlist removal for successful download: {wishlist_error}")
+        
         # Decrement active count
         old_active = download_batches[batch_id]['active_count']
         download_batches[batch_id]['active_count'] -= 1
@@ -5628,6 +5975,13 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
             analysis_results.append({
                 'track_index': i, 'track': track_data, 'found': found, 'confidence': confidence
             })
+            
+            # WISHLIST REMOVAL: If track is found in database, check if it should be removed from wishlist
+            if found and confidence >= 0.7:
+                try:
+                    _check_and_remove_track_from_wishlist_by_metadata(track_data)
+                except Exception as wishlist_error:
+                    print(f"⚠️ [Analysis] Error checking wishlist removal for found track: {wishlist_error}")
 
             with tasks_lock:
                 if batch_id in download_batches:

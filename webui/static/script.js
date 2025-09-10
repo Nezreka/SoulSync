@@ -3405,6 +3405,9 @@ async function openDownloadMissingWishlistModal() {
                     <button class="download-control-btn danger" id="cancel-all-btn-${playlistId}" onclick="cancelAllOperations('${playlistId}')" style="display: none;">
                         Cancel All
                     </button>
+                    <button class="download-control-btn secondary" id="cleanup-wishlist-btn-${playlistId}" onclick="cleanupWishlist('${playlistId}')" style="margin-left: 10px;">
+                        🧹 Cleanup Wishlist
+                    </button>
                     <button class="download-control-btn danger" id="clear-wishlist-btn-${playlistId}" onclick="clearWishlist('${playlistId}')" style="margin-left: 10px;">
                         🗑️ Clear Wishlist
                     </button>
@@ -8485,6 +8488,71 @@ async function handleWishlistButtonClick() {
     } catch (error) {
         console.error('❌ [Wishlist Button] Error handling wishlist button click:', error);
         showToast(`Error opening wishlist: ${error.message}`, 'error');
+    }
+}
+
+async function cleanupWishlist(playlistId) {
+    try {
+        // Show information dialog
+        const confirmed = confirm(
+            "Cleanup Wishlist\n\n" +
+            "This will check all wishlist tracks against your music library and automatically remove " +
+            "any tracks that already exist in your database.\n\n" +
+            "This is a safe operation that only removes tracks you already have. " +
+            "Continue with cleanup?"
+        );
+        
+        if (!confirmed) {
+            return;
+        }
+        
+        // Disable the cleanup button during the operation
+        const cleanupBtn = document.getElementById(`cleanup-wishlist-btn-${playlistId}`);
+        if (cleanupBtn) {
+            cleanupBtn.disabled = true;
+            cleanupBtn.textContent = '🧹 Cleaning...';
+        }
+        
+        const response = await fetch('/api/wishlist/cleanup', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            const removedCount = result.removed_count || 0;
+            const processedCount = result.processed_count || 0;
+            
+            if (removedCount > 0) {
+                showToast(`Wishlist cleanup completed: ${removedCount} tracks removed (${processedCount} checked)`, 'success');
+                
+                // Refresh the modal content to show updated state
+                setTimeout(() => {
+                    openDownloadMissingWishlistModal();
+                }, 500);
+                
+                // Update the wishlist count in the main dashboard
+                await updateWishlistCount();
+            } else {
+                showToast(`Wishlist cleanup completed: No tracks to remove (${processedCount} checked)`, 'info');
+            }
+        } else {
+            showToast(`Error cleaning wishlist: ${result.error}`, 'error');
+        }
+        
+    } catch (error) {
+        console.error('Error cleaning wishlist:', error);
+        showToast(`Error cleaning wishlist: ${error.message}`, 'error');
+    } finally {
+        // Re-enable the cleanup button
+        const cleanupBtn = document.getElementById(`cleanup-wishlist-btn-${playlistId}`);
+        if (cleanupBtn) {
+            cleanupBtn.disabled = false;
+            cleanupBtn.textContent = '🧹 Cleanup Wishlist';
+        }
     }
 }
 
