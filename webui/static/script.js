@@ -10716,7 +10716,18 @@ async function initializeArtistDetailWatchlistButton(artist) {
     const button = document.getElementById('artist-detail-watchlist-btn');
     if (!button) return;
     
-    // Set up click handler
+    console.log(`🔧 Initializing watchlist button for artist: ${artist.name} (${artist.id})`);
+    
+    // Reset button state completely
+    button.disabled = false;
+    button.classList.remove('watching');
+    button.style.background = '';
+    button.style.cursor = '';
+    
+    // Remove any existing click handlers to prevent duplicates
+    button.onclick = null;
+    
+    // Set up new click handler
     button.onclick = (event) => toggleArtistDetailWatchlist(event, artist.id, artist.name);
     
     // Check and update current status
@@ -10811,9 +10822,14 @@ async function toggleArtistDetailWatchlist(event, artistId, artistName) {
  */
 async function updateArtistDetailWatchlistButton(artistId) {
     const button = document.getElementById('artist-detail-watchlist-btn');
-    if (!button) return;
+    if (!button) {
+        console.warn('⚠️ Artist detail watchlist button not found');
+        return;
+    }
     
     try {
+        console.log(`🔍 Checking watchlist status for artist: ${artistId}`);
+        
         const response = await fetch('/api/watchlist/check', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -10825,6 +10841,11 @@ async function updateArtistDetailWatchlistButton(artistId) {
             const icon = button.querySelector('.watchlist-icon');
             const text = button.querySelector('.watchlist-text');
             
+            console.log(`📊 Watchlist status for ${artistId}: ${data.is_watching ? 'WATCHING' : 'NOT WATCHING'}`);
+            
+            // Ensure button is enabled
+            button.disabled = false;
+            
             if (data.is_watching) {
                 icon.textContent = '👁️';
                 text.textContent = 'Remove from Watchlist';
@@ -10834,9 +10855,13 @@ async function updateArtistDetailWatchlistButton(artistId) {
                 text.textContent = 'Add to Watchlist';
                 button.classList.remove('watching');
             }
+        } else {
+            console.error('❌ Failed to check watchlist status:', data.error);
         }
     } catch (error) {
-        console.error('Error checking watchlist status:', error);
+        console.error('❌ Error checking watchlist status:', error);
+        // Ensure button doesn't get stuck in bad state
+        button.disabled = false;
     }
 }
 
