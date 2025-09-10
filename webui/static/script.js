@@ -6882,6 +6882,14 @@ async function loadDashboardData() {
     // Start periodic refresh of wishlist count (every 30 seconds, matching GUI behavior)
     stopWishlistCountPolling(); // Ensure no duplicates
     wishlistCountInterval = setInterval(updateWishlistCount, 30000);
+    
+    // Initial load of service status and system statistics
+    await fetchAndUpdateServiceStatus();
+    await fetchAndUpdateSystemStats();
+    
+    // Start periodic refresh of service status and system stats (every 10 seconds)
+    setInterval(fetchAndUpdateServiceStatus, 10000);
+    setInterval(fetchAndUpdateSystemStats, 10000);
 
     // Also check the status of any ongoing update when the page loads
     await checkAndUpdateDbProgress();
@@ -12010,6 +12018,77 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+// --- Service Status and System Stats Functions ---
+
+async function fetchAndUpdateServiceStatus() {
+    try {
+        const response = await fetch('/status');
+        if (!response.ok) return;
+        
+        const data = await response.json();
+        
+        // Update service status indicators and text
+        updateServiceStatus('spotify', data.spotify);
+        updateServiceStatus('media-server', data.media_server);
+        updateServiceStatus('soulseek', data.soulseek);
+        
+    } catch (error) {
+        console.warn('Could not fetch service status:', error);
+    }
+}
+
+function updateServiceStatus(service, statusData) {
+    const indicator = document.getElementById(`${service}-status-indicator`);
+    const statusText = document.getElementById(`${service}-status-text`);
+    
+    if (indicator && statusText) {
+        if (statusData.connected) {
+            indicator.className = 'service-card-indicator connected';
+            statusText.textContent = `Connected (${statusData.response_time}ms)`;
+            statusText.className = 'service-card-status-text connected';
+        } else {
+            indicator.className = 'service-card-indicator disconnected';
+            statusText.textContent = 'Disconnected';
+            statusText.className = 'service-card-status-text disconnected';
+        }
+    }
+}
+
+async function fetchAndUpdateSystemStats() {
+    try {
+        const response = await fetch('/api/system/stats');
+        if (!response.ok) return;
+        
+        const data = await response.json();
+        
+        // Update all stat cards
+        updateStatCard('active-downloads-card', data.active_downloads, 'Currently downloading');
+        updateStatCard('finished-downloads-card', data.finished_downloads, 'Completed this session');
+        updateStatCard('download-speed-card', data.download_speed, 'Combined speed');
+        updateStatCard('active-syncs-card', data.active_syncs, 'Playlists syncing');
+        updateStatCard('uptime-card', data.uptime, 'Application runtime');
+        updateStatCard('memory-card', data.memory_usage, 'Current usage');
+        
+    } catch (error) {
+        console.warn('Could not fetch system stats:', error);
+    }
+}
+
+function updateStatCard(cardId, value, subtitle) {
+    const card = document.getElementById(cardId);
+    if (card) {
+        const valueElement = card.querySelector('.stat-card-value');
+        const subtitleElement = card.querySelector('.stat-card-subtitle');
+        
+        if (valueElement) {
+            valueElement.textContent = value;
+        }
+        if (subtitleElement) {
+            subtitleElement.textContent = subtitle;
+        }
+    }
 }
 
 // --- Watchlist Functions ---

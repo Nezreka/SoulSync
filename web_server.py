@@ -1318,20 +1318,128 @@ def get_status():
     if not all([spotify_client, plex_client, jellyfin_client, soulseek_client, config_manager]):
         return jsonify({"error": "Core services not initialized."}), 500
     try:
+        import time
+        
         active_server = config_manager.get_active_media_server()
+        
+        # Test Spotify with response time
+        spotify_start = time.time()
+        spotify_status = spotify_client.is_authenticated()
+        spotify_response_time = (time.time() - spotify_start) * 1000  # Convert to ms
+        
+        # Test media server with response time
+        media_server_start = time.time()
         media_server_status = False
         if active_server == "plex":
             media_server_status = plex_client.is_connected()
         elif active_server == "jellyfin":
             media_server_status = jellyfin_client.is_connected()
+        media_server_response_time = (time.time() - media_server_start) * 1000
+        
+        # Test Soulseek (just check if configured, no network test)
+        soulseek_start = time.time()
+        soulseek_status = soulseek_client.is_configured()
+        soulseek_response_time = (time.time() - soulseek_start) * 1000
 
         status_data = {
-            'spotify': spotify_client.is_authenticated(),
-            'media_server': media_server_status,
-            'soulseek': soulseek_client.is_configured(),
+            'spotify': {
+                'connected': spotify_status,
+                'response_time': round(spotify_response_time, 1)
+            },
+            'media_server': {
+                'connected': media_server_status,
+                'response_time': round(media_server_response_time, 1),
+                'type': active_server
+            },
+            'soulseek': {
+                'connected': soulseek_status,
+                'response_time': round(soulseek_response_time, 1)
+            },
             'active_media_server': active_server
         }
         return jsonify(status_data)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/system/stats')
+def get_system_stats():
+    """Get system statistics for dashboard"""
+    try:
+        import psutil
+        import time
+        from datetime import timedelta
+        
+        # Calculate uptime
+        start_time = getattr(app, 'start_time', time.time())
+        uptime_seconds = time.time() - start_time
+        uptime = str(timedelta(seconds=int(uptime_seconds)))
+        
+        # Get memory usage
+        memory = psutil.virtual_memory()
+        memory_usage = f"{memory.percent}%"
+        
+        # Count active downloads from download_batches (batches that are currently downloading)
+        active_downloads = len([batch_id for batch_id, batch_data in download_batches.items() 
+                               if batch_data.get('phase') == 'downloading'])
+        
+        # Count finished downloads (completed this session)
+        finished_downloads = len([batch_id for batch_id, batch_data in download_batches.items() 
+                                 if batch_data.get('phase') == 'complete'])
+        
+        # Calculate total download speed from active soulseek transfers
+        total_download_speed = 0.0
+        try:
+            transfers_data = asyncio.run(soulseek_client._make_request('GET', 'transfers/downloads'))
+            if transfers_data:
+                for user_data in transfers_data:
+                    if 'directories' in user_data:
+                        for directory in user_data['directories']:
+                            if 'files' in directory:
+                                for file_info in directory['files']:
+                                    state = file_info.get('state', '').lower()
+                                    # Only count actively downloading files
+                                    if 'inprogress' in state or 'downloading' in state or 'transferring' in state:
+                                        speed = file_info.get('averageSpeed', 0)
+                                        if isinstance(speed, (int, float)) and speed > 0:
+                                            total_download_speed += float(speed)
+        except Exception as e:
+            print(f"Warning: Could not fetch download speeds: {e}")
+        
+        # Convert bytes/sec to KB/s and format
+        if total_download_speed > 0:
+            speed_kb_s = total_download_speed / 1024
+            if speed_kb_s >= 1024:
+                speed_mb_s = speed_kb_s / 1024
+                download_speed_str = f"{speed_mb_s:.1f} MB/s"
+            else:
+                download_speed_str = f"{speed_kb_s:.1f} KB/s"
+        else:
+            download_speed_str = "0 KB/s"
+        
+        # Count active syncs (playlists currently syncing)
+        active_syncs = 0
+        # Count Spotify playlist syncs
+        for playlist_id, sync_state in sync_states.items():
+            if sync_state.get('status') == 'syncing':
+                active_syncs += 1
+        # Count YouTube playlist syncs
+        for url_hash, state in youtube_playlist_states.items():
+            if state.get('phase') == 'syncing':
+                active_syncs += 1
+        # Count Tidal playlist syncs
+        for playlist_id, state in tidal_discovery_states.items():
+            if state.get('phase') == 'syncing':
+                active_syncs += 1
+        
+        stats_data = {
+            'active_downloads': active_downloads,
+            'finished_downloads': finished_downloads,
+            'download_speed': download_speed_str,
+            'active_syncs': active_syncs,
+            'uptime': uptime,
+            'memory_usage': memory_usage
+        }
+        return jsonify(stats_data)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -10172,5 +10280,9 @@ if __name__ == '__main__':
     print("🔧 Starting automatic watchlist scanning...")
     start_watchlist_auto_scanning()
     print("✅ Automatic watchlist scanning started")
+    
+    # Initialize app start time for uptime tracking
+    import time
+    app.start_time = time.time()
     
     app.run(host='0.0.0.0', port=5001, debug=True)
