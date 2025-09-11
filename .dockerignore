@@ -1,0 +1,70 @@
+# Docker ignore file for SoulSync WebUI
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# Data directories (will be mounted as volumes)
+logs/*
+!logs/.gitkeep
+database/*.db
+database/*.db-shm
+database/*.db-wal
+config/config.json
+downloads/*
+!downloads/.gitkeep
+Transfer/*
+!Transfer/.gitkeep
+Storage/*
+cache/*
+Stream/*
+Incomplete/*
+
+# Temporary files
+artist_bubble_snapshots.json
+.spotify_cache
+
+# Documentation
+*.md
+README.md
+headless.md
+multi-server-database-plan.md
+server-source.md
+plans.md
+
+# GUI-specific files
+main.py
+ui/
+requirements.txt
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
