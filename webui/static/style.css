@@ -5165,6 +5165,7 @@ body {
     max-height: 400px;
     overflow-y: auto;
     margin-top: 20px;
+    padding: 30px;
 }
 
 .watchlist-artist-item {
