@@ -6859,6 +6859,15 @@ async function loadDashboardData() {
     // Start periodic refresh of service status and system stats (every 10 seconds)
     setInterval(fetchAndUpdateServiceStatus, 10000);
     setInterval(fetchAndUpdateSystemStats, 10000);
+    
+    // Initial load of activity feed
+    await fetchAndUpdateActivityFeed();
+    
+    // Start periodic refresh of activity feed (every 5 seconds for responsiveness)
+    setInterval(fetchAndUpdateActivityFeed, 5000);
+    
+    // Start periodic toast checking (every 3 seconds)
+    setInterval(checkForActivityToasts, 3000);
 
     // Also check the status of any ongoing update when the page loads
     await checkAndUpdateDbProgress();
@@ -12087,6 +12096,103 @@ function updateStatCard(cardId, value, subtitle) {
         if (subtitleElement) {
             subtitleElement.textContent = subtitle;
         }
+    }
+}
+
+async function fetchAndUpdateActivityFeed() {
+    try {
+        const response = await fetch('/api/activity/feed');
+        if (!response.ok) {
+            console.warn('Activity feed response not ok:', response.status, response.statusText);
+            return;
+        }
+        
+        const data = await response.json();
+        console.log('Activity feed data received:', data);
+        updateActivityFeed(data.activities || []);
+        
+    } catch (error) {
+        console.warn('Could not fetch activity feed:', error);
+    }
+}
+
+function updateActivityFeed(activities) {
+    const feedContainer = document.getElementById('dashboard-activity-feed');
+    if (!feedContainer) {
+        console.warn('Activity feed container not found!');
+        return;
+    }
+    
+    console.log('Updating activity feed with', activities.length, 'activities:', activities);
+    
+    // Clear existing content
+    feedContainer.innerHTML = '';
+    
+    if (activities.length === 0) {
+        console.log('No activities found, showing placeholder');
+        // Show placeholder if no activities
+        feedContainer.innerHTML = `
+            <div class="activity-item">
+                <span class="activity-icon">📊</span>
+                <div class="activity-text-content">
+                    <p class="activity-title">System Started</p>
+                    <p class="activity-subtitle">Dashboard initialized successfully</p>
+                </div>
+                <p class="activity-time">Now</p>
+            </div>
+        `;
+        return;
+    }
+    
+    // Add activities (limit to 5 most recent)
+    activities.slice(0, 5).forEach((activity, index) => {
+        const activityElement = document.createElement('div');
+        activityElement.className = 'activity-item';
+        activityElement.innerHTML = `
+            <span class="activity-icon">${escapeHtml(activity.icon)}</span>
+            <div class="activity-text-content">
+                <p class="activity-title">${escapeHtml(activity.title)}</p>
+                <p class="activity-subtitle">${escapeHtml(activity.subtitle)}</p>
+            </div>
+            <p class="activity-time">${escapeHtml(activity.time)}</p>
+        `;
+        
+        feedContainer.appendChild(activityElement);
+        
+        // Add separator between items (except after last item)
+        if (index < activities.slice(0, 5).length - 1) {
+            const separator = document.createElement('div');
+            separator.className = 'activity-separator';
+            feedContainer.appendChild(separator);
+        }
+    });
+}
+
+async function checkForActivityToasts() {
+    try {
+        const response = await fetch('/api/activity/toasts');
+        if (!response.ok) return;
+        
+        const data = await response.json();
+        const toasts = data.toasts || [];
+        
+        toasts.forEach(activity => {
+            // Convert activity to toast type based on icon/title
+            let toastType = 'info';
+            if (activity.icon === '✅' || activity.title.includes('Complete')) {
+                toastType = 'success';
+            } else if (activity.icon === '❌' || activity.title.includes('Failed') || activity.title.includes('Error')) {
+                toastType = 'error';
+            } else if (activity.icon === '🚫' || activity.title.includes('Cancelled')) {
+                toastType = 'warning';
+            }
+            
+            // Show toast with activity info
+            showToast(`${activity.title}: ${activity.subtitle}`, toastType);
+        });
+        
+    } catch (error) {
+        // Silently fail for toast checking to avoid spam
     }
 }
 

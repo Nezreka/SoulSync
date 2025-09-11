@@ -310,10 +310,13 @@ class SoulseekClient:
                 else:
                     # Enhanced error logging for better debugging
                     error_detail = response_text if response_text.strip() else "No error details provided"
-                    logger.error(f"API request failed: HTTP {response.status} ({response.reason}) - {error_detail}")
                     
-                    # Log the specific endpoint and method for debugging
-                    logger.debug(f"Failed request: {method} {url}")
+                    # Reduce noise for expected 404s during search cleanup
+                    if response.status == 404 and 'searches/' in url and method == 'DELETE':
+                        logger.debug(f"Search not found for deletion (expected): {url}")
+                    else:
+                        logger.error(f"API request failed: HTTP {response.status} ({response.reason}) - {error_detail}")
+                        logger.debug(f"Failed request: {method} {url}")
                     
                     return None
                     
@@ -1055,7 +1058,8 @@ class SoulseekClient:
             if success:
                 logger.debug(f"Successfully deleted search {search_id}")
             else:
-                logger.warning(f"Failed to delete search {search_id}")
+                # Don't log warnings for failed deletions - they're often just 404s for already-removed searches
+                logger.debug(f"Search deletion returned false (likely already removed): {search_id}")
                 
             return success
             

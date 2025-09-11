@@ -1443,6 +1443,61 @@ def get_system_stats():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+# Global activity tracking storage
+activity_feed = []
+activity_feed_lock = threading.Lock()
+
+@app.route('/api/activity/feed')
+def get_activity_feed():
+    """Get recent activity feed for dashboard"""
+    try:
+        with activity_feed_lock:
+            # Return last 10 activities in reverse chronological order
+            return jsonify({'activities': activity_feed[-10:][::-1]})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/activity/toasts')
+def get_recent_toasts():
+    """Get recent activities that should show toasts"""
+    try:
+        import time
+        current_time = time.time()
+        
+        with activity_feed_lock:
+            # Return activities from last 10 seconds that should show toasts
+            recent_toasts = [
+                activity for activity in activity_feed 
+                if activity.get('show_toast', True) and 
+                   (current_time - activity.get('timestamp', 0)) <= 10
+            ]
+            return jsonify({'toasts': recent_toasts})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+def add_activity_item(icon: str, title: str, subtitle: str, time_ago: str = "Now", show_toast: bool = True):
+    """Add activity item to the feed (replicates dashboard.py functionality)"""
+    try:
+        import time
+        activity_item = {
+            'icon': icon,
+            'title': title,
+            'subtitle': subtitle,
+            'time': time_ago,
+            'timestamp': time.time(),
+            'show_toast': show_toast
+        }
+        
+        with activity_feed_lock:
+            activity_feed.append(activity_item)
+            # Keep only last 20 items to prevent memory growth
+            if len(activity_feed) > 20:
+                activity_feed.pop(0)
+        
+        print(f"📝 Activity: {icon} {title} - {subtitle}")
+    except Exception as e:
+        print(f"Error adding activity item: {e}")
+
 @app.route('/api/settings', methods=['GET', 'POST'])
 def handle_settings():
     global tidal_client # Declare that we might modify the global instance
@@ -1674,6 +1729,10 @@ def start_download():
                     print(f"Failed to start track download: {e}")
                     continue
             
+            # Add activity for album download start
+            album_name = data.get('album_name', 'Unknown Album')
+            add_activity_item("📥", "Album Download Started", f"'{album_name}' - {started_downloads} tracks", "Now")
+            
             return jsonify({
                 "success": True, 
                 "message": f"Started {started_downloads} downloads from album"
@@ -1691,6 +1750,9 @@ def start_download():
             download_id = asyncio.run(soulseek_client.download(username, filename, file_size))
             
             if download_id:
+                # Extract track name from filename for activity
+                track_name = filename.split('/')[-1] if '/' in filename else filename.split('\\')[-1] if '\\' in filename else filename
+                add_activity_item("📥", "Track Download Started", f"'{track_name}'", "Now")
                 return jsonify({"success": True, "message": "Download started"})
             else:
                 return jsonify({"error": "Failed to start download"}), 500
@@ -1930,6 +1992,44 @@ def clear_finished_downloads():
             return jsonify({"success": False, "error": "Backend failed to clear downloads."}), 500
     except Exception as e:
         print(f"Error clearing finished downloads: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/searches/clear-all', methods=['POST'])
+def clear_all_searches():
+    """
+    Clear all searches from slskd search history.
+    """
+    try:
+        success = asyncio.run(soulseek_client.clear_all_searches())
+        if success:
+            add_activity_item("🧹", "Search Cleanup", "All search history cleared manually", "Now")
+            return jsonify({"success": True, "message": "All searches cleared."})
+        else:
+            return jsonify({"success": False, "error": "Backend failed to clear searches."}), 500
+    except Exception as e:
+        print(f"Error clearing searches: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/searches/maintain', methods=['POST'])
+def maintain_search_history():
+    """
+    Maintain search history by keeping only recent searches.
+    """
+    try:
+        data = request.get_json() or {}
+        keep_searches = data.get('keep_searches', 50)
+        trigger_threshold = data.get('trigger_threshold', 200)
+        
+        success = asyncio.run(soulseek_client.maintain_search_history_with_buffer(
+            keep_searches=keep_searches, trigger_threshold=trigger_threshold
+        ))
+        if success:
+            add_activity_item("🧹", "Search Maintenance", f"Search history maintained (keeping {keep_searches} searches)", "Now")
+            return jsonify({"success": True, "message": f"Search history maintained (keeping {keep_searches} searches)."})
+        else:
+            return jsonify({"success": False, "error": "Backend failed to maintain search history."}), 500
+    except Exception as e:
+        print(f"Error maintaining search history: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/artists')
@@ -4956,6 +5056,10 @@ def get_version_info():
 def _simple_monitor_task():
     """The actual monitoring task that runs in the background thread."""
     print("🔄 Simple background monitor started")
+    last_search_cleanup = 0  # Force initial cleanup on first run
+    search_cleanup_interval = 3600  # 1 hour
+    initial_cleanup_done = False
+    
     while True:
         try:
             with matched_context_lock:
@@ -4965,6 +5069,33 @@ def _simple_monitor_task():
                 # Use app_context to safely call endpoint logic from a thread
                 with app.app_context():
                     get_download_status()
+            
+            # Automatic search cleanup every hour (or initial cleanup)
+            current_time = time.time()
+            should_cleanup = (current_time - last_search_cleanup > search_cleanup_interval) or not initial_cleanup_done
+            
+            if should_cleanup:
+                try:
+                    if not initial_cleanup_done:
+                        print("🔍 [Auto Cleanup] Performing initial search cleanup in background...")
+                        initial_cleanup_done = True
+                    else:
+                        print("🔍 [Auto Cleanup] Starting scheduled search cleanup...")
+                    
+                    success = asyncio.run(soulseek_client.maintain_search_history_with_buffer(
+                        keep_searches=50, trigger_threshold=200
+                    ))
+                    if success:
+                        cleanup_type = "Initial search history maintenance" if last_search_cleanup == 0 else "Automatic search history maintenance completed"
+                        add_activity_item("🧹", "Search Cleanup", cleanup_type, "Now")
+                        print("✅ [Auto Cleanup] Search history maintenance completed")
+                    else:
+                        print("⚠️ [Auto Cleanup] Search history maintenance returned false")
+                    last_search_cleanup = current_time
+                except Exception as cleanup_error:
+                    print(f"❌ [Auto Cleanup] Error in automatic search cleanup: {cleanup_error}")
+                    last_search_cleanup = current_time  # Still update to avoid spam
+                    initial_cleanup_done = True  # Mark as done even on error to avoid blocking
             
             time.sleep(1)
         except Exception as e:
@@ -5196,6 +5327,10 @@ def _db_update_finished_callback(total_artists, total_albums, total_tracks, succ
         db_update_state["status"] = "finished"
         db_update_state["phase"] = f"Completed: {successful} successful, {failed} failed."
     
+    # Add activity for database update completion
+    summary = f"{total_tracks} tracks, {total_albums} albums, {total_artists} artists processed"
+    add_activity_item("✅", "Database Update Complete", summary, "Now")
+    
     # WISHLIST CLEANUP: Automatically clean up wishlist after database update
     try:
         print("📋 [DB Update] Database update completed, starting automatic wishlist cleanup...")
@@ -5208,6 +5343,9 @@ def _db_update_error_callback(error_message):
     with db_update_lock:
         db_update_state["status"] = "error"
         db_update_state["error_message"] = error_message
+    
+    # Add activity for database update error
+    add_activity_item("❌", "Database Update Failed", error_message, "Now")
 
 def _run_db_update_task(full_refresh, server_type):
     """The actual function that runs in the background thread."""
@@ -5304,6 +5442,9 @@ def start_wishlist_missing_downloads():
             wishlist_tracks.append(sanitized_track)
         
         print(f"🔧 [Manual-Wishlist] Sanitized {len(wishlist_tracks)} tracks from wishlist service")
+
+        # Add activity for wishlist download start
+        add_activity_item("📥", "Wishlist Download Started", f"{len(wishlist_tracks)} tracks", "Now")
 
         batch_id = str(uuid.uuid4())
         
@@ -5465,6 +5606,11 @@ def start_database_update():
             "phase": "Initializing...",
             "progress": 0, "current_item": "", "processed": 0, "total": 0, "error_message": ""
         })
+        
+        # Add activity for database update start
+        update_type = "Full" if full_refresh else "Incremental"
+        server_name = active_server.capitalize()
+        add_activity_item("🗄️", "Database Update", f"Starting {update_type.lower()} update from {server_name}...", "Now")
         
         # Submit the worker function to the executor
         db_update_executor.submit(_run_db_update_task, full_refresh, active_server)
@@ -5895,6 +6041,10 @@ def _process_failed_tracks_to_wishlist_exact_with_auto_completion(batch_id):
         total_failed = completion_summary.get('total_failed', 0)
         print(f"🎉 [Auto-Wishlist] Background processing complete: {tracks_added} added to wishlist, {total_failed} failed")
         
+        # Add activity for wishlist processing
+        if tracks_added > 0:
+            add_activity_item("⭐", "Wishlist Updated", f"{tracks_added} failed tracks added to wishlist", "Now")
+        
         # Mark auto-processing as complete
         with wishlist_timer_lock:
             wishlist_auto_processing = False
@@ -5952,9 +6102,11 @@ def _on_download_completed(batch_id, task_id, success=True):
             if task_status == 'cancelled':
                 download_batches[batch_id]['cancelled_tracks'].add(task.get('track_index', 0))
                 print(f"🚫 [Batch Manager] Added cancelled track to batch tracking: {track_info['track_name']}")
+                add_activity_item("🚫", "Download Cancelled", f"'{track_info['track_name']}'", "Now")
             elif task_status == 'failed':
                 download_batches[batch_id]['permanently_failed_tracks'].append(track_info)
                 print(f"❌ [Batch Manager] Added failed track to batch tracking: {track_info['track_name']}")
+                add_activity_item("❌", "Download Failed", f"'{track_info['track_name']}'", "Now")
             
         # WISHLIST REMOVAL: Handle successful downloads for wishlist removal
         if success and task_id in download_tasks:
@@ -5962,6 +6114,11 @@ def _on_download_completed(batch_id, task_id, success=True):
                 task = download_tasks[task_id]
                 track_info = task.get('track_info', {})
                 print(f"📋 [Batch Manager] Successful download - checking wishlist removal for task {task_id}")
+                
+                # Add activity for successful download
+                track_name = track_info.get('name', 'Unknown Track')
+                artist_name = track_info.get('artists', [{}])[0].get('name', 'Unknown Artist') if track_info.get('artists') else 'Unknown Artist'
+                add_activity_item("📥", "Download Complete", f"'{track_name}' by {artist_name}", "Now")
                 
                 # Try to remove from wishlist using track info
                 if track_info:
@@ -6018,6 +6175,11 @@ def _on_download_completed(batch_id, task_id, success=True):
             
             # Mark batch as complete and process wishlist outside of lock to prevent deadlocks
             batch['phase'] = 'complete'
+            
+            # Add activity for batch completion
+            playlist_name = batch.get('playlist_name', 'Unknown Playlist')
+            successful_downloads = finished_count - len(batch.get('permanently_failed_tracks', []))
+            add_activity_item("✅", "Download Batch Complete", f"'{playlist_name}' - {successful_downloads} tracks downloaded", "Now")
             
             # Update YouTube playlist phase to 'download_complete' if this is a YouTube playlist
             playlist_id = batch.get('playlist_id')
@@ -6892,6 +7054,10 @@ def start_playlist_missing_downloads(playlist_id):
     if not missing_tracks:
         return jsonify({"success": False, "error": "No missing tracks provided"}), 400
 
+    # Add activity for playlist download missing start
+    playlist_name = data.get('playlist_name', f'Playlist {playlist_id}')
+    add_activity_item("📥", "Missing Tracks Download Started", f"'{playlist_name}' - {len(missing_tracks)} tracks", "Now")
+
     try:
         batch_id = str(uuid.uuid4())
         
@@ -7519,7 +7685,8 @@ def cancel_task_v2():
             
             print(f"🔍 [Atomic Cancel] Task {task_id} state: status='{current_status}', original_status='{original_status}', download_id='{download_id}', username='{username}'")
             print(f"🔍 [Atomic Cancel] Download ID type: {type(download_id)}, length: {len(str(download_id)) if download_id else 0}")
-            print(f"🔍 [Atomic Cancel] Download ID looks like filename: {download_id and ('/' in str(download_id) or '\\' in str(download_id))}")
+            backslash = '\\'
+            print(f"🔍 [Atomic Cancel] Download ID looks like filename: {download_id and ('/' in str(download_id) or backslash in str(download_id))}")
             
             if download_id and username:
                 # Always try to cancel in slskd - doesn't matter what status it was
@@ -8641,6 +8808,9 @@ def start_tidal_sync(playlist_id):
         sync_playlist_id = f"tidal_{playlist_id}"
         playlist_name = state['playlist'].name  # Tidal playlist object has .name attribute
         
+        # Add activity for sync start
+        add_activity_item("🔄", "Tidal Sync Started", f"'{playlist_name}' - {len(spotify_tracks)} tracks", "Now")
+        
         # Update Tidal state
         state['phase'] = 'syncing'
         state['sync_playlist_id'] = sync_playlist_id
@@ -8697,8 +8867,13 @@ def get_tidal_sync_status(playlist_id):
         if sync_state.get('status') == 'finished':
             state['phase'] = 'sync_complete'
             state['sync_progress'] = sync_state.get('progress', {})
+            # Add activity for sync completion
+            playlist_name = state.get('playlist', {}).get('name', 'Unknown Playlist')
+            add_activity_item("🔄", "Sync Complete", f"Tidal playlist '{playlist_name}' synced successfully", "Now")
         elif sync_state.get('status') == 'error':
             state['phase'] = 'discovered'  # Revert on error
+            playlist_name = state.get('playlist', {}).get('name', 'Unknown Playlist')
+            add_activity_item("❌", "Sync Failed", f"Tidal playlist '{playlist_name}' sync failed", "Now")
         
         return jsonify(response)
         
@@ -9025,6 +9200,9 @@ def start_youtube_sync(url_hash):
         sync_playlist_id = f"youtube_{url_hash}"
         playlist_name = state['playlist']['name']
         
+        # Add activity for sync start
+        add_activity_item("🔄", "YouTube Sync Started", f"'{playlist_name}' - {len(spotify_tracks)} tracks", "Now")
+        
         # Update YouTube state
         state['phase'] = 'syncing'
         state['sync_playlist_id'] = sync_playlist_id
@@ -9081,8 +9259,13 @@ def get_youtube_sync_status(url_hash):
         if sync_state.get('status') == 'finished':
             state['phase'] = 'sync_complete'
             state['sync_progress'] = sync_state.get('progress', {})
+            # Add activity for sync completion
+            playlist_name = state.get('playlist', {}).get('name', 'Unknown Playlist')
+            add_activity_item("🔄", "Sync Complete", f"YouTube playlist '{playlist_name}' synced successfully", "Now")
         elif sync_state.get('status') == 'error':
             state['phase'] = 'discovered'  # Revert on error
+            playlist_name = state.get('playlist', {}).get('name', 'Unknown Playlist')
+            add_activity_item("❌", "Sync Failed", f"YouTube playlist '{playlist_name}' sync failed", "Now")
         
         return jsonify(response)
         
@@ -9530,6 +9713,9 @@ def start_playlist_sync():
 
     if not all([playlist_id, playlist_name, tracks_json]):
         return jsonify({"success": False, "error": "Missing playlist_id, name, or tracks."}), 400
+    
+    # Add activity for sync start
+    add_activity_item("🔄", "Spotify Sync Started", f"'{playlist_name}' - {len(tracks_json)} tracks", "Now")
     
     print(f"⏱️ [TIMING] Request parsed at {time.strftime('%H:%M:%S')} (took {(time.time()-request_start_time)*1000:.1f}ms)")
 
@@ -10269,7 +10455,7 @@ if __name__ == '__main__':
     # Start simple background monitor when server starts
     print("🔧 Starting simple background monitor...")
     start_simple_background_monitor()
-    print("✅ Simple background monitor started")
+    print("✅ Simple background monitor started (includes automatic search cleanup)")
     
     # Start automatic wishlist processing when server starts
     print("🔧 Starting automatic wishlist processing...")
@@ -10284,5 +10470,11 @@ if __name__ == '__main__':
     # Initialize app start time for uptime tracking
     import time
     app.start_time = time.time()
+    
+    # Add startup activity
+    add_activity_item("🚀", "System Started", "SoulSync Web UI Server initialized", "Now")
+    
+    # Add a test activity to verify the system is working
+    add_activity_item("🔧", "Debug Test", "Activity feed system test", "Now")
     
     app.run(host='0.0.0.0', port=5001, debug=True)
