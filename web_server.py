@@ -1518,6 +1518,12 @@ def handle_settings():
                         config_manager.set(f'{service}.{key}', value)
 
             print("✅ Settings saved successfully via Web UI.")
+            
+            # Add activity for settings save
+            changed_services = list(new_settings.keys())
+            services_text = ", ".join(changed_services)
+            add_activity_item("⚙️", "Settings Updated", f"{services_text} configuration saved", "Now")
+            
             spotify_client._setup_client()
             plex_client.server = None
             jellyfin_client.server = None
@@ -1553,6 +1559,42 @@ def test_connection_endpoint():
         service = active_server # use the actual server name for the test
 
     success, message = run_service_test(service, test_config)
+    
+    # Add activity for connection test
+    if success:
+        add_activity_item("✅", "Connection Test", f"{service.title()} connection successful", "Now")
+    else:
+        add_activity_item("❌", "Connection Test", f"{service.title()} connection failed", "Now")
+    
+    return jsonify({"success": success, "error": "" if success else message, "message": message if success else ""})
+
+@app.route('/api/test-dashboard-connection', methods=['POST'])
+def test_dashboard_connection_endpoint():
+    """Test connection from dashboard - creates specific dashboard activity items"""
+    data = request.get_json()
+    service = data.get('service')
+    if not service:
+        return jsonify({"success": False, "error": "No service specified."}), 400
+
+    print(f"Received dashboard test connection request for: {service}")
+    
+    # Get the current settings from the main config manager to test with
+    test_config = config_manager.get(service, {})
+    
+    # For media servers, the service name might be 'server'
+    if service == 'server':
+        active_server = config_manager.get_active_media_server()
+        test_config = config_manager.get(active_server, {})
+        service = active_server # use the actual server name for the test
+
+    success, message = run_service_test(service, test_config)
+    
+    # Add activity for dashboard connection test (different from settings test)
+    if success:
+        add_activity_item("🎛️", "Dashboard Test", f"{service.title()} service verified", "Now")
+    else:
+        add_activity_item("⚠️", "Dashboard Test", f"{service.title()} service check failed", "Now")
+    
     return jsonify({"success": success, "error": "" if success else message, "message": message if success else ""})
 
 @app.route('/api/detect-media-server', methods=['POST'])
@@ -1560,19 +1602,30 @@ def detect_media_server_endpoint():
     data = request.get_json()
     server_type = data.get('server_type')
     print(f"Received auto-detect request for: {server_type}")
+    
+    # Add activity for auto-detect start
+    add_activity_item("🔍", "Auto-Detect Started", f"Searching for {server_type} server", "Now")
+    
     found_url = run_detection(server_type)
     if found_url:
+        add_activity_item("✅", "Auto-Detect Complete", f"{server_type} found at {found_url}", "Now")
         return jsonify({"success": True, "found_url": found_url})
     else:
+        add_activity_item("❌", "Auto-Detect Failed", f"No {server_type} server found", "Now")
         return jsonify({"success": False, "error": f"No {server_type} server found on common local addresses."})
 
 @app.route('/api/detect-soulseek', methods=['POST'])
 def detect_soulseek_endpoint():
     print("Received auto-detect request for slskd")
+    
+    # Add activity for soulseek auto-detect start
+    add_activity_item("🔍", "Auto-Detect Started", "Searching for slskd server", "Now")
     found_url = run_detection('slskd')
     if found_url:
+        add_activity_item("✅", "Auto-Detect Complete", f"slskd found at {found_url}", "Now")
         return jsonify({"success": True, "found_url": found_url})
     else:
+        add_activity_item("❌", "Auto-Detect Failed", "No slskd server found", "Now")
         return jsonify({"success": False, "error": "No slskd server found on common local addresses."})
 
 # --- Full Tidal Authentication Flow ---
@@ -1595,12 +1648,17 @@ def auth_tidal():
     print(" tidal_client.authenticate() to start the flow.")
     print("Please follow the instructions in the console to log in to Tidal.")
     
+    # Add activity for authentication start
+    add_activity_item("🔐", "Tidal Auth Started", "Initiating authentication flow", "Now")
+    
     if temp_tidal_client.authenticate():
         # Re-initialize the main client instance after successful auth
         global tidal_client
         tidal_client = TidalClient()
+        add_activity_item("✅", "Tidal Auth Complete", "Successfully authenticated with Tidal", "Now")
         return "<h1>✅ Tidal Authentication Successful!</h1><p>You can now close this window and return to the SoulSync application.</p>"
     else:
+        add_activity_item("❌", "Tidal Auth Failed", "Authentication with Tidal failed", "Now")
         return "<h1>❌ Tidal Authentication Failed</h1><p>Please check the console output of the server for a login URL and follow the instructions.</p>", 400
 
 
@@ -1674,6 +1732,9 @@ def search_music():
 
     print(f"Web UI Search for: '{query}'")
     
+    # Add activity for search start
+    add_activity_item("🔍", "Search Started", f"'{query}'", "Now")
+    
     try:
         tracks, albums = asyncio.run(soulseek_client.search(query))
 
@@ -1693,6 +1754,10 @@ def search_music():
         
         # Sort by quality score
         all_results = sorted(processed_albums + processed_tracks, key=lambda x: x.get('quality_score', 0), reverse=True)
+
+        # Add activity for search completion
+        total_results = len(all_results)
+        add_activity_item("✅", "Search Complete", f"'{query}' - {total_results} results", "Now")
 
         return jsonify({"results": all_results})
         
@@ -7970,6 +8035,10 @@ def cancel_batch(batch_id):
                         task['status'] = 'cancelled'
                         cancelled_count += 1
             
+            # Add activity for batch cancellation
+            playlist_name = download_batches[batch_id].get('playlist_name', 'Unknown Playlist')
+            add_activity_item("🚫", "Batch Cancelled", f"'{playlist_name}' - {cancelled_count} downloads cancelled", "Now")
+            
             print(f"✅ Cancelled batch {batch_id} with {cancelled_count} tasks")
             return jsonify({"success": True, "cancelled_tasks": cancelled_count})
             
@@ -8449,6 +8518,9 @@ def start_tidal_discovery(playlist_id):
             }
             tidal_discovery_states[playlist_id] = state
         
+        # Add activity for discovery start
+        add_activity_item("🔍", "Tidal Discovery Started", f"'{target_playlist.name}' - {len(target_playlist.tracks)} tracks", "Now")
+        
         # Start discovery worker
         future = tidal_discovery_executor.submit(_run_tidal_discovery_worker, playlist_id)
         state['discovery_future'] = future
@@ -8713,6 +8785,9 @@ def _run_tidal_discovery_worker(playlist_id):
         state['phase'] = 'discovered'
         state['status'] = 'discovered'
         state['discovery_progress'] = 100
+        
+        # Add activity for discovery completion
+        add_activity_item("✅", "Tidal Discovery Complete", f"'{playlist.name}' - {successful_discoveries}/{len(playlist.tracks)} tracks found", "Now")
         
         print(f"✅ Tidal discovery complete: {successful_discoveries}/{len(playlist.tracks)} tracks found")
         
@@ -8993,6 +9068,11 @@ def start_youtube_discovery(url_hash):
         state['discovery_progress'] = 0
         state['spotify_matches'] = 0
         
+        # Add activity for discovery start
+        playlist_name = state['playlist']['name']
+        track_count = len(state['playlist']['tracks'])
+        add_activity_item("🔍", "YouTube Discovery Started", f"'{playlist_name}' - {track_count} tracks", "Now")
+        
         # Start discovery worker
         future = youtube_discovery_executor.submit(_run_youtube_discovery_worker, url_hash)
         state['discovery_future'] = future
@@ -9145,6 +9225,10 @@ def _run_youtube_discovery_worker(url_hash):
         state['phase'] = 'discovered'
         state['status'] = 'complete'
         state['discovery_progress'] = 100
+        
+        # Add activity for discovery completion
+        playlist_name = playlist['name']
+        add_activity_item("✅", "YouTube Discovery Complete", f"'{playlist_name}' - {state['spotify_matches']}/{len(tracks)} tracks found", "Now")
         
         print(f"✅ YouTube discovery complete: {state['spotify_matches']}/{len(tracks)} tracks matched")
         
