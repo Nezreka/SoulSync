@@ -13,8 +13,11 @@ services:
       - ./config:/app/config
       - ./database:/app/database
       - ./logs:/app/logs
-      - ./downloads:/app/downloads
-      - ./Transfer:/app/Transfer
+      # Soulseek download and transfer directories (mapped to host E: drive paths)
+      - /mnt/e/Broque Projects/newMusic/downloads:/app/downloads
+      - /mnt/e/Broque Projects/newMusic/transfer:/app/transfer
+      # Stream folder for temporary playback files
+      - /mnt/e/Broque Projects/newMusic/stream:/app/stream
       # Optional: Mount your music library for Plex/Jellyfin access
       - /path/to/your/music:/music:ro
     environment:
@@ -25,6 +28,9 @@ services:
       - SOULSYNC_CONFIG_PATH=/app/config/config.json
       # Set timezone
       - TZ=America/New_York
+    extra_hosts:
+      # Allow container to reach host services
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8888/"]

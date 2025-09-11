@@ -1062,8 +1062,11 @@ def run_service_test(service, test_config):
         # 1. Save original config for the specific service
         original_config = config_manager.get(service, {})
 
-        # 2. Temporarily set the new config for the test
+        # 2. Temporarily set the new config for the test (with Docker URL resolution)
         for key, value in test_config.items():
+            # Apply Docker URL resolution for URL/URI fields
+            if isinstance(value, str) and ('url' in key.lower() or 'uri' in key.lower()):
+                value = docker_resolve_url(value)
             config_manager.set(f"{service}.{key}", value)
 
         # 3. Run the test with the temporary config
@@ -1250,6 +1253,25 @@ def run_detection(server_type):
         if localhost_result:
             print(f"Found {server_type} at localhost!")
             return localhost_result
+        
+        # Priority 1.5: In Docker, try Docker host IP
+        import os
+        if os.path.exists('/.dockerenv'):
+            print(f"Docker detected, testing Docker host for {server_type}...")
+            try:
+                # Try host.docker.internal (Windows/Mac)
+                host_result = test_func("host.docker.internal")
+                if host_result:
+                    print(f"Found {server_type} at Docker host!")
+                    return host_result.replace("host.docker.internal", "localhost")  # Convert back to localhost for config
+                
+                # Try Docker bridge gateway (Linux)
+                gateway_result = test_func("172.17.0.1")
+                if gateway_result:
+                    print(f"Found {server_type} at Docker gateway!")
+                    return gateway_result.replace("172.17.0.1", "localhost")  # Convert back to localhost for config
+            except Exception as e:
+                print(f"Docker host detection failed: {e}")
         
         # Priority 2: Test local IP
         print(f"Testing local IP {local_ip} for {server_type}...")
@@ -11237,6 +11259,17 @@ class WebMetadataUpdateWorker:
         except Exception as e:
             print(f"Error uploading poster: {e}")
             return False
+
+# --- Docker Helper Functions ---
+
+def docker_resolve_url(url):
+    """
+    Resolve localhost URLs to Docker host when running in container
+    """
+    import os
+    if os.path.exists('/.dockerenv') and 'localhost' in url:
+        return url.replace('localhost', 'host.docker.internal')
+    return url
 
 # --- Main Execution ---
 

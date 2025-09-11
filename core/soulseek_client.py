@@ -219,7 +219,14 @@ class SoulseekClient:
             logger.warning("Soulseek slskd URL not configured")
             return
         
-        self.base_url = config['slskd_url'].rstrip('/')
+        # Apply Docker URL resolution if running in container
+        slskd_url = config.get('slskd_url')
+        import os
+        if os.path.exists('/.dockerenv') and 'localhost' in slskd_url:
+            slskd_url = slskd_url.replace('localhost', 'host.docker.internal')
+            logger.info(f"Docker detected, using {slskd_url} for slskd connection")
+        
+        self.base_url = slskd_url.rstrip('/')
         self.api_key = config.get('api_key', '')
         self.download_path = Path(config.get('download_path', './downloads'))
         self.download_path.mkdir(parents=True, exist_ok=True)
