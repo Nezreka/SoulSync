@@ -90,6 +90,14 @@ stream_lock = threading.Lock()  # Prevent race conditions
 stream_background_task = None
 stream_executor = ThreadPoolExecutor(max_workers=1)  # Only one stream at a time
 
+# --- Global OAuth State Management ---
+# Store PKCE values for Tidal OAuth flow
+tidal_oauth_state = {
+    "code_verifier": None,
+    "code_challenge": None
+}
+tidal_oauth_lock = threading.Lock()
+
 db_update_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="DBUpdate")
 db_update_worker = None
 db_update_state = {
@@ -1628,38 +1636,76 @@ def detect_soulseek_endpoint():
         add_activity_item("❌", "Auto-Detect Failed", "No slskd server found", "Now")
         return jsonify({"success": False, "error": "No slskd server found on common local addresses."})
 
-# --- Full Tidal Authentication Flow ---
+# --- Authentication Routes ---
+
+@app.route('/auth/spotify')
+def auth_spotify():
+    """
+    Initiates Spotify OAuth authentication flow
+    """
+    try:
+        # Create a fresh spotify client to trigger OAuth
+        temp_spotify_client = SpotifyClient()
+        if temp_spotify_client.sp and temp_spotify_client.sp.auth_manager:
+            # Get the authorization URL
+            auth_url = temp_spotify_client.sp.auth_manager.get_authorize_url()
+            add_activity_item("🔐", "Spotify Auth Started", "Please complete OAuth in browser", "Now")
+            return f'<h1>🔐 Spotify Authentication</h1><p>Please visit this URL to authenticate:</p><p><a href="{auth_url}" target="_blank">{auth_url}</a></p><p>After authentication, return to the app.</p>'
+        else:
+            return "<h1>❌ Spotify Authentication Failed</h1><p>Could not initialize Spotify client. Check your credentials.</p>", 400
+    except Exception as e:
+        print(f"🔴 Error starting Spotify auth: {e}")
+        return f"<h1>❌ Spotify Authentication Error</h1><p>{str(e)}</p>", 500
 
 @app.route('/auth/tidal')
 def auth_tidal():
     """
-    Initiates the Tidal OAuth authentication flow by calling the client's
-    authenticate method, which should handle opening the browser.
-    This now mirrors the GUI's approach.
+    Initiates Tidal OAuth authentication flow
     """
-    # FIX: Create a fresh client instance to ensure it uses the latest settings from config.json
-    temp_tidal_client = TidalClient()
-    if not temp_tidal_client:
-        return "Tidal client could not be initialized on the server.", 500
-
-    # The authenticate() method in your GUI likely opens a browser and blocks.
-    # The web server will also block here until authentication is complete.
-    # The user will see the URL to visit in the console where the server is running.
-    print(" tidal_client.authenticate() to start the flow.")
-    print("Please follow the instructions in the console to log in to Tidal.")
-    
-    # Add activity for authentication start
-    add_activity_item("🔐", "Tidal Auth Started", "Initiating authentication flow", "Now")
-    
-    if temp_tidal_client.authenticate():
-        # Re-initialize the main client instance after successful auth
-        global tidal_client
-        tidal_client = TidalClient()
-        add_activity_item("✅", "Tidal Auth Complete", "Successfully authenticated with Tidal", "Now")
-        return "<h1>✅ Tidal Authentication Successful!</h1><p>You can now close this window and return to the SoulSync application.</p>"
-    else:
-        add_activity_item("❌", "Tidal Auth Failed", "Authentication with Tidal failed", "Now")
-        return "<h1>❌ Tidal Authentication Failed</h1><p>Please check the console output of the server for a login URL and follow the instructions.</p>", 400
+    print("🔐🔐🔐 TIDAL AUTH ROUTE CALLED 🔐🔐🔐")
+    try:
+        # Create a fresh tidal client to get OAuth URL
+        from core.tidal_client import TidalClient
+        temp_tidal_client = TidalClient()
+        
+        if not temp_tidal_client.client_id:
+            return "<h1>❌ Tidal Authentication Failed</h1><p>Tidal client ID not configured. Check your credentials.</p>", 400
+        
+        # Generate PKCE challenge and store globally
+        temp_tidal_client._generate_pkce_challenge()
+        
+        # Store PKCE values globally for callback use
+        global tidal_oauth_state
+        with tidal_oauth_lock:
+            tidal_oauth_state["code_verifier"] = temp_tidal_client.code_verifier
+            tidal_oauth_state["code_challenge"] = temp_tidal_client.code_challenge
+        
+        print(f"🔐 Stored PKCE - verifier: {temp_tidal_client.code_verifier[:20]}... challenge: {temp_tidal_client.code_challenge[:20]}...")
+        
+        # Create OAuth URL
+        import urllib.parse
+        params = {
+            'response_type': 'code',
+            'client_id': temp_tidal_client.client_id,
+            'redirect_uri': temp_tidal_client.redirect_uri,
+            'scope': 'user.read playlists.read',
+            'code_challenge': temp_tidal_client.code_challenge,
+            'code_challenge_method': 'S256'
+        }
+        
+        auth_url = f"{temp_tidal_client.auth_url}?" + urllib.parse.urlencode(params)
+        
+        print(f"🔗 Generated Tidal OAuth URL: {auth_url}")
+        print(f"🔗 Redirect URI in URL: {params['redirect_uri']}")
+        
+        add_activity_item("🔐", "Tidal Auth Started", "Please complete OAuth in browser", "Now")
+        return f'<h1>🔐 Tidal Authentication</h1><p>Please visit this URL to authenticate:</p><p><a href="{auth_url}" target="_blank">{auth_url}</a></p><p>After authentication, return to the app.</p>'
+        
+    except Exception as e:
+        print(f"🔴 Error starting Tidal auth: {e}")
+        import traceback
+        print(f"🔴 Full traceback: {traceback.format_exc()}")
+        return f"<h1>❌ Tidal Authentication Error</h1><p>{str(e)}</p>", 500
 
 
 @app.route('/tidal/callback')
@@ -11194,9 +11240,183 @@ class WebMetadataUpdateWorker:
 
 # --- Main Execution ---
 
+def start_oauth_callback_servers():
+    """Start dedicated OAuth callback servers for Spotify and Tidal"""
+    import threading
+    from http.server import HTTPServer, BaseHTTPRequestHandler
+    import urllib.parse
+    
+    # Spotify callback server
+    class SpotifyCallbackHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            print(f"🎵 Spotify callback received: {self.path}")
+            parsed_url = urllib.parse.urlparse(self.path)
+            query_params = urllib.parse.parse_qs(parsed_url.query)
+            
+            if 'code' in query_params:
+                auth_code = query_params['code'][0]
+                print(f"🎵 Received Spotify authorization code: {auth_code[:10]}...")
+                
+                # Manually trigger the token exchange using spotipy's auth manager
+                try:
+                    from core.spotify_client import SpotifyClient
+                    from spotipy.oauth2 import SpotifyOAuth
+                    from config.settings import config_manager
+                    
+                    # Get Spotify config
+                    config = config_manager.get_spotify_config()
+                    
+                    # Create auth manager and exchange code for token
+                    auth_manager = SpotifyOAuth(
+                        client_id=config['client_id'],
+                        client_secret=config['client_secret'],
+                        redirect_uri="http://127.0.0.1:8888/callback",
+                        scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email",
+                        cache_path='config/.spotify_cache'
+                    )
+                    
+                    # Extract the authorization code and exchange it for tokens
+                    token_info = auth_manager.get_access_token(auth_code, as_dict=True)
+                    
+                    if token_info:
+                        # Reinitialize the global client with new tokens
+                        global spotify_client
+                        spotify_client = SpotifyClient()
+                        
+                        if spotify_client.is_authenticated():
+                            add_activity_item("✅", "Spotify Auth Complete", "Successfully authenticated with Spotify", "Now")
+                            self.send_response(200)
+                            self.send_header('Content-type', 'text/html')
+                            self.end_headers()
+                            self.wfile.write(b'<h1>Spotify Authentication Successful!</h1><p>You can close this window.</p>')
+                        else:
+                            raise Exception("Token exchange succeeded but authentication validation failed")
+                    else:
+                        raise Exception("Failed to exchange authorization code for access token")
+                except Exception as e:
+                    print(f"🔴 Spotify token processing error: {e}")
+                    add_activity_item("❌", "Spotify Auth Failed", f"Token processing failed: {str(e)}", "Now")
+                    self.send_response(400)
+                    self.send_header('Content-type', 'text/html')
+                    self.end_headers()
+                    self.wfile.write(f'<h1>Spotify Authentication Failed</h1><p>{str(e)}</p>'.encode())
+            else:
+                error = query_params.get('error', ['Unknown error'])[0]
+                print(f"🔴 Spotify OAuth error: {error}")
+                print(f"🔴 Full Spotify callback URL: {self.path}")
+                print(f"🔴 All query params: {query_params}")
+                
+                # Only show error toast if it's not just a spurious request
+                if 'error' in query_params:
+                    add_activity_item("❌", "Spotify Auth Failed", f"OAuth error: {error}", "Now")
+                else:
+                    print("🔴 Spurious Spotify callback without code or error - ignoring")
+                
+                self.send_response(400)
+                self.send_header('Content-type', 'text/html')
+                self.end_headers()
+                self.wfile.write(f'<h1>Spotify Authentication Failed</h1><p>{error}</p>'.encode())
+        
+        def log_message(self, format, *args):
+            pass  # Suppress server logs
+    
+    # Start Spotify callback server
+    def run_spotify_server():
+        try:
+            spotify_server = HTTPServer(('0.0.0.0', 8888), SpotifyCallbackHandler)
+            print("🎵 Started Spotify OAuth callback server on port 8888")
+            spotify_server.serve_forever()
+        except Exception as e:
+            print(f"🔴 Failed to start Spotify callback server: {e}")
+    
+    # Tidal callback server  
+    class TidalCallbackHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            print("🎶🎶🎶 TIDAL CALLBACK SERVER RECEIVED REQUEST 🎶🎶🎶")
+            parsed_url = urllib.parse.urlparse(self.path)
+            query_params = urllib.parse.parse_qs(parsed_url.query)
+            print(f"🎶 Callback path: {self.path}")
+            
+            if 'code' in query_params:
+                auth_code = query_params['code'][0]
+                print(f"🎶 Received Tidal authorization code: {auth_code[:10]}...")
+                
+                # Exchange the authorization code for tokens
+                try:
+                    from core.tidal_client import TidalClient
+                    
+                    # Create a temporary client and set the stored PKCE values
+                    temp_client = TidalClient()
+                    
+                    # Restore the PKCE values from the auth request
+                    global tidal_oauth_state
+                    with tidal_oauth_lock:
+                        temp_client.code_verifier = tidal_oauth_state["code_verifier"]
+                        temp_client.code_challenge = tidal_oauth_state["code_challenge"]
+                    
+                    print(f"🔐 Restored PKCE - verifier: {temp_client.code_verifier[:20] if temp_client.code_verifier else 'None'}... challenge: {temp_client.code_challenge[:20] if temp_client.code_challenge else 'None'}...")
+                    
+                    success = temp_client.fetch_token_from_code(auth_code)
+                    
+                    if success:
+                        # Reinitialize the global tidal client with new tokens
+                        global tidal_client
+                        tidal_client = TidalClient()
+                        
+                        add_activity_item("✅", "Tidal Auth Complete", "Successfully authenticated with Tidal", "Now")
+                        self.send_response(200)
+                        self.send_header('Content-type', 'text/html')
+                        self.end_headers()
+                        self.wfile.write(b'<h1>Tidal Authentication Successful!</h1><p>You can close this window.</p>')
+                    else:
+                        raise Exception("Failed to exchange authorization code for tokens")
+                        
+                except Exception as e:
+                    print(f"🔴 Tidal token processing error: {e}")
+                    add_activity_item("❌", "Tidal Auth Failed", f"Token processing failed: {str(e)}", "Now")
+                    self.send_response(400)
+                    self.send_header('Content-type', 'text/html')
+                    self.end_headers()
+                    self.wfile.write(f'<h1>Tidal Authentication Failed</h1><p>{str(e)}</p>'.encode())
+            else:
+                error = query_params.get('error', ['Unknown error'])[0]
+                print(f"🔴 Tidal OAuth error: {error}")
+                add_activity_item("❌", "Tidal Auth Failed", f"OAuth error: {error}", "Now")
+                self.send_response(400)
+                self.send_header('Content-type', 'text/html')
+                self.end_headers()
+                self.wfile.write(f'<h1>Tidal Authentication Failed</h1><p>{error}</p>'.encode())
+        
+        def log_message(self, format, *args):
+            pass  # Suppress server logs
+    
+    def run_tidal_server():
+        try:
+            tidal_server = HTTPServer(('0.0.0.0', 8889), TidalCallbackHandler)
+            print("🎶 Started Tidal OAuth callback server on port 8889")
+            print(f"🎶 Tidal server listening on all interfaces, port 8889")
+            tidal_server.serve_forever()
+        except Exception as e:
+            print(f"🔴 Failed to start Tidal callback server: {e}")
+            import traceback
+            print(f"🔴 Full error: {traceback.format_exc()}")
+    
+    # Start both servers in background threads
+    spotify_thread = threading.Thread(target=run_spotify_server, daemon=True)
+    tidal_thread = threading.Thread(target=run_tidal_server, daemon=True)
+    
+    spotify_thread.start()
+    tidal_thread.start()
+    
+    print("✅ OAuth callback servers started")
+
 if __name__ == '__main__':
     print("🚀 Starting SoulSync Web UI Server...")
     print("Open your browser and navigate to http://127.0.0.1:8008")
+    
+    # Start OAuth callback servers
+    print("🔧 Starting OAuth callback servers...")
+    start_oauth_callback_servers()
     
     # Start simple background monitor when server starts
     print("🔧 Starting simple background monitor...")
@@ -11223,4 +11443,4 @@ if __name__ == '__main__':
     # Add a test activity to verify the system is working
     add_activity_item("🔧", "Debug Test", "Activity feed system test", "Now")
     
-    app.run(host='0.0.0.0', port=8008, debug=True)
+    app.run(host='0.0.0.0', port=8008, debug=False)

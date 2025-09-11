@@ -5,7 +5,9 @@ services:
     build: .
     container_name: soulsync-webui
     ports:
-      - "8008:8008"
+      - "8008:8008"      # Main web app
+      - "8888:8888"      # Spotify OAuth callback
+      - "8889:8889"      # Tidal OAuth callback
     volumes:
       # Persistent data volumes
       - ./config:/app/config
