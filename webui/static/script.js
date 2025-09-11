@@ -1638,6 +1638,19 @@ function updateStatusDisplays() {
     });
 }
 
+async function authenticateSpotify() {
+    try {
+        showLoadingOverlay('Starting Spotify authentication...');
+        showToast('Spotify authentication started', 'success');
+        window.open('/auth/spotify', '_blank');
+    } catch (error) {
+        console.error('Error authenticating Spotify:', error);
+        showToast('Failed to start Spotify authentication', 'error');
+    } finally {
+        hideLoadingOverlay();
+    }
+}
+
 async function authenticateTidal() {
     try {
         showLoadingOverlay('Starting Tidal authentication...');
@@ -5816,6 +5829,7 @@ window.autoDetectPlex = autoDetectPlex;
 window.autoDetectJellyfin = autoDetectJellyfin;
 window.autoDetectSlskd = autoDetectSlskd;
 window.toggleServer = toggleServer;
+window.authenticateSpotify = authenticateSpotify;
 window.authenticateTidal = authenticateTidal;
 window.browsePath = browsePath;
 window.selectResult = selectResult;
