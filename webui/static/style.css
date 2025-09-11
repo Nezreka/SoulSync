@@ -7142,3 +7142,8 @@ body {
             drop-shadow(0 0 12px var(--glow-color-2, #1ed760));
     border-color: var(--glow-color-1, rgba(29, 185, 84, 0.4));
 }
+
+#metadata-updater-card{
+    display: flex!important;
+    justify-content: space-between;
+}
