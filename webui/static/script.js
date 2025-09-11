@@ -6859,6 +6859,18 @@ async function loadDashboardData() {
         updateButton.addEventListener('click', handleDbUpdateButtonClick);
     }
 
+    // Attach event listeners for the metadata updater tool
+    const metadataButton = document.getElementById('metadata-update-button');
+    if (metadataButton) {
+        metadataButton.addEventListener('click', handleMetadataUpdateButtonClick);
+    }
+    
+    // Check active media server and hide metadata updater if Jellyfin
+    await checkAndHideMetadataUpdaterForJellyfin();
+    
+    // Check for ongoing metadata update and restore state
+    await checkAndRestoreMetadataUpdateState();
+
     // Attach event listener for the wishlist button
     const wishlistButton = document.getElementById('wishlist-button');
     if (wishlistButton) {
@@ -12664,6 +12676,243 @@ async function removeFromWatchlistModal(artistId, artistName) {
     }
 }
 
+
+// --- Metadata Updater Functions ---
+
+// Global state for metadata update polling
+let metadataUpdatePolling = false;
+let metadataUpdateInterval = null;
+
+/**
+ * Handle metadata update button click
+ */
+async function handleMetadataUpdateButtonClick() {
+    const button = document.getElementById('metadata-update-button');
+    const currentAction = button.textContent;
+
+    if (currentAction === 'Begin Update') {
+        // Get refresh interval from dropdown
+        const refreshSelect = document.getElementById('metadata-refresh-interval');
+        const refreshIntervalDays = refreshSelect.value !== undefined ? parseInt(refreshSelect.value) : 30;
+
+        try {
+            button.disabled = true;
+            button.textContent = 'Starting...';
+            
+            const response = await fetch('/api/metadata/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ refresh_interval_days: refreshIntervalDays })
+            });
+
+            const data = await response.json();
+            if (!data.success) {
+                throw new Error(data.error || 'Failed to start metadata update');
+            }
+
+            showToast('Metadata update started!', 'success');
+            
+            // Start polling for status updates
+            startMetadataUpdatePolling();
+
+        } catch (error) {
+            console.error('Error starting metadata update:', error);
+            button.disabled = false;
+            button.textContent = 'Begin Update';
+            showToast(`Error: ${error.message}`, 'error');
+        }
+    } else {
+        // Stop metadata update
+        try {
+            button.disabled = true;
+            button.textContent = 'Stopping...';
+            
+            const response = await fetch('/api/metadata/stop', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to stop metadata update');
+            }
+
+        } catch (error) {
+            console.error('Error stopping metadata update:', error);
+            button.disabled = false;
+            button.textContent = 'Stop Update';
+        }
+    }
+}
+
+/**
+ * Start polling for metadata update status
+ */
+function startMetadataUpdatePolling() {
+    if (metadataUpdatePolling) return; // Already polling
+    
+    metadataUpdatePolling = true;
+    metadataUpdateInterval = setInterval(checkMetadataUpdateStatus, 1000); // Poll every second
+    
+    // Also check immediately
+    checkMetadataUpdateStatus();
+}
+
+/**
+ * Stop polling for metadata update status
+ */
+function stopMetadataUpdatePolling() {
+    metadataUpdatePolling = false;
+    if (metadataUpdateInterval) {
+        clearInterval(metadataUpdateInterval);
+        metadataUpdateInterval = null;
+    }
+}
+
+/**
+ * Check current metadata update status and update UI
+ */
+async function checkMetadataUpdateStatus() {
+    try {
+        const response = await fetch('/api/metadata/status');
+        const data = await response.json();
+        
+        if (data.success && data.status) {
+            updateMetadataProgressUI(data.status);
+            
+            // Stop polling if completed or error
+            if (data.status.status === 'completed' || data.status.status === 'error') {
+                stopMetadataUpdatePolling();
+            }
+        }
+        
+    } catch (error) {
+        console.warn('Could not fetch metadata update status:', error);
+    }
+}
+
+/**
+ * Update metadata progress UI elements
+ */
+function updateMetadataProgressUI(status) {
+    const button = document.getElementById('metadata-update-button');
+    const phaseLabel = document.getElementById('metadata-phase-label');
+    const progressLabel = document.getElementById('metadata-progress-label');
+    const progressBar = document.getElementById('metadata-progress-bar');
+    const refreshSelect = document.getElementById('metadata-refresh-interval');
+
+    if (!button || !phaseLabel || !progressLabel || !progressBar || !refreshSelect) return;
+
+    if (status.status === 'running') {
+        button.textContent = 'Stop Update';
+        button.disabled = false;
+        refreshSelect.disabled = true;
+        
+        // Update current artist display
+        const currentArtist = status.current_artist || 'Processing...';
+        phaseLabel.textContent = `Current Artist: ${currentArtist}`;
+        
+        // Update progress
+        const processed = status.processed || 0;
+        const total = status.total || 0;
+        const percentage = status.percentage || 0;
+        
+        progressLabel.textContent = `${processed} / ${total} artists (${percentage.toFixed(1)}%)`;
+        progressBar.style.width = `${percentage}%`;
+        
+    } else if (status.status === 'stopping') {
+        button.textContent = 'Stopping...';
+        button.disabled = true;
+        phaseLabel.textContent = 'Current Artist: Stopping...';
+        
+    } else if (status.status === 'completed') {
+        button.textContent = 'Begin Update';
+        button.disabled = false;
+        refreshSelect.disabled = false;
+        
+        phaseLabel.textContent = 'Current Artist: Completed';
+        
+        const processed = status.processed || 0;
+        const successful = status.successful || 0;
+        const failed = status.failed || 0;
+        
+        progressLabel.textContent = `Completed: ${processed} processed, ${successful} successful, ${failed} failed`;
+        progressBar.style.width = '100%';
+        
+        showToast(`Metadata update completed: ${successful} artists updated, ${failed} failed`, 'success');
+        
+    } else if (status.status === 'error') {
+        button.textContent = 'Begin Update';
+        button.disabled = false;
+        refreshSelect.disabled = false;
+        
+        phaseLabel.textContent = 'Current Artist: Error occurred';
+        progressLabel.textContent = status.error || 'Unknown error';
+        progressBar.style.width = '0%';
+        
+    } else {
+        // Idle state
+        button.textContent = 'Begin Update';
+        button.disabled = false;
+        refreshSelect.disabled = false;
+        
+        phaseLabel.textContent = 'Current Artist: Not running';
+        progressLabel.textContent = '0 / 0 artists (0.0%)';
+        progressBar.style.width = '0%';
+    }
+}
+
+/**
+ * Check active media server and hide metadata updater if Jellyfin
+ */
+async function checkAndHideMetadataUpdaterForJellyfin() {
+    try {
+        const response = await fetch('/api/active-media-server');
+        const data = await response.json();
+        
+        if (data.success) {
+            const metadataCard = document.getElementById('metadata-updater-card');
+            if (metadataCard) {
+                if (data.active_server === 'jellyfin') {
+                    // Hide metadata updater for Jellyfin (same as dashboard.py behavior)
+                    metadataCard.style.display = 'none';
+                    console.log('Metadata updater hidden: Jellyfin is active server');
+                } else {
+                    // Show metadata updater for Plex
+                    metadataCard.style.display = 'block';
+                    console.log('Metadata updater shown: Plex is active server');
+                }
+            }
+        }
+    } catch (error) {
+        console.warn('Could not check active media server for metadata updater visibility:', error);
+    }
+}
+
+/**
+ * Check for ongoing metadata update and restore state on page load
+ */
+async function checkAndRestoreMetadataUpdateState() {
+    try {
+        const response = await fetch('/api/metadata/status');
+        const data = await response.json();
+        
+        if (data.success && data.status) {
+            const status = data.status;
+            
+            // If metadata update is running, restore the UI state and start polling
+            if (status.status === 'running') {
+                console.log('Found ongoing metadata update, restoring state...');
+                updateMetadataProgressUI(status);
+                startMetadataUpdatePolling();
+            } else if (status.status === 'completed' || status.status === 'error') {
+                // Show final state but don't start polling
+                updateMetadataProgressUI(status);
+            }
+        }
+    } catch (error) {
+        console.warn('Could not check metadata update state on page load:', error);
+    }
+}
 
 // --- Global Cleanup on Page Unload ---
 // Note: Automatic wishlist processing now runs server-side and continues even when browser is closed
