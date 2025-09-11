@@ -259,6 +259,7 @@ const API = {
     config: '/config',
     settings: '/api/settings',
     testConnection: '/api/test-connection',
+    testDashboardConnection: '/api/test-dashboard-connection',
     playlists: '/api/playlists',
     sync: '/api/sync',
     search: '/api/search',
@@ -1506,6 +1507,32 @@ async function testConnection(service) {
     } catch (error) {
         console.error(`Error testing ${service} connection:`, error);
         showToast(`Failed to test ${service} connection`, 'error');
+    } finally {
+        hideLoadingOverlay();
+    }
+}
+
+// Dashboard-specific test functions that create activity items
+async function testDashboardConnection(service) {
+    try {
+        showLoadingOverlay(`Testing ${service} service...`);
+        
+        const response = await fetch(API.testDashboardConnection, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ service })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showToast(`${service} service verified`, 'success');
+        } else {
+            showToast(`${service} service check failed: ${result.error}`, 'error');
+        }
+    } catch (error) {
+        console.error(`Error testing ${service} service:`, error);
+        showToast(`Failed to test ${service} service`, 'error');
     } finally {
         hideLoadingOverlay();
     }
