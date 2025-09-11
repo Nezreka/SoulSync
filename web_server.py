@@ -10530,6 +10530,634 @@ def start_watchlist_auto_scanning():
     thread.start()
     print("✅ Automatic daily watchlist scanning started")
 
+# --- Metadata Updater System ---
+
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# Global state for metadata update process
+metadata_update_state = {
+    'status': 'idle',
+    'current_artist': '',
+    'processed': 0,
+    'total': 0,
+    'percentage': 0.0,
+    'successful': 0,
+    'failed': 0,
+    'started_at': None,
+    'completed_at': None,
+    'error': None,
+    'refresh_interval_days': 30
+}
+
+metadata_update_worker = None
+metadata_update_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="metadata_update")
+
+@app.route('/api/metadata/start', methods=['POST'])
+def start_metadata_update():
+    """Start the metadata update process - EXACT copy of dashboard.py logic"""
+    global metadata_update_worker, metadata_update_state
+    
+    try:
+        # Check if already running
+        if metadata_update_state['status'] == 'running':
+            return jsonify({"success": False, "error": "Metadata update already running"}), 400
+        
+        # Get refresh interval from request
+        data = request.get_json() or {}
+        refresh_interval_days = data.get('refresh_interval_days', 30)
+        
+        # Check active server and client availability - EXACTLY like dashboard.py
+        active_server = config_manager.get_active_media_server()
+        
+        # Get appropriate media client - EXACTLY like dashboard.py start_metadata_update()
+        if active_server == "jellyfin":
+            media_client = jellyfin_client
+            if not media_client:
+                add_activity_item("❌", "Metadata Update", "Jellyfin client not available", "Now")
+                return jsonify({"success": False, "error": "Jellyfin client not available"}), 400
+        else:  # plex
+            media_client = plex_client
+            if not media_client:
+                add_activity_item("❌", "Metadata Update", "Plex client not available", "Now")
+                return jsonify({"success": False, "error": "Plex client not available"}), 400
+            
+            # DEBUG: Check Plex connection details
+            print(f"[DEBUG] Active server: {active_server}")
+            print(f"[DEBUG] Plex client: {media_client}")
+            if hasattr(media_client, 'server') and media_client.server:
+                print(f"[DEBUG] Plex server URL: {getattr(media_client.server, '_baseurl', 'NO_URL')}")
+                print(f"[DEBUG] Plex server name: {getattr(media_client.server, 'friendlyName', 'NO_NAME')}")
+                # Check available libraries
+                try:
+                    sections = media_client.server.library.sections()
+                    print(f"[DEBUG] Available Plex libraries: {[(s.title, s.type) for s in sections]}")
+                except Exception as e:
+                    print(f"[DEBUG] Error getting Plex libraries: {e}")
+            else:
+                print(f"[DEBUG] Plex server is NOT connected!")
+        
+        # Check Spotify client - EXACTLY like dashboard.py
+        if not spotify_client:
+            add_activity_item("❌", "Metadata Update", "Spotify client not available", "Now")
+            return jsonify({"success": False, "error": "Spotify client not available"}), 400
+        
+        # Reset state
+        metadata_update_state.update({
+            'status': 'running',
+            'current_artist': 'Loading artists...',
+            'processed': 0,
+            'total': 0,
+            'percentage': 0.0,
+            'successful': 0,
+            'failed': 0,
+            'started_at': datetime.now(),
+            'completed_at': None,
+            'error': None,
+            'refresh_interval_days': refresh_interval_days
+        })
+        
+        # Start the metadata update worker - EXACTLY like dashboard.py
+        def run_metadata_update():
+            try:
+                metadata_worker = WebMetadataUpdateWorker(
+                    None,  # Artists will be loaded in the worker thread - EXACTLY like dashboard.py
+                    media_client,
+                    spotify_client,
+                    active_server,
+                    refresh_interval_days
+                )
+                metadata_worker.run()
+            except Exception as e:
+                print(f"Error in metadata update worker: {e}")
+                metadata_update_state['status'] = 'error'
+                metadata_update_state['error'] = str(e)
+                add_activity_item("❌", "Metadata Error", str(e), "Now")
+        
+        metadata_update_worker = metadata_update_executor.submit(run_metadata_update)
+        
+        add_activity_item("🎵", "Metadata Update", "Loading artists from library...", "Now")
+        
+        return jsonify({"success": True})
+        
+    except Exception as e:
+        print(f"Error starting metadata update: {e}")
+        metadata_update_state['status'] = 'error'
+        metadata_update_state['error'] = str(e)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/metadata/stop', methods=['POST'])
+def stop_metadata_update():
+    """Stop the metadata update process"""
+    global metadata_update_state
+    
+    try:
+        if metadata_update_state['status'] == 'running':
+            metadata_update_state['status'] = 'stopping'
+            metadata_update_state['current_artist'] = 'Stopping...'
+            add_activity_item("⏹️", "Metadata Update", "Stopping metadata update process", "Now")
+        
+        return jsonify({"success": True})
+        
+    except Exception as e:
+        print(f"Error stopping metadata update: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/metadata/status', methods=['GET'])
+def get_metadata_update_status():
+    """Get current metadata update status"""
+    try:
+        # Return a copy of the state with datetime serialization
+        state_copy = metadata_update_state.copy()
+        
+        # Convert datetime objects to ISO format for JSON serialization
+        if state_copy.get('started_at'):
+            state_copy['started_at'] = state_copy['started_at'].isoformat()
+        if state_copy.get('completed_at'):
+            state_copy['completed_at'] = state_copy['completed_at'].isoformat()
+        
+        return jsonify({"success": True, "status": state_copy})
+        
+    except Exception as e:
+        print(f"Error getting metadata update status: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/active-media-server', methods=['GET'])
+def get_active_media_server():
+    """Get the currently active media server"""
+    try:
+        active_server = config_manager.get_active_media_server()
+        return jsonify({"success": True, "active_server": active_server})
+    except Exception as e:
+        print(f"Error getting active media server: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+class WebMetadataUpdateWorker:
+    """Web-based metadata update worker - EXACT port of dashboard.py MetadataUpdateWorker"""
+    
+    def __init__(self, artists, media_client, spotify_client, server_type, refresh_interval_days=30):
+        self.artists = artists
+        self.media_client = media_client  # Can be plex_client or jellyfin_client
+        self.spotify_client = spotify_client
+        self.server_type = server_type  # "plex" or "jellyfin"
+        self.matching_engine = MusicMatchingEngine()
+        self.refresh_interval_days = refresh_interval_days
+        self.should_stop = False
+        self.processed_count = 0
+        self.successful_count = 0
+        self.failed_count = 0
+        self.max_workers = 4
+        self.thread_lock = threading.Lock()
+    
+    def stop(self):
+        self.should_stop = True
+    
+    def get_artist_name(self, artist):
+        """Get artist name consistently across Plex and Jellyfin"""
+        return getattr(artist, 'title', 'Unknown Artist')
+    
+    def run(self):
+        """Process all artists one by one - EXACT copy from dashboard.py"""
+        global metadata_update_state
+        
+        try:
+            # Load artists in background if not provided - EXACTLY like dashboard.py
+            if self.artists is None:
+                # Enable lightweight mode for Jellyfin to skip track caching
+                if self.server_type == "jellyfin":
+                    self.media_client.set_metadata_only_mode(True)
+                
+                all_artists = self.media_client.get_all_artists()
+                print(f"[DEBUG] Raw artists returned: {[getattr(a, 'title', 'NO_TITLE') for a in (all_artists or [])]}")
+                if not all_artists:
+                    metadata_update_state['status'] = 'error'
+                    metadata_update_state['error'] = f"No artists found in {self.server_type.title()} library"
+                    add_activity_item("❌", "Metadata Update", metadata_update_state['error'], "Now")
+                    return
+                
+                # Filter artists that need processing
+                artists_to_process = [artist for artist in all_artists if self.artist_needs_processing(artist)]
+                self.artists = artists_to_process
+                
+                # Emit loaded signal equivalent - EXACTLY like dashboard.py
+                if len(artists_to_process) == 0:
+                    metadata_update_state['status'] = 'completed'
+                    metadata_update_state['completed_at'] = datetime.now()
+                    add_activity_item("✅", "Metadata Update", "All artists already have good metadata", "Now")
+                    return
+                else:
+                    add_activity_item("🎵", "Metadata Update", f"Processing {len(artists_to_process)} of {len(all_artists)} artists", "Now")
+                
+                if not artists_to_process:
+                    metadata_update_state['status'] = 'completed'
+                    metadata_update_state['completed_at'] = datetime.now()
+                    return
+            
+            total_artists = len(self.artists)
+            metadata_update_state['total'] = total_artists
+            
+            # Process artists in parallel using ThreadPoolExecutor - EXACTLY like dashboard.py
+            def process_single_artist(artist):
+                """Process a single artist and return results"""
+                if self.should_stop or metadata_update_state['status'] == 'stopping':
+                    return None
+                    
+                artist_name = getattr(artist, 'title', 'Unknown Artist')
+                
+                # Double-check ignore flag right before processing
+                if self.media_client.is_artist_ignored(artist):
+                    return (artist_name, True, "Skipped (ignored)")
+                
+                try:
+                    success, details = self.update_artist_metadata(artist)
+                    return (artist_name, success, details)
+                except Exception as e:
+                    return (artist_name, False, f"Error: {str(e)}")
+            
+            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                # Submit all tasks
+                future_to_artist = {executor.submit(process_single_artist, artist): artist 
+                                  for artist in self.artists}
+                
+                # Process completed tasks as they finish
+                for future in as_completed(future_to_artist):
+                    if self.should_stop or metadata_update_state['status'] == 'stopping':
+                        break
+                        
+                    result = future.result()
+                    if result is None:  # Task was cancelled
+                        continue
+                        
+                    artist_name, success, details = result
+                    
+                    with self.thread_lock:
+                        self.processed_count += 1
+                        if success:
+                            self.successful_count += 1
+                        else:
+                            self.failed_count += 1
+                    
+                    # Update global state - equivalent to progress_updated.emit
+                    progress_percent = (self.processed_count / total_artists) * 100
+                    metadata_update_state.update({
+                        'current_artist': artist_name,
+                        'processed': self.processed_count,
+                        'percentage': progress_percent,
+                        'successful': self.successful_count,
+                        'failed': self.failed_count
+                    })
+                    
+                    # Individual artist updates are tracked in progress but not shown as separate activity items
+                    # This prevents spam in the activity feed (unlike dashboard which shows these in a separate widget)
+            
+            # Mark as completed - equivalent to finished.emit
+            metadata_update_state['status'] = 'completed'
+            metadata_update_state['completed_at'] = datetime.now()
+            metadata_update_state['current_artist'] = 'Completed'
+            
+            summary = f"Processed {self.processed_count} artists: {self.successful_count} updated, {self.failed_count} failed"
+            add_activity_item("🎵", "Metadata Complete", summary, "Now")
+            
+        except Exception as e:
+            print(f"Metadata update failed: {e}")
+            metadata_update_state['status'] = 'error'
+            metadata_update_state['error'] = str(e)
+            add_activity_item("❌", "Metadata Error", str(e), "Now")
+    
+    def artist_needs_processing(self, artist):
+        """Check if an artist needs metadata processing using age-based detection - EXACT copy from dashboard.py"""
+        try:
+            # Check if artist is manually ignored
+            if self.media_client.is_artist_ignored(artist):
+                return False
+            
+            # Use media client's age-based checking with configured interval
+            return self.media_client.needs_update_by_age(artist, self.refresh_interval_days)
+            
+        except Exception as e:
+            print(f"Error checking artist {getattr(artist, 'title', 'Unknown')}: {e}")
+            return True  # Process if we can't determine status
+    
+    def update_artist_metadata(self, artist):
+        """Update a single artist's metadata - EXACT copy from dashboard.py"""
+        try:
+            artist_name = getattr(artist, 'title', 'Unknown Artist')
+            
+            # 1. Search for top 5 potential artists on Spotify
+            spotify_artists = self.spotify_client.search_artists(artist_name, limit=5)
+            if not spotify_artists:
+                return False, "Not found on Spotify"
+            
+            # 2. Find the best match using the matching engine
+            best_match = None
+            highest_score = 0.0
+            
+            plex_artist_normalized = self.matching_engine.normalize_string(artist_name)
+
+            for spotify_artist in spotify_artists:
+                spotify_artist_normalized = self.matching_engine.normalize_string(spotify_artist.name)
+                score = self.matching_engine.similarity_score(plex_artist_normalized, spotify_artist_normalized)
+                
+                if score > highest_score:
+                    highest_score = score
+                    best_match = spotify_artist
+
+            # 3. If no suitable match is found, exit
+            if not best_match or highest_score < 0.7: # Confidence threshold
+                 return False, f"No confident match found (best: '{getattr(best_match, 'name', 'N/A')}', score: {highest_score:.2f})"
+
+            spotify_artist = best_match
+            changes_made = []
+            
+            # Update photo if needed
+            photo_updated = self.update_artist_photo(artist, spotify_artist)
+            if photo_updated:
+                changes_made.append("photo")
+            
+            # Update genres
+            genres_updated = self.update_artist_genres(artist, spotify_artist)
+            if genres_updated:
+                changes_made.append("genres")
+            
+            # Update album artwork (only for Plex, skip for Jellyfin due to API issues)
+            if self.server_type == "plex":
+                albums_updated = self.update_album_artwork(artist, spotify_artist)
+                if albums_updated > 0:
+                    changes_made.append(f"{albums_updated} album art")
+            else:
+                # Skip album artwork for Jellyfin until API issues are resolved
+                print(f"Skipping album artwork updates for Jellyfin artist: {artist.title}")
+            
+            if changes_made:
+                # Update artist biography with timestamp to track last update
+                biography_updated = self.media_client.update_artist_biography(artist)
+                if biography_updated:
+                    changes_made.append("timestamp")
+                
+                details = f"Updated {', '.join(changes_made)} (match: '{spotify_artist.name}', score: {highest_score:.2f})"
+                return True, details
+            else:
+                # Even if no metadata changes, update biography to record we checked this artist
+                self.media_client.update_artist_biography(artist)
+                return True, "Already up to date"
+                
+        except Exception as e:
+            return False, str(e)
+    
+    def update_artist_photo(self, artist, spotify_artist):
+        """Update artist photo from Spotify - EXACT copy from dashboard.py"""
+        try:
+            # Check if artist already has a good photo
+            if self.artist_has_valid_photo(artist):
+                return False
+            
+            # Get the image URL from Spotify
+            if not spotify_artist.image_url:
+                return False
+                
+            image_url = spotify_artist.image_url
+            
+            # Download and validate image
+            response = requests.get(image_url, timeout=10)
+            response.raise_for_status()
+            
+            # Validate and convert image
+            image_data = self.validate_and_convert_image(response.content)
+            if not image_data:
+                return False
+            
+            # Upload to media server
+            return self.upload_artist_poster(artist, image_data)
+            
+        except Exception as e:
+            print(f"Error updating photo for {getattr(artist, 'title', 'Unknown')}: {e}")
+            return False
+    
+    def update_artist_genres(self, artist, spotify_artist):
+        """Update artist genres from Spotify and albums - EXACT copy from dashboard.py"""
+        try:
+            # Get existing genres
+            existing_genres = set(genre.tag if hasattr(genre, 'tag') else str(genre) 
+                                for genre in (artist.genres or []))
+            
+            # Get Spotify artist genres
+            spotify_genres = set(spotify_artist.genres or [])
+            
+            # Get genres from all albums
+            album_genres = set()
+            try:
+                for album in artist.albums():
+                    if hasattr(album, 'genres') and album.genres:
+                        album_genres.update(genre.tag if hasattr(genre, 'tag') else str(genre) 
+                                          for genre in album.genres)
+            except Exception:
+                pass  # Albums might not be accessible
+            
+            # Combine all genres (prioritize Spotify genres)
+            all_genres = spotify_genres.union(album_genres)
+            
+            # Filter out empty/invalid genres
+            all_genres = {g for g in all_genres if g and g.strip() and len(g.strip()) > 1}
+            
+            # Only update if we have new genres and they're different
+            if all_genres and (not existing_genres or all_genres != existing_genres):
+                # Convert to list and limit to 10 genres
+                genre_list = list(all_genres)[:10]
+                
+                # Use media client API to update genres
+                success = self.media_client.update_artist_genres(artist, genre_list)
+                if success:
+                    return True
+                else:
+                    return False
+            else:
+                return False
+            
+        except Exception as e:
+            print(f"Error updating genres for {getattr(artist, 'title', 'Unknown')}: {e}")
+            return False
+    
+    def update_album_artwork(self, artist, spotify_artist):
+        """Update album artwork for all albums by this artist - EXACT copy from dashboard.py"""
+        try:
+            updated_count = 0
+            skipped_count = 0
+            
+            # Get all albums for this artist
+            try:
+                albums = list(artist.albums())
+            except Exception:
+                print(f"Could not access albums for artist '{artist.title}'")
+                return 0
+            
+            if not albums:
+                print(f"No albums found for artist '{artist.title}'")
+                return 0
+            
+            for album in albums:
+                try:
+                    album_title = getattr(album, 'title', 'Unknown Album')
+                    
+                    # Check if album already has good artwork
+                    if self.album_has_valid_artwork(album):
+                        skipped_count += 1
+                        continue
+                    
+                    # Search for this specific album on Spotify
+                    album_query = f"album:{album_title} artist:{spotify_artist.name}"
+                    spotify_albums = self.spotify_client.search_albums(album_query, limit=3)
+                    
+                    if not spotify_albums:
+                        continue
+                    
+                    # Find the best matching album
+                    best_album = None
+                    highest_score = 0.0
+                    
+                    plex_album_normalized = self.matching_engine.normalize_string(album_title)
+                    
+                    for spotify_album in spotify_albums:
+                        spotify_album_normalized = self.matching_engine.normalize_string(spotify_album.name)
+                        score = self.matching_engine.similarity_score(plex_album_normalized, spotify_album_normalized)
+                        
+                        if score > highest_score:
+                            highest_score = score
+                            best_album = spotify_album
+                    
+                    # If we found a good match with artwork, download it
+                    if best_album and highest_score > 0.7 and best_album.image_url:
+                        # Download and upload the artwork
+                        if self.download_and_upload_album_artwork(album, best_album.image_url):
+                            updated_count += 1
+                
+                except Exception as e:
+                    print(f"Error processing album '{getattr(album, 'title', 'Unknown')}': {e}")
+                    continue
+            
+            return updated_count
+            
+        except Exception as e:
+            print(f"Error updating album artwork for artist '{getattr(artist, 'title', 'Unknown')}': {e}")
+            return 0
+    
+    def album_has_valid_artwork(self, album):
+        """Check if album has valid artwork - EXACT copy from dashboard.py"""
+        try:
+            if not hasattr(album, 'thumb') or not album.thumb:
+                return False
+            
+            thumb_url = str(album.thumb)
+            
+            # Completely empty or None
+            if not thumb_url or thumb_url.strip() == '':
+                return False
+            
+            # Obvious placeholder text in URL
+            obvious_placeholders = ['no-image', 'placeholder', 'missing', 'default-album', 'blank.jpg', 'empty.png']
+            thumb_lower = thumb_url.lower()
+            for placeholder in obvious_placeholders:
+                if placeholder in thumb_lower:
+                    return False
+            
+            # Extremely short URLs (likely broken)
+            if len(thumb_url) < 20:
+                return False
+            
+            return True
+            
+        except Exception as e:
+            return True
+    
+    def download_and_upload_album_artwork(self, album, image_url):
+        """Download artwork from Spotify and upload to media server - EXACT copy from dashboard.py"""
+        try:
+            # Download image from Spotify
+            response = requests.get(image_url, timeout=10)
+            response.raise_for_status()
+            
+            # Validate and convert image
+            image_data = self.validate_and_convert_image(response.content)
+            if not image_data:
+                return False
+            
+            # Upload using media client
+            success = self.media_client.update_album_poster(album, image_data)
+            return success
+            
+        except Exception as e:
+            print(f"Error downloading/uploading artwork for album '{getattr(album, 'title', 'Unknown')}': {e}")
+            return False
+    
+    def artist_has_valid_photo(self, artist):
+        """Check if artist has a valid photo - EXACT copy from dashboard.py"""
+        try:
+            if not hasattr(artist, 'thumb') or not artist.thumb:
+                return False
+            
+            thumb_url = str(artist.thumb)
+            if 'default' in thumb_url.lower() or len(thumb_url) < 50:
+                return False
+            
+            return True
+            
+        except Exception:
+            return False
+    
+    def validate_and_convert_image(self, image_data):
+        """Validate and convert image for media server compatibility - EXACT copy from dashboard.py"""
+        try:
+            from PIL import Image
+            import io
+            
+            # Open and validate image
+            image = Image.open(io.BytesIO(image_data))
+            
+            # Check minimum dimensions
+            width, height = image.size
+            if width < 200 or height < 200:
+                return None
+            
+            # Convert to JPEG for consistency
+            if image.format != 'JPEG':
+                buffer = io.BytesIO()
+                image.convert('RGB').save(buffer, format='JPEG', quality=95)
+                return buffer.getvalue()
+            
+            return image_data
+            
+        except Exception:
+            return None
+    
+    def upload_artist_poster(self, artist, image_data):
+        """Upload poster using media client - EXACT copy from dashboard.py"""
+        try:
+            # Use media client's update method if available
+            if hasattr(self.media_client, 'update_artist_poster'):
+                return self.media_client.update_artist_poster(artist, image_data)
+            
+            # Fallback for Plex: direct API call
+            if self.server_type == "plex":
+                import requests
+                server = self.media_client.server
+                upload_url = f"{server._baseurl}/library/metadata/{artist.ratingKey}/posters"
+                headers = {
+                    'X-Plex-Token': server._token,
+                    'Content-Type': 'image/jpeg'
+                }
+                
+                response = requests.post(upload_url, data=image_data, headers=headers)
+                response.raise_for_status()
+                
+                # Refresh artist to see changes
+                artist.refresh()
+                return True
+            else:
+                # For other server types, return False since we only have fallback for Plex
+                return False
+            
+        except Exception as e:
+            print(f"Error uploading poster: {e}")
+            return False
+
 # --- Main Execution ---
 
 if __name__ == '__main__':
