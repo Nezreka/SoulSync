@@ -5071,46 +5071,61 @@ def get_version_info():
     This provides the same data that the GUI version modal displays.
     """
     version_data = {
-        "version": "0.65",
+        "version": "1.0",
         "title": "What's New in SoulSync",
-        "subtitle": "Version 0.65 - Tidal Playlist Integration",
+        "subtitle": "Version 1.0 - Complete WebUI Rebuild",
         "sections": [
             {
-                "title": "🎵 Complete Tidal Playlist Integration",
-                "description": "Full Tidal playlist support with seamless workflow integration matching YouTube/Spotify functionality",
+                "title": "🌐 Complete WebUI Transformation",
+                "description": "SoulSync has been completely rebuilt from the ground up as a modern web application, moving from desktop GUI to web-based interface",
                 "features": [
-                    "• Native Tidal API client with OAuth 2.0 authentication and automatic token management",
-                    "• Tidal playlist tab positioned between Spotify and YouTube with identical UI/UX patterns",
-                    "• Advanced playlist card system with persistent state tracking across all phases",
-                    "• Complete discovery workflow: discovering → discovered → syncing → downloading phases",
-                    "• Intelligent track matching using existing Spotify-based algorithms for compatibility",
-                    "• Smart modal routing with proper state persistence (close/cancel behavior)",
-                    "• Full refresh functionality with comprehensive worker cleanup and modal management"
+                    "• Full transition from PyQt6 desktop application to responsive web interface",
+                    "• Modern HTML5, CSS3, and JavaScript implementation with premium glassmorphic design",
+                    "• Real-time updates and live status monitoring through WebSocket connections",
+                    "• Cross-platform compatibility - access from any device with a web browser",
+                    "• Mobile-responsive design optimized for tablets and smartphones",
+                    "• Dark theme with sophisticated visual effects and smooth animations",
+                    "• RESTful API architecture enabling future third-party integrations"
                 ],
-                "usage_note": "Configure Tidal in Settings → Connections, then discover and sync your Tidal playlists just like Spotify!"
+                "usage_note": "Access SoulSync through your web browser at localhost:8888 - no desktop installation required!"
             },
             {
-                "title": "⚙️ Advanced Workflow Features",
-                "description": "Sophisticated state management and user experience improvements",
+                "title": "🐳 Docker Container Support",
+                "description": "Complete containerization with Docker for easy deployment and scalability",
                 "features": [
-                    "• Identical workflow behavior across all playlist sources (Spotify, YouTube, Tidal)",
-                    "• Smart refresh system that cancels all active operations and preserves playlist names",
-                    "• Phase-aware card clicking: routes to discovery, sync progress, or download modals appropriately",
-                    "• Proper modal state persistence: closing download modals preserves discovery state",
-                    "• Cancel operations reset playlists to fresh state for updated playlist data",
-                    "• Multi-server compatibility: works with both Plex and Jellyfin automatically"
+                    "• Pre-built Docker images available for instant deployment",
+                    "• Multi-architecture support (AMD64, ARM64) for various server platforms",
+                    "• Volume mounting for persistent configuration and downloads",
+                    "• Environment variable configuration for easy customization",
+                    "• Docker Compose templates for simplified multi-container setups",
+                    "• Automatic health checks and restart policies for reliability",
+                    "• Lightweight Alpine Linux base for minimal resource usage"
                 ]
             },
             {
-                "title": "🔧 Technical Implementation Details",
-                "description": "Robust architecture ensuring reliable playlist management across all sources",
+                "title": "🎵 Enhanced Music Management",
+                "description": "All beloved features preserved and enhanced with new web-based capabilities",
                 "features": [
-                    "• Implemented comprehensive state tracking system with playlist card hub architecture",
-                    "• Added PKCE (Proof Key for Code Exchange) OAuth flow for enhanced Tidal security",
-                    "• Created unified modal system supporting YouTube, Spotify, and Tidal workflows",
-                    "• Enhanced worker cancellation system for proper resource cleanup during operations",
-                    "• JSON:API response parsing for Tidal's complex relationship-based data structure",
-                    "• Future-ready architecture for additional music streaming service integrations"
+                    "• Complete Spotify, Tidal, and YouTube Music playlist synchronization",
+                    "• Advanced Soulseek integration with real-time download management",
+                    "• Intelligent music matching engine with improved accuracy",
+                    "• Plex and Jellyfin server integration with automatic library updates",
+                    "• Artist watchlist with automatic new release detection",
+                    "• Comprehensive metadata enhancement with high-quality album artwork",
+                    "• Real-time download progress with detailed logging and status updates"
+                ]
+            },
+            {
+                "title": "🚀 Performance & Reliability",
+                "description": "Significant improvements in speed, stability, and resource efficiency",
+                "features": [
+                    "• Asynchronous processing for improved responsiveness",
+                    "• Multi-threaded download management with concurrent processing",
+                    "• Optimized database operations with connection pooling",
+                    "• Intelligent caching system for faster API responses",
+                    "• Robust error handling with automatic retry mechanisms",
+                    "• Memory-efficient architecture suitable for long-running deployments",
+                    "• Comprehensive logging system for easy troubleshooting"
                 ]
             }
         ]
