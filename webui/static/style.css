@@ -823,6 +823,12 @@ body {
     flex: 1;
 }
 
+.activity-separator {
+    height: 1px;
+    background: rgba(255, 255, 255, 0.05);
+    margin: 8px 0;
+}
+
 .stats-grid {
     display: grid;
     grid-template-columns: 1fr;
