@@ -5447,11 +5447,19 @@ def _run_db_update_task(full_refresh, server_type):
             full_refresh=full_refresh,
             server_type=server_type
         )
-        # Connect signals to callbacks
-        db_update_worker.progress_updated.connect(_db_update_progress_callback)
-        db_update_worker.phase_changed.connect(_db_update_phase_callback)
-        db_update_worker.finished.connect(_db_update_finished_callback)
-        db_update_worker.error.connect(_db_update_error_callback)
+        # Connect signals to callbacks (handle both Qt and headless modes)
+        try:
+            # Try Qt signal connection first
+            db_update_worker.progress_updated.connect(_db_update_progress_callback)
+            db_update_worker.phase_changed.connect(_db_update_phase_callback)
+            db_update_worker.finished.connect(_db_update_finished_callback)
+            db_update_worker.error.connect(_db_update_error_callback)
+        except AttributeError:
+            # Headless mode - use callback system
+            db_update_worker.connect_callback('progress_updated', _db_update_progress_callback)
+            db_update_worker.connect_callback('phase_changed', _db_update_phase_callback)
+            db_update_worker.connect_callback('finished', _db_update_finished_callback)
+            db_update_worker.connect_callback('error', _db_update_error_callback)
 
     # This is a blocking call that runs the QThread's logic
     db_update_worker.run()
@@ -6218,6 +6226,10 @@ def _on_download_completed(batch_id, task_id, success=True):
         
         print(f"🔄 [Batch Manager] Task {task_id} completed ({'success' if success else 'failed/cancelled'}). Active workers: {old_active} → {new_active}/{download_batches[batch_id]['max_concurrent']}")
         
+        # ENHANCED: Always check batch completion after any task completes
+        # This ensures completion is detected even when mixing normal downloads with cancelled tasks
+        print(f"🔍 [Batch Manager] Checking batch completion after task {task_id} completed")
+        
         # FIXED: Check if batch is truly complete (all tasks finished, not just workers freed)
         batch = download_batches[batch_id]
         all_tasks_started = batch['queue_index'] >= len(batch['queue'])
@@ -6253,8 +6265,10 @@ def _on_download_completed(batch_id, task_id, success=True):
             # Check if this is an auto-initiated batch
             is_auto_batch = batch.get('auto_initiated', False)
             
-            # Mark batch as complete and process wishlist outside of lock to prevent deadlocks
-            batch['phase'] = 'complete'
+            # FIXED: Ensure batch is not already marked as complete to prevent duplicate processing
+            if batch.get('phase') != 'complete':
+                # Mark batch as complete and process wishlist outside of lock to prevent deadlocks
+                batch['phase'] = 'complete'
             
             # Add activity for batch completion
             playlist_name = batch.get('playlist_name', 'Unknown Playlist')
@@ -7912,13 +7926,18 @@ def _check_batch_completion_v2(batch_id):
             print(f"🔍 [Completion Check V2] Batch {batch_id}: tasks_started={all_tasks_started}, workers={no_active_workers}, finished={finished_count}/{len(queue)}, retrying={retrying_count}")
             
             if all_tasks_started and no_active_workers and all_tasks_truly_finished and not has_retrying_tasks:
-                print(f"🎉 [Completion Check V2] Batch {batch_id} is complete - marking as finished")
-                
-                # Check if this is an auto-initiated batch
-                is_auto_batch = batch.get('auto_initiated', False)
-                
-                # Mark batch as complete
-                batch['phase'] = 'complete'
+                # FIXED: Ensure batch is not already marked as complete to prevent duplicate processing
+                if batch.get('phase') != 'complete':
+                    print(f"🎉 [Completion Check V2] Batch {batch_id} is complete - marking as finished")
+                    
+                    # Check if this is an auto-initiated batch
+                    is_auto_batch = batch.get('auto_initiated', False)
+                    
+                    # Mark batch as complete
+                    batch['phase'] = 'complete'
+                else:
+                    print(f"✅ [Completion Check V2] Batch {batch_id} already marked complete - skipping duplicate processing")
+                    return True  # Already complete
                 
                 # Update YouTube playlist phase to 'download_complete' if this is a YouTube playlist
                 playlist_id = batch.get('playlist_id')
@@ -11177,7 +11196,7 @@ class WebMetadataUpdateWorker:
 
 if __name__ == '__main__':
     print("🚀 Starting SoulSync Web UI Server...")
-    print("Open your browser and navigate to http://127.0.0.1:5001")
+    print("Open your browser and navigate to http://127.0.0.1:8008")
     
     # Start simple background monitor when server starts
     print("🔧 Starting simple background monitor...")
@@ -11204,4 +11223,4 @@ if __name__ == '__main__':
     # Add a test activity to verify the system is working
     add_activity_item("🔧", "Debug Test", "Activity feed system test", "Now")
     
-    app.run(host='0.0.0.0', port=5001, debug=True)
+    app.run(host='0.0.0.0', port=8008, debug=True)

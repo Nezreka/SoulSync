@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  soulsync:
+    build: .
+    container_name: soulsync-webui
+    ports:
+      - "8008:8008"
+    volumes:
+      # Persistent data volumes
+      - ./config:/app/config
+      - ./database:/app/database
+      - ./logs:/app/logs
+      - ./downloads:/app/downloads
+      - ./Transfer:/app/Transfer
+      # Optional: Mount your music library for Plex/Jellyfin access
+      - /path/to/your/music:/music:ro
+    environment:
+      # Web server configuration
+      - FLASK_ENV=production
+      - PYTHONPATH=/app
+      # Optional: Configure through environment variables
+      - SOULSYNC_CONFIG_PATH=/app/config/config.json
+      # Set timezone
+      - TZ=America/New_York
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8888/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    # Resource limits (adjust as needed)
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+# Optional: Add external network for communication with other containers
+networks:
+  default:
+    name: soulsync-network
