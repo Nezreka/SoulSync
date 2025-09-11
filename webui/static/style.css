@@ -9,7 +9,10 @@
 
 body {
     font-family: 'SF Pro Display', 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
-    background: #121212;
+    background: linear-gradient(135deg, 
+        rgba(8, 8, 8, 1) 0%, 
+        rgba(12, 12, 12, 1) 50%, 
+        rgba(16, 16, 16, 1) 100%);
     color: #ffffff;
     overflow: hidden;
     height: 100vh;
@@ -747,7 +750,11 @@ body {
 
 .main-content {
     flex: 1;
-    background: #121212;
+    background: linear-gradient(135deg, 
+        rgba(12, 12, 12, 0.95) 0%, 
+        rgba(16, 16, 16, 0.98) 50%,
+        rgba(8, 8, 8, 0.95) 100%);
+    backdrop-filter: blur(20px) saturate(1.2);
     overflow: auto;
 }
 
@@ -3334,20 +3341,45 @@ body {
     display: flex;
     flex-direction: column;
     gap: 25px; /* Spacing between sections */
-    padding-bottom: 30px; /* Add space at the bottom */
+    padding: 28px 24px 30px 24px; /* Match modal padding */
+    
+    /* Enhanced glassmorphic foundation matching modal */
+    background: linear-gradient(135deg, 
+        rgba(20, 20, 20, 0.85) 0%, 
+        rgba(12, 12, 12, 0.92) 100%);
+    backdrop-filter: blur(20px) saturate(1.2);
+    border-radius: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-top: 1px solid rgba(255, 255, 255, 0.18);
+    margin: 20px;
+    
+    /* Premium shadow effect matching modal */
+    box-shadow: 
+        0 20px 60px rgba(0, 0, 0, 0.6),
+        0 8px 32px rgba(0, 0, 0, 0.4),
+        0 0 40px rgba(29, 185, 84, 0.1),
+        inset 0 1px 0 rgba(255, 255, 255, 0.15);
 }
 
 .dashboard-section {
     display: flex;
     flex-direction: column;
     gap: 15px; /* Spacing within a section (e.g., between title and content) */
+    padding: 20px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.dashboard-section:last-child {
+    border-bottom: none;
 }
 
 .section-title {
     font-family: 'SF Pro Display', -apple-system, sans-serif;
-    font-size: 18px;
+    font-size: 22px;
     font-weight: 700;
     color: #ffffff;
+    margin: 0 0 8px 0;
+    line-height: 1.2;
     padding-bottom: 5px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
@@ -3355,8 +3387,11 @@ body {
 /* Header Styling */
 .dashboard-header {
     display: flex;
-    align-items: center;
-    gap: 20px;
+    align-items: flex-start;
+    justify-content: space-between;
+    padding: 0 0 16px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    margin-bottom: 20px;
 }
 
 .header-text {
@@ -3369,11 +3404,14 @@ body {
     font-size: 28px;
     font-weight: 700;
     color: #ffffff;
+    margin: 0 0 8px 0;
+    line-height: 1.2;
 }
 
 .header-subtitle {
     font-size: 14px;
     color: #b3b3b3;
+    line-height: 1.5;
 }
 
 .header-spacer {
@@ -3408,10 +3446,11 @@ body {
 }
 
 .header-button:hover {
-    transform: translateY(-2px) scale(1.02);
+    transform: translateY(-1px);
     box-shadow: 
-        0 12px 25px rgba(0, 0, 0, 0.4),
-        inset 0 1px 0 rgba(255, 255, 255, 0.3);
+        0 6px 20px rgba(0, 0, 0, 0.4),
+        0 4px 16px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 
 .wishlist-button {
@@ -3453,48 +3492,40 @@ body {
 }
 
 .service-card {
-    /* Premium glassmorphic foundation matching modal and search cards */
+    /* Enhanced glassmorphic foundation matching modal */
     background: linear-gradient(135deg, 
-        rgba(26, 26, 26, 0.95) 0%, 
-        rgba(18, 18, 18, 0.98) 100%);
-    backdrop-filter: blur(12px) saturate(1.1);
-    border-radius: 16px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-top: 1px solid rgba(255, 255, 255, 0.12);
+        rgba(20, 20, 20, 0.95) 0%, 
+        rgba(12, 12, 12, 0.98) 100%);
+    backdrop-filter: blur(20px) saturate(1.2);
+    border-radius: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-top: 1px solid rgba(255, 255, 255, 0.18);
     padding: 20px;
     position: relative;
     overflow: hidden;
     
-    /* Neumorphic depth shadows - elevated card effect */
+    /* Premium shadow effect matching modal */
     box-shadow: 
-        0 18px 40px rgba(0, 0, 0, 0.6),
-        0 0 0 1px rgba(29, 185, 84, 0.08),
-        inset 0 1px 0 rgba(255, 255, 255, 0.06),
-        inset 0 -1px 0 rgba(0, 0, 0, 0.1);
+        0 20px 60px rgba(0, 0, 0, 0.6),
+        0 8px 32px rgba(0, 0, 0, 0.4),
+        0 0 40px rgba(29, 185, 84, 0.1),
+        inset 0 1px 0 rgba(255, 255, 255, 0.15);
     
     display: flex;
     flex-direction: column;
     gap: 8px;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all 0.2s ease;
     transform: translateZ(0);
 }
 
 .service-card:hover {
-    /* Enhanced glassmorphic hover state */
-    background: linear-gradient(135deg, 
-        rgba(30, 30, 30, 0.98) 0%, 
-        rgba(22, 22, 22, 1.0) 100%);
-    backdrop-filter: blur(16px) saturate(1.2);
-    border-color: rgba(29, 185, 84, 0.3);
-    border-top-color: rgba(29, 185, 84, 0.4);
-    
+    transform: translateY(-1px);
+    border-color: rgba(255, 255, 255, 0.18);
     box-shadow: 
-        0 20px 45px rgba(0, 0, 0, 0.7),
-        0 0 0 1px rgba(29, 185, 84, 0.15),
-        inset 0 1px 0 rgba(255, 255, 255, 0.1),
-        inset 0 -1px 0 rgba(0, 0, 0, 0.15);
-    
-    transform: translateY(-2px) translateZ(0);
+        0 24px 70px rgba(0, 0, 0, 0.7),
+        0 10px 38px rgba(0, 0, 0, 0.5),
+        0 0 48px rgba(29, 185, 84, 0.15),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 
 .service-card-header {
@@ -3569,30 +3600,40 @@ body {
 }
 
 .stat-card-dashboard {
-    /* Premium glassmorphic foundation matching other cards */
+    /* Enhanced glassmorphic foundation matching modal */
     background: linear-gradient(135deg, 
-        rgba(26, 26, 26, 0.95) 0%, 
-        rgba(18, 18, 18, 0.98) 100%);
-    backdrop-filter: blur(12px) saturate(1.1);
-    border-radius: 16px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-top: 1px solid rgba(255, 255, 255, 0.12);
+        rgba(20, 20, 20, 0.95) 0%, 
+        rgba(12, 12, 12, 0.98) 100%);
+    backdrop-filter: blur(20px) saturate(1.2);
+    border-radius: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-top: 1px solid rgba(255, 255, 255, 0.18);
     padding: 24px 20px;
     position: relative;
     overflow: hidden;
     
-    /* Neumorphic depth shadows */
+    /* Premium shadow effect matching modal */
     box-shadow: 
-        0 18px 40px rgba(0, 0, 0, 0.6),
-        0 0 0 1px rgba(29, 185, 84, 0.08),
-        inset 0 1px 0 rgba(255, 255, 255, 0.06),
-        inset 0 -1px 0 rgba(0, 0, 0, 0.1);
+        0 20px 60px rgba(0, 0, 0, 0.6),
+        0 8px 32px rgba(0, 0, 0, 0.4),
+        0 0 40px rgba(29, 185, 84, 0.1),
+        inset 0 1px 0 rgba(255, 255, 255, 0.15);
     
     display: flex;
     flex-direction: column;
     gap: 5px;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all 0.2s ease;
     transform: translateZ(0);
+}
+
+.stat-card-dashboard:hover {
+    transform: translateY(-1px);
+    border-color: rgba(255, 255, 255, 0.18);
+    box-shadow: 
+        0 24px 70px rgba(0, 0, 0, 0.7),
+        0 10px 38px rgba(0, 0, 0, 0.5),
+        0 0 48px rgba(29, 185, 84, 0.15),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 
 .stat-card-title {
@@ -3619,30 +3660,40 @@ body {
 }
 
 .tool-card {
-    /* Premium glassmorphic foundation */
+    /* Enhanced glassmorphic foundation matching modal */
     background: linear-gradient(135deg, 
-        rgba(26, 26, 26, 0.95) 0%, 
-        rgba(18, 18, 18, 0.98) 100%);
-    backdrop-filter: blur(12px) saturate(1.1);
-    border-radius: 16px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-top: 1px solid rgba(255, 255, 255, 0.12);
+        rgba(20, 20, 20, 0.95) 0%, 
+        rgba(12, 12, 12, 0.98) 100%);
+    backdrop-filter: blur(20px) saturate(1.2);
+    border-radius: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-top: 1px solid rgba(255, 255, 255, 0.18);
     padding: 24px;
     position: relative;
     overflow: hidden;
     
-    /* Neumorphic depth shadows */
+    /* Premium shadow effect matching modal */
     box-shadow: 
-        0 18px 40px rgba(0, 0, 0, 0.6),
-        0 0 0 1px rgba(29, 185, 84, 0.08),
-        inset 0 1px 0 rgba(255, 255, 255, 0.06),
-        inset 0 -1px 0 rgba(0, 0, 0, 0.1);
+        0 20px 60px rgba(0, 0, 0, 0.6),
+        0 8px 32px rgba(0, 0, 0, 0.4),
+        0 0 40px rgba(29, 185, 84, 0.1),
+        inset 0 1px 0 rgba(255, 255, 255, 0.15);
     
     display: flex;
     flex-direction: column;
     gap: 12px;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all 0.2s ease;
     transform: translateZ(0);
+}
+
+.tool-card:hover {
+    transform: translateY(-1px);
+    border-color: rgba(255, 255, 255, 0.18);
+    box-shadow: 
+        0 24px 70px rgba(0, 0, 0, 0.7),
+        0 10px 38px rgba(0, 0, 0, 0.5),
+        0 0 48px rgba(29, 185, 84, 0.15),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 
 .tool-card-title {
