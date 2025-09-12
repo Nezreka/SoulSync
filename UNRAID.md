@@ -20,9 +20,9 @@ docker run -d \
   -p 8888:8888 \
   -p 8889:8889 \
   -v /mnt/user/appdata/soulsync/config.json:/app/config/config.json \
+  -v /mnt/user/appdata/soulsync/database:/app/data \
   -v /mnt/user/appdata/soulsync/logs:/app/logs \
   -v /mnt/user/Music:/host/music:rw \
-  -v soulsync_database:/app/database \
   --restart unless-stopped \
   boulderbadgedad/soulsync:latest
 ```
@@ -182,22 +182,34 @@ This ensures:
 
 ## 🛠️ Troubleshooting
 
-### ❌ ModuleNotFoundError: No module named 'config.settings'
+### ❌ ModuleNotFoundError: No module named 'config.settings' or 'database'
 
-**Problem**: Most common error - mounting over the Python config module
+**Problem**: Most common error - mounting over Python modules
 
 **Wrong**:
 ```yaml
-- "/mnt/cache/appdata/soulsync:/app/config"         # ❌ Overwrites Python module
-- "/mnt/cache/appdata/soulsync/config:/app/config"  # ❌ Still overwrites Python module
+- "/mnt/cache/appdata/soulsync:/app/config"         # ❌ Overwrites Python config module
+- "/mnt/cache/appdata/soulsync/config:/app/config"  # ❌ Still overwrites Python config module
+- "/mnt/cache/appdata/soulsync/database:/app/database"  # ❌ Overwrites Python database module
 ```
 
 **Correct**:
 ```yaml
 - "/mnt/cache/appdata/soulsync/config.json:/app/config/config.json"  # ✅ Mount only the config file
+- "/mnt/cache/appdata/soulsync/database:/app/data"  # ✅ Mount database to different path
 ```
 
-**Why this happens**: The `/app/config` directory contains Python module files (`settings.py`) needed for the app to run. Mounting anything to `/app/config` overwrites these files. Only mount the specific `config.json` file.
+**Why this happens**: Both `/app/config` and `/app/database` directories contain Python module files needed for the app to run. Mounting anything to these paths overwrites the modules. Mount config file specifically and database to `/app/data`.
+
+**Important**: If mounting database to `/app/data`, update your config.json:
+```json
+{
+  "database": {
+    "path": "data/music_library.db",
+    "max_workers": 5
+  }
+}
+```
 
 ### Container Won't Start
 ```bash
