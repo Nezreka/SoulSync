@@ -1,17 +1,23 @@
+<p align="center">
+  <img src="./assets/trans.png" alt="SoulSync Logo">
+</p>
+
 # 🎵 SoulSync - Automated Music Discovery & Collection Manager
 
-Bridge the gap between streaming services and your local music library. Automatically sync Spotify/Tidal playlists to Plex/Jellyfin via Soulseek.
+Bridge the gap between streaming services and your local music library. Automatically sync Spotify/Tidal/YouTube playlists to Plex/Jellyfin via Soulseek.
 
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/boulderbadgedad)
 
 ## ✨ What It Does
 
-- **Auto-sync playlists** from Spotify/Tidal to your media server
+- **Auto-sync playlists** from Spotify/Tidal/YouTube to your media server
 - **Smart matching** finds what you're missing vs what you own
 - **Download missing tracks** from Soulseek with FLAC priority
 - **Metadata enhancement** adds proper tags and album art
 - **File organization** creates clean folder structures
 - **Artist discovery** browse complete discographies
+- **Wishlist system** saves failed downloads for automatic retry
+- **Artist watchlist** monitors for new releases and adds missing tracks
 - **Background automation** retries failed downloads every hour
 
 ## 🚀 Three Ways to Run
@@ -64,13 +70,13 @@ docker-compose up -d
 
 ## 🎯 Core Features
 
-**Search & Download**: Manual track search with preview streaming
-**Playlist Sync**: Spotify/Tidal playlist analysis and batch downloads  
-**Artist Explorer**: Complete discography browsing with missing indicators
-**Smart Matching**: Advanced algorithm prioritizes originals over remixes
-**Automation**: Hourly retry of failed downloads, metadata enhancement
-**Wishlist**: Failed downloads saved for automatic retry
-**Watchlist**: Monitor favorite artists for new releases automatically
+**Search & Download**: Manual track search with preview streaming  
+**Playlist Sync**: Spotify/Tidal/YouTube playlist analysis and batch downloads  
+**Artist Explorer**: Complete discography browsing with missing indicators  
+**Smart Matching**: Advanced algorithm prioritizes originals over remixes  
+**Wishlist Management**: Failed downloads automatically saved and retried hourly  
+**Artist Watchlist**: Add favorite artists to monitor for new releases automatically  
+**Automation**: Hourly retry of failed downloads, metadata enhancement  
 **Activity Feed**: Real-time status and progress tracking
 
 ## 📁 File Flow
