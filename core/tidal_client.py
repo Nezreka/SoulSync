@@ -272,6 +272,12 @@ class TidalClient:
     
     def _start_callback_server(self):
         """Start HTTP server to receive OAuth callback"""
+        # Skip starting server in Docker/production mode - web server handles callbacks
+        import os
+        if os.getenv('FLASK_ENV') == 'production' or os.path.exists('/.dockerenv'):
+            logger.info("Docker/WebUI mode detected - skipping TidalClient callback server (web server handles callbacks)")
+            return
+            
         # Store reference to self for the callback handler
         tidal_client_ref = self
         
@@ -410,6 +416,28 @@ class TidalClient:
                 
         except Exception as e:
             logger.error(f"Error refreshing Tidal token: {e}")
+            return False
+    
+    def fetch_token_from_code(self, auth_code: str) -> bool:
+        """Exchange authorization code for access tokens (for web server callback)"""
+        try:
+            logger.info(f"Starting token exchange with code: {auth_code[:20]}...")
+            logger.info(f"Using code_verifier: {self.code_verifier[:20] if self.code_verifier else 'None'}...")
+            logger.info(f"Using redirect_uri: {self.redirect_uri}")
+            
+            self.auth_code = auth_code
+            result = self._exchange_code_for_tokens()
+            
+            if result:
+                logger.info("✅ Token exchange successful")
+            else:
+                logger.error("❌ Token exchange failed")
+            
+            return result
+        except Exception as e:
+            logger.error(f"Error in fetch_token_from_code: {e}")
+            import traceback
+            logger.error(f"Full traceback: {traceback.format_exc()}")
             return False
     
     def _ensure_valid_token(self):

@@ -1,9 +1,38 @@
 #!/usr/bin/env python3
 
-from PyQt6.QtCore import QThread, pyqtSignal
+# Conditional PyQt6 import for backward compatibility with GUI version
+try:
+    from PyQt6.QtCore import QThread, pyqtSignal
+    QT_AVAILABLE = True
+except ImportError:
+    QT_AVAILABLE = False
+    # Define dummy classes for headless operation
+    class QThread:
+        def __init__(self):
+            self.callbacks = {}
+        def start(self):
+            import threading
+            self.thread = threading.Thread(target=self.run)
+            self.thread.daemon = True
+            self.thread.start()
+        def wait(self):
+            if hasattr(self, 'thread'):
+                self.thread.join()
+        def emit_signal(self, signal_name, *args):
+            if signal_name in self.callbacks:
+                for callback in self.callbacks[signal_name]:
+                    try:
+                        callback(*args)
+                    except Exception as e:
+                        logger.error(f"Error in callback for {signal_name}: {e}")
+        def connect_signal(self, signal_name, callback):
+            if signal_name not in self.callbacks:
+                self.callbacks[signal_name] = []
+            self.callbacks[signal_name].append(callback)
+
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Optional, List
+from typing import Optional, List, Callable
 from datetime import datetime
 import time
 
@@ -16,15 +45,27 @@ logger = get_logger("database_update_worker")
 class DatabaseUpdateWorker(QThread):
     """Worker thread for updating SoulSync database with media server library data (Plex or Jellyfin)"""
     
-    # Signals for progress reporting
-    progress_updated = pyqtSignal(str, int, int, float)  # current_item, processed, total, percentage
-    artist_processed = pyqtSignal(str, bool, str, int, int)  # artist_name, success, details, albums_count, tracks_count
-    finished = pyqtSignal(int, int, int, int, int)  # total_artists, total_albums, total_tracks, successful, failed
-    error = pyqtSignal(str)  # error_message
-    phase_changed = pyqtSignal(str)  # current_phase (artists, albums, tracks)
+    # Qt signals (only available when PyQt6 is installed)
+    if QT_AVAILABLE:
+        progress_updated = pyqtSignal(str, int, int, float)  # current_item, processed, total, percentage
+        artist_processed = pyqtSignal(str, bool, str, int, int)  # artist_name, success, details, albums_count, tracks_count
+        finished = pyqtSignal(int, int, int, int, int)  # total_artists, total_albums, total_tracks, successful, failed
+        error = pyqtSignal(str)  # error_message
+        phase_changed = pyqtSignal(str)  # current_phase (artists, albums, tracks)
     
     def __init__(self, media_client, database_path: str = "database/music_library.db", full_refresh: bool = False, server_type: str = "plex"):
         super().__init__()
+        
+        # Initialize signal callbacks for headless mode
+        if not QT_AVAILABLE:
+            self.callbacks = {
+                'progress_updated': [],
+                'artist_processed': [], 
+                'finished': [],
+                'error': [],
+                'phase_changed': []
+            }
+        
         # Support both old plex_client parameter and new media_client parameter for backward compatibility
         if hasattr(media_client, '__class__') and 'plex' in media_client.__class__.__name__.lower():
             self.media_client = media_client
@@ -68,6 +109,21 @@ class DatabaseUpdateWorker(QThread):
         # Database instance
         self.database: Optional[MusicDatabase] = None
     
+    def _emit_signal(self, signal_name: str, *args):
+        """Emit a signal in both Qt and headless modes"""
+        if QT_AVAILABLE and hasattr(self, signal_name):
+            # Qt mode - use actual signal
+            getattr(self, signal_name).emit(*args)
+        elif not QT_AVAILABLE:
+            # Headless mode - use callback system
+            self.emit_signal(signal_name, *args)
+    
+    def connect_callback(self, signal_name: str, callback: Callable):
+        """Connect a callback for headless mode"""
+        if not QT_AVAILABLE:
+            self.connect_signal(signal_name, callback)
+        # In Qt mode, use the normal signal.connect() method
+    
     def stop(self):
         """Stop the database update process"""
         self.should_stop = True
@@ -93,30 +149,30 @@ class DatabaseUpdateWorker(QThread):
                 
                 # Show cache preparation phase for Jellyfin and set up progress callback
                 if self.server_type == "jellyfin":
-                    self.phase_changed.emit("Preparing Jellyfin cache for fast processing...")
+                    self._emit_signal('phase_changed', "Preparing Jellyfin cache for fast processing...")
                     # Connect Jellyfin client progress to UI
                     if hasattr(self.media_client, 'set_progress_callback'):
-                        self.media_client.set_progress_callback(lambda msg: self.phase_changed.emit(msg))
+                        self.media_client.set_progress_callback(lambda msg: self._emit_signal('phase_changed', msg))
                 
                 # For full refresh, get all artists
                 artists_to_process = self._get_all_artists()
                 if not artists_to_process:
-                    self.error.emit(f"No artists found in {self.server_type} library or connection failed")
+                    self._emit_signal('error', f"No artists found in {self.server_type} library or connection failed")
                     return
                 logger.info(f"Full refresh: Found {len(artists_to_process)} artists in {self.server_type} library")
             else:
                 logger.info("Performing smart incremental update - checking recently added content")
                 # For incremental, use smart recent-first approach
-                self.phase_changed.emit("Finding recently added content...")
+                self._emit_signal('phase_changed', "Finding recently added content...")
                 artists_to_process = self._get_artists_for_incremental_update()
                 if not artists_to_process:
                     logger.info("No new content found - database is up to date")
-                    self.finished.emit(0, 0, 0, 0, 0)
+                    self._emit_signal('finished', 0, 0, 0, 0, 0)
                     return
                 logger.info(f"Incremental update: Found {len(artists_to_process)} artists to process")
             
             # Phase 2: Process artists and their albums/tracks
-            self.phase_changed.emit("Processing artists, albums, and tracks...")
+            self._emit_signal('phase_changed', "Processing artists, albums, and tracks...")
             
             # FAST PATH: For Jellyfin track-based incremental, process new tracks directly
             if self.server_type == "jellyfin" and hasattr(self, '_jellyfin_new_tracks'):
@@ -158,7 +214,7 @@ class DatabaseUpdateWorker(QThread):
                     logger.warning(f"Could not cleanup orphaned records: {e}")
             
             # Emit final results
-            self.finished.emit(
+            self._emit_signal('finished',
                 self.processed_artists,
                 self.processed_albums, 
                 self.processed_tracks,
@@ -172,7 +228,7 @@ class DatabaseUpdateWorker(QThread):
             
         except Exception as e:
             logger.error(f"Database update failed: {str(e)}")
-            self.error.emit(f"Database update failed: {str(e)}")
+            self._emit_signal('error', f"Database update failed: {str(e)}")
     
     def _get_all_artists(self) -> List:
         """Get all artists from media server library"""
@@ -231,7 +287,7 @@ class DatabaseUpdateWorker(QThread):
             # For Jellyfin, we need to set up progress callback for potential cache population during incremental
             if self.server_type == "jellyfin":
                 if hasattr(self.media_client, 'set_progress_callback'):
-                    self.media_client.set_progress_callback(lambda msg: self.phase_changed.emit(f"Incremental: {msg}"))
+                    self.media_client.set_progress_callback(lambda msg: self._emit_signal('phase_changed', f"Incremental: {msg}"))
             
             # PERFORMANCE BREAKTHROUGH: For Jellyfin, use track-based incremental (much faster)
             if self.server_type == "jellyfin":
@@ -565,11 +621,11 @@ class DatabaseUpdateWorker(QThread):
                     # Emit progress for this artist
                     artist_albums = len(artist_album_ids)
                     artist_tracks = sum(len(tracks_by_album[aid]) for aid in artist_album_ids if aid in tracks_by_album)
-                    self.artist_processed.emit(artist_name, True, f"Processed {artist_albums} albums, {artist_tracks} tracks", artist_albums, artist_tracks)
+                    self._emit_signal('artist_processed', artist_name, True, f"Processed {artist_albums} albums, {artist_tracks} tracks", artist_albums, artist_tracks)
                     
                 except Exception as e:
                     logger.error(f"Error processing artist '{getattr(artist, 'title', 'Unknown')}': {e}")
-                    self.artist_processed.emit(getattr(artist, 'title', 'Unknown'), False, f"Error: {str(e)}", 0, 0)
+                    self._emit_signal('artist_processed', getattr(artist, 'title', 'Unknown'), False, f"Error: {str(e)}", 0, 0)
             
             # Update totals
             with self.thread_lock:
@@ -744,7 +800,7 @@ class DatabaseUpdateWorker(QThread):
                     self.processed_artists += 1
                     progress_percent = (self.processed_artists / total_artists) * 100
                 
-                self.progress_updated.emit(
+                self._emit_signal('progress_updated',
                     f"Processing {artist_name}",
                     self.processed_artists,
                     total_artists,
@@ -788,7 +844,7 @@ class DatabaseUpdateWorker(QThread):
                 artist_name, success, details, album_count, track_count = result
                 
                 # Emit progress signal
-                self.artist_processed.emit(artist_name, success, details, album_count, track_count)
+                self._emit_signal('artist_processed', artist_name, success, details, album_count, track_count)
     
     def _process_artist_with_content(self, media_artist) -> tuple[bool, str, int, int]:
         """Process an artist and all their albums and tracks with optimized API usage"""
@@ -867,16 +923,39 @@ class DatabaseUpdateWorker(QThread):
 class DatabaseStatsWorker(QThread):
     """Simple worker for getting database statistics without blocking UI"""
     
-    stats_updated = pyqtSignal(dict)  # Database statistics
+    # Qt signals (only available when PyQt6 is installed)
+    if QT_AVAILABLE:
+        stats_updated = pyqtSignal(dict)  # Database statistics
     
     def __init__(self, database_path: str = "database/music_library.db"):
         super().__init__()
         self.database_path = database_path
         self.should_stop = False
+        
+        # Initialize signal callbacks for headless mode
+        if not QT_AVAILABLE:
+            self.callbacks = {
+                'stats_updated': []
+            }
     
     def stop(self):
         """Stop the worker"""
         self.should_stop = True
+    
+    def _emit_signal(self, signal_name: str, *args):
+        """Emit a signal in both Qt and headless modes"""
+        if QT_AVAILABLE and hasattr(self, signal_name):
+            # Qt mode - use actual signal
+            getattr(self, signal_name).emit(*args)
+        elif not QT_AVAILABLE:
+            # Headless mode - use callback system
+            self.emit_signal(signal_name, *args)
+    
+    def connect_callback(self, signal_name: str, callback: Callable):
+        """Connect a callback for headless mode"""
+        if not QT_AVAILABLE:
+            self.connect_signal(signal_name, callback)
+        # In Qt mode, use the normal signal.connect() method
     
     def run(self):
         """Get database statistics and full info including last refresh"""
@@ -891,7 +970,7 @@ class DatabaseStatsWorker(QThread):
             # Get database info for active server (server-aware statistics)
             info = database.get_database_info_for_server()
             if not self.should_stop:
-                self.stats_updated.emit(info)
+                self._emit_signal('stats_updated', info)
         except Exception as e:
             logger.error(f"Error getting database stats: {e}")
             if not self.should_stop:
@@ -899,7 +978,7 @@ class DatabaseStatsWorker(QThread):
                 from config.settings import config_manager
                 active_server = config_manager.get_active_media_server()
                 
-                self.stats_updated.emit({
+                self._emit_signal('stats_updated', {
                     'artists': 0,
                     'albums': 0, 
                     'tracks': 0,

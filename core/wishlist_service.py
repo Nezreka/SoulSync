@@ -165,6 +165,52 @@ class WishlistService:
         """Clear all tracks from the wishlist"""
         return self.database.clear_wishlist()
     
+    def check_track_in_wishlist(self, spotify_track_id: str) -> bool:
+        """Check if a track exists in the wishlist by Spotify track ID"""
+        try:
+            wishlist_tracks = self.get_wishlist_tracks_for_download()
+            for track in wishlist_tracks:
+                if track.get('spotify_track_id') == spotify_track_id or track.get('id') == spotify_track_id:
+                    return True
+            return False
+        except Exception as e:
+            logger.error(f"Error checking track in wishlist: {e}")
+            return False
+    
+    def find_matching_wishlist_track(self, track_name: str, artist_name: str) -> Optional[Dict[str, Any]]:
+        """
+        Find a matching track in the wishlist using fuzzy matching on name and artist.
+        Returns the first matching wishlist track or None if no match found.
+        """
+        try:
+            wishlist_tracks = self.get_wishlist_tracks_for_download()
+            
+            # Normalize input for comparison
+            normalized_track_name = track_name.lower().strip()
+            normalized_artist_name = artist_name.lower().strip()
+            
+            for wl_track in wishlist_tracks:
+                wl_name = wl_track.get('name', '').lower().strip()
+                wl_artists = wl_track.get('artists', [])
+                
+                # Extract artist name from wishlist track
+                wl_artist_name = ''
+                if wl_artists:
+                    if isinstance(wl_artists[0], dict):
+                        wl_artist_name = wl_artists[0].get('name', '').lower().strip()
+                    else:
+                        wl_artist_name = str(wl_artists[0]).lower().strip()
+                
+                # Simple exact matching (could be enhanced with fuzzy matching algorithms)
+                if wl_name == normalized_track_name and wl_artist_name == normalized_artist_name:
+                    return wl_track
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error finding matching wishlist track: {e}")
+            return None
+    
     def get_wishlist_summary(self) -> Dict[str, Any]:
         """Get a summary of the wishlist for dashboard display"""
         try:

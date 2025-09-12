@@ -50,33 +50,56 @@ class MediaScanManager:
             
             # Try to get client instances from app
             try:
-                from PyQt6.QtWidgets import QApplication
-                app = QApplication.instance()
-                
-                # Try to find the main window from top-level widgets
-                main_window = None
-                for widget in app.topLevelWidgets():
-                    if hasattr(widget, 'plex_client') and hasattr(widget, 'jellyfin_client'):
-                        main_window = widget
-                        break
-                
-                if main_window:
-                    if active_server == "jellyfin":
-                        client = getattr(main_window, 'jellyfin_client', None)
-                        if client and client.is_connected():
-                            return client, "jellyfin"
+                # Try PyQt6 first (GUI mode)
+                try:
+                    from PyQt6.QtWidgets import QApplication
+                    app = QApplication.instance()
+                    
+                    if app:
+                        # Try to find the main window from top-level widgets
+                        main_window = None
+                        for widget in app.topLevelWidgets():
+                            if hasattr(widget, 'plex_client') and hasattr(widget, 'jellyfin_client'):
+                                main_window = widget
+                                break
+                        
+                        if main_window:
+                            if active_server == "jellyfin":
+                                client = getattr(main_window, 'jellyfin_client', None)
+                                if client and client.is_connected():
+                                    return client, "jellyfin"
+                                else:
+                                    logger.warning("Jellyfin client not connected, falling back to Plex")
+                                    
+                            # Default to Plex or fallback
+                            client = getattr(main_window, 'plex_client', None)
+                            if client and client.is_connected():
+                                return client, "plex"
+                            else:
+                                logger.debug(f"Plex client not connected or not found")
                         else:
-                            logger.warning("Jellyfin client not connected, falling back to Plex")
-                            
-                    # Default to Plex or fallback
-                    client = getattr(main_window, 'plex_client', None)
-                    if client and client.is_connected():
-                        return client, "plex"
+                            logger.debug("No main window found in Qt application")
                     else:
-                        logger.debug(f"Plex client not connected or not found")
+                        logger.debug("No QApplication instance found")
+                        
+                except ImportError:
+                    logger.debug("PyQt6 not available, trying headless mode")
+                
+                # Headless mode - try to get clients from global instances
+                import sys
+                for module_name, module in sys.modules.items():
+                    if hasattr(module, 'plex_client') and hasattr(module, 'jellyfin_client'):
+                        if active_server == "jellyfin":
+                            client = getattr(module, 'jellyfin_client', None)
+                            if client and hasattr(client, 'is_connected') and client.is_connected():
+                                return client, "jellyfin"
+                        
+                        client = getattr(module, 'plex_client', None)
+                        if client and hasattr(client, 'is_connected') and client.is_connected():
+                            return client, "plex"
                         
             except Exception as e:
-                logger.debug(f"Could not access clients from main window: {e}")
+                logger.debug(f"Could not access clients: {e}")
             
             logger.error("No active media client available")
             return None, None

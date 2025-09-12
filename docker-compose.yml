@@ -1,0 +1,64 @@
+version: '3.8'
+
+services:
+  soulsync:
+    build: .
+    container_name: soulsync-webui
+    ports:
+      - "8008:8008"      # Main web app
+      - "8888:8888"      # Spotify OAuth callback
+      - "8889:8889"      # Tidal OAuth callback
+    volumes:
+      # Persistent data volumes
+      - ./config:/app/config
+      - ./logs:/app/logs
+      - ./downloads:/app/downloads
+      # Use named volume for database persistence (separate from host database)
+      - soulsync_database:/app/database
+      # IMPORTANT: Mount the drives containing your download and transfer folders
+      # If your download/transfer paths are on E: drive, mount E: drive:
+      - /mnt/e:/host/mnt/e:rw
+      # If your download/transfer paths are on C: drive, uncomment this line:
+      # - /mnt/c:/host/mnt/c:rw
+      # If your download/transfer paths are on D: drive, uncomment this line:
+      # - /mnt/d:/host/mnt/d:rw
+      # Add additional drive mounts as needed for your specific setup
+      # Optional: Mount your music library for Plex/Jellyfin access
+      - /path/to/your/music:/music:ro
+    environment:
+      # Web server configuration
+      - FLASK_ENV=production
+      - PYTHONPATH=/app
+      # Optional: Configure through environment variables
+      - SOULSYNC_CONFIG_PATH=/app/config/config.json
+      # Set timezone
+      - TZ=America/New_York
+    extra_hosts:
+      # Allow container to reach host services
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8888/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    # Resource limits (adjust as needed)
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+# Named volumes for persistent data
+volumes:
+  soulsync_database:
+    driver: local
+
+# Optional: Add external network for communication with other containers
+networks:
+  default:
+    name: soulsync-network
