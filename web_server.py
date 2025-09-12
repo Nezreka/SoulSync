@@ -62,6 +62,33 @@ app = Flask(
     static_folder=os.path.join(base_dir, 'webui', 'static')
 )
 
+# --- Docker Helper Functions ---
+def docker_resolve_path(path_str):
+    """
+    Resolve absolute paths for Docker container access
+    In Docker, Windows drive paths (E:/) need to be mapped to WSL mount points (/mnt/e/)
+    """
+    if os.path.exists('/.dockerenv') and len(path_str) >= 3 and path_str[1] == ':' and path_str[0].isalpha():
+        # Convert Windows path (E:/path) to WSL mount path (/mnt/e/path)
+        drive_letter = path_str[0].lower()
+        rest_of_path = path_str[2:].replace('\\', '/')  # Remove E: and convert backslashes
+        return f"/host/mnt/{drive_letter}{rest_of_path}"
+    return path_str
+
+def extract_filename(full_path):
+    """
+    Extract filename by working backwards from the end until we hit a separator.
+    This is cross-platform compatible and handles both Windows and Unix path separators.
+    """
+    if not full_path:
+        return ""
+    
+    last_slash = max(full_path.rfind('/'), full_path.rfind('\\'))
+    if last_slash != -1:
+        return full_path[last_slash + 1:]
+    else:
+        return full_path
+
 # --- Initialize Core Application Components ---
 print("🚀 Initializing SoulSync services for Web UI...")
 try:
@@ -174,7 +201,7 @@ def get_cached_transfer_data():
                                     file_info['username'] = username
                                     all_transfers.append(file_info)
                 for transfer in all_transfers:
-                    key = f"{transfer.get('username')}::{os.path.basename(transfer.get('filename', ''))}"
+                    key = f"{transfer.get('username')}::{extract_filename(transfer.get('filename', ''))}"
                     live_transfers_lookup[key] = transfer
             
             # Update cache
@@ -275,7 +302,7 @@ class WebUIDownloadMonitor:
                     for directory in user_data['directories']:
                         if 'files' in directory:
                             for file_info in directory['files']:
-                                key = f"{username}::{os.path.basename(file_info.get('filename', ''))}"
+                                key = f"{username}::{extract_filename(file_info.get('filename', ''))}"
                                 live_transfers[key] = file_info
             return live_transfers
         except Exception as e:
@@ -298,7 +325,7 @@ class WebUIDownloadMonitor:
         if not task_filename or not task_username:
             return False
             
-        lookup_key = f"{task_username}::{os.path.basename(task_filename)}"
+        lookup_key = f"{task_username}::{extract_filename(task_filename)}"
         live_info = live_transfers_lookup.get(lookup_key)
         
         if not live_info:
@@ -776,7 +803,7 @@ def _prepare_stream_task(track_data):
             })
         
         # Get paths
-        download_path = config_manager.get('soulseek.download_path', './downloads')
+        download_path = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
         project_root = os.path.dirname(os.path.abspath(__file__))
         stream_folder = os.path.join(project_root, 'Stream')
         
@@ -898,7 +925,7 @@ def _prepare_stream_task(track_data):
                                 print(f"✓ Found downloaded file: {found_file}")
                                 
                                 # Move file to Stream folder
-                                original_filename = os.path.basename(found_file)
+                                original_filename = extract_filename(found_file)
                                 stream_path = os.path.join(stream_folder, original_filename)
                                 
                                 try:
@@ -1008,11 +1035,11 @@ def _find_streaming_download_in_transfers(transfers_data, track_data):
                         all_transfers.extend(directory['files'])
         
         # Look for our specific file by filename and username
-        target_filename = os.path.basename(track_data.get('filename', ''))
+        target_filename = extract_filename(track_data.get('filename', ''))
         target_username = track_data.get('username', '')
         
         for transfer in all_transfers:
-            transfer_filename = os.path.basename(transfer.get('filename', ''))
+            transfer_filename = extract_filename(transfer.get('filename', ''))
             transfer_username = transfer.get('username', '')
             
             if (transfer_filename == target_filename and 
@@ -1027,7 +1054,7 @@ def _find_streaming_download_in_transfers(transfers_data, track_data):
 def _find_downloaded_file(download_path, track_data):
     """Find the downloaded audio file in the downloads directory tree"""
     audio_extensions = {'.mp3', '.flac', '.ogg', '.aac', '.wma', '.wav', '.m4a'}
-    target_filename = os.path.basename(track_data.get('filename', ''))
+    target_filename = extract_filename(track_data.get('filename', ''))
     
     try:
         # Walk through the downloads directory to find the file
@@ -1956,14 +1983,15 @@ def _find_completed_file_robust(download_dir, api_filename, transfer_dir=None):
         
         return best_match_path, highest_similarity
 
-    target_basename = os.path.basename(api_filename)
+    # Extract filename using the helper function
+    target_basename = extract_filename(api_filename)
     normalized_target = normalize_for_finding(target_basename)
 
     # First search in downloads directory
     best_downloads_path, downloads_similarity = search_in_directory(download_dir, 'downloads')
     
-    # Use a high confidence threshold for fuzzy matches to avoid incorrect files
-    if downloads_similarity > 0.85:
+    # Use a reasonable confidence threshold for fuzzy matches  
+    if downloads_similarity > 0.60:
         location = 'downloads'
         if downloads_similarity == 1.0:
             print(f"✅ Found exact match in downloads: {best_downloads_path}")
@@ -1977,7 +2005,7 @@ def _find_completed_file_robust(download_dir, api_filename, transfer_dir=None):
         print(f"🔍 File not found in downloads, checking transfer folder...")
         best_transfer_path, transfer_similarity = search_in_directory(transfer_dir, 'transfer')
         
-        if transfer_similarity > 0.85:
+        if transfer_similarity > 0.60:
             location = 'transfer'
             if transfer_similarity == 1.0:
                 print(f"✅ Found exact match in transfer: {best_transfer_path}")
@@ -2032,7 +2060,7 @@ def get_download_status():
                                     context = matched_downloads_context.get(context_key)
 
                                 if context and context_key not in _processed_download_ids:
-                                    download_dir = config_manager.get('soulseek.download_path', './downloads')
+                                    download_dir = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
                                     # Use the new robust file finder (only search downloads for post-processing candidates)
                                     found_result = _find_completed_file_robust(download_dir, filename_from_api)
                                     found_path = found_result[0] if found_result and found_result[0] else None
@@ -4553,7 +4581,7 @@ def _post_process_matched_download_with_verification(context_key, context, file_
             album_name_sanitized = clean_album_name.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
             track_name_sanitized = clean_track_name.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
             
-            transfer_dir = config_manager.get('soulseek.transfer_path', './transfers')
+            transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './transfers'))
             artist_dir = os.path.join(transfer_dir, artist_name_sanitized)
             album_folder_name = f"{clean_album_name} ({spotify_album.get('release_date', '').split('-')[0] if spotify_album.get('release_date') else 'Unknown'})"
             album_folder_name = album_folder_name.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
@@ -4569,7 +4597,7 @@ def _post_process_matched_download_with_verification(context_key, context, file_
             track_name = original_search.get('spotify_clean_title') or original_search.get('title', 'Unknown Track')
             track_name_sanitized = track_name.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
             
-            transfer_dir = config_manager.get('soulseek.transfer_path', './transfers')
+            transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './transfers'))
             artist_name_sanitized = spotify_artist.name.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
             artist_dir = os.path.join(transfer_dir, artist_name_sanitized)
             single_dir = os.path.join(artist_dir, "Singles")
@@ -4739,7 +4767,7 @@ def _post_process_matched_download(context_key, context, file_path):
             print(f"🔗 ✅ Album grouping complete!\n")
 
         # 1. Get transfer path and create artist directory
-        transfer_dir = config_manager.get('soulseek.transfer_path', './Transfer')
+        transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
         artist_name_sanitized = _sanitize_filename(spotify_artist["name"])
         artist_dir = os.path.join(transfer_dir, artist_name_sanitized)
         os.makedirs(artist_dir, exist_ok=True)
@@ -4861,7 +4889,7 @@ def _post_process_matched_download(context_key, context, file_path):
         
         _download_cover_art(album_info, os.path.dirname(final_path))
         
-        downloads_path = config_manager.get('soulseek.download_path', './downloads')
+        downloads_path = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
         _cleanup_empty_directories(downloads_path, file_path)
 
         print(f"✅ Post-processing complete for: {final_path}")
@@ -6529,11 +6557,12 @@ def _run_post_processing_worker(task_id, batch_id):
             _on_download_completed(batch_id, task_id, success=False)
             return
             
-        download_dir = config_manager.get('soulseek.download_path', './downloads')
-        transfer_dir = config_manager.get('soulseek.transfer_path', './transfer')
+        download_dir = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
+        transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './transfer'))
         
         # Try to get context for generating the correct final filename
-        context_key = f"{task_username}::{os.path.basename(task_filename)}"
+        task_basename = extract_filename(task_filename)
+        context_key = f"{task_username}::{task_basename}"
         expected_final_filename = None
         
         print(f"🔍 [Post-Processing] Looking up context with key: {context_key}")
@@ -6570,7 +6599,7 @@ def _run_post_processing_worker(task_id, batch_id):
         else:
             print(f"❌ [Post-Processing] No context found for key: {context_key}")
             # Try fuzzy matching with similar keys containing the filename
-            similar_keys = [k for k in matched_downloads_context.keys() if os.path.basename(task_filename) in k]
+            similar_keys = [k for k in matched_downloads_context.keys() if task_basename in k]
             if similar_keys:
                 # Use the first similar key found
                 fuzzy_key = similar_keys[0]
@@ -6600,7 +6629,7 @@ def _run_post_processing_worker(task_id, batch_id):
                     import traceback
                     traceback.print_exc()
             else:
-                print(f"🔍 [Post-Processing] No similar keys found containing '{os.path.basename(task_filename)}'")
+                print(f"🔍 [Post-Processing] No similar keys found containing '{task_basename}'")
                 # Show a sample of what keys actually exist for debugging
                 sample_keys = list(matched_downloads_context.keys())[:5]
                 print(f"🔍 [Post-Processing] Sample of existing keys: {sample_keys}")
@@ -6610,7 +6639,7 @@ def _run_post_processing_worker(task_id, batch_id):
         file_location = None
         for retry_count in range(3):
             print(f"🔍 [Post-Processing] Attempt {retry_count + 1}/3 to find file")
-            print(f"🔍 [Post-Processing] Original filename: {os.path.basename(task_filename)}")
+            print(f"🔍 [Post-Processing] Original filename: {task_basename}")
             if expected_final_filename:
                 print(f"🔍 [Post-Processing] Expected final filename: {expected_final_filename}")
             else:
@@ -6745,7 +6774,7 @@ def _run_post_processing_worker(task_id, batch_id):
         # File found in downloads folder - attempt post-processing
         try:
             # Create context for post-processing (similar to existing matched download logic)
-            context_key = f"{task_username}::{os.path.basename(task_filename)}"
+            context_key = f"{task_username}::{task_basename}"
             
             # Check if this download has matched context for post-processing
             with matched_context_lock:
@@ -7371,7 +7400,7 @@ def _build_batch_status_data(batch_id, batch, live_transfers_lookup):
             task_filename = task.get('filename') or task['track_info'].get('filename')
             task_username = task.get('username') or task['track_info'].get('username')
             if task_filename and task_username:
-                lookup_key = f"{task_username}::{os.path.basename(task_filename)}"
+                lookup_key = f"{task_username}::{extract_filename(task_filename)}"
                 
                 if lookup_key in live_transfers_lookup:
                     live_info = live_transfers_lookup[lookup_key]

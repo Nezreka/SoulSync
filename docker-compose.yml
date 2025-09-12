@@ -11,13 +11,13 @@ services:
     volumes:
       # Persistent data volumes
       - ./config:/app/config
-      - ./database:/app/database
       - ./logs:/app/logs
-      # Soulseek download and transfer directories (mapped to host E: drive paths)
-      - /mnt/e/Broque Projects/newMusic/downloads:/app/downloads
-      - /mnt/e/Broque Projects/newMusic/transfer:/app/transfer
-      # Stream folder for temporary playback files
-      - /mnt/e/Broque Projects/newMusic/stream:/app/stream
+      - ./downloads:/app/downloads
+      - ./Transfer:/app/Transfer
+      # Use named volume for database persistence (separate from host database)
+      - soulsync_database:/app/database
+      # Mount only E: drive through WSL for better performance
+      - /mnt/e:/host/mnt/e:rw
       # Optional: Mount your music library for Plex/Jellyfin access
       - /path/to/your/music:/music:ro
     environment:
@@ -47,6 +47,11 @@ services:
         reservations:
           cpus: '0.5'
           memory: 512M
+
+# Named volumes for persistent data
+volumes:
+  soulsync_database:
+    driver: local
 
 # Optional: Add external network for communication with other containers
 networks:
