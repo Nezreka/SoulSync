@@ -6083,6 +6083,19 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
         permanently_failed_tracks = batch.get('permanently_failed_tracks', [])
         cancelled_tracks = batch.get('cancelled_tracks', set())
         
+        # STEP 0: Remove completed tracks from wishlist (THIS WAS MISSING!)
+        print(f"🔍 [Wishlist Processing] Checking completed tracks for wishlist removal")
+        for task_id in batch.get('queue', []):
+            if task_id in download_tasks:
+                task = download_tasks[task_id]
+                if task.get('status') == 'completed':
+                    try:
+                        track_info = task.get('track_info', {})
+                        context = {'track_info': track_info, 'original_search_result': track_info}
+                        _check_and_remove_from_wishlist(context)
+                    except Exception as e:
+                        print(f"⚠️ [Wishlist Processing] Error removing completed track from wishlist: {e}")
+        
         # STEP 1: Add cancelled tracks that were missing to permanently_failed_tracks (replicating sync.py)
         # This matches sync.py's logic for adding cancelled missing tracks to the failed list
         if cancelled_tracks:

@@ -18,6 +18,8 @@ services:
       # IMPORTANT: Mount the drives containing your download and transfer folders
       # If your download/transfer paths are on E: drive, mount E: drive:
       - /mnt/e:/host/mnt/e:rw
+      # Mount H: drive for transfer folder
+      - /mnt/h:/host/mnt/h:rw
       # If your download/transfer paths are on C: drive, uncomment this line:
       # - /mnt/c:/host/mnt/c:rw
       # If your download/transfer paths are on D: drive, uncomment this line:
