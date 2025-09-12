@@ -56,13 +56,54 @@ docker run -d -p 8008:8008 boulderbadgedad/soulsync:latest
 
 ### Prerequisites
 - **slskd**: Download from [GitHub](https://github.com/slskd/slskd/releases), run on port 5030
-- **Spotify API**: Create app at [Spotify Dashboard](https://developer.spotify.com/dashboard)
+- **Spotify API**: Get Client ID/Secret (see setup below)
+- **Tidal API**: Get Client ID/Secret (see setup below)  
 - **Media Server**: Plex or Jellyfin (optional but recommended)
 
-### Essential Config
-1. Get Spotify Client ID/Secret from developer dashboard
-2. Set up slskd with downloads folder and API key
-3. Launch SoulSync, go to Settings, enter your credentials
+## 🔑 API Setup Guide
+
+### Spotify API Setup
+1. Go to [Spotify Developer Dashboard](https://developer.spotify.com/dashboard)
+2. Click **"Create App"**
+3. Fill out the form:
+   - **App Name**: `SoulSync` (or whatever you want)
+   - **App Description**: `Music library sync`
+   - **Website**: `http://localhost` (or leave blank)
+   - **Redirect URI**: `http://localhost:8888/callback`
+4. Click **"Save"** 
+5. Click **"Settings"** on your new app
+6. Copy the **Client ID** and **Client Secret**
+
+### Tidal API Setup
+1. Go to [Tidal Developer Dashboard](https://developer.tidal.com/dashboard)
+2. Click **"Create New App"**
+3. Fill out the form:
+   - **App Name**: `SoulSync`
+   - **Description**: `Music library sync`
+   - **Redirect URI**: `http://localhost:8889/callback`
+   - **Scopes**: Select `user.read` and `playlists.read`
+4. Click **"Save"**
+5. Copy the **Client ID** and **Client Secret**
+
+### Plex Token Setup
+**Easy Method:**
+1. Open Plex in your browser and sign in
+2. Go to any movie/show page
+3. Click **"Get Info"** or three dots menu → **"View XML"**
+4. In the URL bar, copy everything after `X-Plex-Token=`
+   - Example: `http://192.168.1.100:32400/library/metadata/123?X-Plex-Token=YOUR_TOKEN_HERE`
+5. Your Plex server URL is typically `http://YOUR_IP:32400`
+
+**Alternative Method:**
+1. Go to [plex.tv/claim](https://plex.tv/claim) while logged in
+2. Your 4-minute claim token appears - this isn't what you need
+3. Instead, right-click → Inspect → Network tab → Reload page
+4. Look for requests with `X-Plex-Token` header and copy that value
+
+### Final Steps
+1. Set up slskd with downloads folder and API key
+2. Launch SoulSync, go to Settings, enter all your API credentials
+3. Configure your download and transfer folder paths
 4. **Important**: Share music in slskd to avoid bans
 
 ### Docker Notes
