@@ -182,6 +182,22 @@ This ensures:
 
 ## 🛠️ Troubleshooting
 
+### ❌ ModuleNotFoundError: No module named 'config.settings'
+
+**Problem**: Most common error - incorrect config volume mapping
+
+**Wrong**:
+```yaml
+- "/mnt/cache/appdata/soulsync:/app/config"  # ❌ This overwrites the app's config module
+```
+
+**Correct**:
+```yaml
+- "/mnt/cache/appdata/soulsync/config:/app/config"  # ✅ This maps to the config folder only
+```
+
+**Why this happens**: Mounting the entire appdata folder to `/app/config` overwrites SoulSync's Python `config/` module, causing import errors.
+
 ### Container Won't Start
 ```bash
 # Check Unraid logs
