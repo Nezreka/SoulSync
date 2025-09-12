@@ -1384,13 +1384,17 @@ def get_status():
         spotify_status = spotify_client.is_authenticated()
         spotify_response_time = (time.time() - spotify_start) * 1000  # Convert to ms
         
-        # Test media server with response time
+        # Test media server with response time (use fresh client with Docker URL resolution)
         media_server_start = time.time()
         media_server_status = False
         if active_server == "plex":
-            media_server_status = plex_client.is_connected()
+            # Create fresh client to ensure Docker URL resolution
+            temp_plex_client = PlexClient()
+            media_server_status = temp_plex_client.is_connected()
         elif active_server == "jellyfin":
-            media_server_status = jellyfin_client.is_connected()
+            # Create fresh client to ensure Docker URL resolution
+            temp_jellyfin_client = JellyfinClient()
+            media_server_status = temp_jellyfin_client.is_connected()
         media_server_response_time = (time.time() - media_server_start) * 1000
         
         # Test Soulseek (just check if configured, no network test)
