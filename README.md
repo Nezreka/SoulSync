@@ -20,6 +20,7 @@ Bridge the gap between streaming services and your local music library. Automati
 - **Artist watchlist** monitors for new releases and adds missing tracks
 - **Background automation** retries failed downloads every hour
 
+
 ## 🚀 Three Ways to Run
 
 ### 1. Desktop GUI (Original)
@@ -41,7 +42,13 @@ python web_server.py
 ### 3. Docker (New!)
 Containerized web UI with persistent database.
 ```bash
+# Option 1: Use docker-compose (recommended)
+curl -O https://raw.githubusercontent.com/Nezreka/SoulSync/main/docker-compose.yml
 docker-compose up -d
+
+# Option 2: Run directly
+docker run -d -p 8008:8008 boulderbadgedad/soulsync:latest
+
 # Open http://localhost:8008
 ```
 
