@@ -6,6 +6,8 @@
 
 Bridge the gap between streaming services and your local music library. Automatically sync Spotify/Tidal/YouTube playlists to Plex/Jellyfin via Soulseek.
 
+> ⚠️ **CRITICAL**: You MUST configure file sharing in slskd before using SoulSync. Users who only download without sharing get banned by the Soulseek community. Set up shared folders in slskd's web interface at `http://localhost:5030/shares` - share your music library or downloads folder.
+
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/boulderbadgedad)
 
 ## ✨ What It Does
