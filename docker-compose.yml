@@ -13,11 +13,16 @@ services:
       - ./config:/app/config
       - ./logs:/app/logs
       - ./downloads:/app/downloads
-      - ./Transfer:/app/Transfer
       # Use named volume for database persistence (separate from host database)
       - soulsync_database:/app/database
-      # Mount only E: drive through WSL for better performance
+      # IMPORTANT: Mount the drives containing your download and transfer folders
+      # If your download/transfer paths are on E: drive, mount E: drive:
       - /mnt/e:/host/mnt/e:rw
+      # If your download/transfer paths are on C: drive, uncomment this line:
+      # - /mnt/c:/host/mnt/c:rw
+      # If your download/transfer paths are on D: drive, uncomment this line:
+      # - /mnt/d:/host/mnt/d:rw
+      # Add additional drive mounts as needed for your specific setup
       # Optional: Mount your music library for Plex/Jellyfin access
       - /path/to/your/music:/music:ro
     environment:
