@@ -1,6 +1,7 @@
 import requests
 import asyncio
 import aiohttp
+import os
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
 import time
@@ -219,9 +220,26 @@ class SoulseekClient:
             logger.warning("Soulseek slskd URL not configured")
             return
         
-        self.base_url = config['slskd_url'].rstrip('/')
+        # Apply Docker URL resolution if running in container
+        slskd_url = config.get('slskd_url')
+        import os
+        if os.path.exists('/.dockerenv') and 'localhost' in slskd_url:
+            slskd_url = slskd_url.replace('localhost', 'host.docker.internal')
+            logger.info(f"Docker detected, using {slskd_url} for slskd connection")
+        
+        self.base_url = slskd_url.rstrip('/')
         self.api_key = config.get('api_key', '')
-        self.download_path = Path(config.get('download_path', './downloads'))
+        
+        # Handle download path with Docker translation
+        download_path_str = config.get('download_path', './downloads')
+        if os.path.exists('/.dockerenv') and len(download_path_str) >= 3 and download_path_str[1] == ':' and download_path_str[0].isalpha():
+            # Convert Windows path (E:/path) to WSL mount path (/mnt/e/path)
+            drive_letter = download_path_str[0].lower()
+            rest_of_path = download_path_str[2:].replace('\\', '/')  # Remove E: and convert backslashes
+            download_path_str = f"/host/mnt/{drive_letter}{rest_of_path}"
+            logger.info(f"Docker detected, using {download_path_str} for downloads")
+        
+        self.download_path = Path(download_path_str)
         self.download_path.mkdir(parents=True, exist_ok=True)
         
         logger.info(f"Soulseek client configured with slskd at {self.base_url}")
@@ -308,7 +326,16 @@ class SoulseekClient:
                         else:
                             return {}
                 else:
-                    logger.error(f"API request failed: {response.status} - {response_text}")
+                    # Enhanced error logging for better debugging
+                    error_detail = response_text if response_text.strip() else "No error details provided"
+                    
+                    # Reduce noise for expected 404s during search cleanup
+                    if response.status == 404 and 'searches/' in url and method == 'DELETE':
+                        logger.debug(f"Search not found for deletion (expected): {url}")
+                    else:
+                        logger.error(f"API request failed: HTTP {response.status} ({response.reason}) - {error_detail}")
+                        logger.debug(f"Failed request: {method} {url}")
+                    
                     return None
                     
         except Exception as e:
@@ -907,14 +934,29 @@ class SoulseekClient:
                 return False
         
         try:
-            # Use correct slskd API format: DELETE /transfers/downloads/{username}/{download_id}?remove={true/false}
-            # remove=false: Cancel download but keep in transfer list
-            # remove=true: Remove download completely from transfer list
-            endpoint = f'transfers/downloads/{username}/{download_id}?remove={str(remove).lower()}'
+            # Try multiple API formats as slskd API may vary between versions
+            endpoints_to_try = [
+                # Format 1: With username and remove parameter (original format)
+                f'transfers/downloads/{username}/{download_id}?remove={str(remove).lower()}',
+                # Format 2: Simple format with just download_id (used in sync.py)
+                f'transfers/downloads/{download_id}',
+                # Format 3: Alternative format without remove parameter
+                f'transfers/downloads/{username}/{download_id}'
+            ]
+            
             action = "Removing" if remove else "Cancelling"
-            logger.debug(f"{action} download with endpoint: {endpoint}")
-            response = await self._make_request('DELETE', endpoint)
-            return response is not None
+            
+            for i, endpoint in enumerate(endpoints_to_try):
+                logger.debug(f"{action} download (attempt {i+1}/3) with endpoint: {endpoint}")
+                response = await self._make_request('DELETE', endpoint)
+                if response is not None:
+                    logger.info(f"✅ Successfully cancelled download using endpoint format {i+1}")
+                    return True
+                else:
+                    logger.debug(f"❌ Endpoint format {i+1} failed: {endpoint}")
+            
+            logger.error(f"❌ All cancel endpoint formats failed for download_id: {download_id}")
+            return False
             
         except Exception as e:
             logger.error(f"Error cancelling download: {e}")
@@ -1034,7 +1076,8 @@ class SoulseekClient:
             if success:
                 logger.debug(f"Successfully deleted search {search_id}")
             else:
-                logger.warning(f"Failed to delete search {search_id}")
+                # Don't log warnings for failed deletions - they're often just 404s for already-removed searches
+                logger.debug(f"Search deletion returned false (likely already removed): {search_id}")
                 
             return success
             

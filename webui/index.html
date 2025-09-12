@@ -1,0 +1,977 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>SoulSync - Music Sync & Manager</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="main-container">
+        <!-- Sidebar - Always Visible -->
+        <div class="sidebar">
+            <!-- Header Section -->
+            <div class="sidebar-header">
+                <h1 class="app-name">SoulSync</h1>
+                <p class="app-subtitle">Music Sync & Manager</p>
+            </div>
+            
+            <!-- Navigation Section -->
+            <nav class="sidebar-nav">
+                <button class="nav-button active" data-page="dashboard">
+                    <span class="nav-icon">📊</span>
+                    <span class="nav-text">Dashboard</span>
+                </button>
+                <button class="nav-button" data-page="sync">
+                    <span class="nav-icon">🔄</span>
+                    <span class="nav-text">Sync</span>
+                </button>
+                <button class="nav-button" data-page="downloads">
+                    <span class="nav-icon">📥</span>
+                    <span class="nav-text">Search</span>
+                </button>
+                <button class="nav-button" data-page="artists">
+                    <span class="nav-icon">🎵</span>
+                    <span class="nav-text">Artists</span>
+                </button>
+                <button class="nav-button" data-page="settings">
+                    <span class="nav-icon">⚙️</span>
+                    <span class="nav-text">Settings</span>
+                </button>
+            </nav>
+            
+            <!-- Spacer -->
+            <div class="sidebar-spacer"></div>
+            
+            <!-- Media Player Section -->
+            <div class="media-player" id="media-player">
+                <!-- Loading Animation -->
+                <div class="loading-animation hidden" id="loading-animation">
+                    <div class="loading-bar">
+                        <div class="loading-progress"></div>
+                    </div>
+                    <div class="loading-text">0%</div>
+                </div>
+                
+                <!-- Header (always visible) -->
+                <div class="media-header">
+                    <div class="media-info">
+                        <div class="track-title" id="track-title">No track</div>
+                        <div class="artist-name" id="artist-name">Unknown Artist</div>
+                    </div>
+                    <button class="play-button" id="play-button" disabled>▷</button>
+                </div>
+                
+                <!-- Expanded Content (hidden initially) -->
+                <div class="media-expanded hidden" id="media-expanded">
+                    <div class="album-name" id="album-name">Unknown Album</div>
+                    
+                    <!-- Progress Bar and Time Display -->
+                    <div class="progress-section">
+                        <div class="time-display">
+                            <span class="current-time" id="current-time">0:00</span>
+                            <span class="time-separator">/</span>
+                            <span class="total-time" id="total-time">0:00</span>
+                        </div>
+                        <div class="progress-bar-container">
+                            <div class="progress-track">
+                                <div class="progress-fill" id="progress-fill"></div>
+                            </div>
+                            <input type="range" class="progress-bar" id="progress-bar" min="0" max="100" value="0" step="0.1">
+                        </div>
+                    </div>
+                    
+                    <div class="media-controls">
+                        <div class="volume-control">
+                            <span class="volume-icon">🔊</span>
+                            <input type="range" class="volume-slider" id="volume-slider" min="0" max="100" value="70">
+                        </div>
+                        <button class="stop-button" id="stop-button" disabled>⏹</button>
+                    </div>
+                </div>
+                
+                <!-- No Track Message -->
+                <div class="no-track-message" id="no-track-message">
+                    Start playing music to see controls
+                </div>
+            </div>
+            
+            <!-- Crypto Donation Section -->
+            <div class="crypto-donation">
+                <div class="donation-header">
+                    <span class="donation-title">Support Development</span>
+                    <button class="toggle-button" id="donation-toggle">Show</button>
+                </div>
+                <div class="donation-addresses hidden" id="donation-addresses">
+                    <div class="donation-item" onclick="openKofi()">
+                        <span class="donation-name">Ko-fi</span>
+                        <span class="donation-link">Click to open</span>
+                    </div>
+                    <div class="donation-item" onclick="copyAddress('3JVWrRSkozAQSmw5DXYVxYKsM9bndPTqdS', 'Bitcoin')">
+                        <span class="donation-name">Bitcoin</span>
+                        <span class="donation-address">3JVWrR...dPTqdS</span>
+                    </div>
+                    <div class="donation-item" onclick="copyAddress('0x343fC48c2cd1C6332b0df9a58F86e6520a026AC5', 'Ethereum')">
+                        <span class="donation-name">Ethereum</span>
+                        <span class="donation-address">0x343f...026AC5</span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Version Section -->
+            <div class="version-section">
+                <button class="version-button" onclick="showVersionInfo()">v1.0</button>
+            </div>
+            
+            <!-- Status Section -->
+            <div class="status-section">
+                <h4 class="status-title">Service Status</h4>
+                <div class="status-indicator" id="spotify-indicator">
+                    <span class="status-dot disconnected"></span>
+                    <span class="status-name">Spotify</span>
+                </div>
+                <div class="status-indicator" id="media-server-indicator">
+                    <span class="status-dot disconnected"></span>
+                    <span class="status-name" id="media-server-name">Plex</span>
+                </div>
+                <div class="status-indicator" id="soulseek-indicator">
+                    <span class="status-dot disconnected"></span>
+                    <span class="status-name">Soulseek</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Main Content Area -->
+        <div class="main-content">
+            <!-- Dashboard Page -->
+            <div class="page active" id="dashboard-page">
+                <div class="dashboard-container">
+                    <div class="dashboard-header">
+                        <div class="header-text">
+                            <h2 class="header-title">System Dashboard</h2>
+                            <p class="header-subtitle">Monitor your music system health and manage operations</p>
+                        </div>
+                        <div class="header-spacer"></div>
+                        <div class="header-actions">
+                            <button class="header-button watchlist-button" id="watchlist-button">👁️ Watchlist (0)</button>
+                            <button class="header-button wishlist-button" id="wishlist-button">🎵 Wishlist (0)</button>
+                        </div>
+                    </div>
+
+                    <div class="dashboard-section">
+                        <h3 class="section-title">Service Status</h3>
+                        <div class="service-status-grid">
+                            <div class="service-card" id="spotify-service-card">
+                                <div class="service-card-header">
+                                    <span class="service-card-title">Spotify</span>
+                                    <span class="service-card-indicator disconnected" id="spotify-status-indicator">●</span>
+                                </div>
+                                <p class="service-card-status-text" id="spotify-status-text">Disconnected</p>
+                                <p class="service-card-response-time" id="spotify-response-time">Response: --</p>
+                                <div class="service-card-footer">
+                                    <button class="service-card-button" onclick="testDashboardConnection('spotify')">Test Connection</button>
+                                </div>
+                            </div>
+                            <div class="service-card" id="media-server-service-card">
+                                <div class="service-card-header">
+                                    <span class="service-card-title" id="media-server-service-name">Server</span>
+                                    <span class="service-card-indicator disconnected" id="media-server-status-indicator">●</span>
+                                </div>
+                                <p class="service-card-status-text" id="media-server-status-text">Disconnected</p>
+                                <p class="service-card-response-time" id="media-server-response-time">Response: --</p>
+                                <div class="service-card-footer">
+                                    <button class="service-card-button" onclick="testDashboardConnection('server')">Test Connection</button>
+                                </div>
+                            </div>
+                            <div class="service-card" id="soulseek-service-card">
+                                <div class="service-card-header">
+                                    <span class="service-card-title">Soulseek</span>
+                                    <span class="service-card-indicator disconnected" id="soulseek-status-indicator">●</span>
+                                </div>
+                                <p class="service-card-status-text" id="soulseek-status-text">Disconnected</p>
+                                <p class="service-card-response-time" id="soulseek-response-time">Response: --</p>
+                                <div class="service-card-footer">
+                                    <button class="service-card-button" onclick="testDashboardConnection('soulseek')">Test Connection</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="dashboard-section">
+                        <h3 class="section-title">System Statistics</h3>
+                        <div class="stats-grid-dashboard">
+                            <div class="stat-card-dashboard" id="active-downloads-card">
+                                <p class="stat-card-title">Active Downloads</p>
+                                <p class="stat-card-value">0</p>
+                                <p class="stat-card-subtitle">Currently downloading</p>
+                            </div>
+                            <div class="stat-card-dashboard" id="finished-downloads-card">
+                                <p class="stat-card-title">Finished Downloads</p>
+                                <p class="stat-card-value">0</p>
+                                <p class="stat-card-subtitle">Completed this session</p>
+                            </div>
+                            <div class="stat-card-dashboard" id="download-speed-card">
+                                <p class="stat-card-title">Download Speed</p>
+                                <p class="stat-card-value">0 KB/s</p>
+                                <p class="stat-card-subtitle">Combined speed</p>
+                            </div>
+                            <div class="stat-card-dashboard" id="active-syncs-card">
+                                <p class="stat-card-title">Active Syncs</p>
+                                <p class="stat-card-value">0</p>
+                                <p class="stat-card-subtitle">Playlists syncing</p>
+                            </div>
+                            <div class="stat-card-dashboard" id="uptime-card">
+                                <p class="stat-card-title">System Uptime</p>
+                                <p class="stat-card-value">0m</p>
+                                <p class="stat-card-subtitle">Application runtime</p>
+                            </div>
+                            <div class="stat-card-dashboard" id="memory-card">
+                                <p class="stat-card-title">Memory Usage</p>
+                                <p class="stat-card-value">--</p>
+                                <p class="stat-card-subtitle">Current usage</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="dashboard-section">
+                        <h3 class="section-title">Tools & Operations</h3>
+                        <div class="tools-grid">
+                            <div class="tool-card" id="db-updater-card">
+                                <h4 class="tool-card-title">Database Updater</h4>
+                                <p class="tool-card-info">Last Full Refresh: <span id="db-last-refresh">Never</span></p>
+                                <div class="tool-card-stats">
+                                    <div class="stat-item">
+                                        <span class="stat-item-label">Artists:</span>
+                                        <span class="stat-item-value" id="db-stat-artists">0</span>
+                                    </div>
+                                    <div class="stat-item">
+                                        <span class="stat-item-label">Albums:</span>
+                                        <span class="stat-item-value" id="db-stat-albums">0</span>
+                                    </div>
+                                    <div class="stat-item">
+                                        <span class="stat-item-label">Tracks:</span>
+                                        <span class="stat-item-value" id="db-stat-tracks">0</span>
+                                    </div>
+                                    <div class="stat-item">
+                                        <span class="stat-item-label">Size:</span>
+                                        <span class="stat-item-value" id="db-stat-size">0.0 MB</span>
+                                    </div>
+                                </div>
+                                <div class="tool-card-controls">
+                                    <select id="db-refresh-type">
+                                        <option value="incremental">Incremental Update</option>
+                                        <option value="full">Full Refresh</option>
+                                    </select>
+                                    <button id="db-update-button">Update Database</button>
+                                </div>
+                                <div class="tool-card-progress-section">
+                                    <p class="progress-phase-label" id="db-phase-label">Idle</p>
+                                    <div class="progress-bar-container">
+                                         <div class="progress-bar-fill" id="db-progress-bar" style="width: 0%;"></div>
+                                    </div>
+                                    <p class="progress-details-label" id="db-progress-label">0 / 0 artists (0.0%)</p>
+                                </div>
+                            </div>
+
+                            <div class="tool-card" id="metadata-updater-card">
+                                <h4 class="tool-card-title">Metadata Updater</h4>
+                                <p class="tool-card-info">Updates artist photos, genres, and album art from Spotify.</p>
+                                 <div class="tool-card-controls">
+                                    <select id="metadata-refresh-interval">
+                                        <option value="180">6 months</option>
+                                        <option value="90">3 months</option>
+                                        <option value="30" selected>1 month</option>
+                                        <option value="14">2 weeks</option>
+                                        <option value="7">1 week</option>
+                                        <option value="0">Full refresh</option>
+                                    </select>
+                                    <button id="metadata-update-button">Begin Update</button>
+                                </div>
+                                 <div class="tool-card-progress-section">
+                                    <p class="progress-phase-label" id="metadata-phase-label">Current Artist: Not running</p>
+                                    <div class="progress-bar-container">
+                                         <div class="progress-bar-fill" id="metadata-progress-bar" style="width: 0%;"></div>
+                                    </div>
+                                    <p class="progress-details-label" id="metadata-progress-label">0 / 0 artists (0.0%)</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="dashboard-section">
+                        <h3 class="section-title">Recent Activity</h3>
+                        <div class="activity-feed-container" id="dashboard-activity-feed">
+                            <div class="activity-item">
+                                <span class="activity-icon">📊</span>
+                                <div class="activity-text-content">
+                                    <p class="activity-title">System Started</p>
+                                    <p class="activity-subtitle">Dashboard initialized successfully</p>
+                                </div>
+                                <p class="activity-time">Now</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Main container for the Sync page -->
+            <div class="page" id="sync-page">
+                <!-- Header -->
+                <div class="sync-header">
+                    <h2 class="sync-title">Playlist Sync</h2>
+                    <p class="sync-subtitle">Synchronize your Spotify, Tidal, and YouTube playlists with your media server</p>
+                </div>
+
+                <!-- Main two-column content area -->
+                <div class="sync-content-area">
+                    <!-- Left Panel: Tabbed Playlist Section -->
+                    <div class="sync-main-panel">
+                        <div class="sync-tabs">
+                            <button class="sync-tab-button active" data-tab="spotify">
+                                <span class="tab-icon spotify-icon"></span> Spotify
+                            </button>
+                            <button class="sync-tab-button" data-tab="tidal">
+                                <span class="tab-icon tidal-icon"></span> Tidal
+                            </button>
+                            <button class="sync-tab-button" data-tab="youtube">
+                                <span class="tab-icon youtube-icon"></span> YouTube
+                            </button>
+                        </div>
+
+                        <!-- Spotify Tab Content -->
+                        <div class="sync-tab-content active" id="spotify-tab-content">
+                            <div class="playlist-header">
+                                <h3>Your Spotify Playlists</h3>
+                                <button class="refresh-button" id="spotify-refresh-btn">🔄 Refresh</button>
+                            </div>
+                            <div class="playlist-scroll-container" id="spotify-playlist-container">
+                                <div class="playlist-placeholder">Click 'Refresh' to load your Spotify playlists.</div>
+                            </div>
+                        </div>
+
+                        <!-- Tidal Tab Content -->
+                        <div class="sync-tab-content" id="tidal-tab-content">
+                            <div class="playlist-header">
+                                <h3>Your Tidal Playlists</h3>
+                                <button class="refresh-button tidal" id="tidal-refresh-btn">🔄 Refresh</button>
+                            </div>
+                            <div class="playlist-scroll-container" id="tidal-playlist-container">
+                                <div class="playlist-placeholder">Click 'Refresh' to load your Tidal playlists.</div>
+                            </div>
+                        </div>
+
+                        <!-- YouTube Tab Content -->
+                        <div class="sync-tab-content" id="youtube-tab-content">
+                            <div class="youtube-input-section">
+                                <input type="text" id="youtube-url-input" placeholder="Paste YouTube Music Playlist URL...">
+                                <button id="youtube-parse-btn">Parse Playlist</button>
+                            </div>
+                            <div class="playlist-scroll-container" id="youtube-playlist-container">
+                                <div class="playlist-placeholder">Parsed YouTube playlists will appear here.</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right Panel: Sidebar with Options & Logging -->
+                    <div class="sync-sidebar">
+                        <div class="sidebar-section">
+                            <h4>Sync Actions</h4>
+                            <div id="selection-info">Select playlists to sync</div>
+                            <button id="start-sync-btn" class="neo-button" disabled>Start Sync</button>
+                        </div>
+                        <div class="sidebar-section progress-section">
+                            <h4>Sync Progress</h4>
+                            <div class="progress-bar-container">
+                                <div class="progress-bar-fill" id="sync-progress-bar" style="width: 0%;"></div>
+                            </div>
+                            <div id="sync-progress-text">Ready to sync...</div>
+                            <textarea id="sync-log-area" readonly>Waiting for sync to start...</textarea>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Downloads Page -->
+            <div class="page" id="downloads-page">
+                <!-- 
+                This top-level container replicates the QSplitter from downloads.py,
+                creating the two-panel layout for the page.
+                -->
+                <div class="downloads-content">
+                    
+                    <!-- ======================================================= -->
+                    <!-- == LEFT PANEL: Search, Filters, and Results          == -->
+                    <!-- ======================================================= -->
+                    <div class="downloads-main-panel">
+                        
+                        <!-- Header: Replicates create_elegant_header() -->
+                        <div class="downloads-header">
+                            <h2 class="downloads-title">🎵 Music Downloads</h2>
+                            <p class="downloads-subtitle">Search, discover, and download high-quality music</p>
+                        </div>
+
+                        <!-- Search Bar: Replicates create_elegant_search_bar() -->
+                        <div class="search-bar-container">
+                            <input type="text" id="downloads-search-input" placeholder="Search for music... (e.g., 'Virtual Mage', 'Queen Bohemian Rhapsody')">
+                            <button id="downloads-cancel-btn" class="hidden">✕ Cancel</button>
+                            <button id="downloads-search-btn">🔍 Search</button>
+                        </div>
+
+                       
+                        <div id="filters-container" class="filters-container hidden">
+                            <div class="filter-toggle-header">
+                                <button id="filter-toggle-btn" class="filter-toggle-btn">⏷ Filters</button>
+                            </div>
+
+                            <div id="filter-content" class="filter-content hidden">
+                                <!-- Filter by Type -->
+                                <div class="filter-group">
+                                    <label class="filter-label">Type:</label>
+                                    <button class="filter-btn active" data-filter-type="type" data-value="all">All</button>
+                                    <button class="filter-btn" data-filter-type="type" data-value="album">Albums</button>
+                                    <button class="filter-btn" data-filter-type="type" data-value="track">Singles</button>
+                                </div>
+
+                                <!-- Filter by Format -->
+                                <div class="filter-group">
+                                    <label class="filter-label">Format:</label>
+                                    <button class="filter-btn active" data-filter-type="format" data-value="all">All</button>
+                                    <button class="filter-btn" data-filter-type="format" data-value="flac">FLAC</button>
+                                    <button class="filter-btn" data-filter-type="format" data-value="mp3">MP3</button>
+                                    <!-- Added missing format buttons -->
+                                    <button class="filter-btn" data-filter-type="format" data-value="ogg">OGG</button>
+                                    <button class="filter-btn" data-filter-type="format" data-value="aac">AAC</button>
+                                    <button class="filter-btn" data-filter-type="format" data-value="wma">WMA</button>
+                                </div>
+
+                                <!-- Sort Controls -->
+                                <div class="filter-group">
+                                    <label class="filter-label">Sort by:</label>
+                                    <button id="sort-order-btn" class="filter-btn sort-order-btn" data-order="desc">↓</button>
+                                    <!-- Added all sort options from the GUI -->
+                                    <button class="filter-btn active" data-filter-type="sort" data-value="relevance">Relevance</button>
+                                    <button class="filter-btn" data-filter-type="sort" data-value="quality_score">Quality</button>
+                                    <button class="filter-btn" data-filter-type="sort" data-value="size">Size</button>
+                                    <button class="filter-btn" data-filter-type="sort" data-value="title">Name</button>
+                                    <button class="filter-btn" data-filter-type="sort" data-value="username">Uploader</button>
+                                    <button class="filter-btn" data-filter-type="sort" data-value="bitrate">Bitrate</button>
+                                    <button class="filter-btn" data-filter-type="sort" data-value="duration">Duration</button>
+                                    <button class="filter-btn" data-filter-type="sort" data-value="availability">Available</button>
+                                    <button class="filter-btn" data-filter-type="sort" data-value="upload_speed">Speed</button>
+                                </div>
+                            </div>
+                        </div>
+
+
+                        <!-- Search Status Bar -->
+                        <div class="search-status-container">
+                            <div class="spinner-animation hidden"></div>
+                            <p id="search-status-text">Ready to search • Enter artist, song, or album name</p>
+                            <div class="dots-animation hidden"></div>
+                        </div>
+
+                        <!-- Search Results Area: Replicates the QScrollArea -->
+                        <div class="search-results-container">
+                            <div class="search-results-header">
+                                <h3>Search Results</h3>
+                            </div>
+                            <div class="search-results-scroll-area" id="search-results-area">
+                                <!-- 
+                                The placeholder search results have been removed.
+                                This area will now be populated by JavaScript based on API responses.
+                                -->
+                                <div class="search-results-placeholder">
+                                    <p>Your search results will appear here.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ======================================================= -->
+                    <!-- == RIGHT PANEL: Controls and Download Queue          == -->
+                    <!-- ======================================================= -->
+                    <div class="downloads-side-panel">
+                        
+                        <!-- Controls Panel: Replicates create_collapsible_controls_panel() -->
+                        <div class="controls-panel">
+                            <h3 class="controls-panel__header">Download Manager</h3>
+                            <div class="controls-panel__stats">
+                                <p id="active-downloads-label">• Active Downloads: 0</p>
+                                <p id="finished-downloads-label">• Finished Downloads: 0</p>
+                            </div>
+                            <div class="controls-panel__actions">
+                                <button class="controls-panel__clear-btn">🗑️ Clear Completed</button>
+                            </div>
+                        </div>
+
+                        <!-- Download Queue: Replicates TabbedDownloadManager -->
+                        <div class="download-manager">
+                            <div class="download-manager__tabs">
+                                <button class="tab-btn active" data-tab="active-queue">Download Queue (0)</button>
+                                <button class="tab-btn" data-tab="finished-queue">Finished (0)</button>
+                            </div>
+                            <div class="download-manager__content">
+                                
+                                <!-- Active Queue -->
+                                <div class="download-queue active" id="active-queue">
+                                    <div class="download-queue__empty-message">No active downloads.</div>
+                                </div>
+                                
+                                <!-- Finished Queue -->
+                                <div class="download-queue" id="finished-queue">
+                                    <div class="download-queue__empty-message">No finished downloads.</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Artists Page -->
+            <div class="page" id="artists-page">
+                <!-- Initial Search State -->
+                <div class="artists-search-state" id="artists-search-state">
+                    <div class="artists-search-container">
+                        <div class="artists-welcome-section">
+                            <h2 class="artists-welcome-title">🎵 Discover Artists</h2>
+                            <p class="artists-welcome-subtitle">Search for your favorite artists and explore their complete discography</p>
+                        </div>
+                        
+                        <div class="artists-search-input-container">
+                            <input type="text" 
+                                   id="artists-search-input" 
+                                   class="artists-search-input" 
+                                   placeholder="Search for an artist...">
+                            <div class="artists-search-icon">🔍</div>
+                        </div>
+                        
+                        <div class="artists-search-status" id="artists-search-status">
+                            Start typing to search for artists
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Search Results State -->
+                <div class="artists-results-state hidden" id="artists-results-state">
+                    <div class="artists-results-header">
+                        <button class="artists-back-button" id="artists-back-button">
+                            <span class="back-icon">←</span>
+                            <span>Back to Search</span>
+                        </button>
+                        
+                        <div class="artists-search-header">
+                            <input type="text" 
+                                   id="artists-header-search-input" 
+                                   class="artists-header-search-input" 
+                                   placeholder="Search for an artist...">
+                        </div>
+                    </div>
+                    
+                    <div class="artists-results-content">
+                        <div class="artists-results-title">Search Results</div>
+                        <div class="artists-cards-container" id="artists-cards-container">
+                            <!-- Artist cards will be dynamically populated here -->
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Artist Detail State -->
+                <div class="artist-detail-state hidden" id="artist-detail-state">
+                    <div class="artist-detail-header">
+                        <div class="artist-detail-header-left">
+                            <button class="artist-detail-back-button" id="artist-detail-back-button">
+                                <span class="back-icon">←</span>
+                                <span>Back to Results</span>
+                            </button>
+                            
+                            <div class="artist-detail-info">
+                                <div class="artist-detail-image" id="artist-detail-image"></div>
+                                <div class="artist-detail-text">
+                                    <h2 class="artist-detail-name" id="artist-detail-name">Artist Name</h2>
+                                    <p class="artist-detail-genres" id="artist-detail-genres">Genres</p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <button class="artist-detail-watchlist-btn" id="artist-detail-watchlist-btn">
+                            <span class="watchlist-icon">👁️</span>
+                            <span class="watchlist-text">Add to Watchlist</span>
+                        </button>
+                    </div>
+                    
+                    <div class="artist-detail-content">
+                        <div class="artist-detail-tabs">
+                            <button class="artist-tab active" data-tab="albums" id="albums-tab">
+                                <span class="tab-icon">💿</span>
+                                <span>Albums</span>
+                            </button>
+                            <button class="artist-tab" data-tab="singles" id="singles-tab">
+                                <span class="tab-icon">🎵</span>
+                                <span>Singles & EPs</span>
+                            </button>
+                        </div>
+                        
+                        <div class="artist-detail-discography">
+                            <div class="tab-content active" id="albums-content">
+                                <div class="album-cards-container" id="album-cards-container">
+                                    <!-- Album cards will be populated here -->
+                                </div>
+                            </div>
+                            
+                            <div class="tab-content" id="singles-content">
+                                <div class="singles-cards-container" id="singles-cards-container">
+                                    <!-- Singles cards will be populated here -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Settings Page -->
+            <div class="page" id="settings-page">
+                <div class="page-header">
+                    <h2>Settings</h2>
+                </div>
+                <div class="settings-content">
+                    <!-- Two Column Layout -->
+                    <div class="settings-columns">
+                        <!-- Left Column - API Configuration -->
+                        <div class="settings-left-column">
+                            <!-- API Configuration -->
+                            <div class="settings-group">
+                                <h3>API Configuration</h3>
+                                
+                                <!-- Spotify Settings -->
+                                <div class="api-service-frame">
+                                    <h4 class="service-title spotify-title">Spotify</h4>
+                                    <div class="form-group">
+                                        <label>Client ID:</label>
+                                        <input type="text" id="spotify-client-id" placeholder="Spotify Client ID">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Client Secret:</label>
+                                        <input type="password" id="spotify-client-secret" placeholder="Spotify Client Secret">
+                                    </div>
+                                    <div class="callback-info">
+                                        <div class="callback-label">Required Redirect URI:</div>
+                                        <div class="callback-url">http://127.0.0.1:8888/callback</div>
+                                        <div class="callback-help">Add this URL to your Spotify app's 'Redirect URIs' in the Spotify Developer Dashboard</div>
+                                    </div>
+                                    <div class="form-actions">
+                                        <button class="auth-button" onclick="authenticateSpotify()">🔐 Authenticate</button>
+                                    </div>
+                                </div>
+                                
+                                <!-- Tidal Settings -->
+                                <div class="api-service-frame">
+                                    <h4 class="service-title tidal-title">Tidal</h4>
+                                    <div class="form-group">
+                                        <label>Client ID:</label>
+                                        <input type="text" id="tidal-client-id" placeholder="Tidal Client ID">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Client Secret:</label>
+                                        <input type="password" id="tidal-client-secret" placeholder="Tidal Client Secret">
+                                    </div>
+                                    <div class="callback-info">
+                                        <div class="callback-label">Required Redirect URI:</div>
+                                        <div class="callback-url">http://127.0.0.1:8889/tidal/callback</div>
+                                        <div class="callback-help">Add this URL to your Tidal app configuration</div>
+                                    </div>
+                                    <div class="form-actions">
+                                        <button class="auth-button" onclick="authenticateTidal()">🔐 Authenticate</button>
+                                    </div>
+                                </div>
+                                
+                                <!-- Soulseek Settings -->
+                                <div class="api-service-frame">
+                                    <h4 class="service-title soulseek-title">Soulseek</h4>
+                                    <div class="form-group">
+                                        <label>slskd URL:</label>
+                                        <div class="path-input-group">
+                                            <input type="url" id="soulseek-url" placeholder="http://localhost:5030">
+                                            <button class="detect-button" onclick="autoDetectSlskd()">Auto-detect</button>
+                                        </div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>API Key:</label>
+                                        <input type="password" id="soulseek-api-key" placeholder="Slskd API Key">
+                                    </div>
+                                </div>
+                                
+                                <!-- Test Connection Buttons -->
+                                <div class="api-test-buttons">
+                                    <button class="test-button" onclick="testConnection('spotify')">Test Spotify</button>
+                                    <button class="test-button" onclick="testConnection('tidal')">Test Tidal</button>
+                                    <button class="test-button" onclick="testConnection('soulseek')">Test Soulseek</button>
+                                </div>
+                            </div>
+                            
+                            <!-- Server Connections -->
+                            <div class="settings-group">
+                                <h3>Server Connections</h3>
+                                
+                                <!-- Server Toggle Buttons -->
+                                <div class="server-toggle-container">
+                                    <button class="server-toggle-btn active" id="plex-toggle" onclick="toggleServer('plex')">Plex</button>
+                                    <button class="server-toggle-btn" id="jellyfin-toggle" onclick="toggleServer('jellyfin')">Jellyfin</button>
+                                </div>
+                                
+                                <!-- Plex Settings -->
+                                <div class="server-config-container" id="plex-container">
+                                    <div class="form-group">
+                                        <label>Plex Server URL:</label>
+                                        <input type="url" id="plex-url" placeholder="http://localhost:32400">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Plex Token:</label>
+                                        <input type="password" id="plex-token" placeholder="X-Plex-Token">
+                                    </div>
+                                    <div class="form-actions">
+                                        <button class="detect-button" onclick="autoDetectPlex()">Auto-detect</button>
+                                        <button class="test-button" onclick="testConnection('plex')">Test</button>
+                                    </div>
+                                </div>
+                                
+                                <!-- Jellyfin Settings -->
+                                <div class="server-config-container hidden" id="jellyfin-container">
+                                    <div class="form-group">
+                                        <label>Jellyfin Server URL:</label>
+                                        <input type="url" id="jellyfin-url" placeholder="http://localhost:8096">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>API Key:</label>
+                                        <input type="password" id="jellyfin-api-key" placeholder="Jellyfin API Key">
+                                    </div>
+                                    <div class="form-actions">
+                                        <button class="detect-button" onclick="autoDetectJellyfin()">Auto-detect</button>
+                                        <button class="test-button" onclick="testConnection('jellyfin')">Test</button>
+                                    </div>
+                                </div>
+                                
+                                <!-- Server Test Button -->
+                                <div class="server-test-section">
+                                    <button class="test-button server-test-btn" onclick="testConnection('server')">Test Server</button>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Right Column - Download Settings, Database, Metadata, Logging -->
+                        <div class="settings-right-column">
+                            <!-- Download Settings -->
+                            <div class="settings-group">
+                                <h3>Download Settings</h3>
+                                
+                                <div class="form-group">
+                                    <label>Preferred Quality:</label>
+                                    <select id="preferred-quality">
+                                        <option value="flac">FLAC</option>
+                                        <option value="mp3_320">320 kbps MP3</option>
+                                        <option value="mp3_256">256 kbps MP3</option>
+                                        <option value="mp3_192">192 kbps MP3</option>
+                                        <option value="any">Any</option>
+                                    </select>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label>Slskd Download Dir:</label>
+                                    <div class="path-input-group">
+                                        <input type="text" id="download-path" placeholder="./downloads">
+                                        <button class="browse-button" onclick="browsePath('download')">Browse</button>
+                                    </div>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label>Matched Transfer Dir (Plex Music Dir?):</label>
+                                    <div class="path-input-group">
+                                        <input type="text" id="transfer-path" placeholder="./Transfer">
+                                        <button class="browse-button" onclick="browsePath('transfer')">Browse</button>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Database Settings -->
+                            <div class="settings-group">
+                                <h3>Database Settings</h3>
+                                
+                                <div class="form-group">
+                                    <label>Concurrent Workers:</label>
+                                    <select id="max-workers">
+                                        <option value="3">3</option>
+                                        <option value="4">4</option>
+                                        <option value="5" selected>5</option>
+                                        <option value="6">6</option>
+                                        <option value="7">7</option>
+                                        <option value="8">8</option>
+                                        <option value="9">9</option>
+                                        <option value="10">10</option>
+                                    </select>
+                                </div>
+                                
+                                <div class="help-text">Number of parallel threads for database updates. Higher values = faster updates but more server load.</div>
+                            </div>
+                            
+                            <!-- Metadata Enhancement Settings -->
+                            <div class="settings-group">
+                                <h3>🎵 Metadata Enhancement</h3>
+                                
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="metadata-enabled" checked>
+                                        Enable metadata enhancement with Spotify data
+                                    </label>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="embed-album-art" checked>
+                                        Embed high-quality album art from Spotify
+                                    </label>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label>Supported Formats:</label>
+                                    <div class="supported-formats">MP3, FLAC, MP4/M4A, OGG</div>
+                                </div>
+                            </div>
+                            
+                            <!-- Playlist Sync Settings -->
+                            <div class="settings-group">
+                                <h3>Playlist Sync Settings</h3>
+                                
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="create-backup" checked>
+                                        Create playlist backups before sync
+                                    </label>
+                                </div>
+                            </div>
+                            
+                            <!-- Logging Information (Read-only) -->
+                            <div class="settings-group">
+                                <h3>Logging Information</h3>
+                                
+                                <div class="form-group">
+                                    <label>Log Level:</label>
+                                    <div class="readonly-field" id="log-level-display">DEBUG</div>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label>Log Path:</label>
+                                    <div class="readonly-field" id="log-path-display">logs/app.log</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Save Button -->
+                    <div class="settings-actions">
+                        <button class="save-button" id="save-settings">💾 Save Settings</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Loading Overlay -->
+    <div class="loading-overlay hidden" id="loading-overlay">
+        <div class="loading-spinner"></div>
+        <div class="loading-message">Processing...</div>
+    </div>
+    
+    <!-- Toast Notifications -->
+    <div class="toast-container" id="toast-container"></div>
+    
+    <!-- Hidden HTML5 Audio Player for Streaming -->
+    <audio id="audio-player" style="display: none;"></audio>
+    
+    <!-- Matched Download Modal -->
+    <div class="modal-overlay hidden" id="matching-modal-overlay">
+        <div class="matching-modal" id="matching-modal">
+            <div class="matching-modal-header">
+                <h2 id="matching-modal-title">Match Download to Spotify</h2>
+                <button class="matching-modal-close" onclick="closeMatchingModal()">✕</button>
+            </div>
+            
+            <div class="matching-modal-content">
+                <!-- Artist Selection Stage -->
+                <div id="artist-selection-stage" class="selection-stage">
+                    <div class="stage-header">
+                        <h3 id="artist-stage-title">Step 1: Select the correct Artist</h3>
+                        <p class="stage-subtitle">Choose the artist that best matches your download</p>
+                    </div>
+                    
+                    <div class="suggestions-section">
+                        <h4 class="suggestions-title">Top Suggestions</h4>
+                        <div class="suggestions-container" id="artist-suggestions">
+                            <!-- Artist suggestion cards will be populated here -->
+                        </div>
+                    </div>
+                    
+                    <div class="manual-search-section">
+                        <h4 class="suggestions-title">Or, Search Manually</h4>
+                        <input type="text" id="artist-search-input" class="search-input" placeholder="Search for an artist...">
+                        <div class="suggestions-container" id="artist-manual-results">
+                            <!-- Manual search results will be populated here -->
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Album Selection Stage (for album downloads) -->
+                <div id="album-selection-stage" class="selection-stage hidden">
+                    <div class="stage-header">
+                        <h3 id="album-stage-title">Step 2: Select the correct Album</h3>
+                        <p class="stage-subtitle">Choose the album that best matches your download for <span id="selected-artist-name"></span></p>
+                    </div>
+                    
+                    <div class="suggestions-section">
+                        <h4 class="suggestions-title">Top Suggestions</h4>
+                        <div class="suggestions-container" id="album-suggestions">
+                            <!-- Album suggestion cards will be populated here -->
+                        </div>
+                    </div>
+                    
+                    <div class="manual-search-section">
+                        <h4 class="suggestions-title">Or, Search Manually</h4>
+                        <input type="text" id="album-search-input" class="search-input" placeholder="Search for an album...">
+                        <div class="suggestions-container" id="album-manual-results">
+                            <!-- Manual search results will be populated here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="matching-modal-actions">
+                <button id="skip-matching-btn" class="modal-button modal-button--secondary">Skip Matching</button>
+                <button id="cancel-match-btn" class="modal-button modal-button--cancel">Cancel</button>
+                <button id="confirm-match-btn" class="modal-button modal-button--primary" disabled>Confirm Selection</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Version Info Modal -->
+    <div class="version-modal-overlay hidden" id="version-modal-overlay" onclick="closeVersionModal()">
+        <div class="version-modal" onclick="event.stopPropagation()">
+            <!-- Header -->
+            <div class="version-modal-header">
+                <h2 class="version-modal-title">What's New in SoulSync</h2>
+                <div class="version-modal-subtitle">Version 1.0 - Complete WebUI Rebuild</div>
+            </div>
+            
+            <!-- Content Area with Scroll -->
+            <div class="version-modal-content">
+                <div class="version-content-container" id="version-content-container">
+                    <!-- Content will be populated by JavaScript -->
+                </div>
+            </div>
+            
+            <!-- Footer -->
+            <div class="version-modal-footer">
+                <button class="version-modal-close" onclick="closeVersionModal()">Close</button>
+            </div>
+        </div>
+    </div>
+    
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
