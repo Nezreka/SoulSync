@@ -20,6 +20,7 @@ Bridge the gap between streaming services and your local music library. Automati
 - **Artist watchlist** monitors for new releases and adds missing tracks
 - **Background automation** retries failed downloads every hour
 
+
 ## 🚀 Three Ways to Run
 
 ### 1. Desktop GUI (Original)
