@@ -19,7 +19,7 @@ docker run -d \
   -p 8008:8008 \
   -p 8888:8888 \
   -p 8889:8889 \
-  -v /mnt/user/appdata/soulsync/config:/app/config \
+  -v /mnt/user/appdata/soulsync/config.json:/app/config/config.json \
   -v /mnt/user/appdata/soulsync/logs:/app/logs \
   -v /mnt/user/Music:/host/music:rw \
   -v soulsync_database:/app/database \
@@ -184,19 +184,20 @@ This ensures:
 
 ### ❌ ModuleNotFoundError: No module named 'config.settings'
 
-**Problem**: Most common error - incorrect config volume mapping
+**Problem**: Most common error - mounting over the Python config module
 
 **Wrong**:
 ```yaml
-- "/mnt/cache/appdata/soulsync:/app/config"  # ❌ This overwrites the app's config module
+- "/mnt/cache/appdata/soulsync:/app/config"         # ❌ Overwrites Python module
+- "/mnt/cache/appdata/soulsync/config:/app/config"  # ❌ Still overwrites Python module
 ```
 
 **Correct**:
 ```yaml
-- "/mnt/cache/appdata/soulsync/config:/app/config"  # ✅ This maps to the config folder only
+- "/mnt/cache/appdata/soulsync/config.json:/app/config/config.json"  # ✅ Mount only the config file
 ```
 
-**Why this happens**: Mounting the entire appdata folder to `/app/config` overwrites SoulSync's Python `config/` module, causing import errors.
+**Why this happens**: The `/app/config` directory contains Python module files (`settings.py`) needed for the app to run. Mounting anything to `/app/config` overwrites these files. Only mount the specific `config.json` file.
 
 ### Container Won't Start
 ```bash
