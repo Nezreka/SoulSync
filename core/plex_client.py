@@ -124,14 +124,36 @@ class PlexClient:
             return
         
         try:
+            music_sections = []
+            
+            # Collect all music libraries
             for section in self.server.library.sections():
                 if section.type == 'artist':
-                    self.music_library = section
-                    logger.info(f"Found music library: {section.title}")
-                    break
+                    music_sections.append(section)
             
-            if not self.music_library:
+            if not music_sections:
                 logger.warning("No music library found on Plex server")
+                return
+            
+            # Priority order for common library names
+            priority_names = ['Music', 'music', 'Audio', 'audio', 'Songs', 'songs']
+            
+            # First, try to find a library with a priority name
+            for priority_name in priority_names:
+                for section in music_sections:
+                    if section.title == priority_name:
+                        self.music_library = section
+                        logger.info(f"Found preferred music library: {section.title}")
+                        return
+            
+            # If no priority match found, use the first one
+            self.music_library = music_sections[0]
+            logger.info(f"Found music library (first available): {self.music_library.title}")
+            
+            # Log other available libraries if multiple exist
+            if len(music_sections) > 1:
+                other_libraries = [s.title for s in music_sections[1:]]
+                logger.info(f"Other music libraries available: {', '.join(other_libraries)}")
                 
         except Exception as e:
             logger.error(f"Error finding music library: {e}")
