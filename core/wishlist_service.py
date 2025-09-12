@@ -108,6 +108,17 @@ class WishlistService:
             wishlist_tracks = self.database.get_wishlist_tracks(limit=limit)
             formatted_tracks = []
             
+            # Sort by artist name, then track name for consistent display order
+            try:
+                wishlist_tracks.sort(key=lambda x: (
+                    x['spotify_data'].get('artists', [{}])[0].get('name', '').lower(),
+                    x['spotify_data'].get('name', '').lower()
+                ))
+                logger.debug(f"Successfully sorted {len(wishlist_tracks)} wishlist tracks by artist/track name")
+            except Exception as sort_error:
+                logger.warning(f"Failed to sort wishlist tracks, using original order: {sort_error}")
+                # Continue with original database order (date_added)
+            
             for wishlist_track in wishlist_tracks:
                 spotify_data = wishlist_track['spotify_data']
                 
