@@ -652,9 +652,13 @@
                                         <label>Client Secret:</label>
                                         <input type="password" id="spotify-client-secret" placeholder="Spotify Client Secret">
                                     </div>
+                                    <div class="form-group">
+                                        <label>Redirect URI:</label>
+                                        <input type="text" id="spotify-redirect-uri" placeholder="http://127.0.0.1:8888/callback">
+                                    </div>
                                     <div class="callback-info">
-                                        <div class="callback-label">Required Redirect URI:</div>
-                                        <div class="callback-url">http://127.0.0.1:8888/callback</div>
+                                        <div class="callback-label">Current Redirect URI:</div>
+                                        <div class="callback-url" id="spotify-callback-display">http://127.0.0.1:8888/callback</div>
                                         <div class="callback-help">Add this URL to your Spotify app's 'Redirect URIs' in the Spotify Developer Dashboard</div>
                                     </div>
                                     <div class="form-actions">
@@ -673,9 +677,13 @@
                                         <label>Client Secret:</label>
                                         <input type="password" id="tidal-client-secret" placeholder="Tidal Client Secret">
                                     </div>
+                                    <div class="form-group">
+                                        <label>Redirect URI:</label>
+                                        <input type="text" id="tidal-redirect-uri" placeholder="http://127.0.0.1:8889/tidal/callback">
+                                    </div>
                                     <div class="callback-info">
-                                        <div class="callback-label">Required Redirect URI:</div>
-                                        <div class="callback-url">http://127.0.0.1:8889/tidal/callback</div>
+                                        <div class="callback-label">Current Redirect URI:</div>
+                                        <div class="callback-url" id="tidal-callback-display">http://127.0.0.1:8889/tidal/callback</div>
                                         <div class="callback-help">Add this URL to your Tidal app configuration</div>
                                     </div>
                                     <div class="form-actions">
