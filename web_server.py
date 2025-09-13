@@ -11349,7 +11349,7 @@ def start_oauth_callback_servers():
                     auth_manager = SpotifyOAuth(
                         client_id=config['client_id'],
                         client_secret=config['client_secret'],
-                        redirect_uri="http://127.0.0.1:8888/callback",
+                        redirect_uri=config.get('redirect_uri', "http://127.0.0.1:8888/callback"),
                         scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email",
                         cache_path='config/.spotify_cache'
                     )

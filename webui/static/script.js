@@ -1347,10 +1347,23 @@ async function loadSettingsData() {
         // Populate Spotify settings
         document.getElementById('spotify-client-id').value = settings.spotify?.client_id || '';
         document.getElementById('spotify-client-secret').value = settings.spotify?.client_secret || '';
+        document.getElementById('spotify-redirect-uri').value = settings.spotify?.redirect_uri || 'http://127.0.0.1:8888/callback';
+        document.getElementById('spotify-callback-display').textContent = settings.spotify?.redirect_uri || 'http://127.0.0.1:8888/callback';
         
         // Populate Tidal settings  
         document.getElementById('tidal-client-id').value = settings.tidal?.client_id || '';
         document.getElementById('tidal-client-secret').value = settings.tidal?.client_secret || '';
+        document.getElementById('tidal-redirect-uri').value = settings.tidal?.redirect_uri || 'http://127.0.0.1:8889/tidal/callback';
+        document.getElementById('tidal-callback-display').textContent = settings.tidal?.redirect_uri || 'http://127.0.0.1:8889/tidal/callback';
+        
+        // Add event listeners to update display URLs when input changes
+        document.getElementById('spotify-redirect-uri').addEventListener('input', function() {
+            document.getElementById('spotify-callback-display').textContent = this.value || 'http://127.0.0.1:8888/callback';
+        });
+        
+        document.getElementById('tidal-redirect-uri').addEventListener('input', function() {
+            document.getElementById('tidal-callback-display').textContent = this.value || 'http://127.0.0.1:8889/tidal/callback';
+        });
         
         // Populate Plex settings
         document.getElementById('plex-url').value = settings.plex?.base_url || '';
@@ -1426,11 +1439,13 @@ async function saveSettings() {
         active_media_server: activeServer,
         spotify: {
             client_id: document.getElementById('spotify-client-id').value,
-            client_secret: document.getElementById('spotify-client-secret').value
+            client_secret: document.getElementById('spotify-client-secret').value,
+            redirect_uri: document.getElementById('spotify-redirect-uri').value
         },
         tidal: {
             client_id: document.getElementById('tidal-client-id').value,
-            client_secret: document.getElementById('tidal-client-secret').value
+            client_secret: document.getElementById('tidal-client-secret').value,
+            redirect_uri: document.getElementById('tidal-redirect-uri').value
         },
         plex: {
             base_url: document.getElementById('plex-url').value,

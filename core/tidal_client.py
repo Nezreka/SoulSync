@@ -98,7 +98,7 @@ class TidalClient:
         self.alt_base_url = "https://api.tidal.com/v1"  # Alternative API base
         self.auth_url = "https://login.tidal.com/authorize"
         self.token_url = "https://auth.tidal.com/v1/oauth2/token"
-        self.redirect_uri = "http://127.0.0.1:8889/tidal/callback"
+        self.redirect_uri = "http://127.0.0.1:8889/tidal/callback"  # Default, will be updated from config
         self.session = requests.Session()
         self.auth_server = None
         self.auth_code = None
@@ -117,6 +117,7 @@ class TidalClient:
             tidal_config = config_manager.get('tidal', {})
             self.client_id = tidal_config.get('client_id')
             self.client_secret = tidal_config.get('client_secret')
+            self.redirect_uri = tidal_config.get('redirect_uri', self.redirect_uri)  # Use config or default
             
             if not self.client_id or not self.client_secret:
                 logger.warning("Tidal client ID or secret not configured")
