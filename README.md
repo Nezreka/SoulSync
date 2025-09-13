@@ -118,6 +118,19 @@ docker run -d -p 8008:8008 boulderbadgedad/soulsync:latest
   ```
 - Uses separate database from GUI/WebUI versions
 
+### Docker OAuth Fix (Remote Access)
+If accessing SoulSync from a different machine than where it's running:
+
+1. Set your Spotify callback URL to `http://127.0.0.1:8888/callback`
+2. Open SoulSync settings and click authenticate
+3. Complete Spotify authorization - you'll be redirected to `http://127.0.0.1:8888/callback?code=SOME_CODE_HERE`
+4. If the page fails to load, edit the URL to use your actual SoulSync IP:
+   - Change: `http://127.0.0.1:8888/callback?code=SOME_CODE_HERE`
+   - To: `http://192.168.1.5:8888/callback?code=SOME_CODE_HERE`
+5. Press Enter and authentication should complete
+
+**Note**: Spotify only allows `127.0.0.1` as a local redirect URI, hence this workaround. You may need to repeat this process after rebuilding containers.
+
 ## 🎯 Core Features
 
 **Search & Download**: Manual track search with preview streaming  
