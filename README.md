@@ -164,6 +164,7 @@ docker run -d -p 8008:8008 boulderbadgedad/soulsync:latest
 - **Docker uses separate database** from GUI/WebUI versions
 - **Transfer path** should point to your media server music library
 - **FLAC preferred** but supports all common formats
+- **OAuth from different devices:** See [DOCKER-OAUTH-FIX.md](DOCKER-OAUTH-FIX.md) if you get "Insecure redirect URI" errors
 
 ## 🏗️ Architecture
 
