@@ -2,11 +2,13 @@
   "active_media_server": "plex",
   "spotify": {
     "client_id": "SpotifyClientID",
-    "client_secret": "SpotifyClientSecret"
+    "client_secret": "SpotifyClientSecret",
+    "redirect_uri": "http://127.0.0.1:8888/callback"
   },
   "tidal": {
     "client_id": "TidalClientID",
-    "client_secret": "TidalClientSecret"
+    "client_secret": "TidalClientSecret",
+    "redirect_uri": "http://127.0.0.1:8889/tidal/callback"
   },
   "plex": {
     "base_url": "http://192.168.86.36:32400",
