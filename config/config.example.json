@@ -21,10 +21,10 @@
     "auto_detect": true
   },
   "soulseek": {
-    "slskd_url": "http://localhost:5030",
+    "slskd_url": "http://host.docker.internal:5030",
     "api_key": "SoulseekAPIKey",
-    "download_path": "./Downloads",
-    "transfer_path": "./Transfer"
+    "download_path": "/app/downloads",
+    "transfer_path": "/app/Transfer"
   },
   "logging": {
     "path": "logs/app.log",

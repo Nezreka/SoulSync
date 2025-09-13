@@ -10,7 +10,7 @@ services:
       - "8889:8889"      # Tidal OAuth callback
     volumes:
       # Persistent data volumes
-      - ./config:/app/config
+      # - ./config:/app/config  # Commented out to test baked-in config
       - ./logs:/app/logs
       - ./downloads:/app/downloads
       # Use named volume for database persistence (separate from host database)
