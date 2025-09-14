@@ -4764,18 +4764,9 @@ let isDownloadPollingActive = false;
 async function loadDownloadsData() {
     // Downloads page loads search results dynamically
     console.log('Downloads page loaded');
-    
-    // Connect downloads search button
-    const searchButton = document.getElementById('downloads-search-btn');
-    const searchInput = document.getElementById('downloads-search-input');
+
+    // Event listeners are already set up in initializeSearch() - don't duplicate them
     const clearButton = document.querySelector('.controls-panel__clear-btn');
-    
-    if (searchButton && searchInput) {
-        searchButton.addEventListener('click', performDownloadsSearch);
-        searchInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') performDownloadsSearch();
-        });
-    }
     
     if (clearButton) {
         clearButton.addEventListener('click', clearFinishedDownloads);
