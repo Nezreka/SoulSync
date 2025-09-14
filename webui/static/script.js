@@ -6577,18 +6577,23 @@ function handleAlbumSearch(event) {
 async function performArtistSearch(query) {
     try {
         showLoadingCards('artist-manual-results', 'Searching artists...');
-        
+
+        const requestBody = {
+            query: query,
+            context: 'artist'
+        };
+        console.log('Manual search request:', requestBody);
+
         const response = await fetch('/api/match/search', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                query: query,
-                context: 'artist'
-            })
+            body: JSON.stringify(requestBody)
         });
-        
+
         const data = await response.json();
+        console.log('Manual search response:', data);
         if (data.results) {
+            console.log('Results array:', data.results);
             renderArtistSearchResults(data.results);
         } else {
             showNoResultsMessage('artist-manual-results', 'No artists found');
@@ -6631,9 +6636,21 @@ function renderArtistSearchResults(results) {
     const container = document.getElementById('artist-manual-results');
     container.innerHTML = '';
     
-    results.forEach(result => {
-        const card = createArtistCard(result.artist, result.confidence);
-        container.appendChild(card);
+    results.forEach((result, index) => {
+        console.log(`Manual search result ${index}:`, result);
+        console.log(`  result.artist:`, result.artist);
+        console.log(`  result.confidence:`, result.confidence);
+        try {
+            const card = createArtistCard(result.artist, result.confidence);
+            console.log(`createArtistCard returned:`, card, typeof card, card instanceof Element);
+            if (card && card instanceof Element) {
+                container.appendChild(card);
+            } else {
+                console.error(`Invalid card returned for result ${index}:`, card);
+            }
+        } catch (error) {
+            console.error(`Error calling createArtistCard for result ${index}:`, error);
+        }
     });
 }
 
@@ -10085,11 +10102,11 @@ function displayArtistsResults(query, results) {
     }
     
     // Create artist cards
-    container.innerHTML = results.map(result => createArtistCard(result)).join('');
+    container.innerHTML = results.map(result => createArtistCardHTML(result)).join('');
     
     // Add event listeners to cards
     container.querySelectorAll('.artist-card').forEach((card, index) => {
-        card.addEventListener('click', () => selectArtist(results[index]));
+        card.addEventListener('click', () => selectArtistForDetail(results[index]));
         
         // Extract colors from artist image for dynamic glow
         const artist = results[index];
@@ -10115,7 +10132,7 @@ function displayArtistsResults(query, results) {
 /**
  * Create HTML for an artist card
  */
-function createArtistCard(artist) {
+function createArtistCardHTML(artist) {
     const imageUrl = artist.image_url || '';
     const genres = artist.genres && artist.genres.length > 0 ? 
         artist.genres.slice(0, 3).join(', ') : 'Various genres';
@@ -10154,19 +10171,19 @@ function createArtistCard(artist) {
 /**
  * Select an artist and show their discography
  */
-async function selectArtist(artist) {
+async function selectArtistForDetail(artist) {
     console.log(`🎤 Selected artist: ${artist.name}`);
-    
+
     // Update state
     artistsPageState.selectedArtist = artist;
     artistsPageState.currentView = 'detail';
-    
+
     // Show detail state
     showArtistDetailState();
-    
+
     // Update artist info in header
     updateArtistDetailHeader(artist);
-    
+
     // Load discography
     await loadArtistDiscography(artist.id);
 }
@@ -10240,7 +10257,7 @@ function displayArtistDiscography(discography) {
     const albumsContainer = document.getElementById('album-cards-container');
     if (albumsContainer) {
         if (discography.albums?.length > 0) {
-            albumsContainer.innerHTML = discography.albums.map(album => createAlbumCard(album)).join('');
+            albumsContainer.innerHTML = discography.albums.map(album => createAlbumCardHTML(album)).join('');
             
             // Add dynamic glow effects and click handlers to album cards
             albumsContainer.querySelectorAll('.album-card').forEach((card, index) => {
@@ -10269,7 +10286,7 @@ function displayArtistDiscography(discography) {
     const singlesContainer = document.getElementById('singles-cards-container');
     if (singlesContainer) {
         if (discography.singles?.length > 0) {
-            singlesContainer.innerHTML = discography.singles.map(single => createAlbumCard(single)).join('');
+            singlesContainer.innerHTML = discography.singles.map(single => createAlbumCardHTML(single)).join('');
             
             // Add dynamic glow effects and click handlers to singles cards
             singlesContainer.querySelectorAll('.album-card').forEach((card, index) => {
@@ -10537,7 +10554,7 @@ function showCompletionError() {
 /**
  * Create HTML for an album/single card
  */
-function createAlbumCard(album) {
+function createAlbumCardHTML(album) {
     const imageUrl = album.image_url || '';
     const year = album.release_date ? new Date(album.release_date).getFullYear() : '';
     const type = album.album_type === 'album' ? 'Album' : 
