@@ -2,9 +2,21 @@ version: '3.8'
 
 services:
   soulsync:
+    build: .
     image: boulderbadgedad/soulsync:latest
     container_name: soulsync-webui
-    user: "1000:1000"
+    environment:
+      # User/Group ID configuration
+      - PUID=1000
+      - PGID=1000
+      - UMASK=022
+      # Web server configuration
+      - FLASK_ENV=production
+      - PYTHONPATH=/app
+      # Optional: Configure through environment variables
+      - SOULSYNC_CONFIG_PATH=/app/config/config.json
+      # Set timezone
+      - TZ=America/New_York
     ports:
       - "8008:8008"      # Main web app
       - "8888:8888"      # Spotify OAuth callback
@@ -28,14 +40,6 @@ services:
       # Add additional drive mounts as needed for your specific setup
       # Optional: Mount your music library for Plex/Jellyfin access
       - /path/to/your/music:/music:ro
-    environment:
-      # Web server configuration
-      - FLASK_ENV=production
-      - PYTHONPATH=/app
-      # Optional: Configure through environment variables
-      - SOULSYNC_CONFIG_PATH=/app/config/config.json
-      # Set timezone
-      - TZ=America/New_York
     extra_hosts:
       # Allow container to reach host services
       - "host.docker.internal:host-gateway"
