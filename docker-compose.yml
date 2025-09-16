@@ -4,13 +4,14 @@ services:
   soulsync:
     image: boulderbadgedad/soulsync:latest
     container_name: soulsync-webui
+    user: "1000:1000"
     ports:
       - "8008:8008"      # Main web app
       - "8888:8888"      # Spotify OAuth callback
       - "8889:8889"      # Tidal OAuth callback
     volumes:
       # Persistent data volumes
-      # - ./config:/app/config  # Commented out to test baked-in config
+      # - ./config:/app/config
       - ./logs:/app/logs
       - ./downloads:/app/downloads
       # Use named volume for database persistence (separate from host database)
