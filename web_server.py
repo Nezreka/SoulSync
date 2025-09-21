@@ -158,6 +158,25 @@ download_batches = {}  # batch_id -> {queue, active_count, max_concurrent}
 tasks_lock = threading.Lock()
 batch_locks = {}  # batch_id -> Lock() for atomic batch operations
 
+# --- Session Download Statistics ---
+# Track individual download completions (matches dashboard.py behavior)
+session_completed_downloads = 0
+session_stats_lock = threading.Lock()
+
+def _mark_task_completed(task_id, track_info=None):
+    """
+    Mark a download task as completed and increment session counter.
+    Centralizes completion logic to ensure consistent behavior.
+    Assumes task_id exists in download_tasks (should be called within tasks_lock).
+    """
+    global session_completed_downloads
+
+    download_tasks[task_id]['status'] = 'completed'
+
+    # Increment session counter (matches dashboard.py behavior)
+    with session_stats_lock:
+        session_completed_downloads += 1
+
 # --- Automatic Wishlist Processing Infrastructure ---
 # Server-side timer system for automatic wishlist processing (replaces client-side JavaScript timers)
 wishlist_auto_processor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="WishlistAutoProcessor")
@@ -1443,9 +1462,9 @@ def get_system_stats():
         active_downloads = len([batch_id for batch_id, batch_data in download_batches.items() 
                                if batch_data.get('phase') == 'downloading'])
         
-        # Count finished downloads (completed this session)
-        finished_downloads = len([batch_id for batch_id, batch_data in download_batches.items() 
-                                 if batch_data.get('phase') == 'complete'])
+        # Count finished downloads (completed this session) - use session counter like dashboard.py
+        with session_stats_lock:
+            finished_downloads = session_completed_downloads
         
         # Calculate total download speed from active soulseek transfers
         total_download_speed = 0.0
@@ -4616,7 +4635,7 @@ def _post_process_matched_download_with_verification(context_key, context, file_
             # Mark task as completed only after successful verification
             with tasks_lock:
                 if task_id in download_tasks:
-                    download_tasks[task_id]['status'] = 'completed'
+                    _mark_task_completed(task_id, context.get('track_info'))
                     download_tasks[task_id]['metadata_enhanced'] = True
                     print(f"✅ [Verification] Task {task_id} marked as completed with metadata enhanced")
             
@@ -6849,7 +6868,8 @@ def _run_post_processing_worker(task_id, batch_id):
             
             with tasks_lock:
                 if task_id in download_tasks:
-                    download_tasks[task_id]['status'] = 'completed'
+                    track_info = download_tasks[task_id].get('track_info')
+                    _mark_task_completed(task_id, track_info)
             
             # Clean up context now that both stream processor and verification worker are done
             with matched_context_lock:
@@ -6878,7 +6898,8 @@ def _run_post_processing_worker(task_id, batch_id):
                 print(f"📁 [Post-Processing] No matched context, marking as completed: {os.path.basename(found_file)}")
                 with tasks_lock:
                     if task_id in download_tasks:
-                        download_tasks[task_id]['status'] = 'completed'
+                        track_info = download_tasks[task_id].get('track_info')
+                        _mark_task_completed(task_id, track_info)
                 
                 # Clean up context if it exists (might be leftover from stream processor)
                 with matched_context_lock:
