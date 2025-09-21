@@ -721,8 +721,16 @@
                                 
                                 <!-- Server Toggle Buttons -->
                                 <div class="server-toggle-container">
-                                    <button class="server-toggle-btn active" id="plex-toggle" onclick="toggleServer('plex')">Plex</button>
-                                    <button class="server-toggle-btn" id="jellyfin-toggle" onclick="toggleServer('jellyfin')">Jellyfin</button>
+                                    <button class="server-toggle-btn active" id="plex-toggle" onclick="toggleServer('plex')">
+                                        <img src="https://www.plex.tv/wp-content/themes/plex/assets/img/plex-logo.svg" alt="Plex" class="server-logo">
+                                    </button>
+                                    <button class="server-toggle-btn" id="jellyfin-toggle" onclick="toggleServer('jellyfin')">
+                                        <img src="https://jellyfin.org/images/logo.svg" alt="Jellyfin" class="server-logo">
+                                    </button>
+                                    <button class="server-toggle-btn" id="navidrome-toggle" onclick="toggleServer('navidrome')">
+                                        <img src="https://tweakers.net/ext/i/2007323764.png" alt="Navidrome" class="server-logo">
+                                        Navidrome
+                                    </button>
                                 </div>
                                 
                                 <!-- Plex Settings -->
@@ -756,7 +764,27 @@
                                         <button class="test-button" onclick="testConnection('jellyfin')">Test</button>
                                     </div>
                                 </div>
-                                
+
+                                <!-- Navidrome Settings -->
+                                <div class="server-config-container hidden" id="navidrome-container">
+                                    <div class="form-group">
+                                        <label>Navidrome Server URL:</label>
+                                        <input type="url" id="navidrome-url" placeholder="http://localhost:4533">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Username:</label>
+                                        <input type="text" id="navidrome-username" placeholder="Username">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Password:</label>
+                                        <input type="password" id="navidrome-password" placeholder="Password">
+                                    </div>
+                                    <div class="form-actions">
+                                        <button class="detect-button" onclick="autoDetectNavidrome()">Auto-detect</button>
+                                        <button class="test-button" onclick="testConnection('navidrome')">Test</button>
+                                    </div>
+                                </div>
+
                                 <!-- Server Test Button -->
                                 <div class="server-test-section">
                                     <button class="test-button server-test-btn" onclick="testConnection('server')">Test Server</button>

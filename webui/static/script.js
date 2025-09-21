@@ -1372,7 +1372,12 @@ async function loadSettingsData() {
         // Populate Jellyfin settings
         document.getElementById('jellyfin-url').value = settings.jellyfin?.base_url || '';
         document.getElementById('jellyfin-api-key').value = settings.jellyfin?.api_key || '';
-        
+
+        // Populate Navidrome settings
+        document.getElementById('navidrome-url').value = settings.navidrome?.base_url || '';
+        document.getElementById('navidrome-username').value = settings.navidrome?.username || '';
+        document.getElementById('navidrome-password').value = settings.navidrome?.password || '';
+
         // Set active server and toggle visibility
         const activeServer = settings.active_media_server || 'plex';
         toggleServer(activeServer);
@@ -1424,16 +1429,23 @@ function toggleServer(serverType) {
     // Update toggle buttons
     document.getElementById('plex-toggle').classList.remove('active');
     document.getElementById('jellyfin-toggle').classList.remove('active');
+    document.getElementById('navidrome-toggle').classList.remove('active');
     document.getElementById(`${serverType}-toggle`).classList.add('active');
-    
+
     // Show/hide server containers
     document.getElementById('plex-container').classList.toggle('hidden', serverType !== 'plex');
     document.getElementById('jellyfin-container').classList.toggle('hidden', serverType !== 'jellyfin');
+    document.getElementById('navidrome-container').classList.toggle('hidden', serverType !== 'navidrome');
 }
 
 async function saveSettings() {
     // Determine active server from toggle buttons
-    const activeServer = document.getElementById('plex-toggle').classList.contains('active') ? 'plex' : 'jellyfin';
+    let activeServer = 'plex';
+    if (document.getElementById('jellyfin-toggle').classList.contains('active')) {
+        activeServer = 'jellyfin';
+    } else if (document.getElementById('navidrome-toggle').classList.contains('active')) {
+        activeServer = 'navidrome';
+    }
     
     const settings = {
         active_media_server: activeServer,
@@ -1454,6 +1466,11 @@ async function saveSettings() {
         jellyfin: {
             base_url: document.getElementById('jellyfin-url').value,
             api_key: document.getElementById('jellyfin-api-key').value
+        },
+        navidrome: {
+            base_url: document.getElementById('navidrome-url').value,
+            username: document.getElementById('navidrome-username').value,
+            password: document.getElementById('navidrome-password').value
         },
         soulseek: {
             slskd_url: document.getElementById('soulseek-url').value,
@@ -1603,6 +1620,33 @@ async function autoDetectJellyfin() {
     } catch (error) {
         console.error('Error auto-detecting Jellyfin:', error);
         showToast('Failed to auto-detect Jellyfin server', 'error');
+    } finally {
+        hideLoadingOverlay();
+    }
+}
+
+async function autoDetectNavidrome() {
+    try {
+        showLoadingOverlay('Auto-detecting Navidrome server...');
+
+        const response = await fetch('/api/detect-media-server', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ server_type: 'navidrome' })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            document.getElementById('navidrome-url').value = result.found_url;
+            showToast(`Navidrome server detected: ${result.found_url}`, 'success');
+        } else {
+            showToast(result.error, 'error');
+        }
+
+    } catch (error) {
+        console.error('Error auto-detecting Navidrome:', error);
+        showToast('Failed to auto-detect Navidrome server', 'error');
     } finally {
         hideLoadingOverlay();
     }
