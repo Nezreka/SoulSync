@@ -7474,6 +7474,18 @@ def _build_batch_status_data(batch_id, batch, live_transfers_lookup):
             task = download_tasks.get(task_id)
             if not task: continue
 
+            # SAFETY VALVE: Check for downloads stuck too long and force failure
+            import time
+            current_time = time.time()
+            task_start_time = task.get('status_change_time', current_time)
+            task_age = current_time - task_start_time
+
+            # If task has been running for more than 10 minutes, force it to fail
+            if task_age > 600 and task['status'] in ['downloading', 'queued', 'searching']:
+                print(f"⏰ [Safety Valve] Task {task_id} stuck for {task_age:.1f}s - forcing failure")
+                task['status'] = 'failed'
+                task['error_message'] = f'Task stuck for {task_age:.0f} seconds'
+
             task_status = {
                 'task_id': task_id,
                 'track_index': task['track_index'],
