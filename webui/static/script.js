@@ -3968,6 +3968,26 @@ function processModalStatusUpdate(playlistId, data) {
         document.getElementById(`download-progress-text-${playlistId}`).textContent = `${completedCount}/${missingCount} completed (${progressPercent.toFixed(0)}%)`;
         document.getElementById(`stat-downloaded-${playlistId}`).textContent = completedCount;
 
+        // CLIENT-SIDE COMPLETION: If all tracks are finished (completed or failed), complete the modal
+        const allTracksFinished = totalFinished >= missingCount && missingCount > 0;
+        if (allTracksFinished && process.status !== 'complete') {
+            console.log(`🎯 [Client Completion] All ${totalFinished}/${missingCount} tracks finished - completing modal locally`);
+
+            // Hide cancel button and mark as complete
+            document.getElementById(`cancel-all-btn-${playlistId}`).style.display = 'none';
+            process.status = 'complete';
+            updatePlaylistCardUI(playlistId);
+
+            // Show completion message
+            const completionMessage = `Download complete! ${completedCount} downloaded, ${failedOrCancelledCount} failed.`;
+            showToast(completionMessage, 'success');
+
+            // Check if any other processes still need polling
+            checkAndCleanupGlobalPolling();
+
+            return; // Skip waiting for backend signal
+        }
+
         // FIXED: Only trigger completion logic when backend actually reports batch as complete
         // Don't assume completion based on task counts - let backend determine when truly complete
         if (data.phase === 'complete' || data.phase === 'error') {
