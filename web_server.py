@@ -5828,6 +5828,72 @@ def stop_database_update():
 # == DOWNLOAD MISSING TRACKS   ==
 # ===============================
 
+def _filter_candidates_by_quality_preference(candidates):
+    """
+    Filter candidates based on user's quality preference.
+    Returns candidates of the preferred quality, sorted by size (largest first for best quality).
+    """
+    from config.settings import config_manager
+
+    user_preference = config_manager.get_quality_preference()  # flac, mp3_320, mp3_256, mp3_192, any
+
+    # If user wants 'any' quality, return all candidates (already sorted by confidence+size)
+    if user_preference == 'any':
+        return candidates
+
+    print(f"🎵 [Quality Filter] User preference: '{user_preference}', filtering {len(candidates)} candidates")
+
+    # Categorize candidates by quality
+    quality_buckets = {
+        'flac': [],
+        'mp3_320': [],
+        'mp3_256': [],
+        'mp3_192': [],
+        'mp3_low': [],
+        'other': []
+    }
+
+    for candidate in candidates:
+        if not candidate.quality:
+            quality_buckets['other'].append(candidate)
+            continue
+
+        track_format = candidate.quality.lower()
+        track_bitrate = candidate.bitrate or 0
+
+        if track_format == 'flac':
+            quality_buckets['flac'].append(candidate)
+        elif track_format == 'mp3':
+            if track_bitrate >= 320:
+                quality_buckets['mp3_320'].append(candidate)
+            elif track_bitrate >= 256:
+                quality_buckets['mp3_256'].append(candidate)
+            elif track_bitrate >= 192:
+                quality_buckets['mp3_192'].append(candidate)
+            else:
+                quality_buckets['mp3_low'].append(candidate)
+        else:
+            quality_buckets['other'].append(candidate)
+
+    # Sort each bucket by size (largest first) to get best quality within each category
+    for bucket in quality_buckets.values():
+        bucket.sort(key=lambda x: x.size, reverse=True)
+
+    # Return candidates matching user preference
+    preferred_candidates = quality_buckets.get(user_preference, [])
+
+    # Debug logging
+    for quality, bucket in quality_buckets.items():
+        if bucket:
+            print(f"🎵 [Quality Filter] Found {len(bucket)} '{quality}' candidates")
+
+    if preferred_candidates:
+        print(f"🎯 [Quality Filter] Returning {len(preferred_candidates)} '{user_preference}' candidates")
+        return preferred_candidates
+    else:
+        print(f"⚠️ [Quality Filter] No '{user_preference}' candidates found, will fall back to all")
+        return []
+
 def get_valid_candidates(results, spotify_track, query):
     """
     This function is a direct port from sync.py. It scores and filters
@@ -5838,14 +5904,20 @@ def get_valid_candidates(results, spotify_track, query):
         return []
     # Uses the existing, powerful matching engine for scoring
     initial_candidates = matching_engine.find_best_slskd_matches_enhanced(spotify_track, results)
-    if not initial_candidates: 
+    if not initial_candidates:
         return []
+
+    # Filter by user's quality preference before artist verification
+    quality_filtered_candidates = _filter_candidates_by_quality_preference(initial_candidates)
+    if not quality_filtered_candidates:
+        # If no candidates match preference, fall back to all candidates
+        quality_filtered_candidates = initial_candidates
 
     verified_candidates = []
     spotify_artist_name = spotify_track.artists[0] if spotify_track.artists else ""
     normalized_spotify_artist = re.sub(r'[^a-zA-Z0-9]', '', spotify_artist_name).lower()
 
-    for candidate in initial_candidates:
+    for candidate in quality_filtered_candidates:
         # This check is critical: it ensures the artist's name is in the file path,
         # preventing downloads from the wrong artist.
         normalized_slskd_path = re.sub(r'[^a-zA-Z0-9]', '', candidate.filename).lower()
