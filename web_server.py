@@ -1146,6 +1146,48 @@ def run_service_test(service, test_config):
                 return True, f"Successfully connected to Jellyfin server: {server_name}"
             else:
                 return False, "Could not connect to Jellyfin. Check URL and API Key."
+        elif service == "navidrome":
+            # Test Navidrome connection using Subsonic API
+            base_url = test_config.get('base_url', '')
+            username = test_config.get('username', '')
+            password = test_config.get('password', '')
+
+            if not all([base_url, username, password]):
+                return False, "Missing Navidrome URL, username, or password."
+
+            try:
+                import hashlib
+                import random
+                import string
+
+                # Generate salt and token for Subsonic API authentication
+                salt = ''.join(random.choices(string.ascii_letters + string.digits, k=6))
+                token = hashlib.md5((password + salt).encode()).hexdigest()
+
+                # Test ping endpoint
+                url = f"{base_url.rstrip('/')}/rest/ping"
+                response = requests.get(url, params={
+                    'u': username,
+                    't': token,
+                    's': salt,
+                    'v': '1.16.1',
+                    'c': 'soulsync',
+                    'f': 'json'
+                }, timeout=5)
+
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get('subsonic-response', {}).get('status') == 'ok':
+                        server_version = data.get('subsonic-response', {}).get('version', 'Unknown')
+                        return True, f"Successfully connected to Navidrome server (v{server_version})"
+                    else:
+                        error = data.get('subsonic-response', {}).get('error', {})
+                        return False, f"Navidrome authentication failed: {error.get('message', 'Unknown error')}"
+                else:
+                    return False, f"Could not connect to Navidrome server (HTTP {response.status_code})"
+
+            except Exception as e:
+                return False, f"Navidrome connection error: {str(e)}"
         elif service == "soulseek":
             temp_client = SoulseekClient()
             async def check():
@@ -1274,7 +1316,39 @@ def run_detection(server_type):
             # slskd returns 401 when not authenticated, which is still a valid response
             if response.status_code in [200, 401]:
                 return f"http://{ip}:{port}"
-                
+
+        except:
+            pass
+        return None
+
+    def test_navidrome_server(ip, port=4533):
+        """Test if a Navidrome server is running at the given IP and port"""
+        try:
+            # Try Navidrome's ping endpoint (part of Subsonic API)
+            url = f"http://{ip}:{port}/rest/ping"
+            response = requests.get(url, timeout=2, params={
+                'u': 'test',  # Dummy username for ping test
+                'v': '1.16.1',  # API version
+                'c': 'soulsync',  # Client name
+                'f': 'json'  # Response format
+            })
+
+            # Navidrome should respond even with invalid credentials for ping
+            if response.status_code in [200, 401, 403]:
+                try:
+                    data = response.json()
+                    # Check for Subsonic/Navidrome API response structure
+                    if 'subsonic-response' in data:
+                        return f"http://{ip}:{port}"
+                except:
+                    pass
+
+            # Also try the web interface
+            web_url = f"http://{ip}:{port}/"
+            web_response = requests.get(web_url, timeout=2)
+            if web_response.status_code == 200 and 'navidrome' in web_response.text.lower():
+                return f"http://{ip}:{port}"
+
         except:
             pass
         return None
@@ -1286,6 +1360,7 @@ def run_detection(server_type):
         test_functions = {
             'plex': test_plex_server,
             'jellyfin': test_jellyfin_server,
+            'navidrome': test_navidrome_server,
             'slskd': test_slskd_server
         }
         
@@ -1414,6 +1489,11 @@ def get_status():
             # Create fresh client to ensure Docker URL resolution
             temp_jellyfin_client = JellyfinClient()
             media_server_status = temp_jellyfin_client.is_connected()
+        elif active_server == "navidrome":
+            # Test Navidrome connection
+            navidrome_config = config_manager.get('navidrome', {})
+            success, _ = run_service_test('navidrome', navidrome_config)
+            media_server_status = success
         media_server_response_time = (time.time() - media_server_start) * 1000
         
         # Test Soulseek (just check if configured, no network test)
@@ -1592,7 +1672,7 @@ def handle_settings():
             if 'active_media_server' in new_settings:
                 config_manager.set_active_media_server(new_settings['active_media_server'])
 
-            for service in ['spotify', 'plex', 'jellyfin', 'soulseek', 'settings', 'database', 'metadata_enhancement', 'playlist_sync', 'tidal']:
+            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'settings', 'database', 'metadata_enhancement', 'playlist_sync', 'tidal']:
                 if service in new_settings:
                     for key, value in new_settings[service].items():
                         config_manager.set(f'{service}.{key}', value)
