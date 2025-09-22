@@ -1121,6 +1121,25 @@ class DatabaseUpdateWorker(QThread):
             logger.error(f"Error processing artist '{getattr(media_artist, 'title', 'Unknown')}': {e}")
             return False, f"Processing error: {str(e)}", 0, 0
 
+    def run_with_callback(self, completion_callback=None):
+        """
+        Run the database update with an optional completion callback.
+        This is used by the web interface for automatic chaining of operations.
+        """
+        try:
+            # Run the normal update process
+            self.run()
+
+            # Call completion callback if provided
+            if completion_callback:
+                try:
+                    completion_callback()
+                except Exception as e:
+                    logger.error(f"Error in database update completion callback: {e}")
+
+        except Exception as e:
+            logger.error(f"Error in run_with_callback: {e}")
+
 class DatabaseStatsWorker(QThread):
     """Simple worker for getting database statistics without blocking UI"""
     
