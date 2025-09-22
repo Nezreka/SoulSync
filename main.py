@@ -14,6 +14,7 @@ from utils.logging_config import setup_logging, get_logger
 from core.spotify_client import SpotifyClient
 from core.plex_client import PlexClient
 from core.jellyfin_client import JellyfinClient
+from core.navidrome_client import NavidromeClient
 from core.soulseek_client import SoulseekClient
 
 from ui.sidebar import ModernSidebar
@@ -29,11 +30,12 @@ logger = get_logger("main")
 class ServiceStatusThread(QThread):
     status_updated = pyqtSignal(str, bool)
     
-    def __init__(self, spotify_client, plex_client, jellyfin_client, soulseek_client):
+    def __init__(self, spotify_client, plex_client, jellyfin_client, navidrome_client, soulseek_client):
         super().__init__()
         self.spotify_client = spotify_client
         self.plex_client = plex_client
         self.jellyfin_client = jellyfin_client
+        self.navidrome_client = navidrome_client
         self.soulseek_client = soulseek_client
         self.running = True
         
@@ -57,6 +59,10 @@ class ServiceStatusThread(QThread):
                     # Use the JellyfinClient for status checking
                     jellyfin_status = self.jellyfin_client.is_connected()
                     self.status_updated.emit("jellyfin", jellyfin_status)
+                elif active_server == "navidrome":
+                    # Use the NavidromeClient for status checking
+                    navidrome_status = self.navidrome_client.is_connected()
+                    self.status_updated.emit("navidrome", navidrome_status)
                 
                 # Check Soulseek connection (simplified check to avoid event loop issues)
                 soulseek_status = self.soulseek_client.is_configured()
@@ -83,6 +89,7 @@ class MainWindow(QMainWindow):
         self.spotify_client = SpotifyClient()
         self.plex_client = PlexClient()
         self.jellyfin_client = JellyfinClient()
+        self.navidrome_client = NavidromeClient()
         self.soulseek_client = SoulseekClient()
         
         self.status_thread = None
@@ -176,11 +183,12 @@ class MainWindow(QMainWindow):
         self.dashboard_page = DashboardPage()
         self.downloads_page = DownloadsPage(self.soulseek_client)
         self.sync_page = SyncPage(
-            spotify_client=self.spotify_client, 
-            plex_client=self.plex_client, 
-            soulseek_client=self.soulseek_client, 
-            downloads_page=self.downloads_page, 
-            jellyfin_client=self.jellyfin_client
+            spotify_client=self.spotify_client,
+            plex_client=self.plex_client,
+            soulseek_client=self.soulseek_client,
+            downloads_page=self.downloads_page,
+            jellyfin_client=self.jellyfin_client,
+            navidrome_client=self.navidrome_client
         )
         self.artists_page = ArtistsPage(downloads_page=self.downloads_page)
         self.settings_page = SettingsPage()
@@ -192,7 +200,7 @@ class MainWindow(QMainWindow):
         self.settings_page.set_toast_manager(self.toast_manager)
         
         # Configure dashboard with service clients and page references
-        self.dashboard_page.set_service_clients(self.spotify_client, self.plex_client, self.jellyfin_client, self.soulseek_client)
+        self.dashboard_page.set_service_clients(self.spotify_client, self.plex_client, self.jellyfin_client, self.navidrome_client, self.soulseek_client)
         self.dashboard_page.set_page_references(self.downloads_page, self.sync_page)
         self.dashboard_page.set_app_start_time(self.app_start_time)
         self.dashboard_page.set_toast_manager(self.toast_manager)
@@ -240,6 +248,7 @@ class MainWindow(QMainWindow):
             self.spotify_client,
             self.plex_client,
             self.jellyfin_client,
+            self.navidrome_client,
             self.soulseek_client
         )
         self.status_thread.status_updated.connect(self.update_service_status)

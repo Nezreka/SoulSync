@@ -454,6 +454,8 @@ class ServiceTestThread(QThread):
                 success, message = self._test_plex()
             elif self.service_type == "jellyfin":
                 success, message = self._test_jellyfin()
+            elif self.service_type == "navidrome":
+                success, message = self._test_navidrome()
             elif self.service_type == "soulseek":
                 success, message = self._test_soulseek()
             else:
@@ -644,7 +646,72 @@ class ServiceTestThread(QThread):
             return False, "✗ Cannot connect to Jellyfin server.\nCheck your server URL and network."
         except Exception as e:
             return False, f"✗ Jellyfin test failed:\n{str(e)}"
-    
+
+    def _test_navidrome(self):
+        """Test Navidrome connection"""
+        try:
+            import requests
+            import hashlib
+            import secrets
+
+            base_url = self.test_config['base_url']
+            username = self.test_config['username']
+            password = self.test_config['password']
+
+            if not base_url:
+                return False, "Please enter Navidrome server URL"
+
+            if not username:
+                return False, "Please enter Navidrome username"
+
+            if not password:
+                return False, "Please enter Navidrome password"
+
+            # Clean URL - remove trailing slash
+            if base_url.endswith('/'):
+                base_url = base_url[:-1]
+
+            # Generate authentication parameters for Subsonic API
+            salt = secrets.token_hex(8)
+            token = hashlib.md5((password + salt).encode()).hexdigest()
+
+            # Test connection with ping endpoint
+            params = {
+                'u': username,
+                't': token,
+                's': salt,
+                'v': '1.16.1',
+                'c': 'SoulSync',
+                'f': 'json'
+            }
+
+            test_url = f"{base_url}/rest/ping"
+            response = requests.get(test_url, params=params, timeout=10)
+
+            if response.status_code == 200:
+                data = response.json()
+                subsonic_response = data.get('subsonic-response', {})
+
+                if subsonic_response.get('status') == 'ok':
+                    version = subsonic_response.get('version', 'Unknown')
+                    message = f"✓ Navidrome connection successful!\nSubsonic API Version: {version}"
+                    return True, message
+                elif subsonic_response.get('status') == 'failed':
+                    error = subsonic_response.get('error', {})
+                    error_message = error.get('message', 'Unknown error')
+                    return False, f"✗ Navidrome authentication failed:\n{error_message}"
+                else:
+                    return False, "✗ Unexpected response from Navidrome server"
+            else:
+                return False, f"✗ Navidrome connection failed.\nHTTP {response.status_code}: {response.text}"
+
+        except requests.exceptions.Timeout:
+            return False, "✗ Navidrome connection timeout.\nCheck your server URL."
+        except requests.exceptions.ConnectionError:
+            return False, "✗ Cannot connect to Navidrome server.\nCheck your server URL and network."
+        except Exception as e:
+            return False, f"✗ Navidrome test failed:\n{str(e)}"
+
     def _test_soulseek(self):
         """Test Soulseek connection"""
         try:
@@ -1259,6 +1326,13 @@ class SettingsPage(QWidget):
                 'api_key': self.jellyfin_api_key_input.text()
             }
             self.start_service_test('jellyfin', test_config)
+        elif active_server == 'navidrome':
+            test_config = {
+                'base_url': self.navidrome_url_input.text(),
+                'username': self.navidrome_username_input.text(),
+                'password': self.navidrome_password_input.text()
+            }
+            self.start_service_test('navidrome', test_config)
         else:
             logger.warning(f"Unknown active server type: {active_server}")
     
