@@ -59,7 +59,8 @@ class MediaScanManager:
                         # Try to find the main window from top-level widgets
                         main_window = None
                         for widget in app.topLevelWidgets():
-                            if hasattr(widget, 'plex_client') and hasattr(widget, 'jellyfin_client'):
+                            if (hasattr(widget, 'plex_client') and hasattr(widget, 'jellyfin_client') and
+                                hasattr(widget, 'navidrome_client')):
                                 main_window = widget
                                 break
                         
@@ -70,7 +71,13 @@ class MediaScanManager:
                                     return client, "jellyfin"
                                 else:
                                     logger.warning("Jellyfin client not connected, falling back to Plex")
-                                    
+                            elif active_server == "navidrome":
+                                client = getattr(main_window, 'navidrome_client', None)
+                                if client and client.is_connected():
+                                    return client, "navidrome"
+                                else:
+                                    logger.warning("Navidrome client not connected, falling back to Plex")
+
                             # Default to Plex or fallback
                             client = getattr(main_window, 'plex_client', None)
                             if client and client.is_connected():
@@ -88,12 +95,17 @@ class MediaScanManager:
                 # Headless mode - try to get clients from global instances
                 import sys
                 for module_name, module in sys.modules.items():
-                    if hasattr(module, 'plex_client') and hasattr(module, 'jellyfin_client'):
+                    if (hasattr(module, 'plex_client') and hasattr(module, 'jellyfin_client') and
+                        hasattr(module, 'navidrome_client')):
                         if active_server == "jellyfin":
                             client = getattr(module, 'jellyfin_client', None)
                             if client and hasattr(client, 'is_connected') and client.is_connected():
                                 return client, "jellyfin"
-                        
+                        elif active_server == "navidrome":
+                            client = getattr(module, 'navidrome_client', None)
+                            if client and hasattr(client, 'is_connected') and client.is_connected():
+                                return client, "navidrome"
+
                         client = getattr(module, 'plex_client', None)
                         if client and hasattr(client, 'is_connected') and client.is_connected():
                             return client, "plex"

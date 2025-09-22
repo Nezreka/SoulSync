@@ -1058,6 +1058,17 @@ body {
     font-weight: 500;
     cursor: pointer;
     transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    justify-content: center;
+    flex-direction: column;
+}
+
+.server-logo {
+    width: 100%;
+    opacity: 0.8;
+    transition: opacity 0.2s ease;
 }
 
 .server-toggle-btn.active {
@@ -1072,8 +1083,16 @@ body {
     color: #ffffff;
 }
 
+.server-toggle-btn:hover .server-logo {
+    opacity: 1.0;
+}
+
 .server-toggle-btn.active:hover {
     background: rgba(29, 185, 84, 0.3);
+}
+
+.server-toggle-btn.active .server-logo {
+    opacity: 1.0;
 }
 
 .server-config-container {

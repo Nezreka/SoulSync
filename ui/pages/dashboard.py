@@ -1943,6 +1943,7 @@ class DashboardDataProvider(QObject):
             'spotify': ServiceStatus('Spotify', False, datetime.now()),
             'plex': ServiceStatus('Plex', False, datetime.now()),
             'jellyfin': ServiceStatus('Jellyfin', False, datetime.now()),
+            'navidrome': ServiceStatus('Navidrome', False, datetime.now()),
             'soulseek': ServiceStatus('Soulseek', False, datetime.now())
         }
         self.download_stats = DownloadStats()
@@ -1960,11 +1961,12 @@ class DashboardDataProvider(QObject):
         self.system_stats_timer.timeout.connect(self.update_system_stats)
         self.system_stats_timer.start(10000)  # Update every 10 seconds
     
-    def set_service_clients(self, spotify_client, plex_client, jellyfin_client, soulseek_client):
+    def set_service_clients(self, spotify_client, plex_client, jellyfin_client, navidrome_client, soulseek_client):
         self.service_clients = {
             'spotify_client': spotify_client,
             'plex_client': plex_client,
             'jellyfin_client': jellyfin_client,
+            'navidrome_client': navidrome_client,
             'soulseek_client': soulseek_client
         }
     
@@ -2099,6 +2101,7 @@ class DashboardDataProvider(QObject):
             'spotify': 'spotify_client',
             'plex': 'plex_client',
             'jellyfin': None,  # Jellyfin doesn't need a client, tests via config
+            'navidrome': 'navidrome_client',
             'soulseek': 'soulseek_client'
         }
         
@@ -2712,15 +2715,16 @@ class DashboardPage(QWidget):
             self.wishlist_download_modal.process_finished.connect(self.on_wishlist_modal_finished)
         return True
 
-    def set_service_clients(self, spotify_client, plex_client, jellyfin_client, soulseek_client, downloads_page=None):
+    def set_service_clients(self, spotify_client, plex_client, jellyfin_client, navidrome_client, soulseek_client, downloads_page=None):
         """Called from main window to provide service client references"""
-        self.data_provider.set_service_clients(spotify_client, plex_client, jellyfin_client, soulseek_client)
-        
+        self.data_provider.set_service_clients(spotify_client, plex_client, jellyfin_client, navidrome_client, soulseek_client)
+
         # Store service clients for wishlist modal
         self.service_clients = {
             'spotify_client': spotify_client,
             'plex_client': plex_client,
             'jellyfin_client': jellyfin_client,
+            'navidrome_client': navidrome_client,
             'soulseek_client': soulseek_client,
             'downloads_page': downloads_page
         }
@@ -3051,7 +3055,12 @@ class DashboardPage(QWidget):
         # Create service status cards with dynamic media server
         from config.settings import config_manager
         active_server = config_manager.get_active_media_server()
-        server_name = "Plex" if active_server == "plex" else "Jellyfin"
+        server_name_map = {
+            'plex': 'Plex',
+            'jellyfin': 'Jellyfin',
+            'navidrome': 'Navidrome'
+        }
+        server_name = server_name_map.get(active_server, 'Jellyfin')
         services = ['Spotify', server_name, 'Soulseek']
         for service in services:
             card = ServiceStatusCard(service)
