@@ -1943,6 +1943,7 @@ class DashboardDataProvider(QObject):
             'spotify': ServiceStatus('Spotify', False, datetime.now()),
             'plex': ServiceStatus('Plex', False, datetime.now()),
             'jellyfin': ServiceStatus('Jellyfin', False, datetime.now()),
+            'navidrome': ServiceStatus('Navidrome', False, datetime.now()),
             'soulseek': ServiceStatus('Soulseek', False, datetime.now())
         }
         self.download_stats = DownloadStats()
@@ -2100,6 +2101,7 @@ class DashboardDataProvider(QObject):
             'spotify': 'spotify_client',
             'plex': 'plex_client',
             'jellyfin': None,  # Jellyfin doesn't need a client, tests via config
+            'navidrome': 'navidrome_client',
             'soulseek': 'soulseek_client'
         }
         
@@ -3053,7 +3055,12 @@ class DashboardPage(QWidget):
         # Create service status cards with dynamic media server
         from config.settings import config_manager
         active_server = config_manager.get_active_media_server()
-        server_name = "Plex" if active_server == "plex" else "Jellyfin"
+        server_name_map = {
+            'plex': 'Plex',
+            'jellyfin': 'Jellyfin',
+            'navidrome': 'Navidrome'
+        }
+        server_name = server_name_map.get(active_server, 'Jellyfin')
         services = ['Spotify', server_name, 'Soulseek']
         for service in services:
             card = ServiceStatusCard(service)

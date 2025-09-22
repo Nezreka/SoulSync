@@ -904,6 +904,125 @@ class JellyfinDetectionThread(QThread):
             
         return False
 
+class NavidromeDetectionThread(QThread):
+    progress_updated = pyqtSignal(int, str)  # progress value, current url
+    detection_completed = pyqtSignal(str)  # found_url (empty if not found)
+
+    def __init__(self):
+        super().__init__()
+        self.cancelled = False
+
+    def cancel(self):
+        self.cancelled = True
+
+    def run(self):
+        import requests
+        import socket
+        import ipaddress
+
+        def get_network_info():
+            """Get comprehensive network information with subnet detection"""
+            try:
+                # Get local IP using socket method
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.connect(("8.8.8.8", 80))
+                local_ip = s.getsockname()[0]
+                s.close()
+
+                # Parse network info
+                network = ipaddress.ip_network(f"{local_ip}/24", strict=False)
+                return {
+                    'local_ip': local_ip,
+                    'network': network,
+                    'subnet': str(network.network_address) + "/24"
+                }
+            except Exception as e:
+                print(f"Error getting network info: {e}")
+                return {'local_ip': '127.0.0.1', 'network': None, 'subnet': '127.0.0.1/32'}
+
+        try:
+            # Test common Navidrome URLs first
+            common_urls = [
+                "http://localhost:4533",
+                "http://127.0.0.1:4533",
+                "http://navidrome:4533"
+            ]
+
+            network_info = get_network_info()
+            local_ip = network_info['local_ip']
+
+            # Add local IP with common ports
+            common_urls.extend([
+                f"http://{local_ip}:4533"
+            ])
+
+            total_hosts = len(common_urls)
+            current_host = 0
+
+            # Test common URLs first
+            for url in common_urls:
+                if self.cancelled:
+                    break
+
+                current_host += 1
+                self.progress_updated.emit(int((current_host / total_hosts) * 100), url)
+
+                if self.test_navidrome_url(url):
+                    self.detection_completed.emit(url)
+                    return
+
+            # If no common URLs worked, signal not found
+            self.detection_completed.emit("")
+
+        except Exception as e:
+            print(f"Navidrome detection error: {e}")
+            self.detection_completed.emit("")
+
+    def test_navidrome_url(self, url, timeout=5):
+        """Test if URL hosts a Navidrome server by checking for ping endpoint"""
+        try:
+            # Test Navidrome ping endpoint
+            ping_url = f"{url.rstrip('/')}/rest/ping"
+            print(f"Testing Navidrome at: {ping_url}")
+
+            response = requests.get(ping_url, params={
+                'u': 'test',
+                't': 'test',
+                's': 'test',
+                'v': '1.16.1',
+                'c': 'SoulSync',
+                'f': 'json'
+            }, timeout=timeout)
+
+            print(f"Response status: {response.status_code}")
+
+            # Navidrome should return status 401 or 403 for invalid credentials, not 404
+            if response.status_code in [200, 401, 403]:
+                try:
+                    data = response.json()
+                    print(f"Response data: {data}")
+                    # Check if it's a valid Subsonic API response
+                    if 'subsonic-response' in data:
+                        print(f"✓ Found Navidrome server at {url}")
+                        return True
+                except Exception as e:
+                    print(f"JSON parse error: {e}")
+
+            # Also try a simple GET to the root to see if it's at least a web server
+            try:
+                root_response = requests.get(url, timeout=timeout)
+                if root_response.status_code == 200 and 'navidrome' in root_response.text.lower():
+                    print(f"✓ Found Navidrome web interface at {url}")
+                    return True
+            except:
+                pass
+
+            return False
+
+        except Exception as e:
+            print(f"Error testing {url}: {e}")
+            return False
+
 class SettingsGroup(QGroupBox):
     def __init__(self, title: str, parent=None):
         super().__init__(title, parent)
@@ -1091,19 +1210,29 @@ class SettingsPage(QWidget):
             jellyfin_config = config_manager.get_jellyfin_config()
             self.jellyfin_url_input.setText(jellyfin_config.get('base_url', ''))
             self.jellyfin_api_key_input.setText(jellyfin_config.get('api_key', ''))
-            
+
+            # Load Navidrome config
+            navidrome_config = config_manager.get_navidrome_config()
+            self.navidrome_url_input.setText(navidrome_config.get('base_url', ''))
+            self.navidrome_username_input.setText(navidrome_config.get('username', ''))
+            self.navidrome_password_input.setText(navidrome_config.get('password', ''))
+
             # Initialize server selection
             active_server = config_manager.get_active_media_server()
             self.pending_server_change = None
             self.update_server_toggle_styles(active_server)
             
             # Show/hide appropriate containers based on active server
+            self.plex_container.hide()
+            self.jellyfin_container.hide()
+            self.navidrome_container.hide()
+
             if active_server == 'plex':
                 self.plex_container.show()
-                self.jellyfin_container.hide()
-            else:
-                self.plex_container.hide()
+            elif active_server == 'jellyfin':
                 self.jellyfin_container.show()
+            elif active_server == 'navidrome':
+                self.navidrome_container.show()
             
             # Load Soulseek config
             soulseek_config = config_manager.get_soulseek_config()
@@ -1178,7 +1307,12 @@ class SettingsPage(QWidget):
             # Save Jellyfin settings
             config_manager.set('jellyfin.base_url', self.jellyfin_url_input.text())
             config_manager.set('jellyfin.api_key', self.jellyfin_api_key_input.text())
-            
+
+            # Save Navidrome settings
+            config_manager.set('navidrome.base_url', self.navidrome_url_input.text())
+            config_manager.set('navidrome.username', self.navidrome_username_input.text())
+            config_manager.set('navidrome.password', self.navidrome_password_input.text())
+
             # Save pending server change if any
             if hasattr(self, 'pending_server_change') and self.pending_server_change:
                 config_manager.set_active_media_server(self.pending_server_change)
@@ -2260,9 +2394,16 @@ class SettingsPage(QWidget):
         self.jellyfin_toggle_button.setFixedHeight(40)
         self.jellyfin_toggle_button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.jellyfin_toggle_button.clicked.connect(lambda: self.select_media_server('jellyfin'))
-        
+
+        # Navidrome toggle button
+        self.navidrome_toggle_button = QPushButton()
+        self.navidrome_toggle_button.setFixedHeight(40)
+        self.navidrome_toggle_button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.navidrome_toggle_button.clicked.connect(lambda: self.select_media_server('navidrome'))
+
         toggle_container.addWidget(self.plex_toggle_button)
         toggle_container.addWidget(self.jellyfin_toggle_button)
+        toggle_container.addWidget(self.navidrome_toggle_button)
         server_selection_layout.addLayout(toggle_container)
         
         # Restart warning (initially hidden)
@@ -2397,7 +2538,78 @@ class SettingsPage(QWidget):
         
         # Add Jellyfin frame to its container
         jellyfin_container_layout.addWidget(jellyfin_frame)
-        
+
+        # Navidrome Settings Container
+        self.navidrome_container = QWidget()
+        self.navidrome_container.setStyleSheet("background: transparent;")
+        navidrome_container_layout = QVBoxLayout(self.navidrome_container)
+        navidrome_container_layout.setContentsMargins(0, 0, 0, 0)
+        navidrome_container_layout.setSpacing(0)
+
+        # Navidrome settings
+        navidrome_frame = QFrame()
+        navidrome_frame.setStyleSheet("""
+            QFrame {
+                background: #333333;
+                border: 1px solid #444444;
+                border-radius: 8px;
+                padding: 8px;
+            }
+        """)
+        navidrome_layout = QVBoxLayout(navidrome_frame)
+        navidrome_layout.setSpacing(8)
+
+        navidrome_title = QLabel("Navidrome")
+        navidrome_title.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        navidrome_title.setStyleSheet("color: #ff6b6b;")  # Navidrome red color
+        navidrome_layout.addWidget(navidrome_title)
+
+        # Server URL
+        navidrome_url_label = QLabel("Server URL:")
+        navidrome_url_label.setStyleSheet(self.get_label_style(11))
+        navidrome_layout.addWidget(navidrome_url_label)
+
+        navidrome_url_input_layout = QHBoxLayout()
+        self.navidrome_url_input = QLineEdit()
+        self.navidrome_url_input.setStyleSheet(self.get_input_style())
+        self.navidrome_url_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.form_inputs['navidrome.base_url'] = self.navidrome_url_input
+
+        navidrome_detect_btn = QPushButton("Auto-detect")
+        navidrome_detect_btn.setFixedSize(80, 30)
+        navidrome_detect_btn.clicked.connect(self.auto_detect_navidrome)
+        navidrome_detect_btn.setStyleSheet(self.get_test_button_style())
+
+        navidrome_url_input_layout.addWidget(self.navidrome_url_input)
+        navidrome_url_input_layout.addWidget(navidrome_detect_btn)
+        navidrome_layout.addLayout(navidrome_url_input_layout)
+
+        # Username
+        navidrome_username_label = QLabel("Username:")
+        navidrome_username_label.setStyleSheet(self.get_label_style(11))
+        navidrome_layout.addWidget(navidrome_username_label)
+
+        self.navidrome_username_input = QLineEdit()
+        self.navidrome_username_input.setStyleSheet(self.get_input_style())
+        self.navidrome_username_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.form_inputs['navidrome.username'] = self.navidrome_username_input
+        navidrome_layout.addWidget(self.navidrome_username_input)
+
+        # Password
+        navidrome_password_label = QLabel("Password:")
+        navidrome_password_label.setStyleSheet(self.get_label_style(11))
+        navidrome_layout.addWidget(navidrome_password_label)
+
+        self.navidrome_password_input = QLineEdit()
+        self.navidrome_password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.navidrome_password_input.setStyleSheet(self.get_input_style())
+        self.navidrome_password_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.form_inputs['navidrome.password'] = self.navidrome_password_input
+        navidrome_layout.addWidget(self.navidrome_password_input)
+
+        # Add Navidrome frame to its container
+        navidrome_container_layout.addWidget(navidrome_frame)
+
         # Soulseek settings
         soulseek_frame = QFrame()
         soulseek_frame.setStyleSheet("""
@@ -2454,6 +2666,7 @@ class SettingsPage(QWidget):
         api_layout.addWidget(server_selection_container)
         api_layout.addWidget(self.plex_container)
         api_layout.addWidget(self.jellyfin_container)
+        api_layout.addWidget(self.navidrome_container)
         api_layout.addWidget(soulseek_frame)
         
         # Test connections
@@ -2795,12 +3008,16 @@ class SettingsPage(QWidget):
             self.update_server_toggle_styles(server_type)
             
             # Show/hide appropriate containers
+            self.plex_container.hide()
+            self.jellyfin_container.hide()
+            self.navidrome_container.hide()
+
             if server_type == 'plex':
                 self.plex_container.show()
-                self.jellyfin_container.hide()
-            else:
-                self.plex_container.hide()
+            elif server_type == 'jellyfin':
                 self.jellyfin_container.show()
+            elif server_type == 'navidrome':
+                self.navidrome_container.show()
                 
         except Exception as e:
             logger.error(f"Error selecting media server: {e}")
@@ -2870,9 +3087,21 @@ class SettingsPage(QWidget):
                 "jellyfin_icon.png",
                 32
             )
-        
+
+        if not hasattr(self, '_cached_navidrome_icon'):
+            self._cached_navidrome_icon = download_and_cache_logo(
+                "https://raw.githubusercontent.com/navidrome/navidrome/master/resources/logo-192x192.png",
+                "navidrome_icon.png",
+                32
+            )
+            # Fallback to a simple text-based icon if download fails
+            if self._cached_navidrome_icon.isNull():
+                logger.warning("Navidrome icon download failed, creating fallback icon")
+                self._cached_navidrome_icon = self._create_fallback_icon("N", "#ff6b6b")
+
         plex_icon = self._cached_plex_icon
         jellyfin_icon = self._cached_jellyfin_icon
+        navidrome_icon = self._cached_navidrome_icon
         
         # Active button styles with appropriate colors
         active_plex_style = """
@@ -2904,6 +3133,21 @@ class SettingsPage(QWidget):
                     stop:1 rgba(150, 82, 175, 1.0));
             }
         """
+
+        active_navidrome_style = """
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(255, 107, 107, 0.8),
+                    stop:1 rgba(235, 87, 87, 0.9));
+                border: 2px solid rgba(255, 107, 107, 1);
+                border-radius: 8px;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(255, 107, 107, 0.9),
+                    stop:1 rgba(235, 87, 87, 1.0));
+            }
+        """
         
         # Inactive button style
         inactive_style = """
@@ -2918,19 +3162,64 @@ class SettingsPage(QWidget):
             }
         """
         
-        # Set icons and styles
+        # Set icons, text, and styles
         self.plex_toggle_button.setIcon(plex_icon)
         self.plex_toggle_button.setIconSize(QSize(28, 28))
+        self.plex_toggle_button.setText("Plex")
+
         self.jellyfin_toggle_button.setIcon(jellyfin_icon)
         self.jellyfin_toggle_button.setIconSize(QSize(28, 28))
-        
+        self.jellyfin_toggle_button.setText("Jellyfin")
+
+        self.navidrome_toggle_button.setIcon(navidrome_icon)
+        self.navidrome_toggle_button.setIconSize(QSize(28, 28))
+        self.navidrome_toggle_button.setText("Navidrome")
+
+        # Debug: Check if icons are properly loaded
+        if navidrome_icon.isNull():
+            logger.warning("Navidrome icon failed to load!")
+        else:
+            logger.info("Navidrome icon loaded successfully")
+
+        # Reset all buttons to inactive first
+        self.plex_toggle_button.setStyleSheet(inactive_style)
+        self.jellyfin_toggle_button.setStyleSheet(inactive_style)
+        self.navidrome_toggle_button.setStyleSheet(inactive_style)
+
+        # Set the active server button style
         if active_server == 'plex':
             self.plex_toggle_button.setStyleSheet(active_plex_style)
-            self.jellyfin_toggle_button.setStyleSheet(inactive_style)
-        else:
-            self.plex_toggle_button.setStyleSheet(inactive_style)
+        elif active_server == 'jellyfin':
             self.jellyfin_toggle_button.setStyleSheet(active_jellyfin_style)
-    
+        elif active_server == 'navidrome':
+            self.navidrome_toggle_button.setStyleSheet(active_navidrome_style)
+
+    def _create_fallback_icon(self, text, color):
+        """Create a simple text-based fallback icon"""
+        from PyQt6.QtGui import QPixmap, QPainter, QFont, QColor
+        from PyQt6.QtCore import Qt
+
+        # Create a 32x32 pixmap
+        pixmap = QPixmap(32, 32)
+        pixmap.fill(Qt.GlobalColor.transparent)
+
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # Draw background circle
+        painter.setBrush(QColor(color))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(2, 2, 28, 28)
+
+        # Draw text
+        painter.setPen(QColor("white"))
+        font = QFont("Arial", 14, QFont.Weight.Bold)
+        painter.setFont(font)
+        painter.drawText(0, 0, 32, 32, Qt.AlignmentFlag.AlignCenter, text)
+
+        painter.end()
+        return QIcon(pixmap)
+
     def auto_detect_jellyfin(self):
         """Auto-detect Jellyfin server URL using background thread"""
         # Don't start new detection if one is already running
@@ -3034,7 +3323,102 @@ class SettingsPage(QWidget):
         self.detection_thread.start()
         
         self.detection_dialog.show()
-    
+
+    def auto_detect_navidrome(self):
+        """Auto-detect Navidrome server URL using background thread"""
+        # Don't start new detection if one is already running
+        if self.detection_thread and self.detection_thread.isRunning():
+            return
+
+        # Create animated loading dialog
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
+        from PyQt6.QtCore import QTimer, QPropertyAnimation, QRect
+        from PyQt6.QtGui import QPainter, QColor
+
+        self.detection_dialog = QDialog(self)
+        self.detection_dialog.setWindowTitle("Auto-detecting Navidrome Server")
+        self.detection_dialog.setModal(True)
+        self.detection_dialog.setFixedSize(400, 180)
+        self.detection_dialog.setWindowFlags(self.detection_dialog.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+
+        # Apply dark theme styling
+        self.detection_dialog.setStyleSheet("""
+            QDialog {
+                background-color: #282828;
+                color: #ffffff;
+                border: 1px solid #404040;
+                border-radius: 8px;
+            }
+            QLabel {
+                color: #ffffff;
+                font-size: 14px;
+            }
+            QPushButton {
+                background-color: #404040;
+                border: 1px solid #606060;
+                border-radius: 4px;
+                color: #ffffff;
+                padding: 8px 16px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #505050;
+            }
+        """)
+
+        layout = QVBoxLayout(self.detection_dialog)
+        layout.setSpacing(20)
+
+        # Status text
+        status_label = QLabel("Scanning network for Navidrome servers...")
+        status_label.setWordWrap(True)
+        layout.addWidget(status_label)
+
+        # Cancel button
+        button_layout = QHBoxLayout()
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.cancel_detection)
+        button_layout.addStretch()
+        button_layout.addWidget(cancel_btn)
+        layout.addLayout(button_layout)
+
+        # Start Navidrome detection thread
+        self.detection_thread = NavidromeDetectionThread()
+        self.detection_thread.progress_updated.connect(self.on_detection_progress, Qt.ConnectionType.QueuedConnection)
+        self.detection_thread.detection_completed.connect(self.on_navidrome_detection_completed, Qt.ConnectionType.QueuedConnection)
+        self.detection_thread.start()
+
+        self.detection_dialog.show()
+
+    def on_navidrome_detection_completed(self, found_url):
+        """Handle Navidrome detection completion"""
+        # Stop animation and close dialog
+        if hasattr(self, 'loading_animation'):
+            self.loading_animation.stop()
+
+        if hasattr(self, 'detection_dialog') and self.detection_dialog:
+            self.detection_dialog.close()
+            self.detection_dialog = None
+
+        # Properly cleanup thread
+        if self.detection_thread:
+            if self.detection_thread.isRunning():
+                self.detection_thread.quit()
+                self.detection_thread.wait(1000)  # Wait up to 1 second
+            self.detection_thread = None
+
+        if found_url:
+            self.navidrome_url_input.setText(found_url)
+            # Show success toast
+            from ui.components.toast_manager import ToastManager
+            toast_manager = ToastManager(self)
+            toast_manager.show_toast(f"✓ Navidrome server detected: {found_url}", "success", 4000)
+        else:
+            # Show error toast
+            from ui.components.toast_manager import ToastManager
+            toast_manager = ToastManager(self)
+            toast_manager.show_toast("❌ No Navidrome servers found on the network", "error", 4000)
+
     def on_jellyfin_detection_completed(self, found_url):
         """Handle Jellyfin detection completion"""
         # Stop animation and close dialog
