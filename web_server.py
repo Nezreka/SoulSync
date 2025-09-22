@@ -23,6 +23,7 @@ from config.settings import config_manager
 from core.spotify_client import SpotifyClient, Playlist as SpotifyPlaylist, Track as SpotifyTrack
 from core.plex_client import PlexClient
 from core.jellyfin_client import JellyfinClient
+from core.navidrome_client import NavidromeClient
 from core.soulseek_client import SoulseekClient
 from core.tidal_client import TidalClient # Added import for Tidal
 from core.matching_engine import MusicMatchingEngine
@@ -95,6 +96,7 @@ try:
     spotify_client = SpotifyClient()
     plex_client = PlexClient()
     jellyfin_client = JellyfinClient()
+    navidrome_client = NavidromeClient()
     soulseek_client = SoulseekClient()
     tidal_client = TidalClient()
     matching_engine = MusicMatchingEngine()
@@ -102,7 +104,7 @@ try:
     print("✅ Core service clients initialized.")
 except Exception as e:
     print(f"🔴 FATAL: Error initializing service clients: {e}")
-    spotify_client = plex_client = jellyfin_client = soulseek_client = tidal_client = matching_engine = sync_service = None
+    spotify_client = plex_client = jellyfin_client = navidrome_client = soulseek_client = tidal_client = matching_engine = sync_service = None
 
 # --- Global Streaming State Management ---
 # Thread-safe state tracking for streaming functionality
@@ -1490,10 +1492,8 @@ def get_status():
             temp_jellyfin_client = JellyfinClient()
             media_server_status = temp_jellyfin_client.is_connected()
         elif active_server == "navidrome":
-            # Test Navidrome connection
-            navidrome_config = config_manager.get('navidrome', {})
-            success, _ = run_service_test('navidrome', navidrome_config)
-            media_server_status = success
+            # Test Navidrome connection using existing client instance (non-destructive)
+            media_server_status = navidrome_client.is_connected()
         media_server_response_time = (time.time() - media_server_start) * 1000
         
         # Test Soulseek (just check if configured, no network test)
@@ -5589,6 +5589,7 @@ def _process_wishlist_automatically():
 # ===============================
 
 def _db_update_progress_callback(current_item, processed, total, percentage):
+    print(f"📊 [DB Progress] {current_item} - {processed}/{total} ({percentage:.1f}%)")
     with db_update_lock:
         db_update_state.update({
             "current_item": current_item,
@@ -5598,6 +5599,7 @@ def _db_update_progress_callback(current_item, processed, total, percentage):
         })
 
 def _db_update_phase_callback(phase):
+    print(f"🔄 [DB Phase] {phase}")
     with db_update_lock:
         db_update_state["phase"] = phase
 
@@ -5635,6 +5637,8 @@ def _run_db_update_task(full_refresh, server_type):
         media_client = plex_client
     elif server_type == "jellyfin":
         media_client = jellyfin_client
+    elif server_type == "navidrome":
+        media_client = navidrome_client
 
     if not media_client:
         _db_update_error_callback(f"Media client for '{server_type}' not available.")
@@ -5644,7 +5648,8 @@ def _run_db_update_task(full_refresh, server_type):
         db_update_worker = DatabaseUpdateWorker(
             media_client=media_client,
             full_refresh=full_refresh,
-            server_type=server_type
+            server_type=server_type,
+            force_sequential=True  # Force sequential processing in web server mode
         )
         # Connect signals to callbacks (handle both Qt and headless modes)
         try:
@@ -5908,6 +5913,9 @@ def start_database_update():
 def get_database_update_status():
     """Endpoint to poll for the current update status."""
     with db_update_lock:
+        # Debug: Log current state occasionally
+        if db_update_state["status"] == "running":
+            print(f"📊 [Status Check] {db_update_state['processed']}/{db_update_state['total']} ({db_update_state['progress']:.1f}%) - {db_update_state['phase']}")
         return jsonify(db_update_state)
 
 @app.route('/api/database/update/stop', methods=['POST'])

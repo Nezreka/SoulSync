@@ -6874,6 +6874,7 @@ function stopDbStatsPolling() {
 
 function stopDbUpdatePolling() {
     if (dbUpdateStatusInterval) {
+        console.log('⏹️ Stopping database update polling');
         clearInterval(dbUpdateStatusInterval);
         dbUpdateStatusInterval = null;
     }
@@ -7155,20 +7156,24 @@ async function checkForAutoInitiatedWishlistProcess() {
 
 async function checkAndUpdateDbProgress() {
     try {
-        const response = await fetch('/api/database/update/status');
+        const response = await fetch('/api/database/update/status', {
+            signal: AbortSignal.timeout(10000) // 10 second timeout
+        });
         if (!response.ok) return;
 
         const state = await response.json();
+        console.debug('📊 DB Status:', state.status, `${state.processed}/${state.total}`, `${state.progress.toFixed(1)}%`);
         updateDbProgressUI(state);
 
-        if (state.status === 'running') {
-            // If an update is running, start polling for progress
-            stopDbUpdatePolling();
+        // Start polling only if not already polling and status is running
+        if (state.status === 'running' && !dbUpdateStatusInterval) {
+            console.log('🔄 Starting database update polling (1 second interval)');
             dbUpdateStatusInterval = setInterval(checkAndUpdateDbProgress, 1000);
         }
 
     } catch (error) {
         console.warn('Could not fetch DB update status:', error);
+        // Don't stop polling on network errors - keep trying
     }
 }
 

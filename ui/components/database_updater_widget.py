@@ -9,7 +9,7 @@ from utils.logging_config import get_logger
 logger = get_logger("database_updater_widget")
 
 class DatabaseUpdaterWidget(QFrame):
-    """UI widget for updating SoulSync database with Plex library data"""
+    """UI widget for updating SoulSync database with media server library data (Plex, Jellyfin, or Navidrome)"""
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -37,7 +37,12 @@ class DatabaseUpdaterWidget(QFrame):
         try:
             from config.settings import config_manager
             active_server = config_manager.get_active_media_server()
-            server_name = "Jellyfin" if active_server == "jellyfin" else "Plex"
+            if active_server == "jellyfin":
+                server_name = "Jellyfin"
+            elif active_server == "navidrome":
+                server_name = "Navidrome"
+            else:
+                server_name = "Plex"
         except:
             server_name = "Plex"  # Fallback
         
