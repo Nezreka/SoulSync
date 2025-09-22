@@ -2564,11 +2564,14 @@ def _check_album_completion(db, album_data: dict, artist_name: str, test_mode: b
         else:
             # Check if album exists in database with completeness info
             try:
+                # Get active server for database checking
+                active_server = config_manager.get_active_media_server()
                 db_album, confidence, owned_tracks, expected_tracks, is_complete = db.check_album_exists_with_completeness(
                     title=album_name,
                     artist=artist_name,
                     expected_track_count=total_tracks if total_tracks > 0 else None,
-                    confidence_threshold=0.7  # Slightly lower threshold for better matching
+                    confidence_threshold=0.7,  # Slightly lower threshold for better matching
+                    server_source=active_server  # Check only the active server
                 )
             except Exception as db_error:
                 print(f"⚠️ Database error for album '{album_name}': {db_error}")
@@ -2655,11 +2658,14 @@ def _check_single_completion(db, single_data: dict, artist_name: str, test_mode:
         elif album_type == 'ep' or total_tracks > 1:
             # Treat EPs like albums
             try:
+                # Get active server for database checking
+                active_server = config_manager.get_active_media_server()
                 db_album, confidence, owned_tracks, expected_tracks, is_complete = db.check_album_exists_with_completeness(
                     title=single_name,
                     artist=artist_name,
                     expected_track_count=total_tracks,
-                    confidence_threshold=0.7
+                    confidence_threshold=0.7,
+                    server_source=active_server  # Check only the active server
                 )
             except Exception as db_error:
                 print(f"⚠️ Database error for EP '{single_name}': {db_error}")
