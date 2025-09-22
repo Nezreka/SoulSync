@@ -31,5 +31,8 @@ psutil>=6.0.0
 # YouTube support
 yt-dlp>=2024.12.13
 
+# Lyrics support
+lrclibapi>=0.3.1
+
 # Optional: MQTT support (for future features)
 asyncio-mqtt>=0.16.0

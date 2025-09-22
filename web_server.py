@@ -33,6 +33,7 @@ from core.tidal_client import TidalClient # Added import for Tidal
 from core.matching_engine import MusicMatchingEngine
 from core.database_update_worker import DatabaseUpdateWorker, DatabaseStatsWorker
 from core.web_scan_manager import WebScanManager
+from core.lyrics_client import lyrics_client
 from database.music_database import get_database
 from services.sync_service import PlaylistSyncService
 from datetime import datetime
@@ -4762,6 +4763,60 @@ def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_in
         print(f"❌ Error enhancing metadata for {file_path}: {e}")
         return False
 
+def _generate_lrc_file(file_path: str, context: dict, artist: dict, album_info: dict) -> bool:
+    """
+    Generate LRC lyrics file using LRClib API.
+    Elegant addition to post-processing - extracts metadata from existing context.
+    """
+    try:
+        # Extract track information from existing context (same as metadata enhancement)
+        original_search = context.get("original_search_result", {})
+        spotify_album = context.get("spotify_album")
+
+        # Get track metadata
+        track_name = (original_search.get('spotify_clean_title') or
+                     original_search.get('title', 'Unknown Track'))
+
+        # Handle artist parameter (can be dict or object)
+        if isinstance(artist, dict):
+            artist_name = artist.get('name', 'Unknown Artist')
+        elif hasattr(artist, 'name'):
+            artist_name = artist.name
+        else:
+            artist_name = str(artist) if artist else 'Unknown Artist'
+        album_name = None
+        duration_seconds = None
+
+        # Get album name if available
+        if album_info.get('is_album'):
+            album_name = (original_search.get('spotify_clean_album') or
+                         album_info.get('album_name') or
+                         (spotify_album.get('name') if spotify_album else None))
+
+        # Get duration from original search context
+        if original_search.get('duration_ms'):
+            duration_seconds = int(original_search['duration_ms'] / 1000)
+
+        # Generate LRC file using lyrics client
+        success = lyrics_client.create_lrc_file(
+            audio_file_path=file_path,
+            track_name=track_name,
+            artist_name=artist_name,
+            album_name=album_name,
+            duration_seconds=duration_seconds
+        )
+
+        if success:
+            print(f"🎵 LRC file generated for: {track_name}")
+        else:
+            print(f"🎵 No lyrics found for: {track_name}")
+
+        return success
+
+    except Exception as e:
+        print(f"❌ Error generating LRC file for {file_path}: {e}")
+        return False
+
 def _extract_spotify_metadata(context: dict, artist: dict, album_info: dict) -> dict:
     """Extracts a comprehensive metadata dictionary from the provided context."""
     metadata = {}
@@ -5267,7 +5322,7 @@ def _post_process_matched_download(context_key, context, file_path):
 
         # 3. Enhance metadata, move file, download art, and cleanup
         _enhance_file_metadata(file_path, context, spotify_artist, album_info)
-        
+
         print(f"🚚 Moving '{os.path.basename(file_path)}' to '{final_path}'")
         if os.path.exists(final_path):
             # PROTECTION: Check if existing file already has metadata enhancement
@@ -5290,9 +5345,12 @@ def _post_process_matched_download(context_key, context, file_path):
                 os.remove(final_path)
         
         shutil.move(file_path, final_path)
-        
+
         _download_cover_art(album_info, os.path.dirname(final_path))
-        
+
+        # 4. Generate LRC lyrics file at final location (elegant addition)
+        _generate_lrc_file(final_path, context, spotify_artist, album_info)
+
         downloads_path = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
         _cleanup_empty_directories(downloads_path, file_path)
 
