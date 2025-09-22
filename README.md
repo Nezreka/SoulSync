@@ -4,7 +4,7 @@
 
 # 🎵 SoulSync - Automated Music Discovery & Collection Manager
 
-Bridge the gap between streaming services and your local music library. Automatically sync Spotify/Tidal/YouTube playlists to Plex/Jellyfin via Soulseek.
+Bridge the gap between streaming services and your local music library. Automatically sync Spotify/Tidal/YouTube playlists to Plex/Jellyfin/Navidrome via Soulseek.
 
 > ⚠️ **CRITICAL**: You MUST configure file sharing in slskd before using SoulSync. Users who only download without sharing get banned by the Soulseek community. Set up shared folders in slskd's web interface at `http://localhost:5030/shares` - share your music library or downloads folder.
 
@@ -16,6 +16,9 @@ Bridge the gap between streaming services and your local music library. Automati
 - **Smart matching** finds what you're missing vs what you own
 - **Download missing tracks** from Soulseek with FLAC priority
 - **Metadata enhancement** adds proper tags and album art
+- **🆕 Automatic lyrics** synchronized LRC files for every download
+- **🆕 Auto server scanning** triggers library scans after downloads
+- **🆕 Auto database updates** keeps SoulSync database current
 - **File organization** creates clean folder structures
 - **Artist discovery** browse complete discographies
 - **Wishlist system** saves failed downloads for automatic retry
@@ -59,8 +62,8 @@ docker run -d -p 8008:8008 boulderbadgedad/soulsync:latest
 ### Prerequisites
 - **slskd**: Download from [GitHub](https://github.com/slskd/slskd/releases), run on port 5030
 - **Spotify API**: Get Client ID/Secret (see setup below)
-- **Tidal API**: Get Client ID/Secret (see setup below)  
-- **Media Server**: Plex or Jellyfin (optional but recommended)
+- **Tidal API**: Get Client ID/Secret (see setup below)
+- **Media Server**: Plex, Jellyfin, or Navidrome (optional but recommended)
 
 ## 🔑 API Setup Guide
 
@@ -102,6 +105,27 @@ docker run -d -p 8008:8008 boulderbadgedad/soulsync:latest
 3. Instead, right-click → Inspect → Network tab → Reload page
 4. Look for requests with `X-Plex-Token` header and copy that value
 
+### Navidrome Setup
+**Easy Method:**
+1. Open your Navidrome web interface and sign in
+2. Go to **Settings** → **Users**
+3. Click on your user account
+4. Under **Token**, click **"Generate API Token"**
+5. Copy the generated token
+6. Your Navidrome server URL is typically `http://YOUR_IP:4533`
+
+**Using Username/Password:**
+- You can also use your regular username and password instead of a token
+- SoulSync supports both authentication methods for Navidrome
+
+### Jellyfin Setup
+1. Open your Jellyfin web interface and sign in
+2. Go to **Settings** → **API Keys**
+3. Click **"+"** to create a new API key
+4. Give it a name like "SoulSync"
+5. Copy the generated API key
+6. Your Jellyfin server URL is typically `http://YOUR_IP:8096`
+
 ### Final Steps
 1. Set up slskd with downloads folder and API key
 2. Launch SoulSync, go to Settings, enter all your API credentials
@@ -133,22 +157,28 @@ If accessing SoulSync from a different machine than where it's running:
 
 ## 🎯 Core Features
 
-**Search & Download**: Manual track search with preview streaming  
-**Playlist Sync**: Spotify/Tidal/YouTube playlist analysis and batch downloads  
-**Artist Explorer**: Complete discography browsing with missing indicators  
-**Smart Matching**: Advanced algorithm prioritizes originals over remixes  
-**Wishlist Management**: Failed downloads automatically saved and retried hourly  
-**Artist Watchlist**: Add favorite artists to monitor for new releases automatically  
-**Automation**: Hourly retry of failed downloads, metadata enhancement  
+**Search & Download**: Manual track search with preview streaming
+**Playlist Sync**: Spotify/Tidal/YouTube playlist analysis and batch downloads
+**Artist Explorer**: Complete discography browsing with missing indicators
+**Smart Matching**: Advanced algorithm prioritizes originals over remixes
+**🆕 Automatic Lyrics**: Downloads synchronized LRC files from LRClib.net - works with any media player that supports .lrc files
+**🆕 Server Integration**: Auto-triggers library scans on Plex/Jellyfin/Navidrome after downloads complete
+**🆕 Smart Database**: Automatically updates SoulSync's internal database with incremental scans
+**Wishlist Management**: Failed downloads automatically saved and retried hourly
+**Artist Watchlist**: Add favorite artists to monitor for new releases automatically
+**Full Automation**: Hourly retry of failed downloads, metadata enhancement, lyrics, server scanning
 **Activity Feed**: Real-time status and progress tracking
 
 ## 📁 File Flow
 
 1. **Search**: Query Soulseek via slskd API
-2. **Download**: Files saved to configured download folder  
-3. **Process**: Auto-organize to transfer folder with metadata
-4. **Structure**: `Transfer/Artist/Artist - Album/01 - Track.flac`
-5. **Import**: Media server picks up organized files
+2. **Download**: Files saved to configured download folder
+3. **Process**: Auto-organize to transfer folder with metadata enhancement
+4. **🆕 Lyrics**: Automatic LRC file generation using LRClib.net API
+5. **🆕 Server Scan**: Triggers library scan on your media server (60s delay)
+6. **🆕 Database Sync**: Updates SoulSync database with new tracks
+7. **Structure**: `Transfer/Artist/Artist - Album/01 - Track.flac` + `01 - Track.lrc`
+8. **Import**: Media server picks up organized files with lyrics
 
 ## 🔧 Config Example
 
@@ -162,8 +192,17 @@ If accessing SoulSync from a different machine than where it's running:
     "base_url": "http://localhost:32400",
     "token": "your_plex_token"
   },
+  "jellyfin": {
+    "base_url": "http://localhost:8096",
+    "api_key": "your_jellyfin_api_key"
+  },
+  "navidrome": {
+    "base_url": "http://localhost:4533",
+    "username": "your_username",
+    "password": "your_password"
+  },
   "soulseek": {
-    "slskd_url": "http://localhost:5030", 
+    "slskd_url": "http://localhost:5030",
     "api_key": "your_api_key",
     "download_path": "/path/to/downloads",
     "transfer_path": "/path/to/music/library"
@@ -181,10 +220,11 @@ If accessing SoulSync from a different machine than where it's running:
 
 ## 🏗️ Architecture
 
-- **Core**: Service clients for Spotify, Plex, Jellyfin, Soulseek
-- **Database**: SQLite with full media library cache  
+- **Core**: Service clients for Spotify, Plex, Jellyfin, Navidrome, Soulseek
+- **Database**: SQLite with full media library cache and automatic updates
 - **UI**: PyQt6 desktop + Flask web interface
 - **Matching**: Advanced text normalization and scoring
-- **Background**: Multi-threaded with automatic retry logic
+- **Lyrics**: LRClib.net integration for synchronized lyrics
+- **Automation**: Multi-threaded with automatic retry, scanning, and database updates
 
 Modern, clean, automated. Set it up once, let it manage your music library.
