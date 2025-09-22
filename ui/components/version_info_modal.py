@@ -13,7 +13,7 @@ class VersionInfoModal(QDialog):
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("What's New in SoulSync v0.65")
+        self.setWindowTitle("What's New in SoulSync v1.0")
         self.setModal(True)
         self.setFixedSize(600, 500)
         self.setup_ui()
@@ -68,7 +68,7 @@ class VersionInfoModal(QDialog):
         """)
         
         # Version subtitle
-        version_subtitle = QLabel("Version 0.65 - Tidal Playlist Integration")
+        version_subtitle = QLabel("Version 1.0 - Complete WebUI Rebuild")
         version_subtitle.setFont(QFont("SF Pro Text", 11, QFont.Weight.Medium))
         version_subtitle.setStyleSheet("""
             color: rgba(255, 255, 255, 0.7);
@@ -112,52 +112,70 @@ class VersionInfoModal(QDialog):
         content_layout.setContentsMargins(30, 25, 30, 25)
         content_layout.setSpacing(25)
         
-        # Tidal Integration
-        tidal_section = self.create_feature_section(
-            "🎵 Complete Tidal Playlist Integration",
-            "Full Tidal playlist support with seamless workflow integration matching YouTube/Spotify functionality",
+        # WebUI Transformation
+        webui_section = self.create_feature_section(
+            "🌐 Complete WebUI Transformation",
+            "SoulSync has been completely rebuilt from the ground up as a modern web application, moving from desktop GUI to web-based interface",
             [
-                "• Native Tidal API client with OAuth 2.0 authentication and automatic token management",
-                "• Tidal playlist tab positioned between Spotify and YouTube with identical UI/UX patterns",
-                "• Advanced playlist card system with persistent state tracking across all phases",
-                "• Complete discovery workflow: discovering → discovered → syncing → downloading phases",
-                "• Intelligent track matching using existing Spotify-based algorithms for compatibility",
-                "• Smart modal routing with proper state persistence (close/cancel behavior)",
-                "• Full refresh functionality with comprehensive worker cleanup and modal management"
+                "• Full transition from PyQt6 desktop application to responsive web interface",
+                "• Modern HTML5, CSS3, and JavaScript implementation with premium glassmorphic design",
+                "• Real-time updates and live status monitoring through WebSocket connections",
+                "• Cross-platform compatibility - access from any device with a web browser",
+                "• Mobile-responsive design optimized for tablets and smartphones",
+                "• Dark theme with sophisticated visual effects and smooth animations",
+                "• RESTful API architecture enabling future third-party integrations"
             ],
-            "Configure Tidal in Settings → Connections, then discover and sync your Tidal playlists just like Spotify!"
+            "Access SoulSync through your web browser at localhost:8888 - no desktop installation required!"
         )
-        content_layout.addWidget(tidal_section)
-        
-        # Advanced Features
-        features_section = self.create_feature_section(
-            "⚙️ Advanced Workflow Features",
-            "Sophisticated state management and user experience improvements",
+        content_layout.addWidget(webui_section)
+
+        # Docker Support
+        docker_section = self.create_feature_section(
+            "🐳 Docker Container Support",
+            "Complete containerization with Docker for easy deployment and scalability",
             [
-                "• Identical workflow behavior across all playlist sources (Spotify, YouTube, Tidal)",
-                "• Smart refresh system that cancels all active operations and preserves playlist names",
-                "• Phase-aware card clicking: routes to discovery, sync progress, or download modals appropriately",
-                "• Proper modal state persistence: closing download modals preserves discovery state",
-                "• Cancel operations reset playlists to fresh state for updated playlist data",
-                "• Multi-server compatibility: works with both Plex and Jellyfin automatically"
+                "• Pre-built Docker images available for instant deployment",
+                "• Multi-architecture support (AMD64, ARM64) for various server platforms",
+                "• Volume mounting for persistent configuration and downloads",
+                "• Environment variable configuration for easy customization",
+                "• Docker Compose templates for simplified multi-container setups",
+                "• Automatic health checks and restart policies for reliability",
+                "• Lightweight Alpine Linux base for minimal resource usage"
             ]
         )
-        content_layout.addWidget(features_section)
-        
-        # Technical Improvements  
-        technical_section = self.create_feature_section(
-            "🔧 Technical Implementation Details",
-            "Robust architecture ensuring reliable playlist management across all sources",
+        content_layout.addWidget(docker_section)
+
+        # Enhanced Music Management
+        music_section = self.create_feature_section(
+            "🎵 Enhanced Music Management",
+            "All beloved features preserved and enhanced with new web-based capabilities",
             [
-                "• Implemented comprehensive state tracking system with playlist card hub architecture",
-                "• Added PKCE (Proof Key for Code Exchange) OAuth flow for enhanced Tidal security",
-                "• Created unified modal system supporting YouTube, Spotify, and Tidal workflows",
-                "• Enhanced worker cancellation system for proper resource cleanup during operations",
-                "• JSON:API response parsing for Tidal's complex relationship-based data structure",
-                "• Future-ready architecture for additional music streaming service integrations"
+                "• Complete Spotify, Tidal, and YouTube Music playlist synchronization",
+                "• Advanced Soulseek integration with real-time download management",
+                "• Intelligent music matching engine with improved accuracy",
+                "• Plex and Jellyfin server integration with automatic library updates",
+                "• Artist watchlist with automatic new release detection",
+                "• Comprehensive metadata enhancement with high-quality album artwork",
+                "• Real-time download progress with detailed logging and status updates"
             ]
         )
-        content_layout.addWidget(technical_section)
+        content_layout.addWidget(music_section)
+
+        # Performance & Reliability
+        performance_section = self.create_feature_section(
+            "🚀 Performance & Reliability",
+            "Significant improvements in speed, stability, and resource efficiency",
+            [
+                "• Asynchronous processing for improved responsiveness",
+                "• Multi-threaded download management with concurrent processing",
+                "• Optimized database operations with connection pooling",
+                "• Intelligent caching system for faster API responses",
+                "• Robust error handling with automatic retry mechanisms",
+                "• Memory-efficient architecture suitable for long-running deployments",
+                "• Comprehensive logging system for easy troubleshooting"
+            ]
+        )
+        content_layout.addWidget(performance_section)
         
         scroll_area.setWidget(content_widget)
         return scroll_area
