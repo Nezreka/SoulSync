@@ -53,14 +53,17 @@ class DatabaseUpdateWorker(QThread):
         error = pyqtSignal(str)  # error_message
         phase_changed = pyqtSignal(str)  # current_phase (artists, albums, tracks)
     
-    def __init__(self, media_client, database_path: str = "database/music_library.db", full_refresh: bool = False, server_type: str = "plex"):
+    def __init__(self, media_client, database_path: str = "database/music_library.db", full_refresh: bool = False, server_type: str = "plex", force_sequential: bool = False):
         super().__init__()
-        
+
+        # Force sequential processing for web server mode to avoid threading issues
+        self.force_sequential = force_sequential
+
         # Initialize signal callbacks for headless mode
         if not QT_AVAILABLE:
             self.callbacks = {
                 'progress_updated': [],
-                'artist_processed': [], 
+                'artist_processed': [],
                 'finished': [],
                 'error': [],
                 'phase_changed': []
@@ -93,12 +96,15 @@ class DatabaseUpdateWorker(QThread):
         database_config = config_manager.get('database', {})
         base_max_workers = database_config.get('max_workers', 5)
         
-        # Optimize worker count - reduce for database concurrency safety  
+        # Optimize worker count - reduce for database concurrency safety
         if self.server_type == "jellyfin":
             # Reduce workers to prevent database lock issues with bulk inserts
             self.max_workers = min(base_max_workers, 3)  # Max 3 workers for database safety
             if base_max_workers > 3:
                 logger.info(f"Reducing worker count from {base_max_workers} to {self.max_workers} for Jellyfin database safety")
+        elif self.server_type == "navidrome":
+            # Navidrome uses standard worker count like Plex
+            self.max_workers = base_max_workers
         else:
             # Plex uses standard worker count
             self.max_workers = base_max_workers
@@ -128,32 +134,42 @@ class DatabaseUpdateWorker(QThread):
         """Stop the database update process"""
         self.should_stop = True
         
-        # Clear Jellyfin cache when user stops scan to free memory
-        if self.server_type == "jellyfin" and hasattr(self, 'media_client'):
+        # Clear media client cache when user stops scan to free memory
+        if self.server_type in ["jellyfin", "navidrome"] and hasattr(self, 'media_client'):
             try:
-                cache_stats = self.media_client.get_cache_stats()
+                if hasattr(self.media_client, 'get_cache_stats'):
+                    cache_stats = self.media_client.get_cache_stats()
+                    freed_items = cache_stats.get('bulk_albums_cached', 0) + cache_stats.get('bulk_tracks_cached', 0)
+                else:
+                    freed_items = "unknown"
                 self.media_client.clear_cache()
-                logger.info(f"🧹 Cleared Jellyfin cache after user stop - freed ~{cache_stats.get('bulk_albums_cached', 0) + cache_stats.get('bulk_tracks_cached', 0)} items from memory")
+                logger.info(f"🧹 Cleared {self.server_type} cache after user stop - freed ~{freed_items} items from memory")
             except Exception as e:
-                logger.warning(f"Could not clear Jellyfin cache on stop: {e}")
+                logger.warning(f"Could not clear {self.server_type} cache on stop: {e}")
     
     def run(self):
         """Main worker thread execution"""
         try:
             # Initialize database
             self.database = get_database(self.database_path)
-            
+
             if self.full_refresh:
                 logger.info(f"Performing full database refresh for {self.server_type} - clearing existing {self.server_type} data")
                 self.database.clear_server_data(self.server_type)
-                
+
                 # Show cache preparation phase for Jellyfin and set up progress callback
                 if self.server_type == "jellyfin":
                     self._emit_signal('phase_changed', "Preparing Jellyfin cache for fast processing...")
                     # Connect Jellyfin client progress to UI
                     if hasattr(self.media_client, 'set_progress_callback'):
                         self.media_client.set_progress_callback(lambda msg: self._emit_signal('phase_changed', msg))
-                
+                elif self.server_type == "navidrome":
+                    self._emit_signal('phase_changed', "Connecting to Navidrome server...")
+                    # Connect Navidrome client progress to UI
+                    if hasattr(self.media_client, 'set_progress_callback'):
+                        self.media_client.set_progress_callback(lambda msg: self._emit_signal('phase_changed', msg))
+                        logger.info("✅ Connected Navidrome progress callback")
+
                 # For full refresh, get all artists
                 artists_to_process = self._get_all_artists()
                 if not artists_to_process:
@@ -173,12 +189,13 @@ class DatabaseUpdateWorker(QThread):
             
             # Phase 2: Process artists and their albums/tracks
             self._emit_signal('phase_changed', "Processing artists, albums, and tracks...")
-            
+
             # FAST PATH: For Jellyfin track-based incremental, process new tracks directly
             if self.server_type == "jellyfin" and hasattr(self, '_jellyfin_new_tracks'):
                 self._process_jellyfin_new_tracks_directly(artists_to_process)
             else:
                 # Standard artist processing for Plex or full refresh
+                logger.info(f"🎯 About to process {len(artists_to_process) if artists_to_process else 0} artists for {self.server_type}")
                 self._process_all_artists(artists_to_process)
             
             # Record full refresh completion for tracking purposes
@@ -189,14 +206,18 @@ class DatabaseUpdateWorker(QThread):
                 except Exception as e:
                     logger.warning(f"Could not record full refresh completion: {e}")
             
-            # Clear Jellyfin cache after full refresh to free memory
-            if self.full_refresh and self.server_type == "jellyfin":
+            # Clear cache after full refresh to free memory
+            if self.full_refresh and self.server_type in ["jellyfin", "navidrome"]:
                 try:
-                    cache_stats = self.media_client.get_cache_stats()
+                    if hasattr(self.media_client, 'get_cache_stats'):
+                        cache_stats = self.media_client.get_cache_stats()
+                        freed_items = cache_stats.get('bulk_albums_cached', 0) + cache_stats.get('bulk_tracks_cached', 0)
+                    else:
+                        freed_items = "cache data"
                     self.media_client.clear_cache()
-                    logger.info(f"🧹 Cleared Jellyfin cache after full refresh - freed ~{cache_stats.get('bulk_albums_cached', 0) + cache_stats.get('bulk_tracks_cached', 0)} items from memory")
+                    logger.info(f"🧹 Cleared {self.server_type} cache after full refresh - freed ~{freed_items} items from memory")
                 except Exception as e:
-                    logger.warning(f"Could not clear Jellyfin cache: {e}")
+                    logger.warning(f"Could not clear {self.server_type} cache: {e}")
             
             # Cleanup orphaned records after incremental updates (catches fixed matches)
             if not self.full_refresh and self.database:
@@ -236,10 +257,12 @@ class DatabaseUpdateWorker(QThread):
             if not self.media_client.ensure_connection():
                 logger.error(f"Could not connect to {self.server_type} server")
                 return []
-            
+
+            logger.info(f"🎯 _get_all_artists: Calling media_client.get_all_artists() for {self.server_type}")
             artists = self.media_client.get_all_artists()
+            logger.info(f"🎯 _get_all_artists: Received {len(artists) if artists else 0} artists from {self.server_type}")
             return artists
-            
+
         except Exception as e:
             logger.error(f"Error getting artists from {self.server_type}: {e}")
             return []
@@ -288,11 +311,17 @@ class DatabaseUpdateWorker(QThread):
             if self.server_type == "jellyfin":
                 if hasattr(self.media_client, 'set_progress_callback'):
                     self.media_client.set_progress_callback(lambda msg: self._emit_signal('phase_changed', f"Incremental: {msg}"))
+            elif self.server_type == "navidrome":
+                # Navidrome doesn't need cache preparation for incremental updates
+                logger.info("Navidrome incremental update: no caching needed")
             
             # PERFORMANCE BREAKTHROUGH: For Jellyfin, use track-based incremental (much faster)
             if self.server_type == "jellyfin":
                 return self._get_artists_for_jellyfin_track_incremental_update()
-            
+            elif self.server_type == "navidrome":
+                # Navidrome: simple approach - get all artists and check what's new in database
+                return self._get_artists_for_navidrome_incremental_update()
+
             # Plex uses album-based approach (established and working)
             recent_albums = self._get_recent_albums_for_server()
             if not recent_albums:
@@ -449,6 +478,107 @@ class DatabaseUpdateWorker(QThread):
         except Exception as e:
             logger.error(f"Error in smart incremental update: {e}")
             # Fallback to empty list - user can try full refresh
+            return []
+
+    def _get_artists_for_navidrome_incremental_update(self) -> List:
+        """Get artists for Navidrome incremental update using smart early-stopping logic like Plex/Jellyfin"""
+        try:
+            logger.info("🎵 Navidrome incremental: Getting recent albums and checking for new content...")
+
+            # Get recent albums from Navidrome (use the generic method that calls Navidrome-specific logic)
+            recent_albums = self._get_recent_albums_for_server()
+            if not recent_albums:
+                logger.info("No recent albums found - nothing to process")
+                return []
+
+            logger.info(f"Found {len(recent_albums)} recent albums to check")
+
+            # Sort albums by added date (newest first) - handle None dates properly
+            try:
+                def get_sort_date(album):
+                    date_val = getattr(album, 'addedAt', None)
+                    if date_val is None:
+                        return 0  # Fallback for albums with no date
+                    return date_val
+
+                recent_albums.sort(key=get_sort_date, reverse=True)
+                logger.info("Sorted albums by recently added date (newest first)")
+            except Exception as e:
+                logger.warning(f"Could not sort albums by date: {e}")
+
+            # Extract artists from recent albums with early stopping logic (same as Plex/Jellyfin)
+            artists_to_process = []
+            processed_artist_ids = set()
+            consecutive_complete_albums = 0
+            total_tracks_checked = 0
+
+            logger.info("Checking artists from recent albums (with early stopping)...")
+
+            for i, album in enumerate(recent_albums):
+                if self.should_stop:
+                    break
+
+                try:
+                    # Ensure this is actually an album object
+                    if not hasattr(album, 'tracks'):
+                        logger.warning(f"Skipping invalid album object at index {i}: {type(album).__name__}")
+                        continue
+
+                    album_title = getattr(album, 'title', f'Album_{i}')
+                    album_has_new_tracks = False
+
+                    # Check if album's tracks are already in database
+                    try:
+                        album_tracks = album.tracks()
+                        total_tracks_checked += len(album_tracks)
+
+                        for track in album_tracks:
+                            if not self.database.track_exists(track.ratingKey, self.server_type):
+                                album_has_new_tracks = True
+                                consecutive_complete_albums = 0  # Reset counter
+                                break
+
+                        # If no new tracks found, increment consecutive complete counter
+                        if not album_has_new_tracks:
+                            consecutive_complete_albums += 1
+                            logger.debug(f"✅ Album '{album_title}' is up-to-date (consecutive: {consecutive_complete_albums})")
+
+                            # Early stopping after 25 consecutive complete albums (same as Plex/Jellyfin)
+                            if consecutive_complete_albums >= 25:
+                                logger.info(f"🛑 Found 25 consecutive complete albums - stopping incremental scan after checking {total_tracks_checked} tracks from {i+1} albums")
+                                break
+
+                    except Exception as tracks_error:
+                        logger.warning(f"Error getting tracks for album '{album_title}': {tracks_error}")
+                        # Assume album needs processing if we can't check tracks
+                        album_has_new_tracks = True
+                        consecutive_complete_albums = 0
+
+                    # If album has new tracks, queue its artist for processing
+                    if album_has_new_tracks:
+                        try:
+                            album_artist = album.artist()
+                            if album_artist:
+                                artist_id = str(album_artist.ratingKey)
+
+                                # Skip if we've already queued this artist
+                                if artist_id not in processed_artist_ids:
+                                    processed_artist_ids.add(artist_id)
+                                    artists_to_process.append(album_artist)
+                                    logger.info(f"✅ Added artist '{album_artist.title}' for processing (from album '{album_title}' with new tracks)")
+                        except Exception as artist_error:
+                            logger.warning(f"Error getting artist for album '{album_title}': {artist_error}")
+
+                except Exception as e:
+                    logger.warning(f"Error processing album at index {i}: {e}")
+                    consecutive_complete_albums = 0  # Reset on error
+                    continue
+
+            logger.info(f"🎵 Navidrome incremental complete: {len(artists_to_process)} artists need processing (checked {total_tracks_checked} tracks from {len(recent_albums)} recent albums)")
+            return artists_to_process
+
+        except Exception as e:
+            logger.error(f"Error in Navidrome incremental update: {e}")
             return []
     
     def _get_artists_for_jellyfin_track_incremental_update(self) -> List:
@@ -694,6 +824,8 @@ class DatabaseUpdateWorker(QThread):
                 return self._get_recent_albums_plex()
             elif self.server_type == "jellyfin":
                 return self._get_recent_albums_jellyfin()
+            elif self.server_type == "navidrome":
+                return self._get_recent_albums_navidrome()
             else:
                 logger.error(f"Unknown server type: {self.server_type}")
                 return []
@@ -782,10 +914,62 @@ class DatabaseUpdateWorker(QThread):
         except Exception as e:
             logger.error(f"Error getting recent Jellyfin albums: {e}")
             return []
-    
+
+    def _get_recent_albums_navidrome(self) -> List:
+        """Get recently added albums from Navidrome using all albums sorted by date"""
+        try:
+            logger.info("Getting recent albums from Navidrome...")
+
+            # Navidrome doesn't have a direct "recent albums" API like Plex/Jellyfin
+            # So we need to get all albums and sort them by date
+            all_artists = self.media_client.get_all_artists()
+            if not all_artists:
+                return []
+
+            all_albums = []
+            # Get albums from a subset of artists to avoid too much data
+            # Take first 200 artists to get a reasonable sample of recent albums
+            sample_artists = all_artists[:200]
+
+            for artist in sample_artists:
+                try:
+                    artist_albums = self.media_client.get_albums_for_artist(artist.ratingKey)
+                    all_albums.extend(artist_albums)
+                except Exception as e:
+                    logger.warning(f"Error getting albums for artist {getattr(artist, 'title', 'Unknown')}: {e}")
+                    continue
+
+            if not all_albums:
+                return []
+
+            # Sort by addedAt date (newest first) and take recent ones
+            try:
+                def get_sort_date(album):
+                    date_val = getattr(album, 'addedAt', None)
+                    if date_val is None:
+                        return 0
+                    return date_val
+
+                all_albums.sort(key=get_sort_date, reverse=True)
+                # Take the most recent 400 albums for incremental checking
+                recent_albums = all_albums[:400]
+
+                logger.info(f"Found {len(recent_albums)} recent albums from Navidrome (from {len(all_albums)} total)")
+                return recent_albums
+
+            except Exception as e:
+                logger.warning(f"Error sorting Navidrome albums by date: {e}")
+                # If sorting fails, just return the first 400 albums
+                return all_albums[:400]
+
+        except Exception as e:
+            logger.error(f"Error getting recent Navidrome albums: {e}")
+            return []
+
     def _process_all_artists(self, artists: List):
         """Process all artists and their albums/tracks using thread pool"""
         total_artists = len(artists)
+        logger.info(f"🎯 Processing {total_artists} artists with progress tracking")
         
         def process_single_artist(artist):
             """Process a single artist and return results"""
@@ -806,6 +990,7 @@ class DatabaseUpdateWorker(QThread):
                     total_artists,
                     progress_percent
                 )
+                logger.debug(f"🔄 Progress: {self.processed_artists}/{total_artists} ({progress_percent:.1f}%) - {artist_name}")
                 
                 # Process the artist
                 success, details, album_count, track_count = self._process_artist_with_content(artist)
@@ -826,25 +1011,41 @@ class DatabaseUpdateWorker(QThread):
                 logger.error(f"Error processing artist {getattr(artist, 'title', 'Unknown')}: {e}")
                 return (getattr(artist, 'title', 'Unknown'), False, f"Error: {str(e)}", 0, 0)
         
-        # Process artists in parallel using ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            # Submit all tasks
-            future_to_artist = {executor.submit(process_single_artist, artist): artist 
-                              for artist in artists}
-            
-            # Process completed tasks as they finish
-            for future in as_completed(future_to_artist):
+        # Process artists - use sequential processing in web server mode to avoid threading issues
+        if not QT_AVAILABLE or self.force_sequential:
+            # Sequential processing for web server mode
+            for i, artist in enumerate(artists):
                 if self.should_stop:
                     break
-                
-                result = future.result()
+
+                result = process_single_artist(artist)
                 if result is None:  # Task was cancelled
                     continue
-                
+
                 artist_name, success, details, album_count, track_count = result
-                
+
                 # Emit progress signal
                 self._emit_signal('artist_processed', artist_name, success, details, album_count, track_count)
+        else:
+            # Process artists in parallel using ThreadPoolExecutor (Qt mode only)
+            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                # Submit all tasks
+                future_to_artist = {executor.submit(process_single_artist, artist): artist
+                                  for artist in artists}
+
+                # Process completed tasks as they finish
+                for future in as_completed(future_to_artist):
+                    if self.should_stop:
+                        break
+
+                    result = future.result()
+                    if result is None:  # Task was cancelled
+                        continue
+
+                    artist_name, success, details, album_count, track_count = result
+
+                    # Emit progress signal
+                    self._emit_signal('artist_processed', artist_name, success, details, album_count, track_count)
     
     def _process_artist_with_content(self, media_artist) -> tuple[bool, str, int, int]:
         """Process an artist and all their albums and tracks with optimized API usage"""

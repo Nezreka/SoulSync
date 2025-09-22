@@ -66,7 +66,10 @@ class ConfigManager:
     
     def get_jellyfin_config(self) -> Dict[str, str]:
         return self.get('jellyfin', {})
-    
+
+    def get_navidrome_config(self) -> Dict[str, str]:
+        return self.get('navidrome', {})
+
     def get_soulseek_config(self) -> Dict[str, str]:
         return self.get('soulseek', {})
     
@@ -83,8 +86,8 @@ class ConfigManager:
         return self.get('active_media_server', 'plex')
     
     def set_active_media_server(self, server: str):
-        """Set the active media server (plex or jellyfin)"""
-        if server not in ['plex', 'jellyfin']:
+        """Set the active media server (plex, jellyfin, or navidrome)"""
+        if server not in ['plex', 'jellyfin', 'navidrome']:
             raise ValueError(f"Invalid media server: {server}")
         self.set('active_media_server', server)
     
@@ -95,6 +98,8 @@ class ConfigManager:
             return self.get_plex_config()
         elif active_server == 'jellyfin':
             return self.get_jellyfin_config()
+        elif active_server == 'navidrome':
+            return self.get_navidrome_config()
         else:
             return {}
     
@@ -111,6 +116,9 @@ class ConfigManager:
         elif active_server == 'jellyfin':
             jellyfin = self.get_jellyfin_config()
             media_server_configured = bool(jellyfin.get('base_url')) and bool(jellyfin.get('api_key'))
+        elif active_server == 'navidrome':
+            navidrome = self.get_navidrome_config()
+            media_server_configured = bool(navidrome.get('base_url')) and bool(navidrome.get('username')) and bool(navidrome.get('password'))
         
         return (
             bool(spotify.get('client_id')) and
@@ -127,9 +135,10 @@ class ConfigManager:
             'soulseek': bool(self.get('soulseek.slskd_url'))
         }
         
-        # Validate both server types but mark active one
+        # Validate all server types but mark active one
         validation['plex'] = bool(self.get('plex.base_url')) and bool(self.get('plex.token'))
         validation['jellyfin'] = bool(self.get('jellyfin.base_url')) and bool(self.get('jellyfin.api_key'))
+        validation['navidrome'] = bool(self.get('navidrome.base_url')) and bool(self.get('navidrome.username')) and bool(self.get('navidrome.password'))
         validation['active_media_server'] = active_server
         
         return validation
