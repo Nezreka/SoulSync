@@ -373,6 +373,7 @@ async function loadPageData(pageId) {
         stopDbStatsPolling();
         stopDbUpdatePolling();
         stopWishlistCountPolling();
+        stopLogPolling();
         switch (pageId) {
             case 'dashboard':
                 await loadDashboardData();
@@ -3560,7 +3561,20 @@ async function startMissingTracksProcess(playlistId) {
         process.status = 'running';
         updatePlaylistCardUI(playlistId);
         updateRefreshButtonState();
-        
+
+        // Set album to downloading status if this is an artist album
+        if (playlistId.startsWith('artist_album_')) {
+            // Format: artist_album_{artist.id}_{album.id}
+            const parts = playlistId.split('_');
+            if (parts.length >= 4) {
+                const albumId = parts.slice(3).join('_'); // In case album ID has underscores
+                const totalTracks = process.tracks ? process.tracks.length : 0;
+                setAlbumDownloadingStatus(albumId, 0, totalTracks);
+                console.log(`🔄 Set album ${albumId} to downloading status (0/${totalTracks} tracks)`);
+                console.log(`🔍 Virtual playlist ID: ${playlistId} → Album ID: ${albumId}`);
+            }
+        }
+
         // Update YouTube playlist phase to 'downloading' if this is a YouTube playlist
         if (playlistId.startsWith('youtube_')) {
             const urlHash = playlistId.replace('youtube_', '');
@@ -4021,6 +4035,15 @@ function processModalStatusUpdate(playlistId, data) {
             document.getElementById(`cancel-all-btn-${playlistId}`).style.display = 'none';
             process.status = 'complete';
             updatePlaylistCardUI(playlistId);
+
+            // Set album to downloaded status if this is an artist album
+            if (playlistId.startsWith('artist_album_')) {
+                const parts = playlistId.split('_');
+                if (parts.length >= 4) {
+                    const albumId = parts.slice(3).join('_');
+                    setTimeout(() => setAlbumDownloadedStatus(albumId), 500); // Small delay to ensure UI updates
+                }
+            }
 
             // Show completion message
             const completionMessage = `Download complete! ${completedCount} downloaded, ${failedOrCancelledCount} failed.`;
@@ -8509,6 +8532,9 @@ function initializeSyncPage() {
             }
         });
     }
+
+    // Initialize live log viewer
+    initializeLiveLogViewer();
 }
 
 
@@ -10562,8 +10588,8 @@ function updateAlbumCompletionOverlay(completionData, containerType) {
     }
     
     // Remove existing status classes
-    overlay.classList.remove('checking', 'completed', 'nearly_complete', 'partial', 'missing', 'error');
-    
+    overlay.classList.remove('checking', 'completed', 'nearly_complete', 'partial', 'missing', 'downloading', 'downloaded', 'error');
+
     // Add new status class
     overlay.classList.add(completionData.status);
     
@@ -10600,10 +10626,79 @@ function getCompletionStatusText(completionData) {
             return 'Partial';
         case 'missing':
             return 'Missing';
+        case 'downloading':
+            return 'Downloading...';
+        case 'downloaded':
+            return 'Downloaded';
         case 'error':
             return 'Error';
         default:
             return 'Unknown';
+    }
+}
+
+/**
+ * Set album to downloaded status after download finishes
+ */
+function setAlbumDownloadedStatus(albumId) {
+    console.log(`✅ [DOWNLOAD COMPLETE] Setting album ${albumId} to downloaded status`);
+
+    const completionData = {
+        id: albumId,
+        status: 'downloaded',
+        owned_tracks: 0,
+        expected_tracks: 0,
+        name: 'Downloaded',
+        completion_percentage: 100
+    };
+
+    // Find if it's in albums or singles container
+    let containerType = 'albums';
+    let albumCard = document.querySelector(`#album-cards-container [data-album-id="${albumId}"]`);
+    if (!albumCard) {
+        containerType = 'singles';
+        albumCard = document.querySelector(`#singles-cards-container [data-album-id="${albumId}"]`);
+    }
+
+    if (albumCard) {
+        updateAlbumCompletionOverlay(completionData, containerType);
+        console.log(`✅ [DOWNLOAD COMPLETE] Album ${albumId} set to Downloaded status`);
+    } else {
+        console.warn(`❌ [DOWNLOAD COMPLETE] Album card not found for ID: "${albumId}"`);
+    }
+}
+
+/**
+ * Set album to downloading status
+ */
+function setAlbumDownloadingStatus(albumId, downloaded = 0, total = 0) {
+    console.log(`🔍 [DOWNLOAD STATUS] Searching for album card with ID: "${albumId}"`);
+
+    const completionData = {
+        id: albumId,
+        status: 'downloading',
+        owned_tracks: downloaded,
+        expected_tracks: total,
+        name: 'Downloading',
+        completion_percentage: Math.round((downloaded / total) * 100) || 0
+    };
+
+    // Find if it's in albums or singles container
+    let containerType = 'albums';
+    let albumCard = document.querySelector(`#album-cards-container [data-album-id="${albumId}"]`);
+    if (!albumCard) {
+        containerType = 'singles';
+        albumCard = document.querySelector(`#singles-cards-container [data-album-id="${albumId}"]`);
+    }
+
+    if (albumCard) {
+        console.log(`✅ [DOWNLOAD STATUS] Found album card in ${containerType} container, updating overlay`);
+        updateAlbumCompletionOverlay(completionData, containerType);
+    } else {
+        console.warn(`❌ [DOWNLOAD STATUS] Album card not found for ID: "${albumId}"`);
+        // Debug: List all available album cards
+        const allAlbums = document.querySelectorAll('#album-cards-container [data-album-id], #singles-cards-container [data-album-id]');
+        console.log(`🔍 [DEBUG] Available album IDs:`, Array.from(allAlbums).map(card => card.dataset.albumId));
     }
 }
 
@@ -13018,6 +13113,99 @@ async function checkAndRestoreMetadataUpdateState() {
     } catch (error) {
         console.warn('Could not check metadata update state on page load:', error);
     }
+}
+
+// --- Live Log Viewer Functions ---
+
+// Global state for log polling
+let logPolling = false;
+let logInterval = null;
+let lastLogCount = 0;
+
+/**
+ * Initialize the live log viewer for sync page
+ */
+function initializeLiveLogViewer() {
+    const logArea = document.getElementById('sync-log-area');
+    if (!logArea) return;
+
+    // Set initial content
+    logArea.value = 'Loading activity feed...';
+
+    // Start log polling
+    startLogPolling();
+
+    // Initial load
+    loadLogs();
+}
+
+/**
+ * Start polling for logs
+ */
+function startLogPolling() {
+    if (logPolling) return; // Already polling
+
+    logPolling = true;
+    logInterval = setInterval(loadLogs, 3000); // Poll every 3 seconds
+    console.log('📝 Started activity feed polling for sync page');
+}
+
+/**
+ * Stop polling for logs
+ */
+function stopLogPolling() {
+    logPolling = false;
+    if (logInterval) {
+        clearInterval(logInterval);
+        logInterval = null;
+        console.log('📝 Stopped log polling');
+    }
+}
+
+/**
+ * Load and display activity feed as logs
+ */
+async function loadLogs() {
+    try {
+        const response = await fetch('/api/logs');
+        const data = await response.json();
+
+        if (data.logs && Array.isArray(data.logs)) {
+            const logArea = document.getElementById('sync-log-area');
+            if (!logArea) return;
+
+            // Join logs with newlines and update textarea
+            const logText = data.logs.join('\n');
+
+            // Store current scroll state
+            const wasAtTop = logArea.scrollTop <= 10;
+            const wasUserScrolled = logArea.scrollTop < logArea.scrollHeight - logArea.clientHeight - 10;
+
+            // Update content only if it has changed
+            if (logArea.value !== logText) {
+                logArea.value = logText;
+
+                // Smart scrolling: stay at top for new entries, preserve user position if scrolled
+                if (wasAtTop || !wasUserScrolled) {
+                    logArea.scrollTop = 0; // Stay at top since newest entries are now at top
+                }
+                // If user had scrolled, keep their position (browser handles this automatically)
+            }
+        }
+    } catch (error) {
+        console.warn('Could not load activity logs for sync page:', error);
+        const logArea = document.getElementById('sync-log-area');
+        if (logArea && (logArea.value === 'Loading logs...' || logArea.value === '')) {
+            logArea.value = 'Error loading activity feed. Check console for details.';
+        }
+    }
+}
+
+/**
+ * Stop log polling when leaving sync page
+ */
+function cleanupSyncPageLogs() {
+    stopLogPolling();
 }
 
 // --- Global Cleanup on Page Unload ---
