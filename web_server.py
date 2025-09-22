@@ -2961,6 +2961,8 @@ def stream_audio():
             '.aac': 'audio/aac',
             '.m4a': 'audio/mp4',
             '.wav': 'audio/wav',
+            '.opus': 'audio/ogg',
+            '.webm': 'audio/webm',
             '.wma': 'audio/x-ms-wma'
         }
         
