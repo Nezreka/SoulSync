@@ -32,6 +32,7 @@ from core.soulseek_client import SoulseekClient
 from core.tidal_client import TidalClient # Added import for Tidal
 from core.matching_engine import MusicMatchingEngine
 from core.database_update_worker import DatabaseUpdateWorker, DatabaseStatsWorker
+from core.web_scan_manager import WebScanManager
 from database.music_database import get_database
 from services.sync_service import PlaylistSyncService
 from datetime import datetime
@@ -105,10 +106,18 @@ try:
     tidal_client = TidalClient()
     matching_engine = MusicMatchingEngine()
     sync_service = PlaylistSyncService(spotify_client, plex_client, soulseek_client, jellyfin_client, navidrome_client)
-    print("✅ Core service clients initialized.")
+
+    # Initialize web scan manager for automatic post-download scanning
+    media_clients = {
+        'plex_client': plex_client,
+        'jellyfin_client': jellyfin_client,
+        'navidrome_client': navidrome_client
+    }
+    web_scan_manager = WebScanManager(media_clients, delay_seconds=60)
+    print("✅ Core service clients and scan manager initialized.")
 except Exception as e:
     print(f"🔴 FATAL: Error initializing service clients: {e}")
-    spotify_client = plex_client = jellyfin_client = navidrome_client = soulseek_client = tidal_client = matching_engine = sync_service = None
+    spotify_client = plex_client = jellyfin_client = navidrome_client = soulseek_client = tidal_client = matching_engine = sync_service = web_scan_manager = None
 
 # --- Global Streaming State Management ---
 # Thread-safe state tracking for streaming functionality
@@ -2303,6 +2312,243 @@ def clear_finished_downloads():
             return jsonify({"success": False, "error": "Backend failed to clear downloads."}), 500
     except Exception as e:
         print(f"Error clearing finished downloads: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/scan/request', methods=['POST'])
+def request_media_scan():
+    """
+    Request a media library scan with automatic completion callback support.
+    """
+    try:
+        if not web_scan_manager:
+            return jsonify({"success": False, "error": "Scan manager not initialized"}), 500
+
+        data = request.get_json() or {}
+        reason = data.get('reason', 'Web UI download completed')
+        auto_database_update = data.get('auto_database_update', True)
+
+        def scan_completion_callback():
+            """Callback to trigger automatic database update after scan completes"""
+            if auto_database_update:
+                try:
+                    logger.info("🔄 Starting automatic incremental database update after scan completion")
+                    # Start database update in a separate thread to avoid blocking
+                    threading.Thread(
+                        target=trigger_automatic_database_update,
+                        args=("Post-scan automatic update",),
+                        daemon=True
+                    ).start()
+                except Exception as e:
+                    logger.error(f"Error starting automatic database update: {e}")
+
+        # Request scan with callback
+        result = web_scan_manager.request_scan(
+            reason=reason,
+            callback=scan_completion_callback if auto_database_update else None
+        )
+
+        add_activity_item("📡", "Media Scan", f"Scan requested: {reason}", "Now")
+        return jsonify({
+            "success": True,
+            "scan_info": result,
+            "auto_database_update": auto_database_update
+        })
+
+    except Exception as e:
+        logger.error(f"Error requesting media scan: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/scan/status', methods=['GET'])
+def get_scan_status():
+    """
+    Get current media scan status.
+    """
+    try:
+        if not web_scan_manager:
+            return jsonify({"success": False, "error": "Scan manager not initialized"}), 500
+
+        status = web_scan_manager.get_scan_status()
+        return jsonify({"success": True, "status": status})
+
+    except Exception as e:
+        logger.error(f"Error getting scan status: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/database/incremental-update', methods=['POST'])
+def request_incremental_database_update():
+    """
+    Request an incremental database update with prerequisites checking.
+    """
+    try:
+        data = request.get_json() or {}
+        reason = data.get('reason', 'Web UI manual request')
+
+        # Check prerequisites (similar to GUI logic)
+        db = get_database()
+
+        # Check if database has enough content for incremental updates
+        track_count = db.execute("SELECT COUNT(*) FROM tracks").fetchone()[0]
+        if track_count < 100:
+            return jsonify({
+                "success": False,
+                "error": f"Database has only {track_count} tracks - insufficient for incremental updates (minimum 100)",
+                "track_count": track_count
+            }), 400
+
+        # Check if there's been a previous full refresh
+        last_refresh = db.execute(
+            "SELECT value FROM system_info WHERE key = 'last_full_refresh'"
+        ).fetchone()
+
+        if not last_refresh:
+            return jsonify({
+                "success": False,
+                "error": "No previous full refresh found - incremental updates require established database",
+                "suggestion": "Run a full refresh first"
+            }), 400
+
+        # Start incremental update
+        result = trigger_automatic_database_update(reason)
+
+        add_activity_item("🔄", "Database Update", f"Incremental update started: {reason}", "Now")
+        return jsonify({
+            "success": True,
+            "message": "Incremental database update started",
+            "track_count": track_count,
+            "last_refresh": last_refresh[0] if last_refresh else None,
+            "reason": reason
+        })
+
+    except Exception as e:
+        logger.error(f"Error requesting incremental database update: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+def trigger_automatic_database_update(reason="Automatic update"):
+    """
+    Helper function to trigger automatic incremental database update.
+    """
+    try:
+        from config.settings import config_manager
+        active_server = config_manager.get_active_media_server()
+
+        # Get the appropriate media client
+        media_client = None
+        if active_server == "jellyfin" and jellyfin_client:
+            media_client = jellyfin_client
+        elif active_server == "navidrome" and navidrome_client:
+            media_client = navidrome_client
+        else:
+            media_client = plex_client  # Default fallback
+
+        if not media_client or not media_client.is_connected():
+            logger.error(f"No connected {active_server} client for automatic database update")
+            return False
+
+        # Create and start database update worker
+        worker = DatabaseUpdateWorker(
+            media_client=media_client,
+            server_type=active_server,
+            full_refresh=False  # Always incremental for automatic updates
+        )
+
+        def update_completion_callback():
+            logger.info(f"✅ Automatic incremental database update completed for {active_server}")
+            add_activity_item("✅", "Database Update", f"Automatic update completed ({active_server})", "Now")
+
+        # Start update in background thread
+        update_thread = threading.Thread(
+            target=lambda: worker.run_with_callback(update_completion_callback),
+            daemon=True
+        )
+        update_thread.start()
+
+        logger.info(f"🔄 Started automatic incremental database update for {active_server}")
+        return True
+
+    except Exception as e:
+        logger.error(f"Error in automatic database update: {e}")
+        return False
+
+@app.route('/api/test/automation', methods=['POST'])
+def test_automation_workflow():
+    """
+    Test endpoint to verify the automatic workflow functionality.
+    """
+    try:
+        data = request.get_json() or {}
+        test_type = data.get('test_type', 'full')
+
+        results = {}
+
+        # Test 1: Scan manager status
+        if web_scan_manager:
+            scan_status = web_scan_manager.get_scan_status()
+            results['scan_manager'] = {'status': 'available', 'current_status': scan_status}
+        else:
+            results['scan_manager'] = {'status': 'unavailable'}
+
+        # Test 2: Database prerequisites
+        try:
+            db = get_database()
+            track_count = db.execute("SELECT COUNT(*) FROM tracks").fetchone()[0]
+            last_refresh = db.execute(
+                "SELECT value FROM system_info WHERE key = 'last_full_refresh'"
+            ).fetchone()
+
+            results['database'] = {
+                'track_count': track_count,
+                'meets_minimum': track_count >= 100,
+                'has_previous_refresh': last_refresh is not None,
+                'last_refresh': last_refresh[0] if last_refresh else None
+            }
+        except Exception as e:
+            results['database'] = {'error': str(e)}
+
+        # Test 3: Media client connections
+        active_server = config_manager.get_active_media_server()
+        results['media_clients'] = {'active_server': active_server}
+
+        for client_name, client in [
+            ('plex', plex_client),
+            ('jellyfin', jellyfin_client),
+            ('navidrome', navidrome_client)
+        ]:
+            try:
+                is_connected = client.is_connected() if client else False
+                results['media_clients'][client_name] = {
+                    'available': client is not None,
+                    'connected': is_connected
+                }
+            except Exception as e:
+                results['media_clients'][client_name] = {
+                    'available': client is not None,
+                    'connected': False,
+                    'error': str(e)
+                }
+
+        # Test 4: If requested, actually test the scan request
+        if test_type == 'full' and web_scan_manager:
+            try:
+                scan_result = web_scan_manager.request_scan(
+                    reason="Automation test",
+                    callback=None
+                )
+                results['scan_test'] = {'success': True, 'result': scan_result}
+            except Exception as e:
+                results['scan_test'] = {'success': False, 'error': str(e)}
+
+        return jsonify({
+            "success": True,
+            "test_results": results,
+            "automation_ready": (
+                results.get('scan_manager', {}).get('status') == 'available' and
+                results.get('database', {}).get('meets_minimum', False) and
+                results.get('database', {}).get('has_previous_refresh', False)
+            )
+        })
+
+    except Exception as e:
+        logger.error(f"Error in automation test: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/searches/clear-all', methods=['POST'])

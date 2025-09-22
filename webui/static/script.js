@@ -3361,7 +3361,10 @@ async function closeDownloadMissingModal(playlistId) {
             cleanupArtistDownload(playlistId);
             console.log(`✅ [MODAL CLOSE] Artist download cleanup completed for: ${playlistId}`);
         }
-        
+
+        // Automatic cleanup and server operations after successful downloads
+        await handlePostDownloadAutomation(playlistId, process);
+
         cleanupDownloadProcess(playlistId);
     }
 }
@@ -5974,6 +5977,116 @@ window.clearFinishedDownloads = clearFinishedDownloads;
 window.matchedDownloadTrack = matchedDownloadTrack;
 window.matchedDownloadAlbum = matchedDownloadAlbum;
 window.matchedDownloadAlbumTrack = matchedDownloadAlbumTrack;
+
+/**
+ * Handle automatic post-download operations: cleanup → scan → database update
+ * This replicates the GUI's automatic functionality after download modal completion
+ */
+async function handlePostDownloadAutomation(playlistId, process) {
+    try {
+        // Check if we have successful downloads that warrant automation
+        const successfulDownloads = getSuccessfulDownloadCount(process);
+
+        if (successfulDownloads === 0) {
+            console.log(`🔄 [AUTO] No successful downloads for ${playlistId} - skipping automation`);
+            return;
+        }
+
+        console.log(`🔄 [AUTO] Starting automatic post-download operations for ${playlistId} (${successfulDownloads} successful downloads)`);
+
+        // Step 1: Clear completed downloads from slskd
+        console.log(`🗑️ [AUTO] Step 1: Clearing completed downloads...`);
+        showToast('🗑️ Clearing completed downloads...', 'info', 3000);
+
+        try {
+            const clearResponse = await fetch('/api/downloads/clear-finished', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+
+            if (clearResponse.ok) {
+                console.log(`✅ [AUTO] Step 1 complete: Downloads cleared`);
+            } else {
+                console.warn(`⚠️ [AUTO] Step 1 warning: Clear downloads failed, continuing anyway`);
+            }
+        } catch (error) {
+            console.warn(`⚠️ [AUTO] Step 1 error: ${error.message}, continuing anyway`);
+        }
+
+        // Step 2: Request media server scan
+        console.log(`📡 [AUTO] Step 2: Requesting media server scan...`);
+        showToast('📡 Scanning media server library...', 'info', 5000);
+
+        try {
+            const scanResponse = await fetch('/api/scan/request', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    reason: `Download modal completed for ${playlistId} (${successfulDownloads} tracks)`,
+                    auto_database_update: true  // This will trigger step 3 automatically after scan completes
+                })
+            });
+
+            const scanResult = await scanResponse.json();
+
+            if (scanResponse.ok && scanResult.success) {
+                console.log(`✅ [AUTO] Step 2 complete: Media scan requested`);
+                console.log(`🔄 [AUTO] Scan info:`, scanResult.scan_info);
+
+                // Show success toast with scan details
+                if (scanResult.scan_info.status === 'scheduled') {
+                    showToast(`📡 Media scan scheduled (${scanResult.scan_info.delay_seconds}s delay)`, 'success', 5000);
+                } else {
+                    showToast('📡 Media scan requested successfully', 'success', 3000);
+                }
+
+                // Database update will be triggered automatically by the scan completion callback
+                if (scanResult.auto_database_update) {
+                    console.log(`🔄 [AUTO] Step 3 will run automatically after scan completes`);
+                    showToast('🔄 Database update will follow automatically', 'info', 3000);
+                }
+            } else {
+                console.error(`❌ [AUTO] Step 2 failed: ${scanResult.error || 'Unknown scan error'}`);
+                showToast('❌ Media scan failed', 'error', 5000);
+            }
+        } catch (error) {
+            console.error(`❌ [AUTO] Step 2 error: ${error.message}`);
+            showToast('❌ Media scan request failed', 'error', 5000);
+        }
+
+        console.log(`🏁 [AUTO] Automatic post-download operations initiated for ${playlistId}`);
+
+    } catch (error) {
+        console.error(`❌ [AUTO] Error in post-download automation: ${error.message}`);
+        showToast('❌ Automatic operations failed', 'error', 5000);
+    }
+}
+
+/**
+ * Extract successful download count from a download process
+ */
+function getSuccessfulDownloadCount(process) {
+    try {
+        // For processes that have completed, check the modal for completed count
+        if (process && process.modalElement) {
+            const statElement = process.modalElement.querySelector('[id*="stat-downloaded-"]');
+            if (statElement && statElement.textContent) {
+                const count = parseInt(statElement.textContent, 10);
+                return isNaN(count) ? 0 : count;
+            }
+        }
+
+        // Fallback: assume successful if process completed without obvious failure
+        if (process && process.status === 'complete') {
+            return 1; // Conservative assumption for single download
+        }
+
+        return 0;
+    } catch (error) {
+        console.warn(`⚠️ [AUTO] Error getting successful download count: ${error.message}`);
+        return 0;
+    }
+}
 
 // Download Missing Tracks Modal functions
 window.openDownloadMissingModal = openDownloadMissingModal;

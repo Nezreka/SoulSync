@@ -113,7 +113,7 @@ class PlexClient:
                 return
             
             self._find_music_library()
-            logger.info(f"Successfully connected to Plex server: {self.server.friendlyName}")
+            logger.debug(f"Successfully connected to Plex server: {self.server.friendlyName}")
             
         except Exception as e:
             logger.error(f"Failed to connect to Plex server: {e}")
@@ -143,12 +143,12 @@ class PlexClient:
                 for section in music_sections:
                     if section.title == priority_name:
                         self.music_library = section
-                        logger.info(f"Found preferred music library: {section.title}")
+                        logger.debug(f"Found preferred music library: {section.title}")
                         return
             
             # If no priority match found, use the first one
             self.music_library = music_sections[0]
-            logger.info(f"Found music library (first available): {self.music_library.title}")
+            logger.debug(f"Found music library (first available): {self.music_library.title}")
             
             # Log other available libraries if multiple exist
             if len(music_sections) > 1:
