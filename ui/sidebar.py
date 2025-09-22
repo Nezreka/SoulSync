@@ -1245,7 +1245,7 @@ class ModernSidebar(QWidget):
         layout.setSpacing(0)
         
         # Version button (clickable)
-        self.version_button = QPushButton("v.0.65")
+        self.version_button = QPushButton("v1.0")
         self.version_button.setFont(QFont("SF Pro Text", 10, QFont.Weight.Medium))
         self.version_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.version_button.setStyleSheet("""
