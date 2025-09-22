@@ -100,7 +100,7 @@ try:
     soulseek_client = SoulseekClient()
     tidal_client = TidalClient()
     matching_engine = MusicMatchingEngine()
-    sync_service = PlaylistSyncService(spotify_client, plex_client, soulseek_client, jellyfin_client)
+    sync_service = PlaylistSyncService(spotify_client, plex_client, soulseek_client, jellyfin_client, navidrome_client)
     print("✅ Core service clients initialized.")
 except Exception as e:
     print(f"🔴 FATAL: Error initializing service clients: {e}")

@@ -6,6 +6,7 @@ from utils.logging_config import get_logger
 from core.spotify_client import SpotifyClient, Playlist as SpotifyPlaylist, Track as SpotifyTrack
 from core.plex_client import PlexClient, PlexTrackInfo
 from core.jellyfin_client import JellyfinClient
+from core.navidrome_client import NavidromeClient
 from core.soulseek_client import SoulseekClient
 from core.matching_engine import MusicMatchingEngine, MatchResult
 
@@ -41,10 +42,11 @@ class SyncProgress:
     failed_tracks: int = 0
 
 class PlaylistSyncService:
-    def __init__(self, spotify_client: SpotifyClient, plex_client: PlexClient, soulseek_client: SoulseekClient, jellyfin_client: JellyfinClient = None):
+    def __init__(self, spotify_client: SpotifyClient, plex_client: PlexClient, soulseek_client: SoulseekClient, jellyfin_client: JellyfinClient = None, navidrome_client = None):
         self.spotify_client = spotify_client
         self.plex_client = plex_client
         self.jellyfin_client = jellyfin_client
+        self.navidrome_client = navidrome_client
         self.soulseek_client = soulseek_client
         self.progress_callbacks = {}  # Playlist-specific progress callbacks
         self.syncing_playlists = set()  # Track multiple syncing playlists
@@ -56,12 +58,17 @@ class PlaylistSyncService:
         try:
             from config.settings import config_manager
             active_server = config_manager.get_active_media_server()
-            
+
             if active_server == "jellyfin":
                 if not self.jellyfin_client:
                     logger.error("Jellyfin client not provided to sync service")
                     return None, "jellyfin"
                 return self.jellyfin_client, "jellyfin"
+            elif active_server == "navidrome":
+                if not self.navidrome_client:
+                    logger.error("Navidrome client not provided to sync service")
+                    return None, "navidrome"
+                return self.navidrome_client, "navidrome"
             else:  # Default to Plex
                 return self.plex_client, "plex"
         except Exception as e:
@@ -148,7 +155,8 @@ class PlaylistSyncService:
             total_tracks = len(playlist.tracks)
             media_client, server_type = self._get_active_media_client()
 
-            self._update_progress(playlist.name, "Matching tracks against Plex library", "", 20, 5, 2, total_tracks=total_tracks)
+            media_client, server_type = self._get_active_media_client()
+            self._update_progress(playlist.name, f"Matching tracks against {server_type.title()} library", "", 20, 5, 2, total_tracks=total_tracks)
             
             # Use the same robust matching approach as "Download Missing Tracks"
             match_results = []
@@ -203,7 +211,8 @@ class PlaylistSyncService:
             if self._cancelled:
                 return self._create_error_result(playlist.name, ["Sync cancelled"])
             
-            self._update_progress(playlist.name, "Creating/updating Plex playlist", "", 80, 5, 4,
+            media_client, server_type = self._get_active_media_client()
+            self._update_progress(playlist.name, f"Creating/updating {server_type.title()} playlist", "", 80, 5, 4,
                                 total_tracks=total_tracks,
                                 matched_tracks=len(matched_tracks),
                                 failed_tracks=len(unmatched_tracks))
@@ -313,6 +322,17 @@ class PlaylistSyncService:
                                 actual_track = JellyfinTrackFromDB(db_track)
                                 logger.debug(f"✔️ Created Jellyfin track object for '{db_track.title}' (ID: {actual_track.ratingKey})")
                                 return actual_track, confidence
+                            elif server_type == "navidrome":
+                                # For Navidrome, create a track object from database info (similar to Jellyfin)
+                                class NavidromeTrackFromDB:
+                                    def __init__(self, db_track):
+                                        self.ratingKey = db_track.id
+                                        self.title = db_track.title
+                                        self.id = db_track.id
+
+                                actual_track = NavidromeTrackFromDB(db_track)
+                                logger.debug(f"✔️ Created Navidrome track object for '{db_track.title}' (ID: {actual_track.ratingKey})")
+                                return actual_track, confidence
                             else:
                                 # For Plex, use the original fetchItem approach
                                 # Validate that the track ID is numeric (Plex requirement)
@@ -368,11 +388,21 @@ class PlaylistSyncService:
             logger.error(f"Error fetching Spotify playlist: {e}")
             return None
     
-    async def _get_plex_tracks(self) -> List[PlexTrackInfo]:
+    async def _get_media_tracks(self) -> List:
+        """Get tracks from the active media server"""
         try:
-            return self.plex_client.search_tracks("", limit=10000)
+            media_client, server_type = self._get_active_media_client()
+            if not media_client:
+                logger.error(f"No active media client available")
+                return []
+
+            if hasattr(media_client, 'search_tracks'):
+                return media_client.search_tracks("", limit=10000)
+            else:
+                logger.warning(f"{server_type.title()} client doesn't support track search")
+                return []
         except Exception as e:
-            logger.error(f"Error fetching Plex tracks: {e}")
+            logger.error(f"Error fetching {server_type} tracks: {e}")
             return []
     
     async def _download_missing_tracks(self, unmatched_tracks: List[MatchResult]) -> int:
@@ -415,37 +445,41 @@ class PlaylistSyncService:
             spotify_playlist = self._get_spotify_playlist(playlist_name)
             if not spotify_playlist:
                 return {"error": f"Playlist '{playlist_name}' not found"}
-            
-            plex_tracks = self.plex_client.search_tracks("", limit=1000)
-            
+
+            media_client, server_type = self._get_active_media_client()
+            if not media_client or not hasattr(media_client, 'search_tracks'):
+                return {"error": f"Active media server ({server_type}) doesn't support track search"}
+
+            media_tracks = media_client.search_tracks("", limit=1000)
+
             match_results = self.matching_engine.match_playlist_tracks(
-                spotify_playlist.tracks, 
-                plex_tracks
+                spotify_playlist.tracks,
+                media_tracks
             )
-            
+
             stats = self.matching_engine.get_match_statistics(match_results)
-            
+
             preview = {
                 "playlist_name": playlist_name,
                 "total_tracks": len(spotify_playlist.tracks),
-                "available_in_plex": stats["matched_tracks"],
+                f"available_in_{server_type}": stats["matched_tracks"],
                 "needs_download": stats["total_tracks"] - stats["matched_tracks"],
                 "match_percentage": stats["match_percentage"],
                 "confidence_breakdown": stats["confidence_distribution"],
                 "tracks_preview": []
             }
-            
+
             for result in match_results[:10]:
                 track_info = {
                     "spotify_track": f"{result.spotify_track.name} - {result.spotify_track.artists[0]}",
-                    "plex_match": result.plex_track.title if result.plex_track else None,
+                    f"{server_type}_match": getattr(result, 'plex_track', None).title if getattr(result, 'plex_track', None) else None,
                     "confidence": result.confidence,
                     "status": "available" if result.is_match else "needs_download"
                 }
                 preview["tracks_preview"].append(track_info)
-            
+
             return preview
-            
+
         except Exception as e:
             logger.error(f"Error generating sync preview: {e}")
             return {"error": str(e)}
@@ -453,30 +487,34 @@ class PlaylistSyncService:
     def get_library_comparison(self) -> Dict[str, Any]:
         try:
             spotify_playlists = self.spotify_client.get_user_playlists()
-            plex_playlists = self.plex_client.get_all_playlists()
-            plex_stats = self.plex_client.get_library_stats()
-            
             spotify_track_count = sum(len(p.tracks) for p in spotify_playlists)
-            
+
+            media_client, server_type = self._get_active_media_client()
+            if not media_client:
+                return {"error": f"No active media client available"}
+
+            media_playlists = media_client.get_all_playlists() if hasattr(media_client, 'get_all_playlists') else []
+            media_stats = media_client.get_library_stats() if hasattr(media_client, 'get_library_stats') else {}
+
             comparison = {
                 "spotify": {
                     "playlists": len(spotify_playlists),
                     "total_tracks": spotify_track_count
                 },
-                "plex": {
-                    "playlists": len(plex_playlists),
-                    "artists": plex_stats.get("artists", 0),
-                    "albums": plex_stats.get("albums", 0),
-                    "tracks": plex_stats.get("tracks", 0)
+                server_type: {
+                    "playlists": len(media_playlists),
+                    "artists": media_stats.get("artists", 0),
+                    "albums": media_stats.get("albums", 0),
+                    "tracks": media_stats.get("tracks", 0)
                 },
                 "sync_potential": {
-                    "estimated_matches": min(spotify_track_count, plex_stats.get("tracks", 0)),
-                    "potential_downloads": max(0, spotify_track_count - plex_stats.get("tracks", 0))
+                    "estimated_matches": min(spotify_track_count, media_stats.get("tracks", 0)),
+                    "potential_downloads": max(0, spotify_track_count - media_stats.get("tracks", 0))
                 }
             }
-            
+
             return comparison
-            
+
         except Exception as e:
             logger.error(f"Error generating library comparison: {e}")
             return {"error": str(e)}
