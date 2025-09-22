@@ -1223,39 +1223,65 @@ function getFileExtension(filename) {
 function isAudioFormatSupported(filename) {
     const ext = getFileExtension(filename);
     const supportedFormats = ['mp3', 'ogg', 'wav'];  // Most reliable formats
-    const partialSupport = ['flac', 'aac'];  // Depends on browser
-    const unsupported = ['m4a', 'wma', 'ape', 'aiff'];  // Generally problematic
-    
+    const partialSupport = ['flac', 'aac', 'm4a', 'opus', 'webm'];  // Test browser support
+    const unsupported = ['wma', 'ape', 'aiff'];  // Generally problematic
+
     if (supportedFormats.includes(ext)) {
         return true;
     }
-    
+
     if (partialSupport.includes(ext)) {
         // Test if browser can actually play this format
         return canPlayAudioFormat(ext);
     }
-    
+
     return false;  // Unsupported formats
 }
 
 function canPlayAudioFormat(extension) {
     const audio = document.createElement('audio');
-    
+
     const mimeTypes = {
         'mp3': 'audio/mpeg',
         'ogg': 'audio/ogg; codecs="vorbis"',
         'wav': 'audio/wav',
         'flac': 'audio/flac',
         'aac': 'audio/aac',
-        'm4a': 'audio/mp4',
+        'm4a': 'audio/mp4; codecs="mp4a.40.2"',  // More specific M4A MIME type
+        'opus': 'audio/ogg; codecs="opus"',
+        'webm': 'audio/webm; codecs="opus"',
         'wma': 'audio/x-ms-wma'
     };
-    
+
     const mimeType = mimeTypes[extension];
-    if (!mimeType) return false;
-    
+    if (!mimeType) {
+        console.warn(`🎵 [FORMAT CHECK] No MIME type found for extension: ${extension}`);
+        return false;
+    }
+
     const canPlay = audio.canPlayType(mimeType);
-    return canPlay === 'probably' || canPlay === 'maybe';
+    console.log(`🎵 [FORMAT CHECK] ${extension} (${mimeType}): ${canPlay}`);
+
+    let isSupported = canPlay === 'probably' || canPlay === 'maybe';
+
+    // Special handling for M4A - try fallback MIME types if first one fails
+    if (!isSupported && extension === 'm4a') {
+        const fallbackMimeTypes = ['audio/mp4', 'audio/x-m4a', 'audio/aac'];
+        console.log(`🎵 [FORMAT CHECK] M4A failed with primary MIME type, trying fallbacks...`);
+
+        for (const fallbackMime of fallbackMimeTypes) {
+            const fallbackResult = audio.canPlayType(fallbackMime);
+            console.log(`🎵 [FORMAT CHECK] M4A fallback (${fallbackMime}): ${fallbackResult}`);
+            if (fallbackResult === 'probably' || fallbackResult === 'maybe') {
+                isSupported = true;
+                console.log(`🎵 [FORMAT CHECK] M4A supported with fallback MIME type: ${fallbackMime}`);
+                break;
+            }
+        }
+    }
+
+    console.log(`🎵 [FORMAT CHECK] ${extension} final support result: ${isSupported}`);
+    return isSupported;
 }
 
 // ===============================
@@ -5461,10 +5487,17 @@ async function streamTrack(index) {
         console.log(`🎵 Streaming track:`, result);
         
         // Check for unsupported formats before streaming
-        if (result.filename && !isAudioFormatSupported(result.filename)) {
+        if (result.filename) {
             const format = getFileExtension(result.filename);
-            showToast(`Sorry, ${format.toUpperCase()} format is not supported in web browsers. Try downloading instead.`, 'error');
-            return;
+            console.log(`🎵 [STREAM CHECK] File: ${result.filename}, Extension: ${format}`);
+
+            const isSupported = isAudioFormatSupported(result.filename);
+            console.log(`🎵 [STREAM CHECK] Format ${format} supported: ${isSupported}`);
+
+            if (!isSupported) {
+                showToast(`Sorry, ${format.toUpperCase()} format is not supported in your browser. Try downloading instead.`, 'error');
+                return;
+            }
         }
         
         await startStream(result);
