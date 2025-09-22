@@ -6790,15 +6790,58 @@ body {
 }
 
 .completion-overlay.missing {
-    background: linear-gradient(135deg, 
-        rgba(108, 117, 125, 0.9) 0%, 
+    background: linear-gradient(135deg,
+        rgba(108, 117, 125, 0.9) 0%,
         rgba(73, 80, 87, 0.95) 100%);
     color: rgba(255, 255, 255, 0.9);
     border-color: rgba(108, 117, 125, 0.6);
-    box-shadow: 
+    box-shadow:
         0 4px 12px rgba(0, 0, 0, 0.3),
         0 0 0 1px rgba(108, 117, 125, 0.2),
         inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.completion-overlay.downloading {
+    background: linear-gradient(135deg,
+        rgba(255, 165, 0, 0.9) 0%,
+        rgba(255, 140, 0, 0.95) 100%);
+    color: #ffffff;
+    border-color: rgba(255, 165, 0, 0.6);
+    box-shadow:
+        0 4px 12px rgba(0, 0, 0, 0.3),
+        0 0 0 1px rgba(255, 165, 0, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    animation: downloadingPulse 2s ease-in-out infinite;
+}
+
+@keyframes downloadingPulse {
+    0%, 100% {
+        transform: scale(1);
+        box-shadow:
+            0 4px 12px rgba(0, 0, 0, 0.3),
+            0 0 0 1px rgba(255, 165, 0, 0.2),
+            inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    }
+    50% {
+        transform: scale(1.02);
+        box-shadow:
+            0 6px 16px rgba(0, 0, 0, 0.4),
+            0 0 0 1px rgba(255, 165, 0, 0.4),
+            inset 0 1px 0 rgba(255, 255, 255, 0.3),
+            0 0 12px rgba(255, 165, 0, 0.3);
+    }
+}
+
+.completion-overlay.downloaded {
+    background: linear-gradient(135deg,
+        rgba(40, 167, 69, 0.9) 0%,
+        rgba(34, 139, 58, 0.95) 100%);
+    color: #ffffff;
+    border-color: rgba(40, 167, 69, 0.6);
+    box-shadow:
+        0 4px 12px rgba(0, 0, 0, 0.3),
+        0 0 0 1px rgba(40, 167, 69, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 
 .completion-overlay.error {

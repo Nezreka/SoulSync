@@ -16,10 +16,14 @@ from pathlib import Path
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Flask, render_template, request, jsonify, redirect, send_file, Response
+from utils.logging_config import get_logger
 
 # --- Core Application Imports ---
 # Import the same core clients and config manager used by the GUI app
 from config.settings import config_manager
+
+# Initialize logger
+logger = get_logger("web_server")
 from core.spotify_client import SpotifyClient, Playlist as SpotifyPlaylist, Track as SpotifyTrack
 from core.plex_client import PlexClient
 from core.jellyfin_client import JellyfinClient
@@ -1635,6 +1639,46 @@ def get_recent_toasts():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/logs')
+def get_activity_logs():
+    """Get formatted activity feed for display in sync page log area"""
+    try:
+        with activity_feed_lock:
+            # Get the last 50 activities (more than the dashboard shows)
+            recent_activities = activity_feed[-50:] if len(activity_feed) > 50 else activity_feed[:]
+
+            # Reverse order so newest appears at top
+            recent_activities = recent_activities[::-1]
+
+            # Format activities as readable log entries
+            formatted_logs = []
+
+            if not recent_activities:
+                formatted_logs = [
+                    "No recent activity.",
+                    "Sync and download operations will appear here in real-time."
+                ]
+            else:
+                for activity in recent_activities:
+                    # Format: [TIME] ICON TITLE - SUBTITLE
+                    timestamp = activity.get('time', 'Unknown')
+                    icon = activity.get('icon', '•')
+                    title = activity.get('title', 'Activity')
+                    subtitle = activity.get('subtitle', '')
+
+                    # Create a clean, readable log entry
+                    if subtitle:
+                        log_entry = f"[{timestamp}] {icon} {title} - {subtitle}"
+                    else:
+                        log_entry = f"[{timestamp}] {icon} {title}"
+
+                    formatted_logs.append(log_entry)
+
+            return jsonify({'logs': formatted_logs})
+
+    except Exception as e:
+        return jsonify({'logs': [f'Error reading activity feed: {str(e)}']})
+
 def add_activity_item(icon: str, title: str, subtitle: str, time_ago: str = "Now", show_toast: bool = True):
     """Add activity item to the feed (replicates dashboard.py functionality)"""
     try:
@@ -1928,8 +1972,8 @@ def search_music():
     if not query:
         return jsonify({"error": "No search query provided."}), 400
 
-    print(f"Web UI Search for: '{query}'")
-    
+    logger.info(f"Web UI Search initiated for: '{query}'")
+
     # Add activity for search start
     add_activity_item("🔍", "Search Started", f"'{query}'", "Now")
     
@@ -1989,11 +2033,12 @@ def start_download():
                     if download_id:
                         started_downloads += 1
                 except Exception as e:
-                    print(f"Failed to start track download: {e}")
+                    logger.error(f"Failed to start track download: {e}")
                     continue
             
             # Add activity for album download start
             album_name = data.get('album_name', 'Unknown Album')
+            logger.info(f"📥 Starting album download: '{album_name}' with {started_downloads}/{len(tracks)} tracks")
             add_activity_item("📥", "Album Download Started", f"'{album_name}' - {started_downloads} tracks", "Now")
             
             return jsonify({
@@ -2015,13 +2060,15 @@ def start_download():
             if download_id:
                 # Extract track name from filename for activity
                 track_name = filename.split('/')[-1] if '/' in filename else filename.split('\\')[-1] if '\\' in filename else filename
+                logger.info(f"📥 Starting single track download: '{track_name}'")
                 add_activity_item("📥", "Track Download Started", f"'{track_name}'", "Now")
                 return jsonify({"success": True, "message": "Download started"})
             else:
+                logger.error(f"Failed to start download for: {filename}")
                 return jsonify({"error": "Failed to start download"}), 500
                 
     except Exception as e:
-        print(f"Download error: {e}")
+        logger.error(f"Download error: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -10147,8 +10194,9 @@ def start_playlist_sync():
     
     # Add activity for sync start
     add_activity_item("🔄", "Spotify Sync Started", f"'{playlist_name}' - {len(tracks_json)} tracks", "Now")
-    
-    print(f"⏱️ [TIMING] Request parsed at {time.strftime('%H:%M:%S')} (took {(time.time()-request_start_time)*1000:.1f}ms)")
+
+    logger.info(f"🔄 Starting playlist sync for '{playlist_name}' with {len(tracks_json)} tracks")
+    logger.debug(f"Request parsed at {time.strftime('%H:%M:%S')} (took {(time.time()-request_start_time)*1000:.1f}ms)")
 
     with sync_lock:
         if playlist_id in active_sync_workers and not active_sync_workers[playlist_id].done():
@@ -11689,6 +11737,12 @@ def start_oauth_callback_servers():
     print("✅ OAuth callback servers started")
 
 if __name__ == '__main__':
+    # Initialize logging for web server
+    from utils.logging_config import setup_logging
+    log_level = config_manager.get('logging.level', 'INFO')
+    log_path = config_manager.get('logging.path', 'logs/app.log')
+    logger = setup_logging(log_level, log_path)
+
     print("🚀 Starting SoulSync Web UI Server...")
     print("Open your browser and navigate to http://127.0.0.1:8008")
     
