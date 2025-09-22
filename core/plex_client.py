@@ -80,6 +80,8 @@ class PlexClient:
         self.music_library: Optional[MusicSection] = None
         self._connection_attempted = False
         self._is_connecting = False
+        self._last_connection_check = 0  # Cache connection checks
+        self._connection_check_interval = 30  # Check every 30 seconds max
     
     def ensure_connection(self) -> bool:
         """Ensure connection to Plex server with lazy initialization."""
@@ -159,11 +161,21 @@ class PlexClient:
             logger.error(f"Error finding music library: {e}")
     
     def is_connected(self) -> bool:
-        """Check if connected to Plex server with lazy initialization."""
-        if not self._connection_attempted:
+        """Check if connected to Plex server with cached connection checks."""
+        import time
+
+        current_time = time.time()
+
+        # Only check connection if enough time has passed or never attempted
+        if (not self._connection_attempted or
+            current_time - self._last_connection_check > self._connection_check_interval):
+
+            self._last_connection_check = current_time
+
             # Try to connect on first call, but don't block if already connecting
             if not self._is_connecting:
                 self.ensure_connection()
+
         return self.server is not None and self.music_library is not None
     
     def get_all_playlists(self) -> List[PlexPlaylistInfo]:
