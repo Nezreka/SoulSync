@@ -6967,8 +6967,8 @@ async function loadDashboardData() {
         metadataButton.addEventListener('click', handleMetadataUpdateButtonClick);
     }
     
-    // Check active media server and hide metadata updater if Jellyfin
-    await checkAndHideMetadataUpdaterForJellyfin();
+    // Check active media server and hide metadata updater if not Plex
+    await checkAndHideMetadataUpdaterForNonPlex();
     
     // Check for ongoing metadata update and restore state
     await checkAndRestoreMetadataUpdateState();
@@ -12968,24 +12968,24 @@ function updateMetadataProgressUI(status) {
 }
 
 /**
- * Check active media server and hide metadata updater if Jellyfin
+ * Check active media server and hide metadata updater if not Plex
  */
-async function checkAndHideMetadataUpdaterForJellyfin() {
+async function checkAndHideMetadataUpdaterForNonPlex() {
     try {
         const response = await fetch('/api/active-media-server');
         const data = await response.json();
-        
+
         if (data.success) {
             const metadataCard = document.getElementById('metadata-updater-card');
             if (metadataCard) {
-                if (data.active_server === 'jellyfin') {
-                    // Hide metadata updater for Jellyfin (same as dashboard.py behavior)
-                    metadataCard.style.display = 'none';
-                    console.log('Metadata updater hidden: Jellyfin is active server');
-                } else {
-                    // Show metadata updater for Plex
+                if (data.active_server === 'plex') {
+                    // Show metadata updater only for Plex
                     metadataCard.style.display = 'block';
                     console.log('Metadata updater shown: Plex is active server');
+                } else {
+                    // Hide metadata updater for Jellyfin and Navidrome (same as dashboard.py behavior)
+                    metadataCard.style.display = 'none';
+                    console.log(`Metadata updater hidden: ${data.active_server} is active server`);
                 }
             }
         }

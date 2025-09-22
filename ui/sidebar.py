@@ -1308,7 +1308,12 @@ class ModernSidebar(QWidget):
         # Dynamic media server status - determine which server is active
         from config.settings import config_manager
         active_server = config_manager.get_active_media_server()
-        server_name = "Plex" if active_server == "plex" else "Jellyfin"
+        server_name_map = {
+            'plex': 'Plex',
+            'jellyfin': 'Jellyfin',
+            'navidrome': 'Navidrome'
+        }
+        server_name = server_name_map.get(active_server, 'Jellyfin')
         self.media_server_status = StatusIndicator(server_name)
         
         self.soulseek_status = StatusIndicator("Soulseek")
@@ -1333,6 +1338,7 @@ class ModernSidebar(QWidget):
             "spotify": self.spotify_status,
             "plex": self.media_server_status,
             "jellyfin": self.media_server_status,
+            "navidrome": self.media_server_status,
             "soulseek": self.soulseek_status
         }
         
@@ -1341,7 +1347,12 @@ class ModernSidebar(QWidget):
     
     def update_media_server_name(self, server_type: str):
         """Update the media server status indicator name"""
-        server_name = "Plex" if server_type == "plex" else "Jellyfin"
+        server_name_map = {
+            'plex': 'Plex',
+            'jellyfin': 'Jellyfin',
+            'navidrome': 'Navidrome'
+        }
+        server_name = server_name_map.get(server_type, 'Jellyfin')
         if hasattr(self, 'media_server_status'):
             self.media_server_status.update_name(server_name)
     

@@ -1709,7 +1709,8 @@ class PlaylistDetailsModal(QDialog):
                 self.parent_page.spotify_client,
                 self.parent_page.plex_client,
                 self.parent_page.soulseek_client,
-                getattr(self.parent_page, 'jellyfin_client', None)
+                getattr(self.parent_page, 'jellyfin_client', None),
+                getattr(self.parent_page, 'navidrome_client', None)
             )
         
         # Start sync
@@ -1839,7 +1840,15 @@ class PlaylistDetailsModal(QDialog):
     
     def on_analysis_started(self, total_tracks):
         """Handle analysis started signal"""
-        print(f"Started analyzing {total_tracks} tracks against Plex library")
+        # Get server name for log message
+        try:
+            from config.settings import config_manager
+            active_server = config_manager.get_active_media_server()
+            server_name = active_server.title() if active_server else "Plex"
+        except:
+            server_name = "Plex"
+
+        print(f"Started analyzing {total_tracks} tracks against {server_name} library")
     
     def on_track_analyzed(self, track_index, result):
         """Handle individual track analysis completion"""
@@ -1858,12 +1867,20 @@ class PlaylistDetailsModal(QDialog):
         
         if not missing_tracks:
             QMessageBox.information(self, "Analysis Complete", 
-                                  "All tracks already exist in Plex library!\nNo downloads needed.")
+                                  f"All tracks already exist in {server_name} library!\nNo downloads needed.")
             return
         
         # Show results to user
         message = f"Analysis complete!\n\n"
-        message += f"Tracks already in Plex: {len(existing_tracks)}\n"
+        # Get server name for display
+        try:
+            from config.settings import config_manager
+            active_server = config_manager.get_active_media_server()
+            server_name = active_server.title() if active_server else "Plex"
+        except:
+            server_name = "Plex"
+
+        message += f"Tracks already in {server_name}: {len(existing_tracks)}\n"
         message += f"Tracks to download: {len(missing_tracks)}\n\n"
         message += "Ready to start downloading missing tracks?"
         
@@ -3086,11 +3103,12 @@ class SyncPage(QWidget):
     sync_activity = pyqtSignal(str, str, str, str)  # icon, title, subtitle, time
     database_updated_externally = pyqtSignal()
     
-    def __init__(self, spotify_client=None, plex_client=None, soulseek_client=None, downloads_page=None, jellyfin_client=None, tidal_client=None, parent=None):
+    def __init__(self, spotify_client=None, plex_client=None, soulseek_client=None, downloads_page=None, jellyfin_client=None, navidrome_client=None, tidal_client=None, parent=None):
         super().__init__(parent)
         self.spotify_client = spotify_client
         self.plex_client = plex_client
         self.jellyfin_client = jellyfin_client
+        self.navidrome_client = navidrome_client
         self.soulseek_client = soulseek_client
         self.tidal_client = tidal_client or TidalClient()
         self.downloads_page = downloads_page
@@ -3293,7 +3311,7 @@ class SyncPage(QWidget):
         if playlist.id in self.active_sync_workers:
             # Already syncing
             return False
-        
+
         # Create sync service if not available
         if not hasattr(self, 'sync_service'):
             from services.sync_service import PlaylistSyncService
@@ -3301,7 +3319,8 @@ class SyncPage(QWidget):
                 self.spotify_client,
                 self.plex_client,
                 self.soulseek_client,
-                getattr(self, 'jellyfin_client', None)
+                getattr(self, 'jellyfin_client', None),
+                getattr(self, 'navidrome_client', None)
             )
         
         # Create sync worker
@@ -3355,7 +3374,8 @@ class SyncPage(QWidget):
                 self.spotify_client,
                 self.plex_client,
                 self.soulseek_client,
-                getattr(self, 'jellyfin_client', None)
+                getattr(self, 'jellyfin_client', None),
+                getattr(self, 'navidrome_client', None)
             )
         
         # Create sync worker for sequential sync
@@ -4059,7 +4079,15 @@ class SyncPage(QWidget):
         title_label.setStyleSheet("color: #ffffff;")
         
         # Subtitle
-        subtitle_label = QLabel("Synchronize your Spotify playlists with Plex")
+        # Get active server name for subtitle
+        try:
+            from config.settings import config_manager
+            active_server = config_manager.get_active_media_server()
+            server_name = active_server.title() if active_server else "Plex"
+        except:
+            server_name = "Plex"
+
+        subtitle_label = QLabel(f"Synchronize your Spotify playlists with {server_name}")
         subtitle_label.setFont(QFont("Arial", 14))
         subtitle_label.setStyleSheet("color: #b3b3b3;")
         
@@ -8100,7 +8128,15 @@ class DownloadMissingTracksModal(QDialog):
             # The modal now stays open.
             # The process_finished signal is still emitted to unlock the main UI.
             self.process_finished.emit() 
-            QMessageBox.information(self, "Analysis Complete", "All tracks already exist in Plex! No downloads needed.")
+            # Get server name for message
+            try:
+                from config.settings import config_manager
+                active_server = config_manager.get_active_media_server()
+                server_name = active_server.title() if active_server else "Plex"
+            except:
+                server_name = "Plex"
+
+            QMessageBox.information(self, "Analysis Complete", f"All tracks already exist in {server_name}! No downloads needed.")
             
     def on_analysis_failed(self, error_message):
         print(f"❌ Analysis failed: {error_message}")
