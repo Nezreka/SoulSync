@@ -12060,21 +12060,35 @@ function monitorArtistDownload(artistId, virtualPlaylistId) {
 function openArtistDownloadModal(artistId) {
     const artistBubbleData = artistDownloadBubbles[artistId];
     if (!artistBubbleData || artistDownloadModalOpen) return;
-    
+
     console.log(`🎵 [MODAL OPEN] Opening artist download modal for: ${artistBubbleData.artist.name}`);
     console.log(`📊 [MODAL OPEN] Current download statuses:`, artistBubbleData.downloads.map(d => `${d.album.name}: ${d.status}`));
     artistDownloadModalOpen = true;
-    
+
     const modal = document.createElement('div');
     modal.id = 'artist-download-management-modal';
     modal.className = 'artist-download-management-modal';
     modal.innerHTML = `
         <div class="artist-download-modal-content">
-            <div class="artist-download-modal-header">
-                <h2 class="artist-download-modal-title">Downloads for ${escapeHtml(artistBubbleData.artist.name)}</h2>
-                <span class="artist-download-modal-close" onclick="closeArtistDownloadModal()">&times;</span>
+            <div class="artist-download-modal-hero">
+                <div class="artist-download-modal-hero-bg" ${artistBubbleData.artist.image_url ? `style="background-image: url('${escapeHtml(artistBubbleData.artist.image_url)}')"` : ''}></div>
+                <div class="artist-download-modal-hero-overlay">
+                    <div class="artist-download-modal-hero-content">
+                        <div class="artist-download-modal-hero-avatar">
+                            ${artistBubbleData.artist.image_url
+                                ? `<img src="${escapeHtml(artistBubbleData.artist.image_url)}" alt="${escapeHtml(artistBubbleData.artist.name)}" class="artist-download-modal-hero-image" loading="lazy">`
+                                : '<div class="artist-download-modal-hero-fallback"><i class="fas fa-user-music"></i></div>'
+                            }
+                        </div>
+                        <div class="artist-download-modal-hero-info">
+                            <h2 class="artist-download-modal-hero-title">${escapeHtml(artistBubbleData.artist.name)}</h2>
+                            <p class="artist-download-modal-hero-subtitle">${artistBubbleData.downloads.length} active download${artistBubbleData.downloads.length !== 1 ? 's' : ''}</p>
+                        </div>
+                    </div>
+                    <span class="artist-download-modal-close" onclick="closeArtistDownloadModal()">&times;</span>
+                </div>
             </div>
-            
+
             <div class="artist-download-modal-body">
                 <div class="artist-download-items" id="artist-download-items-${artistId}">
                     ${artistBubbleData.downloads.map((download, index) => createArtistDownloadItem(download, index)).join('')}
@@ -12083,7 +12097,7 @@ function openArtistDownloadModal(artistId) {
         </div>
         <div class="artist-download-modal-overlay" onclick="closeArtistDownloadModal()"></div>
     `;
-    
+
     document.body.appendChild(modal);
     modal.style.display = 'flex';
     
@@ -12098,18 +12112,26 @@ function createArtistDownloadItem(download, index) {
     const { album, albumType, status, virtualPlaylistId } = download;
     const buttonText = status === 'view_results' ? 'View Results' : 'View Progress';
     const buttonClass = status === 'view_results' ? 'completed' : 'active';
-    
+
     // Enhanced debugging for button text generation
     console.log(`🎯 [BUTTON] Creating item for ${album.name}: status='${status}' → buttonText='${buttonText}'`);
-    
+
     return `
         <div class="artist-download-item" data-playlist-id="${virtualPlaylistId}">
+            <div class="download-item-artwork">
+                ${album.image_url
+                    ? `<img src="${escapeHtml(album.image_url)}" alt="${escapeHtml(album.name)}" class="download-item-image" loading="lazy">`
+                    : `<div class="download-item-fallback">
+                         <i class="fas fa-${albumType === 'album' ? 'compact-disc' : albumType === 'single' ? 'music' : 'record-vinyl'}"></i>
+                       </div>`
+                }
+            </div>
             <div class="download-item-info">
                 <div class="download-item-name">${escapeHtml(album.name)}</div>
                 <div class="download-item-type">${albumType === 'album' ? 'Album' : albumType === 'single' ? 'Single' : 'EP'}</div>
             </div>
             <div class="download-item-actions">
-                <button class="download-item-btn ${buttonClass}" 
+                <button class="download-item-btn ${buttonClass}"
                         onclick="openArtistDownloadProcess('${virtualPlaylistId}')">
                     ${buttonText}
                 </button>
