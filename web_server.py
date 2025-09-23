@@ -12430,12 +12430,6 @@ def merge_discography_data(owned_releases, spotify_discography):
             for spotify_release in spotify_category:
                 spotify_key = (normalize_title(spotify_release['title']), normalize_year(spotify_release.get('year')))
 
-                # Debug logging for Bad Hair Day specifically
-                if 'bad hair day' in spotify_release['title'].lower():
-                    print(f"🔍 DEBUG: Spotify 'Bad Hair Day' - Title: '{spotify_release['title']}', Year: {spotify_release.get('year')}")
-                    print(f"🔍 DEBUG: Normalized key: {spotify_key}")
-                    print(f"🔍 DEBUG: Available owned keys: {list(owned_map.keys())}")
-
                 # Check if we own this release (exact match first)
                 owned_release = None
                 matched_key = None
@@ -12460,12 +12454,39 @@ def merge_discography_data(owned_releases, spotify_discography):
                     owned_release['spotify_id'] = spotify_release['spotify_id']
                     owned_release['owned'] = True
 
+                    # Calculate track completion using Spotify track count
+                    spotify_track_count = spotify_release.get('track_count', 0)
+                    owned_track_count = owned_release.get('track_count', 0)
+
+                    if spotify_track_count > 0:
+                        completion_percentage = (owned_track_count / spotify_track_count) * 100
+                        owned_release['track_completion'] = {
+                            'owned_tracks': owned_track_count,
+                            'total_tracks': spotify_track_count,
+                            'percentage': round(completion_percentage, 1),
+                            'missing_tracks': spotify_track_count - owned_track_count
+                        }
+                    else:
+                        # Fallback if no Spotify track count
+                        owned_release['track_completion'] = {
+                            'owned_tracks': owned_track_count,
+                            'total_tracks': owned_track_count,
+                            'percentage': 100.0,
+                            'missing_tracks': 0
+                        }
+
                     # Image priority: owned first, then Spotify fallback
                     if not owned_release.get('image_url') and spotify_release.get('image_url'):
                         owned_release['image_url'] = spotify_release['image_url']
 
                     cards.append(owned_release)
-                    print(f"✅ {category_name}: '{spotify_release['title']}' - OWNED")
+
+                    # Enhanced logging with track completion
+                    completion = owned_release['track_completion']
+                    if completion['missing_tracks'] > 0:
+                        print(f"✅ {category_name}: '{spotify_release['title']}' - OWNED ({completion['owned_tracks']}/{completion['total_tracks']} tracks, missing {completion['missing_tracks']})")
+                    else:
+                        print(f"✅ {category_name}: '{spotify_release['title']}' - OWNED (complete: {completion['owned_tracks']} tracks)")
 
                     # Remove empty lists from map (use the key that actually matched)
                     if matched_key and not owned_map[matched_key]:
