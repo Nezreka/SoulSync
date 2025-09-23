@@ -3181,6 +3181,12 @@ async function openDownloadMissingModal(playlistId) {
             
             <div class="download-missing-modal-footer">
                 <div class="download-phase-controls">
+                    <div class="force-download-toggle-container" style="margin-bottom: 0px;">
+                        <label class="force-download-toggle">
+                            <input type="checkbox" id="force-download-all-${playlistId}">
+                            <span>Force Download All</span>
+                        </label>
+                    </div>
                     <button class="download-control-btn primary" id="begin-analysis-btn-${playlistId}" onclick="startMissingTracksProcess('${playlistId}')">
                         Begin Analysis
                     </button>
@@ -3335,6 +3341,12 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
             
             <div class="download-missing-modal-footer">
                 <div class="download-phase-controls">
+                    <div class="force-download-toggle-container" style="margin-bottom: 0px;">
+                        <label class="force-download-toggle">
+                            <input type="checkbox" id="force-download-all-${virtualPlaylistId}">
+                            <span>Force Download All</span>
+                        </label>
+                    </div>
                     <button class="download-control-btn primary" id="begin-analysis-btn-${virtualPlaylistId}" onclick="startMissingTracksProcess('${virtualPlaylistId}')">
                         Begin Analysis
                     </button>
@@ -3636,6 +3648,12 @@ async function openDownloadMissingWishlistModal() {
             
             <div class="download-missing-modal-footer">
                 <div class="download-phase-controls">
+                    <div class="force-download-toggle-container" style="margin-bottom: 0px;">
+                        <label class="force-download-toggle">
+                            <input type="checkbox" id="force-download-all-${playlistId}">
+                            <span>Force Download All</span>
+                        </label>
+                    </div>
                     <button class="download-control-btn primary" id="begin-analysis-btn-${playlistId}" onclick="startWishlistMissingTracksProcess('${playlistId}')">
                         Begin Analysis
                     </button>
@@ -3671,9 +3689,22 @@ async function startWishlistMissingTracksProcess(playlistId) {
         document.getElementById(`begin-analysis-btn-${playlistId}`).style.display = 'none';
         document.getElementById(`cancel-all-btn-${playlistId}`).style.display = 'inline-block';
 
+        // Check if force download toggle is enabled
+        const forceDownloadCheckbox = document.getElementById(`force-download-all-${playlistId}`);
+        const forceDownloadAll = forceDownloadCheckbox ? forceDownloadCheckbox.checked : false;
+
+        // Hide the force download toggle during processing
+        const forceToggleContainer = forceDownloadCheckbox ? forceDownloadCheckbox.closest('.force-download-toggle-container') : null;
+        if (forceToggleContainer) {
+            forceToggleContainer.style.display = 'none';
+        }
+
         const response = await fetch('/api/wishlist/download_missing', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' }
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                force_download_all: forceDownloadAll
+            })
         });
 
         const data = await response.json();
@@ -3700,6 +3731,12 @@ async function startWishlistMissingTracksProcess(playlistId) {
         // Note: Wishlist processes don't affect sync page refresh button state
         document.getElementById(`begin-analysis-btn-${playlistId}`).style.display = 'inline-block';
         document.getElementById(`cancel-all-btn-${playlistId}`).style.display = 'none';
+
+        // Show the force download toggle again
+        const forceToggleContainer = document.querySelector(`#force-download-all-${playlistId}`)?.closest('.force-download-toggle-container');
+        if (forceToggleContainer) {
+            forceToggleContainer.style.display = 'flex';
+        }
     }
 }
 
@@ -3744,12 +3781,23 @@ async function startMissingTracksProcess(playlistId) {
         document.getElementById(`begin-analysis-btn-${playlistId}`).style.display = 'none';
         document.getElementById(`cancel-all-btn-${playlistId}`).style.display = 'inline-block';
 
+        // Check if force download toggle is enabled
+        const forceDownloadCheckbox = document.getElementById(`force-download-all-${playlistId}`);
+        const forceDownloadAll = forceDownloadCheckbox ? forceDownloadCheckbox.checked : false;
+
+        // Hide the force download toggle during processing
+        const forceToggleContainer = forceDownloadCheckbox ? forceDownloadCheckbox.closest('.force-download-toggle-container') : null;
+        if (forceToggleContainer) {
+            forceToggleContainer.style.display = 'none';
+        }
+
         const response = await fetch(`/api/playlists/${playlistId}/start-missing-process`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
+            body: JSON.stringify({
                 tracks: process.tracks,
-                playlist_name: process.playlist.name 
+                playlist_name: process.playlist.name,
+                force_download_all: forceDownloadAll
             })
         });
 
@@ -4186,6 +4234,12 @@ function processModalStatusUpdate(playlistId, data) {
             document.getElementById(`cancel-all-btn-${playlistId}`).style.display = 'none';
             process.status = 'complete';
             updatePlaylistCardUI(playlistId);
+
+            // Show the force download toggle again
+            const forceToggleContainer = document.querySelector(`#force-download-all-${playlistId}`)?.closest('.force-download-toggle-container');
+            if (forceToggleContainer) {
+                forceToggleContainer.style.display = 'flex';
+            }
 
             // Set album to downloaded status if this is an artist album
             if (playlistId.startsWith('artist_album_')) {
@@ -7207,6 +7261,12 @@ function resetWishlistModalToIdleState() {
         if (cancelBtn) {
             cancelBtn.style.display = 'none';
         }
+
+        // Show the force download toggle again
+        const forceToggleContainer = document.querySelector(`#force-download-all-${playlistId}`)?.closest('.force-download-toggle-container');
+        if (forceToggleContainer) {
+            forceToggleContainer.style.display = 'flex';
+        }
         
         // Reset progress displays
         const analysisText = document.getElementById(`analysis-progress-text-${playlistId}`);
@@ -8731,6 +8791,12 @@ async function openDownloadMissingModalForTidal(virtualPlaylistId, playlistName,
             
             <div class="download-missing-modal-footer">
                 <div class="download-phase-controls">
+                    <div class="force-download-toggle-container" style="margin-bottom: 0px;">
+                        <label class="force-download-toggle">
+                            <input type="checkbox" id="force-download-all-${virtualPlaylistId}">
+                            <span>Force Download All</span>
+                        </label>
+                    </div>
                     <button class="download-control-btn primary" id="begin-analysis-btn-${virtualPlaylistId}" onclick="startMissingTracksProcess('${virtualPlaylistId}')">
                         Begin Analysis
                     </button>
@@ -11676,6 +11742,12 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
             
             <div class="download-missing-modal-footer">
                 <div class="download-phase-controls">
+                    <div class="force-download-toggle-container" style="margin-bottom: 0px;">
+                        <label class="force-download-toggle">
+                            <input type="checkbox" id="force-download-all-${virtualPlaylistId}">
+                            <span>Force Download All</span>
+                        </label>
+                    </div>
                     <button class="download-control-btn primary" id="begin-analysis-btn-${virtualPlaylistId}" onclick="startMissingTracksProcess('${virtualPlaylistId}')">
                         Begin Analysis
                     </button>

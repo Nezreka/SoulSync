@@ -6094,6 +6094,9 @@ def start_wishlist_missing_downloads():
     identical to playlist processing, maintaining exactly 3 concurrent downloads.
     """
     try:
+        data = request.get_json() or {}
+        force_download_all = data.get('force_download_all', False)
+
         from core.wishlist_service import get_wishlist_service
         wishlist_service = get_wishlist_service()
         
@@ -6135,7 +6138,8 @@ def start_wishlist_missing_downloads():
                 'analysis_results': [],
                 # Track state management (replicating sync.py)
                 'permanently_failed_tracks': [],
-                'cancelled_tracks': set()
+                'cancelled_tracks': set(),
+                'force_download_all': force_download_all  # Pass the force flag to the batch
             }
 
         # Submit the wishlist processing job using the same processing function
@@ -6992,25 +6996,39 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
         active_server = config_manager.get_active_media_server()
         analysis_results = []
 
+        # Get force download flag from batch
+        force_download_all = False
+        with tasks_lock:
+            if batch_id in download_batches:
+                force_download_all = download_batches[batch_id].get('force_download_all', False)
+
+        if force_download_all:
+            print(f"🔄 [Force Download] Force download mode enabled for batch {batch_id} - treating all tracks as missing")
+
         for i, track_data in enumerate(tracks_json):
             track_name = track_data.get('name', '')
             artists = track_data.get('artists', [])
             found, confidence = False, 0.0
 
-            for artist in artists:
-                # Handle both string format and Spotify API format {'name': 'Artist Name'}
-                if isinstance(artist, str):
-                    artist_name = artist
-                elif isinstance(artist, dict) and 'name' in artist:
-                    artist_name = artist['name']
-                else:
-                    artist_name = str(artist)
-                db_track, track_confidence = db.check_track_exists(
-                    track_name, artist_name, confidence_threshold=0.7, server_source=active_server
-                )
-                if db_track and track_confidence >= 0.7:
-                    found, confidence = True, track_confidence
-                    break
+            # Skip database check if force download is enabled
+            if force_download_all:
+                print(f"🔄 [Force Download] Skipping database check for '{track_name}' - treating as missing")
+                found, confidence = False, 0.0
+            else:
+                for artist in artists:
+                    # Handle both string format and Spotify API format {'name': 'Artist Name'}
+                    if isinstance(artist, str):
+                        artist_name = artist
+                    elif isinstance(artist, dict) and 'name' in artist:
+                        artist_name = artist['name']
+                    else:
+                        artist_name = str(artist)
+                    db_track, track_confidence = db.check_track_exists(
+                        track_name, artist_name, confidence_threshold=0.7, server_source=active_server
+                    )
+                    if db_track and track_confidence >= 0.7:
+                        found, confidence = True, track_confidence
+                        break
 
             analysis_results.append({
                 'track_index': i, 'track': track_data, 'found': found, 'confidence': confidence
@@ -8818,6 +8836,7 @@ def start_missing_tracks_process(playlist_id):
     data = request.get_json()
     tracks = data.get('tracks', [])
     playlist_name = data.get('playlist_name', 'Unknown Playlist')
+    force_download_all = data.get('force_download_all', False)
 
     if not tracks:
         return jsonify({"success": False, "error": "No tracks provided"}), 400
@@ -8848,7 +8867,8 @@ def start_missing_tracks_process(playlist_id):
             'queue_index': 0,
             'analysis_total': len(tracks),
             'analysis_processed': 0,
-            'analysis_results': []
+            'analysis_results': [],
+            'force_download_all': force_download_all  # Pass the force flag to the batch
         }
 
     # Link YouTube playlist to download process if this is a YouTube playlist
