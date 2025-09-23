@@ -400,12 +400,22 @@ async function loadPageData(pageId) {
                 }
                 break;
             case 'library':
-                // Initialize and load library data
-                if (!libraryPageState.isInitialized) {
-                    initializeLibraryPage();
+                // Check if we should return to artist detail view instead of list
+                if (artistDetailPageState.currentArtistId && artistDetailPageState.currentArtistName) {
+                    console.log(`🔄 Returning to artist detail: ${artistDetailPageState.currentArtistName}`);
+                    navigateToPage('artist-detail');
+                    if (!artistDetailPageState.isInitialized) {
+                        initializeArtistDetailPage();
+                    }
+                    loadArtistDetailData(artistDetailPageState.currentArtistId, artistDetailPageState.currentArtistName);
                 } else {
-                    // Refresh data when returning to page
-                    await loadLibraryArtists();
+                    // Initialize and load library data
+                    if (!libraryPageState.isInitialized) {
+                        initializeLibraryPage();
+                    } else {
+                        // Refresh data when returning to page
+                        await loadLibraryArtists();
+                    }
                 }
                 break;
             case 'artist-detail':
@@ -13936,6 +13946,9 @@ function initializeArtistDetailPage() {
     if (backBtn) {
         backBtn.addEventListener("click", () => {
             console.log("🔙 Returning to Library page");
+            // Clear artist detail state so we go back to the list view
+            artistDetailPageState.currentArtistId = null;
+            artistDetailPageState.currentArtistName = null;
             navigateToPage('library');
         });
     }
@@ -14289,17 +14302,42 @@ function createReleaseCard(release) {
     completionFill.className = "completion-fill";
 
     if (release.owned) {
-        const percentage = release.track_completion || 100;
-        completionFill.style.width = `${percentage}%`;
+        // Handle new detailed track completion object
+        if (release.track_completion && typeof release.track_completion === 'object') {
+            const completion = release.track_completion;
+            const percentage = completion.percentage || 100;
+            const ownedTracks = completion.owned_tracks || 0;
+            const totalTracks = completion.total_tracks || 0;
+            const missingTracks = completion.missing_tracks || 0;
 
-        if (percentage === 100) {
-            completionText.textContent = "Complete";
-            completionText.className = "completion-text complete";
-            completionFill.className += " complete";
+            completionFill.style.width = `${percentage}%`;
+
+            if (missingTracks === 0) {
+                completionText.textContent = `Complete (${ownedTracks})`;
+                completionText.className = "completion-text complete";
+                completionFill.className += " complete";
+            } else {
+                completionText.textContent = `${ownedTracks}/${totalTracks} tracks`;
+                completionText.className = "completion-text partial";
+                completionFill.className += " partial";
+
+                // Add missing tracks indicator
+                completionText.title = `Missing ${missingTracks} track${missingTracks !== 1 ? 's' : ''}`;
+            }
         } else {
-            completionText.textContent = `${percentage}%`;
-            completionText.className = "completion-text partial";
-            completionFill.className += " partial";
+            // Fallback for legacy simple percentage
+            const percentage = release.track_completion || 100;
+            completionFill.style.width = `${percentage}%`;
+
+            if (percentage === 100) {
+                completionText.textContent = "Complete";
+                completionText.className = "completion-text complete";
+                completionFill.className += " complete";
+            } else {
+                completionText.textContent = `${percentage}%`;
+                completionText.className = "completion-text partial";
+                completionFill.className += " partial";
+            }
         }
     } else {
         completionText.textContent = "Missing";
