@@ -2687,6 +2687,96 @@ def get_library_artists():
             }
         }), 500
 
+@app.route('/api/test-artist/<artist_id>')
+def test_artist_endpoint(artist_id):
+    """Simple test endpoint"""
+    return jsonify({
+        "success": True,
+        "message": f"Test endpoint working for artist ID: {artist_id}"
+    })
+
+@app.route('/api/artist-detail/<artist_id>')
+def get_artist_detail(artist_id):
+    """Get artist detail data"""
+    try:
+        print(f"🎵 Getting artist detail for ID: {artist_id}")
+
+        # Get database instance
+        database = get_database()
+
+        # Get artist discography from database
+        db_result = database.get_artist_discography(artist_id)
+
+        if not db_result.get('success'):
+            print(f"❌ Database returned error: {db_result}")
+            return jsonify({
+                "success": False,
+                "error": db_result.get('error', 'Artist not found')
+            }), 404
+
+        artist_info = db_result['artist']
+        owned_releases = db_result['owned_releases']
+
+        print(f"✅ Found artist: {artist_info['name']} with {len(owned_releases['albums'])} albums")
+
+        # Fix artist image URL
+        print(f"🖼️ Artist image before fix: '{artist_info.get('image_url')}'")
+        if artist_info.get('image_url'):
+            artist_info['image_url'] = fix_artist_image_url(artist_info['image_url'])
+            print(f"🖼️ Artist image after fix: '{artist_info['image_url']}'")
+        else:
+            print(f"🖼️ No artist image URL found for {artist_info['name']}")
+
+        # Debug final artist data being sent
+        print(f"🖼️ Final artist data being sent: {artist_info}")
+
+        # Fix image URLs for all albums
+        for album in owned_releases['albums']:
+            if album.get('image_url'):
+                album['image_url'] = fix_artist_image_url(album['image_url'])
+
+        # Fix image URLs for EPs and singles (currently empty but for future use)
+        for ep in owned_releases['eps']:
+            if ep.get('image_url'):
+                ep['image_url'] = fix_artist_image_url(ep['image_url'])
+
+        for single in owned_releases['singles']:
+            if single.get('image_url'):
+                single['image_url'] = fix_artist_image_url(single['image_url'])
+
+        # Get Spotify discography for proper categorization and missing releases
+        try:
+            spotify_discography = get_spotify_artist_discography(artist_info['name'])
+
+            if spotify_discography['success']:
+                print(f"🎵 Spotify discography found - Albums: {len(spotify_discography['albums'])}, EPs: {len(spotify_discography['eps'])}, Singles: {len(spotify_discography['singles'])}")
+
+                # Merge owned and Spotify data for complete picture
+                merged_discography = merge_discography_data(owned_releases, spotify_discography)
+            else:
+                print(f"⚠️ Spotify discography not found: {spotify_discography.get('error', 'Unknown error')}")
+                # Fall back to our database categorization
+                merged_discography = owned_releases
+        except Exception as spotify_error:
+            print(f"⚠️ Error fetching Spotify data: {spotify_error}")
+            # Fall back to our database categorization
+            merged_discography = owned_releases
+
+        return jsonify({
+            "success": True,
+            "artist": artist_info,
+            "discography": merged_discography
+        })
+
+    except Exception as e:
+        print(f"❌ Error in get_artist_detail: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
 @app.route('/api/library/debug-photos')
 def debug_library_photos():
     """Debug endpoint to check artist photo URLs"""
@@ -12209,6 +12299,217 @@ def start_oauth_callback_servers():
     tidal_thread.start()
     
     print("✅ OAuth callback servers started")
+
+# ===============================================
+# Artist Detail Spotify Integration Functions
+# ===============================================
+
+def get_spotify_artist_discography(artist_name):
+    """Get complete artist discography from Spotify"""
+    try:
+        from core.spotify_client import SpotifyClient
+
+        print(f"🎵 Searching Spotify for artist: {artist_name}")
+
+        # Initialize Spotify client
+        spotify_client = SpotifyClient()
+
+        # Search for the artist
+        artists = spotify_client.search_artists(artist_name, limit=1)
+
+        if not artists:
+            return {
+                'success': False,
+                'error': f'Artist "{artist_name}" not found on Spotify'
+            }
+
+        artist = artists[0]
+        spotify_artist_id = artist.id
+
+        print(f"🎵 Found Spotify artist: {artist.name} (ID: {spotify_artist_id})")
+
+        # Get all albums (albums, singles, and compilations)
+        all_albums = spotify_client.get_artist_albums(spotify_artist_id, album_type='album,single,compilation', limit=50)
+
+        if not all_albums:
+            return {
+                'success': False,
+                'error': f'No albums found for artist "{artist_name}"'
+            }
+
+        print(f"📀 Found {len(all_albums)} releases on Spotify")
+
+        # Categorize releases
+        albums = []
+        eps = []
+        singles = []
+
+        for album in all_albums:
+            # Use the Album object properties
+            track_count = album.total_tracks
+
+            release_data = {
+                'title': album.name,
+                'year': album.release_date[:4] if album.release_date else None,
+                'image_url': album.image_url,
+                'spotify_id': album.id,
+                'owned': False,  # Will be updated when merging with owned data
+                'track_count': track_count,
+                'album_type': album.album_type.lower()
+            }
+
+            # Categorize based on album type and track count
+            album_type = album.album_type.lower()
+
+            if album_type == 'single' or track_count <= 3:
+                singles.append(release_data)
+            elif album_type == 'compilation' or (track_count <= 8 and track_count > 3):
+                eps.append(release_data)
+            else:
+                albums.append(release_data)
+
+        print(f"📀 Categorized Spotify releases - Albums: {len(albums)}, EPs: {len(eps)}, Singles: {len(singles)}")
+
+        return {
+            'success': True,
+            'albums': albums,
+            'eps': eps,
+            'singles': singles,
+            'artist_image': artist.image_url if hasattr(artist, 'image_url') else None
+        }
+
+    except Exception as e:
+        print(f"❌ Error getting Spotify discography for {artist_name}: {e}")
+        return {
+            'success': False,
+            'error': str(e)
+        }
+
+def merge_discography_data(owned_releases, spotify_discography):
+    """Build discography using Spotify as source of truth, checking if we own each release"""
+    try:
+        print("🔄 Building discography using Spotify categorization...")
+
+        def normalize_title(title):
+            """Normalize title for comparison"""
+            import re
+            normalized = title.lower().strip()
+            normalized = re.sub(r'[^\w\s]', '', normalized)
+            normalized = re.sub(r'\s+', ' ', normalized)
+            return normalized.strip()
+
+        def normalize_year(year):
+            """Normalize year to integer for comparison"""
+            if year is None:
+                return None
+            try:
+                return int(year)
+            except (ValueError, TypeError):
+                return None
+
+        # Create a flat map of ALL owned releases (regardless of category)
+        all_owned = []
+        all_owned.extend(owned_releases['albums'])
+        all_owned.extend(owned_releases['eps'])
+        all_owned.extend(owned_releases['singles'])
+
+        owned_map = {}
+        for owned in all_owned:
+            key = (normalize_title(owned['title']), normalize_year(owned.get('year')))
+            if key not in owned_map:
+                owned_map[key] = []
+            owned_map[key].append(owned)
+
+        print(f"📀 Created lookup map for {len(all_owned)} owned releases")
+
+        def build_category(spotify_category, category_name):
+            """Build cards for a category using Spotify as source of truth"""
+            cards = []
+            print(f"📀 Building {category_name} category with {len(spotify_category)} Spotify releases")
+
+            for spotify_release in spotify_category:
+                spotify_key = (normalize_title(spotify_release['title']), normalize_year(spotify_release.get('year')))
+
+                # Debug logging for Bad Hair Day specifically
+                if 'bad hair day' in spotify_release['title'].lower():
+                    print(f"🔍 DEBUG: Spotify 'Bad Hair Day' - Title: '{spotify_release['title']}', Year: {spotify_release.get('year')}")
+                    print(f"🔍 DEBUG: Normalized key: {spotify_key}")
+                    print(f"🔍 DEBUG: Available owned keys: {list(owned_map.keys())}")
+
+                # Check if we own this release (exact match first)
+                owned_release = None
+                matched_key = None
+
+                if spotify_key in owned_map and owned_map[spotify_key]:
+                    owned_release = owned_map[spotify_key].pop(0).copy()
+                    matched_key = spotify_key
+                else:
+                    # Fallback: try matching by title only (ignore year)
+                    title_only = normalize_title(spotify_release['title'])
+                    for key, releases in owned_map.items():
+                        if key[0] == title_only and releases:  # key[0] is the normalized title
+                            owned_release = releases.pop(0).copy()
+                            matched_key = key
+                            print(f"🔄 Year mismatch fallback: '{spotify_release['title']}' matched by title only")
+                            break
+
+                if owned_release:
+                    # We own it - use owned data with Spotify enhancements
+
+                    # Add Spotify metadata
+                    owned_release['spotify_id'] = spotify_release['spotify_id']
+                    owned_release['owned'] = True
+
+                    # Image priority: owned first, then Spotify fallback
+                    if not owned_release.get('image_url') and spotify_release.get('image_url'):
+                        owned_release['image_url'] = spotify_release['image_url']
+
+                    cards.append(owned_release)
+                    print(f"✅ {category_name}: '{spotify_release['title']}' - OWNED")
+
+                    # Remove empty lists from map (use the key that actually matched)
+                    if matched_key and not owned_map[matched_key]:
+                        del owned_map[matched_key]
+                else:
+                    # We don't own it - create missing card
+                    missing_release = spotify_release.copy()
+                    missing_release['owned'] = False
+                    missing_release['track_completion'] = 0
+                    cards.append(missing_release)
+                    print(f"❌ {category_name}: '{spotify_release['title']}' - MISSING")
+
+            return cards
+
+        # Build each category using Spotify as the source of truth
+        albums = build_category(spotify_discography['albums'], 'Albums')
+        eps = build_category(spotify_discography['eps'], 'EPs')
+        singles = build_category(spotify_discography['singles'], 'Singles')
+
+        # Report any owned releases that didn't match Spotify (rare)
+        remaining_owned = sum(len(owned_list) for owned_list in owned_map.values())
+        if remaining_owned > 0:
+            print(f"📀 Note: {remaining_owned} owned releases not found on Spotify (compilations, bootlegs, etc.)")
+
+        print(f"✅ Built discography - Albums: {len(albums)}, EPs: {len(eps)}, Singles: {len(singles)}")
+
+        return {
+            'success': True,
+            'albums': albums,
+            'eps': eps,
+            'singles': singles
+        }
+
+    except Exception as e:
+        print(f"❌ Error building discography: {e}")
+        import traceback
+        traceback.print_exc()
+        return {
+            'success': False,
+            'error': str(e),
+            'albums': [],
+            'eps': [],
+            'singles': []
+        }
 
 if __name__ == '__main__':
     # Initialize logging for web server

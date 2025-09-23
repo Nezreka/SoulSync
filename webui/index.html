@@ -588,10 +588,10 @@
                             </button>
                             
                             <div class="artist-detail-info">
-                                <div class="artist-detail-image" id="artist-detail-image"></div>
+                                <div class="artist-detail-image" id="search-artist-detail-image"></div>
                                 <div class="artist-detail-text">
-                                    <h2 class="artist-detail-name" id="artist-detail-name">Artist Name</h2>
-                                    <p class="artist-detail-genres" id="artist-detail-genres">Genres</p>
+                                    <h2 class="artist-detail-name" id="search-artist-detail-name">Artist Name</h2>
+                                    <p class="artist-detail-genres" id="search-artist-detail-genres">Genres</p>
                                 </div>
                             </div>
                         </div>
@@ -724,6 +724,135 @@
                             <button class="pagination-btn" id="next-page-btn" disabled>
                                 <span>Next →</span>
                             </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Artist Detail Page -->
+            <div class="page" id="artist-detail-page">
+                <div class="page-header">
+                    <button class="back-btn" id="artist-detail-back-btn">
+                        <span>← Back to Library</span>
+                    </button>
+                </div>
+
+                <!-- Artist Hero Section -->
+                <div class="artist-hero-section">
+                    <div class="artist-hero-content">
+                        <div class="artist-image-container">
+                            <img class="artist-image" id="artist-detail-image" src="" alt="Artist Image" />
+                            <div class="artist-image-fallback" id="artist-detail-image-fallback">🎵</div>
+                        </div>
+
+                        <div class="artist-info">
+                            <h1 class="artist-name" id="artist-detail-name">Artist Name</h1>
+
+                            <div class="collection-overview">
+                                <div class="collection-category">
+                                    <div class="category-header">
+                                        <span class="category-label">Albums</span>
+                                        <span class="category-stats" id="albums-stats">0 owned, 0 missing</span>
+                                    </div>
+                                    <div class="completion-section">
+                                        <div class="completion-bar">
+                                            <div class="completion-fill" id="albums-completion-fill" style="width: 0%"></div>
+                                        </div>
+                                        <span class="completion-text" id="albums-completion-text">0%</span>
+                                    </div>
+                                </div>
+
+                                <div class="collection-category">
+                                    <div class="category-header">
+                                        <span class="category-label">EPs</span>
+                                        <span class="category-stats" id="eps-stats">0 owned, 0 missing</span>
+                                    </div>
+                                    <div class="completion-section">
+                                        <div class="completion-bar">
+                                            <div class="completion-fill" id="eps-completion-fill" style="width: 0%"></div>
+                                        </div>
+                                        <span class="completion-text" id="eps-completion-text">0%</span>
+                                    </div>
+                                </div>
+
+                                <div class="collection-category">
+                                    <div class="category-header">
+                                        <span class="category-label">Singles</span>
+                                        <span class="category-stats" id="singles-stats">0 owned, 0 missing</span>
+                                    </div>
+                                    <div class="completion-section">
+                                        <div class="completion-bar">
+                                            <div class="completion-fill" id="singles-completion-fill" style="width: 0%"></div>
+                                        </div>
+                                        <span class="completion-text" id="singles-completion-text">0%</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="artist-detail-content">
+                    <!-- Loading State -->
+                    <div class="artist-detail-loading hidden" id="artist-detail-loading">
+                        <div class="loading-spinner"></div>
+                        <p>Loading artist discography...</p>
+                    </div>
+
+                    <!-- Error State -->
+                    <div class="artist-detail-error hidden" id="artist-detail-error">
+                        <div class="error-icon">⚠️</div>
+                        <h3>Failed to load artist details</h3>
+                        <p id="artist-detail-error-message">An error occurred while loading the artist's discography.</p>
+                        <button class="retry-btn" id="artist-detail-retry-btn">Retry</button>
+                    </div>
+
+                    <!-- Main Content -->
+                    <div class="artist-detail-main" id="artist-detail-main">
+
+                        <!-- Discography Sections -->
+                        <div class="discography-sections">
+                            <!-- Albums Section -->
+                            <div class="discography-section" id="albums-section">
+                                <div class="section-header">
+                                    <h3>Albums</h3>
+                                    <div class="section-stats">
+                                        <span id="albums-owned-count">0 owned</span>
+                                        <span id="albums-missing-count">0 missing</span>
+                                    </div>
+                                </div>
+                                <div class="releases-grid" id="albums-grid">
+                                    <!-- Album cards will be populated here -->
+                                </div>
+                            </div>
+
+                            <!-- EPs Section -->
+                            <div class="discography-section" id="eps-section">
+                                <div class="section-header">
+                                    <h3>EPs</h3>
+                                    <div class="section-stats">
+                                        <span id="eps-owned-count">0 owned</span>
+                                        <span id="eps-missing-count">0 missing</span>
+                                    </div>
+                                </div>
+                                <div class="releases-grid" id="eps-grid">
+                                    <!-- EP cards will be populated here -->
+                                </div>
+                            </div>
+
+                            <!-- Singles Section -->
+                            <div class="discography-section" id="singles-section">
+                                <div class="section-header">
+                                    <h3>Singles</h3>
+                                    <div class="section-stats">
+                                        <span id="singles-owned-count">0 owned</span>
+                                        <span id="singles-missing-count">0 missing</span>
+                                    </div>
+                                </div>
+                                <div class="releases-grid" id="singles-grid">
+                                    <!-- Single cards will be populated here -->
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
