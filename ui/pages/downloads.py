@@ -15,6 +15,7 @@ from config.settings import config_manager
 from core.soulseek_client import TrackResult, AlbumResult
 from core.spotify_client import SpotifyClient, Artist, Album
 from core.matching_engine import MusicMatchingEngine
+from core.lyrics_client import LyricsClient
 import requests
 from typing import List, Optional
 from dataclasses import dataclass
@@ -7729,7 +7730,10 @@ class DownloadsPage(QWidget):
                 single_album_info = self._create_single_track_album_info(download_item, artist)
                 if single_album_info:
                     self._download_cover_art(artist, single_album_info, os.path.dirname(new_file_path))
-            
+
+            # Generate LRC lyrics file at final location (elegant addition)
+            self._generate_lrc_file(new_file_path, download_item, artist, album_info)
+
             print(f"✅ Successfully organized matched download: {new_file_path}")
             return new_file_path
             
@@ -8492,7 +8496,65 @@ class DownloadsPage(QWidget):
         except Exception as e:
             print(f"❌ Error creating single track album info: {e}")
             return None
-    
+
+    def _generate_lrc_file(self, file_path: str, download_item, artist, album_info: dict) -> bool:
+        """
+        Generate LRC lyrics file using LRClib API.
+        Elegant addition to post-processing - extracts metadata from existing context.
+        """
+        try:
+            # Initialize lyrics client if not already done
+            if not hasattr(self, 'lyrics_client'):
+                self.lyrics_client = LyricsClient()
+
+            if not self.lyrics_client:
+                return False
+
+            # Get track metadata from download_item
+            track_name = getattr(download_item, 'title', 'Unknown Track')
+
+            # Handle artist parameter (can be dict or object)
+            if isinstance(artist, dict):
+                artist_name = artist.get('name', 'Unknown Artist')
+            elif hasattr(artist, 'name'):
+                artist_name = artist.name
+            else:
+                artist_name = str(artist) if artist else 'Unknown Artist'
+
+            album_name = None
+            duration_seconds = None
+
+            # Get album name if available
+            if album_info and album_info.get('is_album'):
+                album_name = album_info.get('album_name')
+
+            # Get duration from download_item if available
+            if hasattr(download_item, 'duration') and download_item.duration:
+                try:
+                    duration_seconds = int(download_item.duration)
+                except (ValueError, TypeError):
+                    pass
+
+            # Generate LRC file using lyrics client
+            success = self.lyrics_client.create_lrc_file(
+                audio_file_path=file_path,
+                track_name=track_name,
+                artist_name=artist_name,
+                album_name=album_name,
+                duration_seconds=duration_seconds
+            )
+
+            if success:
+                print(f"🎵 LRC file generated for: {track_name}")
+            else:
+                print(f"🎵 No lyrics found for: {track_name}")
+
+            return success
+
+        except Exception as e:
+            print(f"❌ Error generating LRC file for {file_path}: {e}")
+            return False
+
     def _extract_track_number(self, download_item, spotify_track=None) -> int:
         """Extract track number from various sources"""
         try:
