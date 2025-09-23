@@ -4835,7 +4835,25 @@ def _extract_spotify_metadata(context: dict, artist: dict, album_info: dict) -> 
     else:
         metadata['title'] = original_search.get('title', '')
         print(f"🎵 Metadata: Using original title as fallback: '{metadata['title']}'")
-    metadata['artist'] = artist.get('name', '')
+    # Handle multiple artists from Spotify data
+    original_search = context.get("original_search_result", {})
+    if 'artists' in original_search and isinstance(original_search['artists'], list) and len(original_search['artists']) > 0:
+        # Join all artists with semicolon separator (standard format)
+        all_artists = []
+        for a in original_search['artists']:
+            if isinstance(a, dict) and 'name' in a:
+                all_artists.append(a['name'])
+            elif isinstance(a, str):
+                all_artists.append(a)
+            else:
+                all_artists.append(str(a))
+        metadata['artist'] = ', '.join(all_artists)
+        print(f"🎵 Metadata: Using all artists: '{metadata['artist']}'")
+    else:
+        # Fallback to single artist
+        metadata['artist'] = artist.get('name', '')
+        print(f"🎵 Metadata: Using primary artist: '{metadata['artist']}'")
+
     metadata['album_artist'] = artist.get('name', '') # Crucial for library organization
 
     if album_info.get('is_album'):
@@ -7695,6 +7713,8 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
                         enhanced_payload['spotify_clean_title'] = track.name
                         enhanced_payload['spotify_clean_album'] = track.album
                         enhanced_payload['spotify_clean_artist'] = track.artists[0] if track.artists else enhanced_payload.get('artist', '')
+                        # Preserve all artists for metadata tagging
+                        enhanced_payload['artists'] = [{'name': artist} for artist in track.artists] if track.artists else []
                         print(f"✨ [Context] Using clean Spotify metadata - Album: '{track.album}', Title: '{track.name}'")
                         
                         # CRITICAL FIX: Get track_number from Spotify API like GUI does
@@ -7726,6 +7746,9 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
                         enhanced_payload['spotify_clean_title'] = enhanced_payload.get('title', '')
                         enhanced_payload['spotify_clean_album'] = enhanced_payload.get('album', '')
                         enhanced_payload['spotify_clean_artist'] = enhanced_payload.get('artist', '')
+                        # Preserve existing artists array if available, otherwise create from single artist
+                        if 'artists' not in enhanced_payload and enhanced_payload.get('artist'):
+                            enhanced_payload['artists'] = [{'name': enhanced_payload['artist']}]
                         enhanced_payload['track_number'] = 1  # Fallback when no clean Spotify data
                         is_album_context = False
                         print(f"⚠️ [Context] Using fallback data - no clean Spotify metadata available, track_number=1")

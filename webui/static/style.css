@@ -5896,7 +5896,7 @@ body {
 @media (min-width: 1600px) {
     .download-missing-modal-content {
         width: 1500px;
-        height: 950px;
+        height: 90vh;
     }
 
     .download-missing-modal-hero {
@@ -5919,7 +5919,7 @@ body {
 @media (max-width: 1599px) and (min-width: 1200px) {
     .download-missing-modal-content {
         width: 1200px;
-        height: 800px;
+        height: 90vh;
     }
 }
 
