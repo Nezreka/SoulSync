@@ -2923,6 +2923,108 @@ let missingTracks = [];
 
 // New variables for enhanced modal functionality
 let currentDownloadBatchId = null;
+
+// ===============================
+// HERO SECTION HELPER FUNCTIONS
+// ===============================
+
+/**
+ * Generate hero section HTML for download missing tracks modal
+ * Context-aware display based on available data
+ */
+function generateDownloadModalHeroSection(context) {
+    const { type, playlist, artist, album, trackCount } = context;
+
+    let heroContent = '';
+    let heroBackgroundImage = '';
+
+    switch (type) {
+        case 'artist_album':
+            // Artist album context - show artist + album images
+            const artistImage = artist?.image_url || artist?.images?.[0]?.url;
+            const albumImage = album?.image_url || album?.images?.[0]?.url;
+
+            // Use album image as background if available
+            if (albumImage) {
+                heroBackgroundImage = `<div class="download-missing-modal-hero-bg" style="background-image: url('${albumImage}');"></div>`;
+            }
+
+            heroContent = `
+                <div class="download-missing-modal-hero-content">
+                    <div class="download-missing-modal-hero-images">
+                        ${artistImage ? `<img class="download-missing-modal-hero-image artist" src="${artistImage}" alt="${escapeHtml(artist.name)}">` : ''}
+                        ${albumImage ? `<img class="download-missing-modal-hero-image album" src="${albumImage}" alt="${escapeHtml(album.name)}">` : ''}
+                    </div>
+                    <div class="download-missing-modal-hero-metadata">
+                        <h1 class="download-missing-modal-hero-title">${escapeHtml(album.name || 'Unknown Album')}</h1>
+                        <div class="download-missing-modal-hero-subtitle">by ${escapeHtml(artist.name || 'Unknown Artist')}</div>
+                        <div class="download-missing-modal-hero-details">
+                            <span class="download-missing-modal-hero-detail">${album.album_type || 'Album'}</span>
+                            <span class="download-missing-modal-hero-detail">${trackCount} tracks</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+            break;
+
+        case 'playlist':
+            // Playlist context - show playlist info
+            heroContent = `
+                <div class="download-missing-modal-hero-content">
+                    <div class="download-missing-modal-hero-icon">🎵</div>
+                    <div class="download-missing-modal-hero-metadata">
+                        <h1 class="download-missing-modal-hero-title">${escapeHtml(playlist.name)}</h1>
+                        <div class="download-missing-modal-hero-subtitle">by ${escapeHtml(playlist.owner || 'Spotify')}</div>
+                        <div class="download-missing-modal-hero-details">
+                            <span class="download-missing-modal-hero-detail">Playlist</span>
+                            <span class="download-missing-modal-hero-detail">${trackCount} tracks</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+            break;
+
+        case 'wishlist':
+            // Wishlist context - show wishlist icon
+            heroContent = `
+                <div class="download-missing-modal-hero-content">
+                    <div class="download-missing-modal-hero-icon">👁️</div>
+                    <div class="download-missing-modal-hero-metadata">
+                        <h1 class="download-missing-modal-hero-title">Wishlist</h1>
+                        <div class="download-missing-modal-hero-subtitle">From watched artists</div>
+                        <div class="download-missing-modal-hero-details">
+                            <span class="download-missing-modal-hero-detail">Wishlist</span>
+                            <span class="download-missing-modal-hero-detail">${trackCount} tracks</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+            break;
+
+        default:
+            // Fallback - basic display
+            heroContent = `
+                <div class="download-missing-modal-hero-content">
+                    <div class="download-missing-modal-hero-icon">📥</div>
+                    <div class="download-missing-modal-hero-metadata">
+                        <h1 class="download-missing-modal-hero-title">Download Missing Tracks</h1>
+                        <div class="download-missing-modal-hero-subtitle">${trackCount} tracks</div>
+                    </div>
+                </div>
+            `;
+            break;
+    }
+
+    return `
+        <div class="download-missing-modal-hero">
+            ${heroBackgroundImage}
+            ${heroContent}
+        </div>
+        <div class="download-missing-modal-header-actions">
+            <span class="download-missing-modal-close" onclick="closeDownloadMissingModal('${context.playlistId || 'unknown'}')">&times;</span>
+        </div>
+    `;
+}
 let modalDownloadPoller = null;
 let currentModalPlaylistId = null;
 
@@ -2987,11 +3089,18 @@ async function openDownloadMissingModal(playlistId) {
         tracks: tracks
     };
     
+    // Generate hero section for playlist context
+    const heroContext = {
+        type: 'playlist',
+        playlist: playlist,
+        trackCount: tracks.length,
+        playlistId: playlistId
+    };
+
     modal.innerHTML = `
-        <div class="download-missing-modal-content">
+        <div class="download-missing-modal-content" data-context="playlist">
             <div class="download-missing-modal-header">
-                <h2 class="download-missing-modal-title">Download Missing Tracks - ${escapeHtml(playlist.name)}</h2>
-                <span class="download-missing-modal-close" onclick="closeDownloadMissingModal('${playlistId}')">&times;</span>
+                ${generateDownloadModalHeroSection(heroContext)}
             </div>
             
             <div class="download-missing-modal-body">
@@ -3104,19 +3213,19 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
     }
 
     console.log(`📥 Opening Download Missing Tracks modal for YouTube playlist: ${virtualPlaylistId}`);
-    
+
     // Create virtual playlist object for compatibility with existing modal logic
     const virtualPlaylist = {
         id: virtualPlaylistId,
         name: playlistName,
         track_count: spotifyTracks.length
     };
-    
+
     // Store the tracks in the cache for the modal to use
     playlistTrackCache[virtualPlaylistId] = spotifyTracks;
     currentPlaylistTracks = spotifyTracks;
     currentModalPlaylistId = virtualPlaylistId;
-    
+
     let modal = document.createElement('div');
     modal.id = `download-missing-modal-${virtualPlaylistId}`;
     modal.className = 'download-missing-modal';
@@ -3132,13 +3241,20 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
         playlist: virtualPlaylist,
         tracks: spotifyTracks
     };
-    
+
+    // Generate hero section for YouTube playlist context
+    const heroContext = {
+        type: 'playlist',
+        playlist: { name: playlistName, owner: 'YouTube' },
+        trackCount: spotifyTracks.length,
+        playlistId: virtualPlaylistId
+    };
+
     // Use the exact same modal HTML structure as the existing Spotify modal
     modal.innerHTML = `
-        <div class="download-missing-modal-content">
+        <div class="download-missing-modal-content" data-context="playlist">
             <div class="download-missing-modal-header">
-                <h2 class="download-missing-modal-title">Download Missing Tracks - ${escapeHtml(playlistName)}</h2>
-                <span class="download-missing-modal-close" onclick="closeDownloadMissingModal('${virtualPlaylistId}')">&times;</span>
+                ${generateDownloadModalHeroSection(heroContext)}
             </div>
             
             <div class="download-missing-modal-body">
@@ -3430,12 +3546,18 @@ async function openDownloadMissingWishlistModal() {
         playlist: { id: playlistId, name: "Wishlist" }, // Create a pseudo-playlist object
         tracks: tracks
     };
-    
+
+    // Generate hero section for wishlist context
+    const heroContext = {
+        type: 'wishlist',
+        trackCount: tracks.length,
+        playlistId: playlistId
+    };
+
     modal.innerHTML = `
-        <div class="download-missing-modal-content">
+        <div class="download-missing-modal-content" data-context="wishlist">
             <div class="download-missing-modal-header">
-                <h2 class="download-missing-modal-title">Download Missing Tracks - Wishlist</h2>
-                <span class="download-missing-modal-close" onclick="closeDownloadMissingModal('${playlistId}')">&times;</span>
+                ${generateDownloadModalHeroSection(heroContext)}
             </div>
             
             <div class="download-missing-modal-body">
@@ -11452,12 +11574,20 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
         albumType: album.album_type
     };
     
+    // Generate hero section for artist album context
+    const heroContext = {
+        type: 'artist_album',
+        artist: artist,
+        album: album,
+        trackCount: spotifyTracks.length,
+        playlistId: virtualPlaylistId
+    };
+
     // Use the exact same modal HTML structure as the existing modals
     modal.innerHTML = `
-        <div class="download-missing-modal-content">
+        <div class="download-missing-modal-content" data-context="artist_album">
             <div class="download-missing-modal-header">
-                <h2 class="download-missing-modal-title">Download Missing Tracks - ${escapeHtml(playlistName)}</h2>
-                <span class="download-missing-modal-close" onclick="closeDownloadMissingModal('${virtualPlaylistId}')">&times;</span>
+                ${generateDownloadModalHeroSection(heroContext)}
             </div>
             
             <div class="download-missing-modal-body">
