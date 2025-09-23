@@ -7837,44 +7837,196 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    animation: fadeIn 0.3s ease-out;
+    animation: modalOverlayFadeIn 0.4s ease-out;
 }
 
 .artist-download-modal-overlay {
     position: absolute;
     inset: 0;
-    background: rgba(0, 0, 0, 0.8);
-    backdrop-filter: blur(8px);
+    background: rgba(18, 18, 18, 0.85);
+    backdrop-filter: blur(12px);
     z-index: 1;
 }
 
 .artist-download-modal-content {
     position: relative;
-    background: linear-gradient(135deg, 
-        rgba(20, 20, 20, 0.98) 0%, 
+    /* Premium glassmorphic foundation matching download modal */
+    background: linear-gradient(135deg,
+        rgba(20, 20, 20, 0.95) 0%,
         rgba(12, 12, 12, 0.98) 100%);
-    border-radius: 16px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    max-width: 500px;
-    width: 90%;
-    max-height: 70vh;
-    overflow: hidden;
+    backdrop-filter: blur(20px) saturate(1.2);
+    border-radius: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-top: 1px solid rgba(255, 255, 255, 0.18);
+
+    width: 700px;
+    max-width: 95vw;
+    max-height: 80vh;
     z-index: 2;
-    
-    box-shadow: 
-        0 20px 40px rgba(0, 0, 0, 0.6),
-        0 0 0 1px rgba(29, 185, 84, 0.1),
-        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+
+    /* Premium shadow effect */
+    box-shadow:
+        0 25px 80px rgba(0, 0, 0, 0.7),
+        0 10px 40px rgba(0, 0, 0, 0.5),
+        0 0 50px rgba(29, 185, 84, 0.15),
+        inset 0 1px 0 rgba(255, 255, 255, 0.15);
+
+    /* Smooth animation */
+    transform: scale(1);
+    transition: transform 0.4s ease-in-out;
+    animation: modalFadeIn 0.4s ease-out;
 }
 
 .artist-download-modal-header {
-    padding: 24px 24px 0;
+    padding: 0;
     display: flex;
-    justify-content: space-between;
-    align-items: center;
+    flex-direction: column;
+    overflow: hidden;
+    /* Enhanced gradient with subtle transparency and glow */
+    background: linear-gradient(135deg,
+        rgba(45, 45, 45, 0.8) 0%,
+        rgba(26, 26, 26, 0.9) 100%);
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-    padding-bottom: 16px;
-    margin-bottom: 20px;
+    /* Subtle inner glow */
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+/* Artist Modal Hero Section */
+.artist-download-modal-hero {
+    display: flex;
+    align-items: center;
+    padding: 20px 28px;
+    gap: 20px;
+    position: relative;
+    min-height: 100px;
+}
+
+.artist-download-modal-hero-bg {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-size: cover;
+    background-position: center;
+    opacity: 0.15;
+    filter: blur(8px);
+    z-index: 1;
+}
+
+.artist-download-modal-hero-bg::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(135deg,
+        rgba(0, 0, 0, 0.7) 0%,
+        rgba(0, 0, 0, 0.3) 100%);
+}
+
+.artist-download-modal-hero-content {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    position: relative;
+    z-index: 2;
+    flex: 1;
+}
+
+.artist-download-modal-hero-image {
+    width: 70px;
+    height: 70px;
+    border-radius: 50%;
+    object-fit: cover;
+    box-shadow:
+        0 8px 24px rgba(0, 0, 0, 0.4),
+        0 4px 12px rgba(0, 0, 0, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    transition: all 0.3s ease;
+    flex-shrink: 0;
+}
+
+.artist-download-modal-hero-image:hover {
+    transform: scale(1.05);
+    box-shadow:
+        0 12px 32px rgba(0, 0, 0, 0.5),
+        0 6px 16px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+.artist-download-modal-hero-avatar {
+    position: relative;
+    z-index: 2;
+    flex-shrink: 0;
+}
+
+.artist-download-modal-hero-fallback {
+    width: 70px;
+    height: 70px;
+    border-radius: 50%;
+    background: linear-gradient(135deg,
+        rgba(60, 60, 60, 0.9) 0%,
+        rgba(30, 30, 30, 0.9) 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    color: #999;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow:
+        0 8px 24px rgba(0, 0, 0, 0.4),
+        0 4px 12px rgba(0, 0, 0, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.artist-download-modal-hero-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+}
+
+.artist-download-modal-hero-overlay {
+    display: flex;
+    align-items: center;
+    position: relative;
+    z-index: 2;
+    width: 100%;
+}
+
+.artist-download-modal-hero-title {
+    color: #ffffff;
+    font-size: 20px;
+    font-weight: 700;
+    margin: 0;
+    line-height: 1.2;
+    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.artist-download-modal-hero-subtitle {
+    color: #e0e0e0;
+    font-size: 14px;
+    font-weight: 500;
+    margin: 0;
+    opacity: 0.9;
+}
+
+.artist-download-modal-header-actions {
+    position: relative;
+    z-index: 3;
+    padding: 16px 24px 0 0;
+    display: flex;
+    justify-content: flex-end;
 }
 
 .artist-download-modal-title {
@@ -7902,35 +8054,109 @@ body {
 }
 
 .artist-download-modal-body {
-    padding: 0 24px 24px;
+    flex: 1;
+    padding: 16px 28px 25px 28px;
     overflow-y: auto;
-    max-height: calc(70vh - 100px);
+    display: flex;
+    flex-direction: column;
 }
 
 .artist-download-items {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 16px;
 }
 
 .artist-download-item {
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    padding: 16px;
-    background: linear-gradient(135deg, 
-        rgba(26, 26, 26, 0.6) 0%, 
-        rgba(18, 18, 18, 0.8) 100%);
-    border-radius: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    transition: all 0.2s ease;
+    padding: 20px;
+    gap: 16px;
+    /* Premium glassmorphic card matching download modal */
+    background: linear-gradient(135deg,
+        rgba(35, 35, 35, 0.7) 0%,
+        rgba(25, 25, 25, 0.8) 100%);
+    backdrop-filter: blur(10px) saturate(1.1);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-top: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 16px;
+    transition: all 0.3s ease;
+
+    /* Premium shadow with subtle glow */
+    box-shadow:
+        0 8px 32px rgba(0, 0, 0, 0.4),
+        0 4px 16px rgba(0, 0, 0, 0.2),
+        0 0 20px rgba(29, 185, 84, 0.08),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
 .artist-download-item:hover {
-    background: linear-gradient(135deg, 
-        rgba(26, 26, 26, 0.8) 0%, 
-        rgba(18, 18, 18, 0.9) 100%);
-    border-color: rgba(255, 255, 255, 0.1);
+    transform: translateY(-2px);
+    background: linear-gradient(135deg,
+        rgba(40, 40, 40, 0.8) 0%,
+        rgba(30, 30, 30, 0.9) 100%);
+    border-color: rgba(255, 255, 255, 0.15);
+    box-shadow:
+        0 12px 40px rgba(0, 0, 0, 0.5),
+        0 6px 20px rgba(0, 0, 0, 0.3),
+        0 0 25px rgba(29, 185, 84, 0.12),
+        inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+
+/* Album artwork in download items */
+.download-item-artwork {
+    position: relative;
+    flex-shrink: 0;
+}
+
+.download-item-image {
+    width: 50px;
+    height: 50px;
+    border-radius: 12px;
+    object-fit: cover;
+    box-shadow:
+        0 4px 12px rgba(0, 0, 0, 0.3),
+        0 2px 6px rgba(0, 0, 0, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    transition: all 0.3s ease;
+}
+
+.artist-download-item:hover .download-item-image {
+    transform: scale(1.05);
+    box-shadow:
+        0 6px 16px rgba(0, 0, 0, 0.4),
+        0 3px 8px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+
+/* Fallback icon when no album image */
+.download-item-fallback {
+    width: 50px;
+    height: 50px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg,
+        rgba(29, 185, 84, 0.2) 0%,
+        rgba(30, 215, 96, 0.1) 100%);
+    border: 1px solid rgba(29, 185, 84, 0.3);
+    font-size: 18px;
+    color: rgba(29, 185, 84, 0.8);
+    transition: all 0.3s ease;
+}
+
+.artist-download-item:hover .download-item-fallback {
+    background: linear-gradient(135deg,
+        rgba(29, 185, 84, 0.3) 0%,
+        rgba(30, 215, 96, 0.2) 100%);
+    border-color: rgba(29, 185, 84, 0.4);
+    color: rgba(29, 185, 84, 1);
+    transform: scale(1.05);
+    box-shadow:
+        0 4px 12px rgba(29, 185, 84, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
 .download-item-info {
@@ -8008,6 +8234,142 @@ body {
     filter: drop-shadow(0 0 6px var(--glow-color-1, #1db954)) 
             drop-shadow(0 0 12px var(--glow-color-2, #1ed760));
     border-color: var(--glow-color-1, rgba(29, 185, 84, 0.4));
+}
+
+/* Responsive design for artist download modal */
+@media (max-width: 768px) {
+    .artist-download-modal-content {
+        width: 95vw;
+        max-height: 90vh;
+        margin: 16px;
+        border-radius: 16px;
+    }
+
+    .artist-download-modal-hero {
+        padding: 16px 20px;
+        min-height: 80px;
+    }
+
+    .artist-download-modal-hero-content {
+        gap: 16px;
+    }
+
+    .artist-download-modal-hero-image,
+    .artist-download-modal-hero-fallback {
+        width: 60px;
+        height: 60px;
+    }
+
+    .artist-download-modal-hero-fallback {
+        font-size: 20px;
+    }
+
+    .artist-download-modal-hero-title {
+        font-size: 18px;
+    }
+
+    .artist-download-modal-hero-subtitle {
+        font-size: 13px;
+    }
+
+    .artist-download-modal-body {
+        padding: 12px 20px 20px 20px;
+    }
+
+    .artist-download-items {
+        gap: 12px;
+    }
+
+    .artist-download-item {
+        padding: 16px;
+        gap: 12px;
+        border-radius: 12px;
+    }
+
+    .download-item-image,
+    .download-item-fallback {
+        width: 40px;
+        height: 40px;
+        border-radius: 8px;
+    }
+
+    .download-item-fallback {
+        font-size: 14px;
+    }
+
+    .download-item-name {
+        font-size: 13px;
+    }
+
+    .download-item-type {
+        font-size: 11px;
+    }
+
+    .download-item-btn {
+        padding: 6px 12px;
+        font-size: 11px;
+        min-width: 80px;
+    }
+
+    .download-item-actions {
+        margin-left: 8px;
+    }
+}
+
+@media (max-width: 480px) {
+    .artist-download-modal-content {
+        width: 98vw;
+        margin: 8px;
+        border-radius: 12px;
+    }
+
+    .artist-download-modal-hero {
+        padding: 12px 16px;
+        min-height: 70px;
+    }
+
+    .artist-download-modal-hero-image,
+    .artist-download-modal-hero-fallback {
+        width: 50px;
+        height: 50px;
+    }
+
+    .artist-download-modal-hero-title {
+        font-size: 16px;
+    }
+
+    .artist-download-modal-body {
+        padding: 8px 16px 16px 16px;
+    }
+
+    .artist-download-item {
+        padding: 12px;
+        gap: 10px;
+        flex-direction: column;
+        text-align: center;
+    }
+
+    .download-item-artwork {
+        order: 1;
+        align-self: center;
+    }
+
+    .download-item-info {
+        order: 2;
+        text-align: center;
+    }
+
+    .download-item-actions {
+        order: 3;
+        margin-left: 0;
+        margin-top: 8px;
+        align-self: center;
+    }
+
+    .download-item-btn {
+        padding: 8px 16px;
+        min-width: 90px;
+    }
 }
 
 #metadata-updater-card{
