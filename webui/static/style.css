@@ -8870,3 +8870,670 @@ body {
         font-size: 12px;
     }
 }
+
+/* ========================================
+   Artist Detail Page Styles
+   ======================================== */
+
+.artist-detail-header {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    width: 100%;
+}
+
+.back-btn {
+    background: linear-gradient(135deg, rgba(26, 26, 26, 0.95) 0%, rgba(18, 18, 18, 0.98) 100%);
+    backdrop-filter: blur(12px) saturate(1.1);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    padding: 12px 20px;
+    color: #ffffff;
+    font-family: 'SF Pro Text', -apple-system, sans-serif;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0.0, 0.2, 1);
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.back-btn:hover {
+    background: linear-gradient(135deg, rgba(40, 40, 40, 0.95) 0%, rgba(30, 30, 30, 0.98) 100%);
+    border-color: rgba(255, 255, 255, 0.15);
+    transform: translateY(-1px);
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.4);
+}
+
+.artist-detail-title {
+    flex-grow: 1;
+    min-width: 0;
+}
+
+.artist-detail-title h2 {
+    font-size: 28px;
+    font-weight: 700;
+    color: #ffffff;
+    margin: 0 0 8px 0;
+    line-height: 1.2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.artist-detail-stats {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.artist-stat {
+    color: #b3b3b3;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+/* Artist Detail Content */
+.artist-detail-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.artist-detail-loading,
+.artist-detail-error {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    text-align: center;
+    padding: 40px 20px;
+}
+
+.artist-detail-loading .loading-spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid rgba(255, 255, 255, 0.1);
+    border-top: 3px solid #1db954;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-bottom: 20px;
+}
+
+.artist-detail-error .error-icon {
+    font-size: 48px;
+    margin-bottom: 16px;
+}
+
+.artist-detail-error h3 {
+    color: #ffffff;
+    font-size: 20px;
+    margin: 0 0 8px 0;
+}
+
+.artist-detail-error p {
+    color: #b3b3b3;
+    margin: 0 0 20px 0;
+}
+
+.retry-btn {
+    background: linear-gradient(135deg, #1db954 0%, #1ed760 100%);
+    border: none;
+    border-radius: 12px;
+    padding: 12px 24px;
+    color: #ffffff;
+    font-family: 'SF Pro Text', -apple-system, sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0.0, 0.2, 1);
+}
+
+.retry-btn:hover {
+    background: linear-gradient(135deg, #1ed760 0%, #1db954 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 8px 25px rgba(29, 185, 84, 0.3);
+}
+
+/* Artist Info Section */
+.artist-info-section {
+    display: flex;
+    gap: 30px;
+    padding: 30px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    margin-bottom: 30px;
+    background: linear-gradient(135deg, rgba(26, 26, 26, 0.3) 0%, rgba(18, 18, 18, 0.5) 100%);
+    border-radius: 20px;
+    padding: 32px;
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.artist-image-container {
+    position: relative;
+    flex-shrink: 0;
+}
+
+.artist-detail-image {
+    width: 200px;
+    height: 200px;
+    border-radius: 16px;
+    object-fit: cover;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.artist-image-fallback {
+    width: 200px;
+    height: 200px;
+    border-radius: 16px;
+    background: linear-gradient(135deg, rgba(26, 26, 26, 0.95) 0%, rgba(18, 18, 18, 0.98) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 64px;
+}
+
+.artist-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.artist-info h1 {
+    font-size: 48px;
+    font-weight: 800;
+    color: #ffffff;
+    margin: 0 0 12px 0;
+    line-height: 1.1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.artist-genres {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 24px;
+}
+
+.genre-tag {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 20px;
+    padding: 6px 14px;
+    color: #ffffff;
+    font-size: 12px;
+    font-weight: 500;
+    text-transform: capitalize;
+}
+
+.artist-summary-stats {
+    display: flex;
+    gap: 40px;
+    flex-wrap: wrap;
+}
+
+.summary-stat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+}
+
+.stat-number {
+    font-size: 32px;
+    font-weight: 800;
+    color: #1db954;
+    line-height: 1;
+    margin-bottom: 6px;
+}
+
+.stat-label {
+    font-size: 14px;
+    color: #b3b3b3;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* Discography Sections */
+.discography-sections {
+    display: flex;
+    flex-direction: column;
+    gap: 40px;
+}
+
+.discography-section {
+    opacity: 1; /* Show immediately instead of animation for now */
+}
+
+/* Animation keyframes for future use */
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 20px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.section-header h3 {
+    font-size: 24px;
+    font-weight: 700;
+    color: #ffffff;
+    margin: 0;
+}
+
+.section-stats {
+    display: flex;
+    gap: 16px;
+    color: #b3b3b3;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.releases-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 16px;
+    padding: 8px 0;
+}
+
+/* Release Cards */
+.release-card {
+    background: linear-gradient(135deg, rgba(26, 26, 26, 0.95) 0%, rgba(18, 18, 18, 0.98) 100%);
+    backdrop-filter: blur(12px) saturate(1.1);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    padding: 14px;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0.0, 0.2, 1);
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    height: 280px; /* Fixed height for consistent layout */
+}
+
+.release-card:hover {
+    background: linear-gradient(135deg, rgba(40, 40, 40, 0.95) 0%, rgba(30, 30, 30, 0.98) 100%);
+    border-color: rgba(255, 255, 255, 0.15);
+    transform: translateY(-4px);
+    box-shadow: 0 12px 35px rgba(0, 0, 0, 0.4);
+}
+
+.release-card.missing {
+    opacity: 0.6;
+    background: linear-gradient(135deg, rgba(60, 60, 60, 0.3) 0%, rgba(40, 40, 40, 0.5) 100%);
+    border-color: rgba(255, 255, 255, 0.05);
+}
+
+.release-card.missing:hover {
+    opacity: 0.8;
+    background: linear-gradient(135deg, rgba(70, 70, 70, 0.4) 0%, rgba(50, 50, 50, 0.6) 100%);
+}
+
+.release-image {
+    width: 100%;
+    aspect-ratio: 1;
+    border-radius: 12px;
+    object-fit: cover;
+    margin-bottom: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    flex-shrink: 0;
+}
+
+.release-image-fallback {
+    width: 100%;
+    aspect-ratio: 1;
+    border-radius: 12px;
+    background: linear-gradient(135deg, rgba(60, 60, 60, 0.6) 0%, rgba(40, 40, 40, 0.8) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 28px;
+    margin-bottom: 12px;
+    flex-shrink: 0;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.release-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: #ffffff;
+    margin: 0 0 6px 0;
+    line-height: 1.3;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.release-year {
+    font-size: 14px;
+    color: #b3b3b3;
+    margin: 0 0 8px 0;
+}
+
+.release-completion {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 11px;
+    margin-top: auto;
+    padding-top: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.completion-text {
+    color: #b3b3b3;
+}
+
+.completion-text.complete {
+    color: #1db954;
+    font-weight: 600;
+}
+
+.completion-text.partial {
+    color: #ffa500;
+    font-weight: 600;
+}
+
+.completion-text.missing {
+    color: #ff6b6b;
+    font-weight: 600;
+}
+
+.completion-bar {
+    width: 60px;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.completion-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.3s cubic-bezier(0.4, 0.0, 0.2, 1);
+}
+
+.completion-fill.complete {
+    background: linear-gradient(90deg, #1db954, #1ed760);
+}
+
+.completion-fill.partial {
+    background: linear-gradient(90deg, #ffa500, #ffb347);
+}
+
+.completion-fill.missing {
+    background: linear-gradient(90deg, #ff6b6b, #ff8e8e);
+    width: 0%;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .artist-detail-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 16px;
+    }
+
+    .artist-detail-title h2 {
+        font-size: 24px;
+        white-space: normal;
+    }
+
+    .artist-info-section {
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        gap: 20px;
+    }
+
+    .artist-detail-image,
+    .artist-image-fallback {
+        width: 150px;
+        height: 150px;
+    }
+
+    .artist-info h1 {
+        font-size: 36px;
+        white-space: normal;
+        text-align: center;
+    }
+
+    .artist-summary-stats {
+        justify-content: center;
+        gap: 30px;
+    }
+
+    .section-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+
+    .releases-grid {
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        gap: 16px;
+    }
+
+    .release-card {
+        padding: 12px;
+    }
+}
+
+/* ===============================
+   ARTIST HERO SECTION (Modal-inspired design)
+   =============================== */
+
+.artist-hero-section {
+    background: linear-gradient(135deg, rgba(26, 26, 26, 0.95) 0%, rgba(18, 18, 18, 0.98) 100%);
+    backdrop-filter: blur(12px) saturate(1.1);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    margin: 20px 20px 20px 20px;
+    padding: 20px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.artist-hero-content {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+}
+
+.artist-image-container {
+    position: relative;
+    flex-shrink: 0;
+}
+
+.artist-image {
+    width: 100px;
+    height: 100px;
+    border-radius: 12px;
+    object-fit: cover;
+    border: 2px solid rgba(29, 185, 84, 0.3);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    display: block;
+}
+
+.artist-image-fallback {
+    width: 100px;
+    height: 100px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, rgba(29, 185, 84, 0.2) 0%, rgba(30, 215, 96, 0.1) 100%);
+    border: 2px solid rgba(29, 185, 84, 0.3);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 40px;
+    color: rgba(255, 255, 255, 0.6);
+    position: absolute;
+    top: 0;
+    left: 0;
+}
+
+.artist-image:not([src=""]):not([src]) + .artist-image-fallback,
+.artist-image[src]:not([src=""]) + .artist-image-fallback {
+    display: none;
+}
+
+.artist-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.artist-name {
+    font-size: 32px;
+    font-weight: 700;
+    color: #ffffff;
+    margin: 0 0 16px 0;
+    line-height: 1.1;
+    font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
+    letter-spacing: -0.3px;
+}
+
+.collection-overview {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.collection-category {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 12px 16px;
+    transition: all 0.3s ease;
+}
+
+.collection-category:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(29, 185, 84, 0.2);
+}
+
+.category-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.category-label {
+    color: #ffffff;
+    font-weight: 700;
+    font-size: 16px;
+    font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.category-stats {
+    color: #b3b3b3;
+    font-size: 14px;
+    font-weight: 500;
+    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.completion-section {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.completion-bar {
+    flex: 1;
+    height: 8px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    overflow: hidden;
+    position: relative;
+}
+
+.completion-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #1db954 0%, #1ed760 100%);
+    transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+    border-radius: 4px;
+    position: relative;
+}
+
+.completion-fill::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.2) 50%, transparent 100%);
+    animation: shimmer 2s infinite;
+}
+
+@keyframes shimmer {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+}
+
+.completion-text {
+    color: #ffffff;
+    font-size: 16px;
+    font-weight: 700;
+    min-width: 45px;
+    text-align: right;
+    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* Mobile responsiveness */
+@media (max-width: 768px) {
+    .artist-hero-section {
+        margin: 15px;
+        padding: 20px;
+    }
+
+    .artist-hero-content {
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        gap: 20px;
+    }
+
+    .artist-image,
+    .artist-image-fallback {
+        width: 120px;
+        height: 120px;
+    }
+
+    .artist-name {
+        font-size: 32px;
+        text-align: center;
+    }
+
+    .category-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+        margin-bottom: 8px;
+    }
+
+    .completion-section {
+        gap: 12px;
+    }
+}

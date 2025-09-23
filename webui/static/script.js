@@ -346,11 +346,14 @@ function initializeWatchlist() {
 function navigateToPage(pageId) {
     if (pageId === currentPage) return;
     
-    // Update navigation buttons
+    // Update navigation buttons (only if there's a nav button for this page)
     document.querySelectorAll('.nav-button').forEach(btn => {
         btn.classList.remove('active');
     });
-    document.querySelector(`[data-page="${pageId}"]`).classList.add('active');
+    const navButton = document.querySelector(`[data-page="${pageId}"]`);
+    if (navButton) {
+        navButton.classList.add('active');
+    }
     
     // Update pages
     document.querySelectorAll('.page').forEach(page => {
@@ -404,6 +407,9 @@ async function loadPageData(pageId) {
                     // Refresh data when returning to page
                     await loadLibraryArtists();
                 }
+                break;
+            case 'artist-detail':
+                // Artist detail page is handled separately by navigateToArtistDetail()
                 break;
             case 'settings':
                 initializeSettings();
@@ -13824,11 +13830,10 @@ function createLibraryArtistCard(artist) {
     card.appendChild(imageContainer);
     card.appendChild(info);
 
-    // Add click handler (for future functionality)
+    // Add click handler to navigate to artist detail page
     card.addEventListener("click", () => {
-        // TODO: Implement artist detail view
-        console.log(`Clicked on artist: ${artist.name}`);
-        showToast(`Artist details coming soon!`, "info");
+        console.log(`🎵 Opening artist detail for: ${artist.name} (ID: ${artist.id})`);
+        navigateToArtistDetail(artist.id, artist.name);
     });
 
     return card;
@@ -13889,6 +13894,478 @@ function showLibraryEmpty(show) {
             emptyElement.classList.remove("hidden");
         } else {
             emptyElement.classList.add("hidden");
+        }
+    }
+}
+
+// ===============================================
+// Artist Detail Page Functions
+// ===============================================
+
+// Artist detail page state
+let artistDetailPageState = {
+    isInitialized: false,
+    currentArtistId: null,
+    currentArtistName: null
+};
+
+function navigateToArtistDetail(artistId, artistName) {
+    console.log(`🎵 Navigating to artist detail: ${artistName} (ID: ${artistId})`);
+
+    // Store current artist info
+    artistDetailPageState.currentArtistId = artistId;
+    artistDetailPageState.currentArtistName = artistName;
+
+    // Navigate to artist detail page
+    navigateToPage('artist-detail');
+
+    // Initialize if needed and load data
+    if (!artistDetailPageState.isInitialized) {
+        initializeArtistDetailPage();
+    }
+
+    // Load artist data
+    loadArtistDetailData(artistId, artistName);
+}
+
+function initializeArtistDetailPage() {
+    console.log("🔧 Initializing Artist Detail page...");
+
+    // Initialize back button
+    const backBtn = document.getElementById("artist-detail-back-btn");
+    if (backBtn) {
+        backBtn.addEventListener("click", () => {
+            console.log("🔙 Returning to Library page");
+            navigateToPage('library');
+        });
+    }
+
+    // Initialize retry button
+    const retryBtn = document.getElementById("artist-detail-retry-btn");
+    if (retryBtn) {
+        retryBtn.addEventListener("click", () => {
+            if (artistDetailPageState.currentArtistId && artistDetailPageState.currentArtistName) {
+                loadArtistDetailData(artistDetailPageState.currentArtistId, artistDetailPageState.currentArtistName);
+            }
+        });
+    }
+
+    artistDetailPageState.isInitialized = true;
+    console.log("✅ Artist Detail page initialized successfully");
+}
+
+async function loadArtistDetailData(artistId, artistName) {
+    console.log(`🔄 Loading artist detail data for: ${artistName} (ID: ${artistId})`);
+
+    // Show loading state
+    showArtistDetailLoading(true);
+    showArtistDetailError(false);
+    showArtistDetailMain(false);
+
+    // Update header with artist name
+    updateArtistDetailHeader(artistName);
+
+    try {
+        // Call API to get artist discography data
+        const response = await fetch(`/api/artist-detail/${artistId}`);
+
+        if (!response.ok) {
+            throw new Error(`Failed to load artist data: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+
+        if (!data.success) {
+            throw new Error(data.error || 'Failed to load artist data');
+        }
+
+        console.log(`✅ Loaded artist detail data:`, data);
+
+        // Hide loading and show main content
+        showArtistDetailLoading(false);
+        showArtistDetailMain(true);
+
+        console.log(`🎨 Main content visibility:`, document.getElementById('artist-detail-main'));
+        console.log(`🎨 Albums section:`, document.getElementById('albums-section'));
+
+        // Populate the page with data
+        populateArtistDetailPage(data);
+
+    } catch (error) {
+        console.error(`❌ Error loading artist detail data:`, error);
+
+        // Show error state
+        showArtistDetailLoading(false);
+        showArtistDetailError(true, error.message);
+
+        showToast(`Failed to load artist details: ${error.message}`, "error");
+    }
+}
+
+function updateArtistDetailHeader(artistName) {
+    // Update header title
+    const headerTitle = document.getElementById("artist-detail-name");
+    if (headerTitle) {
+        headerTitle.textContent = artistName;
+    }
+
+    // Update main artist name
+    const mainTitle = document.getElementById("artist-info-name");
+    if (mainTitle) {
+        mainTitle.textContent = artistName;
+    }
+}
+
+function populateArtistDetailPage(data) {
+    const artist = data.artist;
+    const discography = data.discography;
+
+    console.log(`🎨 Populating artist detail page for: ${artist.name}`);
+    console.log(`📀 Discography data:`, discography);
+    console.log(`📀 Albums:`, discography.albums);
+    console.log(`📀 EPs:`, discography.eps);
+    console.log(`📀 Singles:`, discography.singles);
+
+    // Update hero section with image, name, and stats
+    updateArtistHeroSection(artist, discography);
+
+    // Update genres (if element exists)
+    updateArtistGenres(artist.genres);
+
+    // Update summary stats (if element exists)
+    updateArtistSummaryStats(discography);
+
+    // Populate discography sections
+    populateDiscographySections(discography);
+}
+
+function updateArtistDetailImage(imageUrl, artistName) {
+    const imageElement = document.getElementById("artist-detail-image");
+    const fallbackElement = document.getElementById("artist-image-fallback");
+
+    if (imageUrl && imageUrl.trim() !== "") {
+        imageElement.src = imageUrl;
+        imageElement.alt = artistName;
+        imageElement.classList.remove("hidden");
+        fallbackElement.classList.add("hidden");
+
+        imageElement.onerror = () => {
+            console.log(`Failed to load artist image for ${artistName}: ${imageUrl}`);
+            // Replace with fallback on error
+            imageElement.classList.add("hidden");
+            fallbackElement.classList.remove("hidden");
+        };
+
+        imageElement.onload = () => {
+            console.log(`Successfully loaded artist image for ${artistName}: ${imageUrl}`);
+        };
+    } else {
+        console.log(`No image URL for ${artistName}: '${imageUrl}'`);
+        imageElement.classList.add("hidden");
+        fallbackElement.classList.remove("hidden");
+    }
+}
+
+function updateArtistGenres(genres) {
+    const genresContainer = document.getElementById("artist-genres");
+    if (!genresContainer) return;
+
+    genresContainer.innerHTML = "";
+
+    if (genres && genres.length > 0) {
+        genres.forEach(genre => {
+            const genreTag = document.createElement("span");
+            genreTag.className = "genre-tag";
+            genreTag.textContent = genre;
+            genresContainer.appendChild(genreTag);
+        });
+    }
+}
+
+function updateArtistSummaryStats(discography) {
+    // Calculate stats
+    const ownedAlbums = discography.albums.filter(album => album.owned).length;
+    const missingAlbums = discography.albums.filter(album => !album.owned).length;
+    const totalAlbums = discography.albums.length;
+    const completionPercentage = totalAlbums > 0 ? Math.round((ownedAlbums / totalAlbums) * 100) : 0;
+
+    // Update owned albums count
+    const ownedElement = document.getElementById("owned-albums-count");
+    if (ownedElement) {
+        ownedElement.textContent = ownedAlbums;
+    }
+
+    // Update missing albums count
+    const missingElement = document.getElementById("missing-albums-count");
+    if (missingElement) {
+        missingElement.textContent = missingAlbums;
+    }
+
+    // Update completion percentage
+    const completionElement = document.getElementById("completion-percentage");
+    if (completionElement) {
+        completionElement.textContent = `${completionPercentage}%`;
+    }
+}
+
+function updateArtistHeaderStats(albumCount, trackCount) {
+    // This function is deprecated - now using updateArtistHeroSection
+    console.log("📊 Using new hero section instead of old header stats");
+}
+
+function updateArtistHeroSection(artist, discography) {
+    console.log("🖼️ Updating artist hero section");
+
+    // Update artist image with detailed debugging
+    const imageElement = document.getElementById("artist-detail-image");
+    const fallbackElement = document.getElementById("artist-detail-image-fallback");
+
+    console.log(`🖼️ Debug Artist image info:`);
+    console.log(`   - URL: '${artist.image_url}'`);
+    console.log(`   - Type: ${typeof artist.image_url}`);
+    console.log(`   - Full artist object:`, artist);
+    console.log(`   - Image element:`, imageElement);
+    console.log(`   - Fallback element:`, fallbackElement);
+
+    if (artist.image_url && artist.image_url.trim() !== "" && artist.image_url !== "null") {
+        console.log(`✅ Setting image src to: ${artist.image_url}`);
+        imageElement.src = artist.image_url;
+        imageElement.alt = artist.name;
+        imageElement.style.display = "block";
+        if (fallbackElement) {
+            fallbackElement.style.display = "none";
+        }
+
+        imageElement.onload = () => {
+            console.log(`✅ Successfully loaded artist image: ${artist.image_url}`);
+        };
+
+        imageElement.onerror = () => {
+            console.error(`❌ Failed to load artist image: ${artist.image_url}`);
+            imageElement.style.display = "none";
+            if (fallbackElement) {
+                fallbackElement.style.display = "flex";
+            }
+        };
+    } else {
+        console.log(`🖼️ No valid image URL - showing fallback for ${artist.name}`);
+        imageElement.style.display = "none";
+        if (fallbackElement) {
+            fallbackElement.style.display = "flex";
+        }
+    }
+
+    // Update artist name
+    const nameElement = document.getElementById("artist-detail-name");
+    if (nameElement) {
+        nameElement.textContent = artist.name;
+    }
+
+    // Calculate and update stats for each category
+    updateCategoryStats('albums', discography.albums);
+    updateCategoryStats('eps', discography.eps);
+    updateCategoryStats('singles', discography.singles);
+}
+
+function updateCategoryStats(category, releases) {
+    const owned = releases.filter(r => r.owned !== false).length;
+    const missing = releases.filter(r => r.owned === false).length;
+    const total = releases.length;
+    const completion = total > 0 ? Math.round((owned / total) * 100) : 0;
+
+    console.log(`📊 ${category}: ${owned} owned, ${missing} missing, ${completion}% complete`);
+
+    // Update stats text
+    const statsElement = document.getElementById(`${category}-stats`);
+    if (statsElement) {
+        statsElement.textContent = `${owned} owned, ${missing} missing`;
+    }
+
+    // Update completion bar
+    const fillElement = document.getElementById(`${category}-completion-fill`);
+    if (fillElement) {
+        fillElement.style.width = `${completion}%`;
+    }
+
+    // Update completion text
+    const textElement = document.getElementById(`${category}-completion-text`);
+    if (textElement) {
+        textElement.textContent = `${completion}%`;
+    }
+}
+
+function populateDiscographySections(discography) {
+    // Populate albums
+    populateReleaseSection('albums', discography.albums);
+
+    // Populate EPs
+    populateReleaseSection('eps', discography.eps);
+
+    // Populate singles
+    populateReleaseSection('singles', discography.singles);
+}
+
+function populateReleaseSection(sectionType, releases) {
+    const gridId = `${sectionType}-grid`;
+    const ownedCountId = `${sectionType}-owned-count`;
+    const missingCountId = `${sectionType}-missing-count`;
+
+    const grid = document.getElementById(gridId);
+    if (!grid) return;
+
+    // Clear existing content
+    grid.innerHTML = "";
+
+    // Calculate stats
+    const ownedCount = releases.filter(release => release.owned).length;
+    const missingCount = releases.filter(release => !release.owned).length;
+
+    // Update section stats
+    const ownedElement = document.getElementById(ownedCountId);
+    const missingElement = document.getElementById(missingCountId);
+
+    if (ownedElement) {
+        ownedElement.textContent = `${ownedCount} owned`;
+    }
+
+    if (missingElement) {
+        missingElement.textContent = `${missingCount} missing`;
+    }
+
+    // Create release cards
+    releases.forEach((release, index) => {
+        console.log(`📀 Creating card ${index + 1} for: ${release.title}`);
+        const card = createReleaseCard(release);
+        grid.appendChild(card);
+        console.log(`📀 Added card to grid:`, card);
+    });
+
+    console.log(`📀 Populated ${sectionType} section: ${ownedCount} owned, ${missingCount} missing`);
+    console.log(`📀 Grid element:`, grid);
+    console.log(`📀 Grid children count:`, grid.children.length);
+}
+
+function createReleaseCard(release) {
+    const card = document.createElement("div");
+    card.className = `release-card${release.owned ? "" : " missing"}`;
+    card.setAttribute("data-release-id", release.id || "");
+    card.setAttribute("data-spotify-id", release.spotify_id || "");
+
+    // Create image
+    const imageContainer = document.createElement("div");
+    if (release.image_url && release.image_url.trim() !== "") {
+        const img = document.createElement("img");
+        img.src = release.image_url;
+        img.alt = release.title;
+        img.className = "release-image";
+        img.onerror = () => {
+            imageContainer.innerHTML = `<div class="release-image-fallback">💿</div>`;
+        };
+        imageContainer.appendChild(img);
+    } else {
+        imageContainer.innerHTML = `<div class="release-image-fallback">💿</div>`;
+    }
+
+    // Create title
+    const title = document.createElement("h4");
+    title.className = "release-title";
+    title.textContent = release.title;
+    title.title = release.title;
+
+    // Create year
+    const year = document.createElement("div");
+    year.className = "release-year";
+    year.textContent = release.year || "Unknown Year";
+
+    // Create completion info
+    const completion = document.createElement("div");
+    completion.className = "release-completion";
+
+    const completionText = document.createElement("span");
+    const completionBar = document.createElement("div");
+    completionBar.className = "completion-bar";
+
+    const completionFill = document.createElement("div");
+    completionFill.className = "completion-fill";
+
+    if (release.owned) {
+        const percentage = release.track_completion || 100;
+        completionFill.style.width = `${percentage}%`;
+
+        if (percentage === 100) {
+            completionText.textContent = "Complete";
+            completionText.className = "completion-text complete";
+            completionFill.className += " complete";
+        } else {
+            completionText.textContent = `${percentage}%`;
+            completionText.className = "completion-text partial";
+            completionFill.className += " partial";
+        }
+    } else {
+        completionText.textContent = "Missing";
+        completionText.className = "completion-text missing";
+        completionFill.className += " missing";
+        completionFill.style.width = "0%";
+    }
+
+    completionBar.appendChild(completionFill);
+    completion.appendChild(completionText);
+    completion.appendChild(completionBar);
+
+    // Assemble card
+    card.appendChild(imageContainer);
+    card.appendChild(title);
+    card.appendChild(year);
+    card.appendChild(completion);
+
+    // Add click handler for future functionality
+    card.addEventListener("click", () => {
+        console.log(`Clicked on release: ${release.title} (Owned: ${release.owned})`);
+        if (release.owned) {
+            showToast(`Album details coming soon!`, "info");
+        } else {
+            showToast(`Add to download queue coming soon!`, "info");
+        }
+    });
+
+    return card;
+}
+
+// UI state management functions
+function showArtistDetailLoading(show) {
+    const loadingElement = document.getElementById("artist-detail-loading");
+    if (loadingElement) {
+        if (show) {
+            loadingElement.classList.remove("hidden");
+        } else {
+            loadingElement.classList.add("hidden");
+        }
+    }
+}
+
+function showArtistDetailError(show, message = "") {
+    const errorElement = document.getElementById("artist-detail-error");
+    const errorMessageElement = document.getElementById("artist-detail-error-message");
+
+    if (errorElement) {
+        if (show) {
+            errorElement.classList.remove("hidden");
+            if (errorMessageElement && message) {
+                errorMessageElement.textContent = message;
+            }
+        } else {
+            errorElement.classList.add("hidden");
+        }
+    }
+}
+
+function showArtistDetailMain(show) {
+    const mainElement = document.getElementById("artist-detail-main");
+    if (mainElement) {
+        if (show) {
+            mainElement.classList.remove("hidden");
+        } else {
+            mainElement.classList.add("hidden");
         }
     }
 }
