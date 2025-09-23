@@ -5442,48 +5442,638 @@ body {
     left: 0;
     width: 100vw;
     height: 100vh;
-    background: rgba(0, 0, 0, 0.8);
-    backdrop-filter: blur(8px);
-    z-index: 1000;
+    background: rgba(18, 18, 18, 0.85);
+    backdrop-filter: blur(12px);
+    z-index: 10000;
     align-items: center;
     justify-content: center;
+    opacity: 1;
+    transition: opacity 0.4s ease-in-out;
 }
 
 .download-missing-modal-content {
-    background: #1e1e1e;
-    border-radius: 16px;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    /* Premium glassmorphic foundation matching playlist modal */
+    background: linear-gradient(135deg,
+        rgba(20, 20, 20, 0.95) 0%,
+        rgba(12, 12, 12, 0.98) 100%);
+    backdrop-filter: blur(20px) saturate(1.2);
+    border-radius: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-top: 1px solid rgba(255, 255, 255, 0.18);
+
+    /* Premium shadow effect */
+    box-shadow:
+        0 25px 80px rgba(0, 0, 0, 0.7),
+        0 10px 40px rgba(0, 0, 0, 0.5),
+        0 0 50px rgba(29, 185, 84, 0.15),
+        inset 0 1px 0 rgba(255, 255, 255, 0.15);
+
     width: 1400px;
     height: 900px;
-    max-width: 90vw;
-    max-height: 90vh;
+    max-width: 95vw;
+    max-height: 95vh;
     display: flex;
     flex-direction: column;
     overflow: hidden;
+
+    /* Smooth animation */
+    transform: scale(1);
+    transition: transform 0.4s ease-in-out;
 }
 
 .download-missing-modal-header {
-    background: linear-gradient(135deg, #2d2d2d 0%, #1a1a1a 100%);
-    border-bottom: 1px solid #404040;
-    padding: 20px 25px;
+    /* Enhanced gradient with subtle transparency and glow */
+    background: linear-gradient(135deg,
+        rgba(45, 45, 45, 0.8) 0%,
+        rgba(26, 26, 26, 0.9) 100%);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 0;
     display: flex;
-    align-items: center;
-    justify-content: space-between;
+    flex-direction: column;
+    overflow: hidden;
+
+    /* Subtle inner glow */
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
+/* Hero Section for Context-Aware Display */
+.download-missing-modal-hero {
+    display: flex;
+    align-items: center;
+    padding: 20px 28px;
+    gap: 20px;
+    position: relative;
+    min-height: 110px;
+}
+
+/* Hero Background Image (for artist/album context) */
+.download-missing-modal-hero-bg {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-size: cover;
+    background-position: center;
+    opacity: 0.15;
+    filter: blur(8px);
+    z-index: 1;
+}
+
+.download-missing-modal-hero-bg::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(135deg,
+        rgba(0, 0, 0, 0.7) 0%,
+        rgba(0, 0, 0, 0.3) 100%);
+}
+
+/* Hero Content */
+.download-missing-modal-hero-content {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    position: relative;
+    z-index: 2;
+    flex: 1;
+}
+
+/* Hero Images Container */
+.download-missing-modal-hero-images {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-shrink: 0;
+}
+
+.download-missing-modal-hero-image {
+    width: 80px;
+    height: 80px;
+    border-radius: 12px;
+    object-fit: cover;
+    box-shadow:
+        0 8px 24px rgba(0, 0, 0, 0.4),
+        0 4px 12px rgba(0, 0, 0, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    transition: all 0.3s ease;
+}
+
+.download-missing-modal-hero-image:hover {
+    transform: scale(1.05);
+    box-shadow:
+        0 12px 32px rgba(0, 0, 0, 0.5),
+        0 6px 16px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+/* Artist Image (circular) */
+.download-missing-modal-hero-image.artist {
+    border-radius: 50%;
+    width: 70px;
+    height: 70px;
+}
+
+/* Album Image (rounded square) */
+.download-missing-modal-hero-image.album {
+    border-radius: 12px;
+    width: 80px;
+    height: 80px;
+}
+
+/* Hero Icon (for wishlist/playlist without images) */
+.download-missing-modal-hero-icon {
+    width: 80px;
+    height: 80px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg,
+        rgba(29, 185, 84, 0.2) 0%,
+        rgba(30, 215, 96, 0.1) 100%);
+    border-radius: 12px;
+    font-size: 40px;
+    color: #1ed760;
+    border: 1px solid rgba(29, 185, 84, 0.3);
+    box-shadow:
+        0 8px 24px rgba(29, 185, 84, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+/* Hero Metadata */
+.download-missing-modal-hero-metadata {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+}
+
+.download-missing-modal-hero-title {
+    color: #ffffff;
+    font-size: 22px;
+    font-weight: 700;
+    margin: 0;
+    line-height: 1.2;
+    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.download-missing-modal-hero-subtitle {
+    color: #e0e0e0;
+    font-size: 16px;
+    font-weight: 500;
+    margin: 0;
+    opacity: 0.9;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.download-missing-modal-hero-details {
+    display: flex;
+    gap: 16px;
+    font-size: 14px;
+    margin-top: 4px;
+}
+
+.download-missing-modal-hero-detail {
+    color: #1ed760;
+    font-weight: 600;
+    padding: 4px 8px;
+    background: rgba(29, 185, 84, 0.1);
+    border-radius: 6px;
+    border: 1px solid rgba(29, 185, 84, 0.2);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-size: 12px;
+}
+
+/* Header Actions (close button) */
+.download-missing-modal-header-actions {
+    position: relative;
+    z-index: 3;
+    padding: 16px 24px 0 0;
+    display: flex;
+    justify-content: flex-end;
+}
+
+/* ===============================
+   CONTEXT-SPECIFIC STYLING
+   =============================== */
+
+/* Artist Album Context - Music theme with artist/album colors */
+.download-missing-modal-content[data-context="artist_album"] .download-missing-modal-hero-bg {
+    opacity: 0.2;
+}
+
+.download-missing-modal-content[data-context="artist_album"] .download-missing-modal-hero {
+    background: linear-gradient(135deg,
+        rgba(45, 45, 45, 0.9) 0%,
+        rgba(26, 26, 26, 0.95) 100%);
+}
+
+.download-missing-modal-content[data-context="artist_album"] .download-missing-modal-hero-detail {
+    background: rgba(29, 185, 84, 0.15);
+    border-color: rgba(29, 185, 84, 0.3);
+    box-shadow: 0 0 10px rgba(29, 185, 84, 0.2);
+}
+
+/* Playlist Context - Spotify green theme */
+.download-missing-modal-content[data-context="playlist"] .download-missing-modal-hero {
+    background: linear-gradient(135deg,
+        rgba(29, 185, 84, 0.1) 0%,
+        rgba(26, 26, 26, 0.95) 100%);
+}
+
+.download-missing-modal-content[data-context="playlist"] .download-missing-modal-hero-icon {
+    background: linear-gradient(135deg,
+        rgba(29, 185, 84, 0.25) 0%,
+        rgba(30, 215, 96, 0.15) 100%);
+    border-color: rgba(29, 185, 84, 0.4);
+    box-shadow: 0 8px 24px rgba(29, 185, 84, 0.25);
+}
+
+.download-missing-modal-content[data-context="playlist"] .download-missing-modal-hero-detail {
+    background: rgba(29, 185, 84, 0.12);
+    border-color: rgba(29, 185, 84, 0.25);
+}
+
+/* Wishlist Context - Eye/watch theme with purple accents */
+.download-missing-modal-content[data-context="wishlist"] .download-missing-modal-hero {
+    background: linear-gradient(135deg,
+        rgba(123, 31, 162, 0.1) 0%,
+        rgba(26, 26, 26, 0.95) 100%);
+}
+
+.download-missing-modal-content[data-context="wishlist"] .download-missing-modal-hero-icon {
+    background: linear-gradient(135deg,
+        rgba(123, 31, 162, 0.25) 0%,
+        rgba(142, 36, 170, 0.15) 100%);
+    border-color: rgba(123, 31, 162, 0.4);
+    color: #DA70D6;
+    box-shadow: 0 8px 24px rgba(123, 31, 162, 0.25);
+}
+
+.download-missing-modal-content[data-context="wishlist"] .download-missing-modal-hero-detail {
+    background: rgba(123, 31, 162, 0.12);
+    border-color: rgba(123, 31, 162, 0.25);
+    color: #DA70D6;
+}
+
+.download-missing-modal-content[data-context="wishlist"] .stat-total .dashboard-stat-number {
+    color: #DA70D6;
+    text-shadow: 0 0 20px rgba(218, 112, 214, 0.4);
+}
+
+/* ===============================
+   ANIMATIONS & POLISH
+   =============================== */
+
+/* Modal entrance animation */
+@keyframes modalFadeIn {
+    0% {
+        opacity: 0;
+        transform: scale(0.9) translateY(20px);
+        filter: blur(4px);
+    }
+    100% {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+        filter: blur(0px);
+    }
+}
+
+@keyframes modalOverlayFadeIn {
+    0% {
+        opacity: 0;
+        backdrop-filter: blur(0px);
+    }
+    100% {
+        opacity: 1;
+        backdrop-filter: blur(12px);
+    }
+}
+
+/* Apply entrance animations */
+#download-missing-modal:not(.hidden) {
+    animation: modalOverlayFadeIn 0.4s ease-out;
+}
+
+#download-missing-modal:not(.hidden) .download-missing-modal-content {
+    animation: modalFadeIn 0.4s ease-out;
+}
+
+/* Hero section animations */
+.download-missing-modal-hero-image {
+    animation: imageSlideIn 0.6s ease-out 0.2s both;
+}
+
+@keyframes imageSlideIn {
+    0% {
+        opacity: 0;
+        transform: translateX(-20px) scale(0.8);
+    }
+    100% {
+        opacity: 1;
+        transform: translateX(0) scale(1);
+    }
+}
+
+.download-missing-modal-hero-metadata {
+    animation: textSlideIn 0.6s ease-out 0.3s both;
+}
+
+@keyframes textSlideIn {
+    0% {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.download-missing-modal-hero-detail {
+    animation: detailPop 0.4s ease-out 0.5s both;
+}
+
+@keyframes detailPop {
+    0% {
+        opacity: 0;
+        transform: scale(0.8);
+    }
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+/* Stats dashboard animation */
+.dashboard-stat {
+    animation: statSlideUp 0.5s ease-out calc(0.4s + var(--stat-index, 0) * 0.1s) both;
+}
+
+@keyframes statSlideUp {
+    0% {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Progress section animation */
+.progress-item {
+    animation: progressSlideIn 0.5s ease-out calc(0.6s + var(--progress-index, 0) * 0.1s) both;
+}
+
+@keyframes progressSlideIn {
+    0% {
+        opacity: 0;
+        transform: translateX(-20px);
+    }
+    100% {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+/* Enhanced hover effects */
+.dashboard-stat:hover .dashboard-stat-number {
+    transform: scale(1.1);
+    filter: brightness(1.2);
+}
+
+.download-missing-modal-hero-detail:hover {
+    transform: translateY(-2px) scale(1.05);
+    box-shadow: 0 4px 12px rgba(29, 185, 84, 0.3);
+}
+
+/* Subtle pulse animation for active elements */
+.progress-fill {
+    position: relative;
+    overflow: hidden;
+}
+
+.progress-fill::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg,
+        transparent 0%,
+        rgba(255, 255, 255, 0.3) 50%,
+        transparent 100%);
+    animation: progressShimmer 2s infinite;
+}
+
+@keyframes progressShimmer {
+    0% {
+        left: -100%;
+    }
+    100% {
+        left: 100%;
+    }
+}
+
+/* ===============================
+   RESPONSIVE DESIGN
+   =============================== */
+
+/* Large screens (1600px+) */
+@media (min-width: 1600px) {
+    .download-missing-modal-content {
+        width: 1500px;
+        height: 950px;
+    }
+
+    .download-missing-modal-hero {
+        min-height: 140px;
+        padding: 28px 32px;
+    }
+
+    .download-missing-modal-hero-image.album {
+        width: 90px;
+        height: 90px;
+    }
+
+    .download-missing-modal-hero-image.artist {
+        width: 80px;
+        height: 80px;
+    }
+}
+
+/* Medium screens (1200px - 1599px) */
+@media (max-width: 1599px) and (min-width: 1200px) {
+    .download-missing-modal-content {
+        width: 1200px;
+        height: 800px;
+    }
+}
+
+/* Small screens (768px - 1199px) */
+@media (max-width: 1199px) and (min-width: 768px) {
+    .download-missing-modal-content {
+        width: 95vw;
+        height: 90vh;
+        max-width: 1000px;
+    }
+
+    .download-dashboard-stats {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 20px;
+    }
+
+    .download-missing-modal-hero {
+        min-height: 100px;
+        padding: 20px 24px;
+    }
+
+    .download-missing-modal-hero-image.album {
+        width: 70px;
+        height: 70px;
+    }
+
+    .download-missing-modal-hero-image.artist {
+        width: 60px;
+        height: 60px;
+    }
+
+    .download-missing-modal-hero-icon {
+        width: 70px;
+        height: 70px;
+        font-size: 32px;
+    }
+
+    .download-missing-modal-hero-title {
+        font-size: 20px;
+    }
+
+    .download-missing-modal-hero-subtitle {
+        font-size: 14px;
+    }
+}
+
+/* Mobile screens (767px and below) */
+@media (max-width: 767px) {
+    .download-missing-modal-content {
+        width: 95vw;
+        height: 95vh;
+        max-width: none;
+        border-radius: 16px;
+    }
+
+    .download-missing-modal-hero {
+        flex-direction: column;
+        text-align: center;
+        min-height: auto;
+        padding: 20px;
+        gap: 16px;
+    }
+
+    .download-missing-modal-hero-content {
+        flex-direction: column;
+        gap: 16px;
+    }
+
+    .download-missing-modal-hero-images {
+        justify-content: center;
+    }
+
+    .download-missing-modal-hero-image.album,
+    .download-missing-modal-hero-image.artist {
+        width: 60px;
+        height: 60px;
+    }
+
+    .download-missing-modal-hero-icon {
+        width: 60px;
+        height: 60px;
+        font-size: 28px;
+        margin: 0 auto;
+    }
+
+    .download-missing-modal-hero-title {
+        font-size: 18px;
+        white-space: normal;
+        text-align: center;
+    }
+
+    .download-missing-modal-hero-subtitle {
+        font-size: 14px;
+        white-space: normal;
+        text-align: center;
+    }
+
+    .download-missing-modal-hero-details {
+        justify-content: center;
+        flex-wrap: wrap;
+    }
+
+    .download-missing-modal-body {
+        padding: 0 20px 20px 20px;
+        gap: 20px;
+    }
+
+    .download-dashboard-stats {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 16px;
+        padding: 20px;
+    }
+
+    .dashboard-stat-number {
+        font-size: 28px;
+    }
+
+    .dashboard-stat-label {
+        font-size: 12px;
+    }
+
+    .download-missing-modal-footer {
+        padding: 20px;
+        flex-direction: column;
+        gap: 16px;
+    }
+
+    .download-phase-controls {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .download-control-btn {
+        flex: 1;
+        max-width: 200px;
+    }
+}
+
+/* Legacy title styling - now handled by hero section */
 .download-missing-modal-title {
-    color: #1db954;
+    color: #ffffff;
     font-size: 18px;
     font-weight: 700;
     margin: 0;
+    line-height: 1.2;
+    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
 .download-missing-modal-close {
-    color: #cccccc;
-    font-size: 32px;
+    color: #b3b3b3;
+    font-size: 28px;
     font-weight: 300;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all 0.3s ease;
     line-height: 1;
     width: 40px;
     height: 40px;
@@ -5491,124 +6081,226 @@ body {
     align-items: center;
     justify-content: center;
     border-radius: 50%;
+    padding: 4px;
+    margin: -4px;
 }
 
 .download-missing-modal-close:hover {
     color: #ffffff;
-    background: rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.15);
     transform: scale(1.1);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
 .download-missing-modal-body {
     flex: 1;
     display: flex;
     flex-direction: column;
-    padding: 25px;
+    padding: 16px 28px 25px 28px;
     gap: 20px;
     overflow: hidden;
 }
 
 /* Dashboard Stats Section */
 .download-dashboard-stats {
-    background: #2d2d2d;
-    border: 1px solid #444444;
-    border-radius: 12px;
-    padding: 20px;
+    /* Premium glassmorphic card */
+    background: linear-gradient(135deg,
+        rgba(35, 35, 35, 0.7) 0%,
+        rgba(25, 25, 25, 0.8) 100%);
+    backdrop-filter: blur(10px) saturate(1.1);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-top: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 16px;
+    padding: 24px;
     display: grid;
     grid-template-columns: repeat(4, 1fr);
-    gap: 20px;
+    gap: 24px;
+
+    /* Premium shadow with subtle glow */
+    box-shadow:
+        0 8px 32px rgba(0, 0, 0, 0.4),
+        0 4px 16px rgba(0, 0, 0, 0.2),
+        0 0 20px rgba(29, 185, 84, 0.08),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
 .dashboard-stat {
     text-align: center;
+    padding: 8px;
+    border-radius: 12px;
+    transition: all 0.3s ease;
+}
+
+.dashboard-stat:hover {
+    background: rgba(255, 255, 255, 0.05);
+    transform: translateY(-2px);
 }
 
 .dashboard-stat-number {
-    font-size: 28px;
+    font-size: 32px;
     font-weight: 700;
-    margin-bottom: 5px;
+    margin-bottom: 8px;
+    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    transition: all 0.3s ease;
 }
 
 .dashboard-stat-label {
-    font-size: 13px;
-    color: #cccccc;
-    font-weight: 500;
+    font-size: 14px;
+    color: #e0e0e0;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    opacity: 0.9;
 }
 
-.stat-total .dashboard-stat-number { color: #1db954; }
-.stat-found .dashboard-stat-number { color: #4CAF50; }
-.stat-missing .dashboard-stat-number { color: #FF6B35; }
-.stat-downloaded .dashboard-stat-number { color: #2196F3; }
+/* Enhanced stat colors with glow effects */
+.stat-total .dashboard-stat-number {
+    color: #1ed760;
+    text-shadow: 0 0 20px rgba(30, 215, 96, 0.4);
+}
+
+.stat-found .dashboard-stat-number {
+    color: #4CAF50;
+    text-shadow: 0 0 20px rgba(76, 175, 80, 0.4);
+}
+
+.stat-missing .dashboard-stat-number {
+    color: #FF6B35;
+    text-shadow: 0 0 20px rgba(255, 107, 53, 0.4);
+}
+
+.stat-downloaded .dashboard-stat-number {
+    color: #2196F3;
+    text-shadow: 0 0 20px rgba(33, 150, 243, 0.4);
+}
 
 /* Progress Section */
 .download-progress-section {
-    background: #2d2d2d;
-    border: 1px solid #444444;
-    border-radius: 12px;
+    /* Premium glassmorphic card matching stats */
+    background: linear-gradient(135deg,
+        rgba(35, 35, 35, 0.7) 0%,
+        rgba(25, 25, 25, 0.8) 100%);
+    backdrop-filter: blur(10px) saturate(1.1);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-top: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 16px;
     padding: 20px;
     display: flex;
     flex-direction: column;
-    gap: 15px;
+    gap: 16px;
+
+    /* Premium shadow with subtle glow */
+    box-shadow:
+        0 8px 32px rgba(0, 0, 0, 0.4),
+        0 4px 16px rgba(0, 0, 0, 0.2),
+        0 0 20px rgba(29, 185, 84, 0.08),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
 .progress-item {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
+    padding: 2px 0;
 }
 
 .progress-label {
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 600;
-    color: #cccccc;
+    color: #e8e8e8;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 
 .progress-bar {
-    background: #404040;
-    border-radius: 8px;
-    height: 8px;
+    background: rgba(64, 64, 64, 0.8);
+    border-radius: 10px;
+    height: 10px;
     overflow: hidden;
+    box-shadow:
+        inset 0 2px 4px rgba(0, 0, 0, 0.3),
+        0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
 .progress-fill {
     background: linear-gradient(90deg, #1db954, #1ed760);
     height: 100%;
-    border-radius: 8px;
-    transition: width 0.3s ease;
+    border-radius: 10px;
+    transition: width 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
     width: 0%;
+    box-shadow:
+        0 0 15px rgba(29, 185, 84, 0.6),
+        inset 0 1px 2px rgba(255, 255, 255, 0.3);
+    position: relative;
 }
 
-.progress-fill.analysis { background: linear-gradient(90deg, #2196F3, #21CBF3); }
-.progress-fill.download { background: linear-gradient(90deg, #FF6B35, #FF8A35); }
+.progress-fill::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 50%;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.3) 0%, transparent 100%);
+    border-radius: 10px 10px 0 0;
+}
+
+.progress-fill.analysis {
+    background: linear-gradient(90deg, #2196F3, #21CBF3);
+    box-shadow:
+        0 0 15px rgba(33, 150, 243, 0.6),
+        inset 0 1px 2px rgba(255, 255, 255, 0.3);
+}
+
+.progress-fill.download {
+    background: linear-gradient(90deg, #FF6B35, #FF8A35);
+    box-shadow:
+        0 0 15px rgba(255, 107, 53, 0.6),
+        inset 0 1px 2px rgba(255, 255, 255, 0.3);
+}
 
 /* Track Table Section */
 .download-tracks-section {
-    background: #2d2d2d;
-    border: 1px solid #444444;
-    border-radius: 12px;
+    /* Premium glassmorphic card matching other sections */
+    background: linear-gradient(135deg,
+        rgba(35, 35, 35, 0.7) 0%,
+        rgba(25, 25, 25, 0.8) 100%);
+    backdrop-filter: blur(10px) saturate(1.1);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-top: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 16px;
     flex: 1;
     display: flex;
     flex-direction: column;
     overflow: hidden;
+
+    /* Premium shadow with subtle glow */
+    box-shadow:
+        0 8px 32px rgba(0, 0, 0, 0.4),
+        0 4px 16px rgba(0, 0, 0, 0.2),
+        0 0 20px rgba(29, 185, 84, 0.08),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
 .download-tracks-header {
-    padding: 15px 20px;
-    border-bottom: 1px solid #444444;
-    background: #333333;
+    padding: 18px 24px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    background: linear-gradient(135deg,
+        rgba(40, 40, 40, 0.8) 0%,
+        rgba(30, 30, 30, 0.9) 100%);
 }
 
 .download-tracks-title {
-    font-size: 15px;
-    font-weight: 600;
+    font-size: 16px;
+    font-weight: 700;
     color: #ffffff;
     margin: 0;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 
 .download-tracks-table-container {
@@ -5730,12 +6422,17 @@ body {
 
 /* Modal Footer */
 .download-missing-modal-footer {
-    background: #2a2a2a;
-    border-top: 1px solid #404040;
-    padding: 20px 25px;
+    background: linear-gradient(135deg,
+        rgba(42, 42, 42, 0.9) 0%,
+        rgba(30, 30, 30, 0.95) 100%);
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 24px 28px;
     display: flex;
     align-items: center;
     justify-content: space-between;
+
+    /* Subtle inner glow */
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
 .download-phase-controls {
