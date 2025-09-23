@@ -396,6 +396,15 @@ async function loadPageData(pageId) {
                     restoreArtistsPageState();
                 }
                 break;
+            case 'library':
+                // Initialize and load library data
+                if (!libraryPageState.isInitialized) {
+                    initializeLibraryPage();
+                } else {
+                    // Refresh data when returning to page
+                    await loadLibraryArtists();
+                }
+                break;
             case 'settings':
                 initializeSettings();
                 await loadSettingsData();
@@ -13588,3 +13597,298 @@ function cleanupSyncPageLogs() {
 
 // --- Global Cleanup on Page Unload ---
 // Note: Automatic wishlist processing now runs server-side and continues even when browser is closed
+// ===============================
+// LIBRARY PAGE FUNCTIONALITY
+// ===============================
+
+// Library page state
+const libraryPageState = {
+    isInitialized: false,
+    currentSearch: "",
+    currentLetter: "all",
+    currentPage: 1,
+    limit: 75,
+    debounceTimer: null
+};
+
+function initializeLibraryPage() {
+    console.log("🔧 Initializing Library page...");
+
+    try {
+        // Initialize search functionality
+        initializeLibrarySearch();
+
+        // Initialize alphabet selector
+        initializeAlphabetSelector();
+
+        // Initialize pagination
+        initializeLibraryPagination();
+
+        // Load initial data
+        loadLibraryArtists();
+
+        libraryPageState.isInitialized = true;
+        console.log("✅ Library page initialized successfully");
+
+    } catch (error) {
+        console.error("❌ Error initializing Library page:", error);
+        showToast("Failed to initialize Library page", "error");
+    }
+}
+
+function initializeLibrarySearch() {
+    const searchInput = document.getElementById("library-search-input");
+    if (!searchInput) return;
+
+    searchInput.addEventListener("input", (e) => {
+        const query = e.target.value.trim();
+
+        // Clear existing debounce timer
+        if (libraryPageState.debounceTimer) {
+            clearTimeout(libraryPageState.debounceTimer);
+        }
+
+        // Debounce search requests
+        libraryPageState.debounceTimer = setTimeout(() => {
+            libraryPageState.currentSearch = query;
+            libraryPageState.currentPage = 1; // Reset to first page
+            loadLibraryArtists();
+        }, 300);
+    });
+
+    // Clear search on Escape key
+    searchInput.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") {
+            searchInput.value = "";
+            libraryPageState.currentSearch = "";
+            libraryPageState.currentPage = 1;
+            loadLibraryArtists();
+        }
+    });
+}
+
+function initializeAlphabetSelector() {
+    const alphabetButtons = document.querySelectorAll(".alphabet-btn");
+
+    alphabetButtons.forEach(button => {
+        button.addEventListener("click", () => {
+            const letter = button.getAttribute("data-letter");
+
+            // Update active state
+            alphabetButtons.forEach(btn => btn.classList.remove("active"));
+            button.classList.add("active");
+
+            // Update state and load data
+            libraryPageState.currentLetter = letter;
+            libraryPageState.currentPage = 1; // Reset to first page
+            loadLibraryArtists();
+        });
+    });
+}
+
+function initializeLibraryPagination() {
+    const prevBtn = document.getElementById("prev-page-btn");
+    const nextBtn = document.getElementById("next-page-btn");
+
+    if (prevBtn) {
+        prevBtn.addEventListener("click", () => {
+            if (libraryPageState.currentPage > 1) {
+                libraryPageState.currentPage--;
+                loadLibraryArtists();
+            }
+        });
+    }
+
+    if (nextBtn) {
+        nextBtn.addEventListener("click", () => {
+            libraryPageState.currentPage++;
+            loadLibraryArtists();
+        });
+    }
+}
+
+async function loadLibraryArtists() {
+    try {
+        // Show loading state
+        showLibraryLoading(true);
+
+        // Build query parameters
+        const params = new URLSearchParams({
+            search: libraryPageState.currentSearch,
+            letter: libraryPageState.currentLetter,
+            page: libraryPageState.currentPage,
+            limit: libraryPageState.limit
+        });
+
+        // Fetch artists from API
+        const response = await fetch(`/api/library/artists?${params}`);
+        const data = await response.json();
+
+        if (!data.success) {
+            throw new Error(data.error || "Failed to load artists");
+        }
+
+        // Update UI with artists
+        displayLibraryArtists(data.artists);
+        updateLibraryPagination(data.pagination);
+        updateLibraryStats(data.pagination.total_count);
+
+        // Hide loading state
+        showLibraryLoading(false);
+
+        // Show empty state if no artists
+        if (data.artists.length === 0) {
+            showLibraryEmpty(true);
+        } else {
+            showLibraryEmpty(false);
+        }
+
+    } catch (error) {
+        console.error("❌ Error loading library artists:", error);
+        showToast("Failed to load artists", "error");
+        showLibraryLoading(false);
+        showLibraryEmpty(true);
+    }
+}
+
+function displayLibraryArtists(artists) {
+    const grid = document.getElementById("library-artists-grid");
+    if (!grid) return;
+
+    // Clear existing content
+    grid.innerHTML = "";
+
+    // Create artist cards
+    artists.forEach(artist => {
+        const card = createLibraryArtistCard(artist);
+        grid.appendChild(card);
+    });
+}
+
+function createLibraryArtistCard(artist) {
+    const card = document.createElement("div");
+    card.className = "library-artist-card";
+    card.setAttribute("data-artist-id", artist.id);
+
+    // Create image element
+    const imageContainer = document.createElement("div");
+    imageContainer.className = "library-artist-image";
+
+    if (artist.image_url && artist.image_url.trim() !== "") {
+        const img = document.createElement("img");
+        img.src = artist.image_url;
+        img.alt = artist.name;
+        img.onerror = () => {
+            console.log(`Failed to load image for ${artist.name}: ${artist.image_url}`);
+            // Replace with fallback on error
+            imageContainer.innerHTML = `<div class="library-artist-image-fallback">🎵</div>`;
+        };
+        img.onload = () => {
+            console.log(`Successfully loaded image for ${artist.name}: ${artist.image_url}`);
+        };
+        imageContainer.appendChild(img);
+    } else {
+        console.log(`No image URL for ${artist.name}: '${artist.image_url}'`);
+        imageContainer.innerHTML = `<div class="library-artist-image-fallback">🎵</div>`;
+    }
+
+    // Create info section
+    const info = document.createElement("div");
+    info.className = "library-artist-info";
+
+    const name = document.createElement("h3");
+    name.className = "library-artist-name";
+    name.textContent = artist.name;
+    name.title = artist.name; // For tooltip on long names
+
+    const stats = document.createElement("div");
+    stats.className = "library-artist-stats";
+
+    if (artist.album_count > 0 || artist.track_count > 0) {
+        const albumStat = document.createElement("span");
+        albumStat.className = "library-artist-stat";
+        albumStat.textContent = `${artist.album_count} album${artist.album_count !== 1 ? "s" : ""}`;
+
+        const trackStat = document.createElement("span");
+        trackStat.className = "library-artist-stat";
+        trackStat.textContent = `${artist.track_count} track${artist.track_count !== 1 ? "s" : ""}`;
+
+        stats.appendChild(albumStat);
+        stats.appendChild(trackStat);
+    }
+
+    info.appendChild(name);
+    info.appendChild(stats);
+
+    // Assemble card
+    card.appendChild(imageContainer);
+    card.appendChild(info);
+
+    // Add click handler (for future functionality)
+    card.addEventListener("click", () => {
+        // TODO: Implement artist detail view
+        console.log(`Clicked on artist: ${artist.name}`);
+        showToast(`Artist details coming soon!`, "info");
+    });
+
+    return card;
+}
+
+function updateLibraryPagination(pagination) {
+    const prevBtn = document.getElementById("prev-page-btn");
+    const nextBtn = document.getElementById("next-page-btn");
+    const pageInfo = document.getElementById("page-info");
+    const paginationContainer = document.getElementById("library-pagination");
+
+    if (!paginationContainer) return;
+
+    // Update button states
+    if (prevBtn) {
+        prevBtn.disabled = !pagination.has_prev;
+    }
+
+    if (nextBtn) {
+        nextBtn.disabled = !pagination.has_next;
+    }
+
+    // Update page info
+    if (pageInfo) {
+        pageInfo.textContent = `Page ${pagination.page} of ${pagination.total_pages}`;
+    }
+
+    // Show/hide pagination based on total pages
+    if (pagination.total_pages > 1) {
+        paginationContainer.classList.remove("hidden");
+    } else {
+        paginationContainer.classList.add("hidden");
+    }
+}
+
+function updateLibraryStats(totalCount) {
+    const countElement = document.getElementById("library-artist-count");
+    if (countElement) {
+        countElement.textContent = totalCount;
+    }
+}
+
+function showLibraryLoading(show) {
+    const loadingElement = document.getElementById("library-loading");
+    if (loadingElement) {
+        if (show) {
+            loadingElement.classList.remove("hidden");
+        } else {
+            loadingElement.classList.add("hidden");
+        }
+    }
+}
+
+function showLibraryEmpty(show) {
+    const emptyElement = document.getElementById("library-empty");
+    if (emptyElement) {
+        if (show) {
+            emptyElement.classList.remove("hidden");
+        } else {
+            emptyElement.classList.add("hidden");
+        }
+    }
+}

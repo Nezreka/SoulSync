@@ -33,6 +33,10 @@
                     <span class="nav-icon">🎵</span>
                     <span class="nav-text">Artists</span>
                 </button>
+                <button class="nav-button" data-page="library">
+                    <span class="nav-icon">📚</span>
+                    <span class="nav-text">Library</span>
+                </button>
                 <button class="nav-button" data-page="settings">
                     <span class="nav-icon">⚙️</span>
                     <span class="nav-text">Settings</span>
@@ -626,7 +630,105 @@
                     </div>
                 </div>
             </div>
-            
+
+            <!-- Library Page -->
+            <div class="page" id="library-page">
+                <div class="library-container">
+                    <!-- Header -->
+                    <div class="library-header">
+                        <div class="library-header-content">
+                            <h2 class="library-title">📚 Music Library</h2>
+                            <p class="library-subtitle">Browse your complete music collection</p>
+                        </div>
+                        <div class="library-stats" id="library-stats">
+                            <span class="library-stat">
+                                <span class="stat-number" id="library-artist-count">0</span>
+                                <span class="stat-label">Artists</span>
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- Search and Filters -->
+                    <div class="library-controls">
+                        <div class="library-search-container">
+                            <input type="text"
+                                   id="library-search-input"
+                                   class="library-search-input"
+                                   placeholder="Search artists...">
+                            <div class="library-search-icon">🔍</div>
+                        </div>
+
+                        <!-- Alphabet Selector -->
+                        <div class="alphabet-selector" id="alphabet-selector">
+                            <div class="alphabet-selector-inner">
+                                <button class="alphabet-btn active" data-letter="all">All</button>
+                                <button class="alphabet-btn" data-letter="a">A</button>
+                                <button class="alphabet-btn" data-letter="b">B</button>
+                                <button class="alphabet-btn" data-letter="c">C</button>
+                                <button class="alphabet-btn" data-letter="d">D</button>
+                                <button class="alphabet-btn" data-letter="e">E</button>
+                                <button class="alphabet-btn" data-letter="f">F</button>
+                                <button class="alphabet-btn" data-letter="g">G</button>
+                                <button class="alphabet-btn" data-letter="h">H</button>
+                                <button class="alphabet-btn" data-letter="i">I</button>
+                                <button class="alphabet-btn" data-letter="j">J</button>
+                                <button class="alphabet-btn" data-letter="k">K</button>
+                                <button class="alphabet-btn" data-letter="l">L</button>
+                                <button class="alphabet-btn" data-letter="m">M</button>
+                                <button class="alphabet-btn" data-letter="n">N</button>
+                                <button class="alphabet-btn" data-letter="o">O</button>
+                                <button class="alphabet-btn" data-letter="p">P</button>
+                                <button class="alphabet-btn" data-letter="q">Q</button>
+                                <button class="alphabet-btn" data-letter="r">R</button>
+                                <button class="alphabet-btn" data-letter="s">S</button>
+                                <button class="alphabet-btn" data-letter="t">T</button>
+                                <button class="alphabet-btn" data-letter="u">U</button>
+                                <button class="alphabet-btn" data-letter="v">V</button>
+                                <button class="alphabet-btn" data-letter="w">W</button>
+                                <button class="alphabet-btn" data-letter="x">X</button>
+                                <button class="alphabet-btn" data-letter="y">Y</button>
+                                <button class="alphabet-btn" data-letter="z">Z</button>
+                                <button class="alphabet-btn" data-letter="#">#</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Content Area -->
+                    <div class="library-content">
+                        <!-- Loading State -->
+                        <div class="library-loading hidden" id="library-loading">
+                            <div class="loading-spinner"></div>
+                            <div class="loading-text">Loading artists...</div>
+                        </div>
+
+                        <!-- Artist Grid -->
+                        <div class="library-artists-grid" id="library-artists-grid">
+                            <!-- Artist cards will be populated here -->
+                        </div>
+
+                        <!-- Empty State -->
+                        <div class="library-empty hidden" id="library-empty">
+                            <div class="empty-icon">🎵</div>
+                            <div class="empty-title">No artists found</div>
+                            <div class="empty-subtitle">Try adjusting your search or filters</div>
+                        </div>
+
+                        <!-- Pagination -->
+                        <div class="library-pagination hidden" id="library-pagination">
+                            <button class="pagination-btn" id="prev-page-btn" disabled>
+                                <span>← Previous</span>
+                            </button>
+                            <div class="pagination-info">
+                                <span id="page-info">Page 1 of 1</span>
+                            </div>
+                            <button class="pagination-btn" id="next-page-btn" disabled>
+                                <span>Next →</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Settings Page -->
             <div class="page" id="settings-page">
                 <div class="page-header">

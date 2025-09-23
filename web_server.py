@@ -2590,14 +2590,141 @@ def maintain_search_history():
         print(f"Error maintaining search history: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
-@app.route('/api/artists')
-def get_artists():
-    # Placeholder: returns mock artist data
-    mock_artists = [
-        {"name": "Queen", "album_count": 15, "image": None},
-        {"name": "Led Zeppelin", "album_count": 9, "image": None}
-    ]
-    return jsonify({"artists": mock_artists})
+def fix_artist_image_url(thumb_url):
+    """Convert localhost URLs to proper server URLs using config"""
+    if not thumb_url:
+        return None
+
+    try:
+        # Check if it's a localhost URL or relative path that needs fixing
+        needs_fixing = (
+            thumb_url.startswith('http://localhost:') or
+            thumb_url.startswith('https://localhost:') or
+            thumb_url.startswith('/library/')  # Plex relative paths
+        )
+
+        if needs_fixing:
+            active_server = config_manager.get_active_media_server()
+            print(f"🔧 Fixing URL: {thumb_url}, Active server: {active_server}")
+
+            if active_server == 'plex':
+                plex_config = config_manager.get_plex_config()
+                plex_base_url = plex_config.get('base_url', '')
+                plex_token = plex_config.get('token', '')
+                print(f"🔧 Plex config - base_url: {plex_base_url}, token: {plex_token[:10]}...")
+
+                if plex_base_url and plex_token:
+                    # Extract the path from URL
+                    if thumb_url.startswith('/library/'):
+                        # Already a path
+                        path = thumb_url
+                    else:
+                        # Full localhost URL, extract path
+                        from urllib.parse import urlparse
+                        parsed = urlparse(thumb_url)
+                        path = parsed.path
+
+                    # Construct proper Plex URL with token
+                    fixed_url = f"{plex_base_url.rstrip('/')}{path}?X-Plex-Token={plex_token}"
+                    print(f"🔧 Fixed URL: {fixed_url}")
+                    return fixed_url
+
+            # For other servers, we might need similar logic later
+
+        # Return original URL if no fixing needed/possible
+        return thumb_url
+
+    except Exception as e:
+        print(f"Error fixing image URL '{thumb_url}': {e}")
+        return thumb_url
+
+@app.route('/api/library/artists')
+def get_library_artists():
+    """Get artists for the library page with search, filtering, and pagination"""
+    try:
+        # Get query parameters
+        search_query = request.args.get('search', '')
+        letter = request.args.get('letter', 'all')
+        page = int(request.args.get('page', 1))
+        limit = int(request.args.get('limit', 75))
+
+        # Get database instance
+        database = get_database()
+
+        # Get artists from database
+        result = database.get_library_artists(
+            search_query=search_query,
+            letter=letter,
+            page=page,
+            limit=limit
+        )
+
+        # Fix image URLs for all artists
+        for artist in result['artists']:
+            if artist.get('image_url'):
+                artist['image_url'] = fix_artist_image_url(artist['image_url'])
+
+        return jsonify({
+            "success": True,
+            **result
+        })
+
+    except Exception as e:
+        print(f"❌ Error fetching library artists: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "artists": [],
+            "pagination": {
+                "page": 1,
+                "limit": 75,
+                "total_count": 0,
+                "total_pages": 0,
+                "has_prev": False,
+                "has_next": False
+            }
+        }), 500
+
+@app.route('/api/library/debug-photos')
+def debug_library_photos():
+    """Debug endpoint to check artist photo URLs"""
+    try:
+        database = get_database()
+
+        with database._get_connection() as conn:
+            cursor = conn.cursor()
+
+            # Get first 10 artists with their photo URLs
+            cursor.execute("""
+                SELECT name, thumb_url, server_source
+                FROM artists
+                WHERE thumb_url IS NOT NULL AND thumb_url != ''
+                LIMIT 10
+            """)
+
+            artists_with_photos = cursor.fetchall()
+
+            # Get first 10 artists without photos
+            cursor.execute("""
+                SELECT name, thumb_url, server_source
+                FROM artists
+                WHERE thumb_url IS NULL OR thumb_url = ''
+                LIMIT 10
+            """)
+
+            artists_without_photos = cursor.fetchall()
+
+            return jsonify({
+                "artists_with_photos": [dict(row) for row in artists_with_photos],
+                "artists_without_photos": [dict(row) for row in artists_without_photos],
+                "total_with_photos": len(artists_with_photos),
+                "total_without_photos": len(artists_without_photos)
+            })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/artist/<artist_id>/discography', methods=['GET'])
 def get_artist_discography(artist_id):
