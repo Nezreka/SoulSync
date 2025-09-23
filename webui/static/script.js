@@ -4200,6 +4200,14 @@ function processModalStatusUpdate(playlistId, data) {
             const completionMessage = `Download complete! ${completedCount} downloaded, ${failedOrCancelledCount} failed.`;
             showToast(completionMessage, 'success');
 
+            // Auto-close wishlist modal when completed (for auto-processing)
+            if (playlistId === 'wishlist') {
+                console.log('🔄 [Auto-Wishlist] Auto-closing completed wishlist modal to enable next cycle');
+                setTimeout(() => {
+                    closeDownloadMissingModal(playlistId);
+                }, 3000); // 3-second delay to show completion message
+            }
+
             // Check if any other processes still need polling
             checkAndCleanupGlobalPolling();
 

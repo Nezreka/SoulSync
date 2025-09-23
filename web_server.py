@@ -5794,12 +5794,8 @@ def _sanitize_track_data_for_processing(track_data):
 def start_wishlist_auto_processing():
     """Start automatic wishlist processing with 1-minute initial delay."""
     global wishlist_auto_timer
-    
-    # Skip if this is Flask's debug reloader process
-    import os
-    if os.environ.get('WERKZEUG_RUN_MAIN') != 'true':
-        print("🔄 Skipping auto-processing start in Flask debug reloader")
-        return
+
+    print("🚀 [Auto-Wishlist] Initializing automatic wishlist processing...")
     
     with wishlist_timer_lock:
         # Stop any existing timer to prevent duplicates
@@ -5810,6 +5806,7 @@ def start_wishlist_auto_processing():
         wishlist_auto_timer = threading.Timer(60.0, _process_wishlist_automatically)  # 1 minute
         wishlist_auto_timer.daemon = True
         wishlist_auto_timer.start()
+        print(f"✅ [Debug] Timer started successfully - will trigger in 60 seconds")
 
 def stop_wishlist_auto_processing():
     """Stop automatic wishlist processing and cleanup timer."""
@@ -5824,21 +5821,21 @@ def stop_wishlist_auto_processing():
         wishlist_auto_processing = False
 
 def schedule_next_wishlist_processing():
-    """Schedule next automatic wishlist processing in 10 minutes."""
+    """Schedule next automatic wishlist processing in 30 minutes."""
     global wishlist_auto_timer
-    
+
     with wishlist_timer_lock:
-        print("⏰ Scheduling next automatic wishlist processing in 10 minutes")
-        wishlist_auto_timer = threading.Timer(600.0, _process_wishlist_automatically)  # 10 minutes
+        print("⏰ Scheduling next automatic wishlist processing in 30 minutes")
+        wishlist_auto_timer = threading.Timer(1800.0, _process_wishlist_automatically)  # 30 minutes (1800 seconds)
         wishlist_auto_timer.daemon = True
         wishlist_auto_timer.start()
 
 def _process_wishlist_automatically():
     """Main automatic processing logic that runs in background thread."""
     global wishlist_auto_processing
-    
-    print("🤖 Starting automatic wishlist processing...")
-    
+
+    print("🤖 [Auto-Wishlist] Timer triggered - starting automatic wishlist processing...")
+
     try:
         with wishlist_timer_lock:
             if wishlist_auto_processing:
@@ -5864,14 +5861,15 @@ def _process_wishlist_automatically():
             
             # Check if wishlist has tracks
             count = wishlist_service.get_wishlist_count()
+            print(f"🔍 [Auto-Wishlist] Wishlist count check: {count} tracks found")
             if count == 0:
-                print("ℹ️ No tracks in wishlist for auto-processing.")
+                print("ℹ️ [Auto-Wishlist] No tracks in wishlist for auto-processing.")
                 with wishlist_timer_lock:
                     wishlist_auto_processing = False
                 schedule_next_wishlist_processing()
                 return
-            
-            print(f"🎵 Found {count} tracks in wishlist, starting automatic processing...")
+
+            print(f"🎵 [Auto-Wishlist] Found {count} tracks in wishlist, starting automatic processing...")
             
             # Check if wishlist processing is already active
             playlist_id = "wishlist"
@@ -6789,7 +6787,7 @@ def _process_failed_tracks_to_wishlist_exact_with_auto_completion(batch_id):
             wishlist_auto_processing = False
         
         # Schedule next automatic processing cycle
-        print("⏰ [Auto-Wishlist] Scheduling next automatic cycle in 10 minutes")
+        print("⏰ [Auto-Wishlist] Scheduling next automatic cycle in 30 minutes")
         schedule_next_wishlist_processing()
         
         return completion_summary
@@ -6804,7 +6802,7 @@ def _process_failed_tracks_to_wishlist_exact_with_auto_completion(batch_id):
             wishlist_auto_processing = False
         
         # Schedule next cycle even after error to maintain continuity
-        print("⏰ [Auto-Wishlist] Scheduling next cycle after error (10 minutes)")
+        print("⏰ [Auto-Wishlist] Scheduling next cycle after error (30 minutes)")
         schedule_next_wishlist_processing()
         
         return {'tracks_added': 0, 'errors': 1, 'total_failed': 0}
