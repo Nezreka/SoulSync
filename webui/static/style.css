@@ -6493,6 +6493,90 @@ body {
     box-shadow: none;
 }
 
+/* Force Download Toggle Styling */
+.force-download-toggle-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 16px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    transition: all 0.2s ease;
+}
+
+.force-download-toggle-container:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.12);
+}
+
+.force-download-toggle {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.force-download-toggle span {
+    font-size: 13px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.8);
+    transition: color 0.2s ease;
+}
+
+/* Toggle Switch */
+.force-download-toggle input[type="checkbox"] {
+    position: relative;
+    width: 48px;
+    height: 24px;
+    appearance: none;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 12px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    outline: none;
+}
+
+.force-download-toggle input[type="checkbox"]:before {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 18px;
+    height: 18px;
+    background: #ffffff;
+    border-radius: 50%;
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.force-download-toggle input[type="checkbox"]:checked {
+    background: linear-gradient(135deg, #1db954, #1ed760);
+    border-color: rgba(29, 185, 84, 0.4);
+    box-shadow: 0 0 12px rgba(29, 185, 84, 0.3);
+}
+
+.force-download-toggle input[type="checkbox"]:checked:before {
+    transform: translateX(24px);
+    background: #ffffff;
+}
+
+.force-download-toggle input[type="checkbox"]:checked + span {
+    color: #1ed760;
+    font-weight: 600;
+}
+
+.force-download-toggle:hover input[type="checkbox"] {
+    border-color: rgba(255, 255, 255, 0.3);
+}
+
+.force-download-toggle:hover input[type="checkbox"]:checked {
+    border-color: rgba(29, 185, 84, 0.6);
+    box-shadow: 0 0 16px rgba(29, 185, 84, 0.4);
+}
+
 .modal-close-section {
     display: flex;
     align-items: center;
