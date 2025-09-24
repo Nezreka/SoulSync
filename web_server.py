@@ -11635,12 +11635,17 @@ def start_metadata_update():
         # Check active server and client availability - EXACTLY like dashboard.py
         active_server = config_manager.get_active_media_server()
         
-        # Get appropriate media client - EXACTLY like dashboard.py start_metadata_update()
+        # Get appropriate media client - Support all three servers
         if active_server == "jellyfin":
             media_client = jellyfin_client
             if not media_client:
                 add_activity_item("❌", "Metadata Update", "Jellyfin client not available", "Now")
                 return jsonify({"success": False, "error": "Jellyfin client not available"}), 400
+        elif active_server == "navidrome":
+            media_client = navidrome_client
+            if not media_client:
+                add_activity_item("❌", "Metadata Update", "Navidrome client not available", "Now")
+                return jsonify({"success": False, "error": "Navidrome client not available"}), 400
         else:  # plex
             media_client = plex_client
             if not media_client:
@@ -11791,6 +11796,9 @@ class WebMetadataUpdateWorker:
                 # Enable lightweight mode for Jellyfin to skip track caching
                 if self.server_type == "jellyfin":
                     self.media_client.set_metadata_only_mode(True)
+                elif self.server_type == "navidrome":
+                    # Navidrome doesn't need special mode setting
+                    pass
                 
                 all_artists = self.media_client.get_all_artists()
                 print(f"[DEBUG] Raw artists returned: {[getattr(a, 'title', 'NO_TITLE') for a in (all_artists or [])]}")
@@ -11972,27 +11980,37 @@ class WebMetadataUpdateWorker:
     def update_artist_photo(self, artist, spotify_artist):
         """Update artist photo from Spotify - EXACT copy from dashboard.py"""
         try:
-            # Check if artist already has a good photo
-            if self.artist_has_valid_photo(artist):
+            # Check if artist already has a good photo (skip check for Jellyfin)
+            if self.server_type != "jellyfin" and self.artist_has_valid_photo(artist):
+                print(f"🖼️ Skipping {artist.title}: already has valid photo ({getattr(artist, 'thumb', 'None')})")
                 return False
-            
+
             # Get the image URL from Spotify
             if not spotify_artist.image_url:
+                print(f"🚫 Skipping {artist.title}: no Spotify image URL available")
                 return False
+
+            print(f"📸 Processing {artist.title}: downloading from Spotify...")
                 
             image_url = spotify_artist.image_url
             
             # Download and validate image
             response = requests.get(image_url, timeout=10)
             response.raise_for_status()
+
+            # Validate and convert image (skip conversion for Jellyfin to preserve format)
+            if self.server_type == "jellyfin":
+                # For Jellyfin, use raw image data to preserve original format
+                image_data = response.content
+                print(f"📸 Using raw image data for Jellyfin ({len(image_data)} bytes)")
+            else:
+                # For other servers, validate and convert
+                image_data = self.validate_and_convert_image(response.content)
+                if not image_data:
+                    return False
             
-            # Validate and convert image
-            image_data = self.validate_and_convert_image(response.content)
-            if not image_data:
-                return False
-            
-            # Upload to media server
-            return self.upload_artist_poster(artist, image_data)
+            # Upload to media server using client's method
+            return self.media_client.update_artist_poster(artist, image_data)
             
         except Exception as e:
             print(f"Error updating photo for {getattr(artist, 'title', 'Unknown')}: {e}")
@@ -12216,8 +12234,35 @@ class WebMetadataUpdateWorker:
                 # Refresh artist to see changes
                 artist.refresh()
                 return True
+
+            # Jellyfin: Use Jellyfin API to upload artist image
+            elif self.server_type == "jellyfin":
+                import requests
+                jellyfin_config = config_manager.get_jellyfin_config()
+                jellyfin_base_url = jellyfin_config.get('base_url', '')
+                jellyfin_token = jellyfin_config.get('api_key', '')
+
+                if not jellyfin_base_url or not jellyfin_token:
+                    print("❌ Jellyfin configuration missing for image upload")
+                    return False
+
+                upload_url = f"{jellyfin_base_url.rstrip('/')}/Items/{artist.ratingKey}/Images/Primary"
+                headers = {
+                    'Authorization': f'MediaBrowser Token="{jellyfin_token}"',
+                    'Content-Type': 'image/jpeg'
+                }
+
+                response = requests.post(upload_url, data=image_data, headers=headers)
+                response.raise_for_status()
+                return True
+
+            # Navidrome: Currently not supported (Subsonic API doesn't support image uploads)
+            elif self.server_type == "navidrome":
+                print("ℹ️ Navidrome does not support artist image uploads via Subsonic API")
+                return False
+
             else:
-                # For other server types, return False since we only have fallback for Plex
+                # Unknown server type
                 return False
             
         except Exception as e:

@@ -13476,14 +13476,31 @@ async function checkAndHideMetadataUpdaterForNonPlex() {
         if (data.success) {
             const metadataCard = document.getElementById('metadata-updater-card');
             if (metadataCard) {
-                if (data.active_server === 'plex') {
-                    // Show metadata updater only for Plex
-                    metadataCard.style.display = 'block';
-                    console.log('Metadata updater shown: Plex is active server');
+                // Show metadata updater only for Plex and Jellyfin
+                if (data.active_server === 'plex' || data.active_server === 'jellyfin') {
+                    metadataCard.style.display = 'flex';
+                    console.log(`Metadata updater shown: ${data.active_server} is active server`);
+
+                    // Update the header text to reflect the current server
+                    const headerElement = metadataCard.querySelector('.card-header h3');
+                    if (headerElement) {
+                        const serverDisplayName = data.active_server.charAt(0).toUpperCase() + data.active_server.slice(1);
+                        headerElement.textContent = `${serverDisplayName} Metadata Updater`;
+                    }
+
+                    // Update the description based on the server type
+                    const descElement = metadataCard.querySelector('.metadata-updater-description');
+                    if (descElement) {
+                        if (data.active_server === 'jellyfin') {
+                            descElement.textContent = 'Download and upload high-quality artist images from Spotify to your Jellyfin server for artists without photos.';
+                        } else {
+                            descElement.textContent = 'Download and upload high-quality artist images from Spotify to your Plex server for artists without photos.';
+                        }
+                    }
                 } else {
-                    // Hide metadata updater for Jellyfin and Navidrome (same as dashboard.py behavior)
+                    // Hide metadata updater for Navidrome
                     metadataCard.style.display = 'none';
-                    console.log(`Metadata updater hidden: ${data.active_server} is active server`);
+                    console.log(`Metadata updater hidden: ${data.active_server} does not support image uploads`);
                 }
             }
         }
