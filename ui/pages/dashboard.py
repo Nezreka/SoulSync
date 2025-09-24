@@ -1532,7 +1532,11 @@ class MetadataUpdateWorker(QThread):
         """
         try:
             artist_name = getattr(artist, 'title', 'Unknown Artist')
-            
+
+            # Skip processing for artists with no valid name
+            if artist_name == 'Unknown Artist' or not artist_name or not artist_name.strip():
+                return False, "Skipped: No valid artist name"
+
             # --- IMPROVED ARTIST MATCHING ---
             # 1. Search for top 5 potential artists on Spotify
             spotify_artists = self.spotify_client.search_artists(artist_name, limit=5)
