@@ -11776,7 +11776,7 @@ class WebMetadataUpdateWorker:
         self.processed_count = 0
         self.successful_count = 0
         self.failed_count = 0
-        self.max_workers = 4
+        self.max_workers = 1
         self.thread_lock = threading.Lock()
     
     def stop(self):
@@ -11882,6 +11882,10 @@ class WebMetadataUpdateWorker:
                     
                     # Individual artist updates are tracked in progress but not shown as separate activity items
                     # This prevents spam in the activity feed (unlike dashboard which shows these in a separate widget)
+
+                    # Add delay between artist processing to respect Spotify API rate limits
+                    import time
+                    time.sleep(1.0)
             
             # Mark as completed - equivalent to finished.emit
             metadata_update_state['status'] = 'completed'
@@ -12647,7 +12651,7 @@ def merge_discography_data(owned_releases, spotify_discography):
 
                     # Calculate track completion using Spotify track count
                     spotify_track_count = spotify_release.get('track_count', 0)
-                    owned_track_count = owned_release.get('track_count') or 0
+                    owned_track_count = owned_release.get('owned_tracks') or 0
 
                     if spotify_track_count > 0 and owned_track_count is not None:
                         completion_percentage = (owned_track_count / spotify_track_count) * 100
