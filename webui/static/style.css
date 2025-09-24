@@ -8457,7 +8457,6 @@ body {
 }
 
 #metadata-updater-card{
-    display: flex!important;
     justify-content: space-between;
 }
 /* ===============================

@@ -1186,15 +1186,9 @@ class JellyfinClient:
     
     # Metadata update methods for compatibility with metadata updater
     def update_artist_genres(self, artist, genres: List[str]):
-        """Update artist genres - currently not implemented for Jellyfin"""
-        try:
-            # TODO: Implement Jellyfin genre update API
-            # For now, just log and return success to continue processing
-            logger.debug(f"Genre update not yet implemented for Jellyfin artist: {artist.title}")
-            return True
-        except Exception as e:
-            logger.error(f"Error updating genres for {artist.title}: {e}")
-            return False
+        """Update artist genres - not implemented for Jellyfin"""
+        # Genre updates not supported via Jellyfin API - silently skip
+        return True
     
     def update_artist_poster(self, artist, image_data: bytes):
         """Update artist poster image using Jellyfin API"""
@@ -1206,49 +1200,33 @@ class JellyfinClient:
             import requests
             
             url = f"{self.base_url}/Items/{artist_id}/Images/Primary"
+
+            # Use the working approach from successful Jellyfin implementation
+            from base64 import b64encode
+
+            # Base64 encode the image data (key difference!)
+            encoded_data = b64encode(image_data)
+
+            # Add /0 to URL for image index
+            url = f"{self.base_url}/Items/{artist_id}/Images/Primary/0"
+
             headers = {
-                'X-Emby-Token': self.api_key
+                'X-Emby-Token': self.api_key,
+                'Content-Type': 'image/jpeg'
             }
-            
-            # Try multiple approaches to find what works with Jellyfin
-            
-            # Method 1: Try with different field names that Jellyfin might expect
-            method1_files = {'data': ('poster.jpg', image_data, 'image/jpeg')}
+
             try:
-                response = requests.post(url, files=method1_files, headers=headers, timeout=30)
+                logger.debug(f"Uploading {len(image_data)} bytes (base64 encoded) for {artist.title}")
+
+                response = requests.post(url, data=encoded_data, headers=headers, timeout=30)
                 response.raise_for_status()
-                logger.info(f"Updated poster for {artist.title} (method 1)")
+                logger.info(f"Updated poster for {artist.title} - HTTP {response.status_code}")
                 return True
-            except Exception as e1:
-                logger.debug(f"Method 1 failed for {artist.title}: {e1}")
-            
-            # Method 2: Try with raw data and proper content-type
-            try:
-                headers_raw = {
-                    'X-Emby-Token': self.api_key,
-                    'Content-Type': 'image/jpeg'
-                }
-                response = requests.post(url, data=image_data, headers=headers_raw, timeout=30)
-                response.raise_for_status()
-                logger.info(f"Updated poster for {artist.title} (method 2)")
-                return True
-            except Exception as e2:
-                logger.debug(f"Method 2 failed for {artist.title}: {e2}")
-            
-            # Method 3: Try with different endpoint structure
-            try:
-                alt_url = f"{self.base_url}/Items/{artist_id}/Images/Primary/0"
-                response = requests.post(alt_url, data=image_data, headers=headers_raw, timeout=30)
-                response.raise_for_status()
-                logger.info(f"Updated poster for {artist.title} (method 3)")
-                return True
-            except Exception as e3:
-                logger.debug(f"Method 3 failed for {artist.title}: {e3}")
-            
-            # All methods failed
-            logger.error(f"All image upload methods failed for {artist.title}")
-            return False
-            
+
+            except Exception as e:
+                logger.error(f"Failed to upload poster for {artist.title}: {e}")
+                return False
+
         except Exception as e:
             logger.error(f"Error updating poster for {artist.title}: {e}")
             return False
@@ -1311,44 +1289,48 @@ class JellyfinClient:
             return False
     
     def update_artist_biography(self, artist) -> bool:
-        """Update artist overview/biography - currently not implemented for Jellyfin"""
-        try:
-            # TODO: Implement Jellyfin biography update API
-            # For now, just log and return success to continue processing
-            logger.debug(f"Biography update not yet implemented for Jellyfin artist: {artist.title}")
-            return True
-        except Exception as e:
-            logger.error(f"Error updating biography for {artist.title}: {e}")
-            return False
+        """Update artist overview/biography - not implemented for Jellyfin"""
+        # Biography updates not supported via Jellyfin API - silently skip
+        return True
     
     def needs_update_by_age(self, artist, refresh_interval_days: int) -> bool:
-        """Check if artist needs updating based on age threshold - simplified for Jellyfin"""
+        """Check if artist needs updating based on age threshold"""
         try:
-            # For now, just return True for all artists since we don't have timestamp tracking yet
-            # TODO: Implement timestamp tracking in Jellyfin artist metadata
-            return True
+            last_update = self.parse_update_timestamp(artist)
+            if not last_update:
+                # No timestamp found, needs update
+                return True
+
+            # Calculate days since last update
+            from datetime import datetime
+            days_since_update = (datetime.now() - last_update).days
+
+            # Use same logic as Plex client
+            needs_update = days_since_update >= refresh_interval_days
+
+            if not needs_update:
+                logger.debug(f"Skipping {artist.title}: updated {days_since_update} days ago (threshold: {refresh_interval_days})")
+
+            return needs_update
+
         except Exception as e:
             logger.debug(f"Error checking update age for {artist.title}: {e}")
-            return True
+            return True  # Default to needing update if error
     
     def is_artist_ignored(self, artist) -> bool:
-        """Check if artist is manually marked to be ignored - simplified for Jellyfin"""
+        """Check if artist is manually marked to be ignored"""
         try:
-            # For now, no artists are ignored
-            # TODO: Implement ignore flag tracking in Jellyfin artist metadata
-            return False
+            # Check overview field where we store timestamps and ignore flags
+            overview = getattr(artist, 'overview', '') or ''
+            return '-IgnoreUpdate' in overview
         except Exception as e:
             logger.debug(f"Error checking ignore status for {artist.title}: {e}")
             return False
     
     def parse_update_timestamp(self, artist) -> Optional[datetime]:
-        """Parse the last update timestamp from artist summary - not implemented for Jellyfin"""
-        try:
-            # TODO: Implement timestamp parsing from Jellyfin artist overview
-            return None
-        except Exception as e:
-            logger.debug(f"Error parsing timestamp for {artist.title}: {e}")
-            return None
+        """Parse the last update timestamp - not implemented for Jellyfin"""
+        # No timestamp tracking for Jellyfin - always return None (needs update)
+        return None
     
     def set_metadata_only_mode(self, enabled: bool = True):
         """Enable metadata-only mode to skip expensive track caching"""
