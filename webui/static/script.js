@@ -11288,9 +11288,9 @@ function retryLastSearch() {
  * Update artist detail header with artist info
  */
 function updateArtistDetailHeader(artist) {
-    const imageElement = document.getElementById('artist-detail-image');
-    const nameElement = document.getElementById('artist-detail-name');
-    const genresElement = document.getElementById('artist-detail-genres');
+    const imageElement = document.getElementById('search-artist-detail-image');
+    const nameElement = document.getElementById('search-artist-detail-name');
+    const genresElement = document.getElementById('search-artist-detail-genres');
     
     if (imageElement && artist.image_url) {
         imageElement.style.backgroundImage = `url('${artist.image_url}')`;
@@ -13993,7 +13993,7 @@ async function loadArtistDetailData(artistId, artistName) {
     showArtistDetailMain(false);
 
     // Update header with artist name
-    updateArtistDetailHeader(artistName);
+    updateArtistDetailPageHeader(artistName);
 
     try {
         // Call API to get artist discography data
@@ -14032,7 +14032,7 @@ async function loadArtistDetailData(artistId, artistName) {
     }
 }
 
-function updateArtistDetailHeader(artistName) {
+function updateArtistDetailPageHeader(artistName) {
     // Update header title
     const headerTitle = document.getElementById("artist-detail-name");
     if (headerTitle) {

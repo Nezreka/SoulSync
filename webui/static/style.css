@@ -9412,6 +9412,13 @@ body {
     letter-spacing: -0.3px;
 }
 
+.artist-genres-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 24px;
+}
+
 .collection-overview {
     display: flex;
     flex-direction: column;
