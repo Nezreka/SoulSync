@@ -43,6 +43,9 @@ class JellyfinArtist:
         
         # Create summary property from Jellyfin data (used for timestamp storage)
         self.summary = jellyfin_data.get('Overview', '') or ''
+
+        # Create thumb property for artist images
+        self.thumb = self._get_artist_image_url()
         
     def _parse_date(self, date_str: Optional[str]) -> Optional[datetime]:
         """Parse Jellyfin date string to datetime"""
@@ -53,6 +56,14 @@ class JellyfinArtist:
             return datetime.fromisoformat(date_str.replace('Z', '+00:00'))
         except:
             return None
+
+    def _get_artist_image_url(self) -> Optional[str]:
+        """Generate Jellyfin artist image URL"""
+        if not self.ratingKey:
+            return None
+
+        # Jellyfin primary image URL format
+        return f"/Items/{self.ratingKey}/Images/Primary"
     
     def albums(self) -> List['JellyfinAlbum']:
         """Get all albums for this artist"""

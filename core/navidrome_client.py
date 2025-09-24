@@ -46,6 +46,9 @@ class NavidromeArtist:
         # Create summary property (used for timestamp storage)
         self.summary = navidrome_data.get('biography', '') or ''
 
+        # Create thumb property for artist images
+        self.thumb = self._get_artist_image_url()
+
     def _parse_date(self, date_str: Optional[str]) -> Optional[datetime]:
         """Parse Navidrome date string to datetime"""
         if not date_str:
@@ -55,6 +58,14 @@ class NavidromeArtist:
             return datetime.fromisoformat(date_str.replace('Z', '+00:00'))
         except:
             return None
+
+    def _get_artist_image_url(self) -> Optional[str]:
+        """Generate Navidrome artist image URL using Subsonic getCoverArt API"""
+        if not self.ratingKey:
+            return None
+
+        # Subsonic getCoverArt API for artist images
+        return f"/rest/getCoverArt?id={self.ratingKey}"
 
     def albums(self) -> List['NavidromeAlbum']:
         """Get all albums for this artist"""

@@ -1535,6 +1535,51 @@ def get_status():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/fix-navidrome-urls', methods=['POST'])
+def fix_navidrome_urls():
+    """Fix Navidrome artist image URLs to use correct Subsonic format"""
+    try:
+        db = get_database()
+        with db._get_connection() as conn:
+            cursor = conn.cursor()
+
+            # Get all Navidrome artists with old URL format
+            cursor.execute('SELECT id, name, thumb_url FROM artists WHERE server_source = "navidrome" AND thumb_url LIKE "/api/artist/%"')
+            artists = cursor.fetchall()
+
+            if not artists:
+                return jsonify({"status": "success", "message": "No URLs needed fixing", "updated": 0})
+
+            # Update URLs to new Subsonic format
+            import re
+            updated = 0
+            examples = []
+
+            for artist_id, name, old_url in artists:
+                # Extract artist ID from old URL: /api/artist/ARTIST_ID/image
+                match = re.search(r'/api/artist/([^/]+)/image', old_url)
+                if match:
+                    artist_spotify_id = match.group(1)
+                    new_url = f'/rest/getCoverArt?id={artist_spotify_id}'
+
+                    cursor.execute('UPDATE artists SET thumb_url = ? WHERE id = ? AND server_source = "navidrome"', (new_url, artist_id))
+                    updated += 1
+
+                    if len(examples) < 3:  # Show first 3 as examples
+                        examples.append(f'{name}: {old_url} -> {new_url}')
+
+            conn.commit()
+
+            return jsonify({
+                "status": "success",
+                "message": f"Updated {updated} Navidrome artist URLs to Subsonic format",
+                "updated": updated,
+                "examples": examples
+            })
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 @app.route('/api/system/stats')
 def get_system_stats():
     """Get system statistics for dashboard"""
@@ -2602,7 +2647,8 @@ def fix_artist_image_url(thumb_url):
             thumb_url.startswith('https://localhost:') or
             thumb_url.startswith('/library/') or  # Plex relative paths
             thumb_url.startswith('/Items/') or    # Jellyfin relative paths
-            thumb_url.startswith('/api/')         # Navidrome API paths
+            thumb_url.startswith('/api/') or      # Old Navidrome API paths
+            thumb_url.startswith('/rest/')        # Navidrome Subsonic API paths
         )
 
         if needs_fixing:
@@ -2660,12 +2706,14 @@ def fix_artist_image_url(thumb_url):
             elif active_server == 'navidrome':
                 navidrome_config = config_manager.get_navidrome_config()
                 navidrome_base_url = navidrome_config.get('base_url', '')
-                print(f"🔧 Navidrome config - base_url: {navidrome_base_url}")
+                navidrome_username = navidrome_config.get('username', '')
+                navidrome_password = navidrome_config.get('password', '')
+                print(f"🔧 Navidrome config - base_url: {navidrome_base_url}, username: {navidrome_username}")
 
-                if navidrome_base_url:
+                if navidrome_base_url and navidrome_username and navidrome_password:
                     # Extract the path from URL
-                    if thumb_url.startswith('/api/'):
-                        # Already a path
+                    if thumb_url.startswith('/rest/'):
+                        # Already a Subsonic API path
                         path = thumb_url
                     else:
                         # Full localhost URL, extract path
@@ -2673,8 +2721,18 @@ def fix_artist_image_url(thumb_url):
                         parsed = urlparse(thumb_url)
                         path = parsed.path
 
-                    # Construct proper Navidrome URL
-                    fixed_url = f"{navidrome_base_url.rstrip('/')}{path}"
+                    # Generate Subsonic API authentication
+                    import hashlib
+                    import secrets
+                    salt = secrets.token_hex(6)
+                    token = hashlib.md5((navidrome_password + salt).encode()).hexdigest()
+
+                    # Add authentication parameters to the URL
+                    separator = '&' if '?' in path else '?'
+                    auth_params = f"u={navidrome_username}&t={token}&s={salt}&v=1.16.1&c=SoulSync&f=json"
+
+                    # Construct proper Navidrome Subsonic URL
+                    fixed_url = f"{navidrome_base_url.rstrip('/')}{path}{separator}{auth_params}"
                     print(f"🔧 Fixed URL: {fixed_url}")
                     return fixed_url
 
@@ -12354,17 +12412,19 @@ def start_oauth_callback_servers():
 # ===============================================
 
 def get_spotify_artist_discography(artist_name):
-    """Get complete artist discography from Spotify"""
+    """Get complete artist discography from Spotify using proper matching"""
     try:
         from core.spotify_client import SpotifyClient
+        from core.matching_engine import MusicMatchingEngine
 
         print(f"🎵 Searching Spotify for artist: {artist_name}")
 
-        # Initialize Spotify client
+        # Initialize clients
         spotify_client = SpotifyClient()
+        matching_engine = MusicMatchingEngine()
 
-        # Search for the artist
-        artists = spotify_client.search_artists(artist_name, limit=1)
+        # Search for multiple potential matches (not just 1)
+        artists = spotify_client.search_artists(artist_name, limit=5)
 
         if not artists:
             return {
@@ -12372,10 +12432,43 @@ def get_spotify_artist_discography(artist_name):
                 'error': f'Artist "{artist_name}" not found on Spotify'
             }
 
-        artist = artists[0]
+        # Since database names are exact Spotify names, try exact match first
+        best_match = None
+        highest_score = 0.0
+
+        # Step 1: Try exact case-insensitive match
+        for spotify_artist in artists:
+            if artist_name.lower().strip() == spotify_artist.name.lower().strip():
+                print(f"🎯 Exact match found: '{spotify_artist.name}'")
+                best_match = spotify_artist
+                highest_score = 1.0
+                break
+
+        # Step 2: If no exact match, use matching engine with higher threshold
+        if not best_match:
+            db_artist_normalized = matching_engine.normalize_string(artist_name)
+
+            for spotify_artist in artists:
+                spotify_artist_normalized = matching_engine.normalize_string(spotify_artist.name)
+                score = matching_engine.similarity_score(db_artist_normalized, spotify_artist_normalized)
+
+                print(f"🔍 Fuzzy match candidate: '{spotify_artist.name}' (score: {score:.3f})")
+
+                if score > highest_score:
+                    highest_score = score
+                    best_match = spotify_artist
+
+        # Require high confidence threshold since DB should have exact names
+        if not best_match or highest_score < 0.95:
+            return {
+                'success': False,
+                'error': f'No confident artist match found for "{artist_name}" (best: "{getattr(best_match, "name", "N/A")}", score: {highest_score:.3f})'
+            }
+
+        artist = best_match
         spotify_artist_id = artist.id
 
-        print(f"🎵 Found Spotify artist: {artist.name} (ID: {spotify_artist_id})")
+        print(f"🎵 Found Spotify artist: {artist.name} (ID: {spotify_artist_id}, confidence: {highest_score:.3f})")
 
         # Get all albums (albums, singles, and compilations)
         all_albums = spotify_client.get_artist_albums(spotify_artist_id, album_type='album,single,compilation', limit=50)
@@ -12505,9 +12598,9 @@ def merge_discography_data(owned_releases, spotify_discography):
 
                     # Calculate track completion using Spotify track count
                     spotify_track_count = spotify_release.get('track_count', 0)
-                    owned_track_count = owned_release.get('track_count', 0)
+                    owned_track_count = owned_release.get('track_count') or 0
 
-                    if spotify_track_count > 0:
+                    if spotify_track_count > 0 and owned_track_count is not None:
                         completion_percentage = (owned_track_count / spotify_track_count) * 100
                         owned_release['track_completion'] = {
                             'owned_tracks': owned_track_count,
