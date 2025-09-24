@@ -2600,7 +2600,9 @@ def fix_artist_image_url(thumb_url):
         needs_fixing = (
             thumb_url.startswith('http://localhost:') or
             thumb_url.startswith('https://localhost:') or
-            thumb_url.startswith('/library/')  # Plex relative paths
+            thumb_url.startswith('/library/') or  # Plex relative paths
+            thumb_url.startswith('/Items/') or    # Jellyfin relative paths
+            thumb_url.startswith('/api/')         # Navidrome API paths
         )
 
         if needs_fixing:
@@ -2629,7 +2631,54 @@ def fix_artist_image_url(thumb_url):
                     print(f"🔧 Fixed URL: {fixed_url}")
                     return fixed_url
 
-            # For other servers, we might need similar logic later
+            elif active_server == 'jellyfin':
+                jellyfin_config = config_manager.get_jellyfin_config()
+                jellyfin_base_url = jellyfin_config.get('base_url', '')
+                jellyfin_token = jellyfin_config.get('api_key', '')
+                print(f"🔧 Jellyfin config - base_url: {jellyfin_base_url}, token: {jellyfin_token[:10] if jellyfin_token else 'None'}...")
+
+                if jellyfin_base_url:
+                    # Extract the path from URL
+                    if thumb_url.startswith('/Items/') or thumb_url.startswith('/api/'):
+                        # Already a path
+                        path = thumb_url
+                    else:
+                        # Full localhost URL, extract path
+                        from urllib.parse import urlparse
+                        parsed = urlparse(thumb_url)
+                        path = parsed.path
+
+                    # Construct proper Jellyfin URL with token
+                    if jellyfin_token:
+                        separator = '&' if '?' in path else '?'
+                        fixed_url = f"{jellyfin_base_url.rstrip('/')}{path}{separator}X-Emby-Token={jellyfin_token}"
+                    else:
+                        fixed_url = f"{jellyfin_base_url.rstrip('/')}{path}"
+                    print(f"🔧 Fixed URL: {fixed_url}")
+                    return fixed_url
+
+            elif active_server == 'navidrome':
+                navidrome_config = config_manager.get_navidrome_config()
+                navidrome_base_url = navidrome_config.get('base_url', '')
+                print(f"🔧 Navidrome config - base_url: {navidrome_base_url}")
+
+                if navidrome_base_url:
+                    # Extract the path from URL
+                    if thumb_url.startswith('/api/'):
+                        # Already a path
+                        path = thumb_url
+                    else:
+                        # Full localhost URL, extract path
+                        from urllib.parse import urlparse
+                        parsed = urlparse(thumb_url)
+                        path = parsed.path
+
+                    # Construct proper Navidrome URL
+                    fixed_url = f"{navidrome_base_url.rstrip('/')}{path}"
+                    print(f"🔧 Fixed URL: {fixed_url}")
+                    return fixed_url
+
+            print(f"⚠️ No configuration found for {active_server} or unsupported server type")
 
         # Return original URL if no fixing needed/possible
         return thumb_url
