@@ -8574,7 +8574,7 @@ body {
     pointer-events: none;
 }
 
-/* Alphabet Selector */
+/* Alphabet Selector - Apple Style Design */
 .alphabet-selector {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
@@ -8588,37 +8588,59 @@ body {
 
 .alphabet-selector-inner {
     display: flex;
-    gap: 4px;
-    padding: 8px 0;
+    gap: 12px;
+    padding: 16px;
     min-width: max-content;
+    justify-content: center;
+    align-items: center;
 }
 
 .alphabet-btn {
-    padding: 8px 12px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.05);
-    color: rgba(255, 255, 255, 0.7);
-    font-size: 13px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 16px;
     font-weight: 600;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', system-ui, sans-serif;
     cursor: pointer;
-    transition: all 0.2s ease;
-    white-space: nowrap;
-    min-width: 36px;
+    transition: all 0.2s ease-out;
+    min-width: 20px;
+    height: 32px;
     text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transform: scale(1);
+    text-shadow: none;
 }
 
 .alphabet-btn:hover {
-    background: rgba(255, 255, 255, 0.1);
-    border-color: rgba(255, 255, 255, 0.2);
     color: #ffffff;
+    transform: scale(2.5);
+    margin-left: 15px;
+    margin-right: 15px;
+    text-shadow: 0 0 8px rgba(255, 255, 255, 0.8);
+}
+
+/* Neighbor scaling effect */
+.alphabet-btn:hover + .alphabet-btn,
+.alphabet-btn:has(+ .alphabet-btn:hover) {
+    transform: scale(1.8);
+    color: rgba(255, 255, 255, 0.7);
+    text-shadow: 0 0 4px rgba(255, 255, 255, 0.4);
+}
+
+.alphabet-btn:hover + .alphabet-btn + .alphabet-btn,
+.alphabet-btn:has(+ .alphabet-btn + .alphabet-btn:hover) {
+    transform: scale(1.4);
+    color: rgba(255, 255, 255, 0.6);
 }
 
 .alphabet-btn.active {
-    background: linear-gradient(135deg, #1db954, #1ed760);
-    border-color: rgba(29, 185, 84, 0.4);
-    color: #000000;
-    font-weight: 700;
+    color: #ffffff;
+    transform: scale(1.2);
+    text-shadow: 0 0 6px rgba(255, 255, 255, 0.6);
 }
 
 /* Library Content */
