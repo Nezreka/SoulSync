@@ -9543,3 +9543,541 @@ body {
         gap: 12px;
     }
 }
+
+/* ================================================
+   ADD TO WISHLIST MODAL STYLES
+   ================================================ */
+
+/* Modal Overlay and Container */
+.add-to-wishlist-modal {
+    display: flex;
+    flex-direction: column;
+    width: 900px;
+    max-width: 90vw;
+    max-height: 85vh;
+    border-radius: 20px;
+    overflow: hidden;
+    position: relative;
+
+    /* Premium glassmorphic foundation matching download modal */
+    background: linear-gradient(135deg,
+        rgba(20, 20, 20, 0.95) 0%,
+        rgba(12, 12, 12, 0.98) 100%);
+    backdrop-filter: blur(20px) saturate(1.2);
+
+    /* Enhanced borders */
+    border: 1px solid rgba(255, 255, 255, 0.12);
+
+    /* Premium shadow effect matching download modal */
+    box-shadow:
+        0 20px 60px rgba(0, 0, 0, 0.6),
+        0 8px 32px rgba(0, 0, 0, 0.4),
+        0 0 40px rgba(29, 185, 84, 0.1),
+        inset 0 1px 0 rgba(255, 255, 255, 0.15);
+
+    transform: scale(0.9);
+    opacity: 0;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#add-to-wishlist-modal-overlay:not(.hidden) .add-to-wishlist-modal {
+    transform: scale(1);
+    opacity: 1;
+}
+
+/* Modal Header */
+.add-to-wishlist-modal-header {
+    /* Enhanced gradient with subtle transparency and glow */
+    background: linear-gradient(135deg,
+        rgba(45, 45, 45, 0.8) 0%,
+        rgba(26, 26, 26, 0.9) 100%);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    border-top-left-radius: 20px;
+    border-top-right-radius: 20px;
+    position: relative;
+    overflow: hidden;
+}
+
+/* Hero Section */
+.add-to-wishlist-modal-hero {
+    display: flex;
+    align-items: center;
+    padding: 20px 28px;
+    gap: 20px;
+    position: relative;
+    z-index: 2;
+    min-height: 120px;
+}
+
+.add-to-wishlist-modal-hero-bg {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-size: cover;
+    background-position: center;
+    opacity: 0.3;
+    filter: blur(20px);
+    z-index: 1;
+}
+
+.add-to-wishlist-modal-hero-bg::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(135deg,
+        rgba(26, 26, 26, 0.7) 0%,
+        rgba(18, 18, 18, 0.8) 100%);
+}
+
+.add-to-wishlist-modal-hero-content {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    position: relative;
+    z-index: 2;
+    width: 100%;
+}
+
+.add-to-wishlist-modal-hero-images {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-shrink: 0;
+}
+
+.add-to-wishlist-modal-hero-image {
+    border-radius: 12px;
+    object-fit: cover;
+    box-shadow:
+        0 8px 24px rgba(0, 0, 0, 0.4),
+        0 4px 12px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.add-to-wishlist-modal-hero-image:hover {
+    transform: scale(1.05);
+    box-shadow:
+        0 12px 32px rgba(0, 0, 0, 0.5),
+        0 6px 16px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+.add-to-wishlist-modal-hero-image.artist {
+    border-radius: 50%;
+    width: 70px;
+    height: 70px;
+}
+
+.add-to-wishlist-modal-hero-image.album {
+    border-radius: 12px;
+    width: 80px;
+    height: 80px;
+}
+
+.add-to-wishlist-modal-hero-icon {
+    width: 80px;
+    height: 80px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 36px;
+    border-radius: 12px;
+    background: linear-gradient(135deg,
+        rgba(255, 255, 255, 0.1) 0%,
+        rgba(255, 255, 255, 0.05) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.add-to-wishlist-modal-hero-metadata {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+}
+
+.add-to-wishlist-modal-hero-title {
+    color: #ffffff;
+    font-size: 22px;
+    font-weight: 700;
+    margin: 0;
+    line-height: 1.2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.add-to-wishlist-modal-hero-subtitle {
+    color: #e0e0e0;
+    font-size: 16px;
+    font-weight: 500;
+    margin: 0;
+    opacity: 0.9;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.add-to-wishlist-modal-hero-details {
+    display: flex;
+    gap: 16px;
+    font-size: 14px;
+    margin-top: 4px;
+}
+
+.add-to-wishlist-modal-hero-detail {
+    color: #1ed760;
+    font-weight: 600;
+    padding: 4px 8px;
+    background: rgba(29, 185, 84, 0.1);
+    border-radius: 6px;
+    border: 1px solid rgba(29, 185, 84, 0.2);
+    box-shadow: 0 2px 6px rgba(29, 185, 84, 0.1);
+    transition: all 0.3s ease;
+}
+
+/* Header Actions */
+.add-to-wishlist-modal-header-actions {
+    position: absolute;
+    top: 16px;
+    right: 24px;
+    z-index: 3;
+}
+
+.add-to-wishlist-modal-close {
+    color: #b3b3b3;
+    font-size: 28px;
+    font-weight: 300;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+}
+
+.add-to-wishlist-modal-close:hover {
+    color: #ffffff;
+    background: rgba(255, 255, 255, 0.15);
+    transform: scale(1.1);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+/* Modal Content */
+.add-to-wishlist-modal-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.add-to-wishlist-modal-body {
+    flex: 1;
+    padding: 24px 28px;
+    overflow-y: auto;
+    background: #121212;
+}
+
+.add-to-wishlist-modal-body::-webkit-scrollbar {
+    width: 8px;
+}
+
+.add-to-wishlist-modal-body::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 4px;
+}
+
+.add-to-wishlist-modal-body::-webkit-scrollbar-thumb {
+    background: rgba(29, 185, 84, 0.3);
+    border-radius: 4px;
+}
+
+.add-to-wishlist-modal-body::-webkit-scrollbar-thumb:hover {
+    background: rgba(29, 185, 84, 0.5);
+}
+
+/* Track List Container */
+.wishlist-track-list-container {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.wishlist-track-list-header {
+    text-align: center;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    padding-bottom: 20px;
+}
+
+.wishlist-track-list-header h3 {
+    color: #ffffff;
+    font-size: 20px;
+    font-weight: 700;
+    margin: 0 0 8px 0;
+}
+
+.wishlist-track-list-subtitle {
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 14px;
+    margin: 0;
+}
+
+/* Track List */
+.wishlist-track-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-height: 400px;
+    overflow-y: auto;
+    padding-right: 8px;
+}
+
+.wishlist-track-list::-webkit-scrollbar {
+    width: 6px;
+}
+
+.wishlist-track-list::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 3px;
+}
+
+.wishlist-track-list::-webkit-scrollbar-thumb {
+    background: rgba(29, 185, 84, 0.3);
+    border-radius: 3px;
+}
+
+.wishlist-track-item {
+    display: flex;
+    align-items: center;
+    padding: 12px 16px;
+    background: linear-gradient(135deg,
+        rgba(255, 255, 255, 0.05) 0%,
+        rgba(255, 255, 255, 0.02) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    gap: 12px;
+}
+
+.wishlist-track-item:hover {
+    background: linear-gradient(135deg,
+        rgba(29, 185, 84, 0.08) 0%,
+        rgba(29, 185, 84, 0.03) 100%);
+    border-color: rgba(29, 185, 84, 0.2);
+    transform: translateX(4px);
+}
+
+.wishlist-track-number {
+    width: 30px;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.wishlist-track-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.wishlist-track-name {
+    color: #ffffff;
+    font-size: 15px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.wishlist-track-artists {
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.wishlist-track-duration {
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 13px;
+    font-weight: 500;
+    min-width: 40px;
+    text-align: right;
+}
+
+/* Modal Footer */
+.add-to-wishlist-modal-footer {
+    background: linear-gradient(135deg,
+        rgba(42, 42, 42, 0.9) 0%,
+        rgba(30, 30, 30, 0.95) 100%);
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 24px 28px;
+    border-bottom-left-radius: 20px;
+    border-bottom-right-radius: 20px;
+}
+
+.wishlist-modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+}
+
+.wishlist-modal-btn {
+    padding: 12px 24px;
+    border: none;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    min-width: 120px;
+}
+
+.wishlist-modal-btn-secondary {
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.wishlist-modal-btn-secondary:hover {
+    background: rgba(255, 255, 255, 0.2);
+    color: #ffffff;
+    border-color: rgba(255, 255, 255, 0.3);
+}
+
+.wishlist-modal-btn-primary {
+    background: linear-gradient(135deg, #1db954 0%, #1ed760 100%);
+    color: #ffffff;
+    border: 1px solid rgba(29, 185, 84, 0.3);
+}
+
+.wishlist-modal-btn-primary:hover {
+    background: linear-gradient(135deg, #1ed760 0%, #22e167 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 8px 24px rgba(29, 185, 84, 0.4);
+}
+
+.wishlist-modal-btn-primary:active {
+    transform: translateY(0);
+    box-shadow: 0 4px 12px rgba(29, 185, 84, 0.3);
+}
+
+/* Loading State */
+.wishlist-modal-btn-primary.loading {
+    background: rgba(255, 193, 7, 0.9);
+    color: #000000;
+    animation: pulse-loading 1.5s infinite;
+    cursor: not-allowed;
+}
+
+.wishlist-modal-btn-primary:disabled {
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.4);
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+/* Animation for modal appearance */
+@keyframes wishlistModalFadeIn {
+    from {
+        opacity: 0;
+        transform: scale(0.9) translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+#add-to-wishlist-modal-overlay:not(.hidden) .add-to-wishlist-modal {
+    animation: wishlistModalFadeIn 0.4s ease-out;
+}
+
+/* Mobile Responsiveness */
+@media (max-width: 768px) {
+    .add-to-wishlist-modal {
+        width: 95vw;
+        max-height: 90vh;
+        border-radius: 16px;
+    }
+
+    .add-to-wishlist-modal-hero {
+        flex-direction: column;
+        text-align: center;
+        min-height: auto;
+        padding: 20px;
+        gap: 16px;
+    }
+
+    .add-to-wishlist-modal-hero-content {
+        flex-direction: column;
+        gap: 16px;
+    }
+
+    .add-to-wishlist-modal-hero-images {
+        justify-content: center;
+    }
+
+    .add-to-wishlist-modal-hero-image.album,
+    .add-to-wishlist-modal-hero-image.artist {
+        width: 60px;
+        height: 60px;
+    }
+
+    .add-to-wishlist-modal-hero-icon {
+        width: 60px;
+        height: 60px;
+        font-size: 28px;
+        margin: 0 auto;
+    }
+
+    .add-to-wishlist-modal-hero-title {
+        font-size: 18px;
+        white-space: normal;
+        text-align: center;
+    }
+
+    .add-to-wishlist-modal-hero-subtitle {
+        font-size: 14px;
+        white-space: normal;
+        text-align: center;
+    }
+
+    .add-to-wishlist-modal-hero-details {
+        justify-content: center;
+        flex-wrap: wrap;
+    }
+
+    .add-to-wishlist-modal-body {
+        padding: 20px;
+    }
+
+    .add-to-wishlist-modal-footer {
+        padding: 20px;
+    }
+
+    .wishlist-modal-actions {
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    .wishlist-modal-btn {
+        width: 100%;
+    }
+}

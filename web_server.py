@@ -6584,6 +6584,85 @@ def cleanup_wishlist():
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
 
+@app.route('/api/add-album-to-wishlist', methods=['POST'])
+def add_album_track_to_wishlist():
+    """Endpoint to add a single track from an album to the wishlist."""
+    try:
+        from core.wishlist_service import get_wishlist_service
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "error": "No data provided"}), 400
+
+        track = data.get('track')
+        artist = data.get('artist')
+        album = data.get('album')
+        source_type = data.get('source_type', 'album')
+        source_context = data.get('source_context', {})
+
+        if not track or not artist or not album:
+            return jsonify({"success": False, "error": "Missing required fields: track, artist, album"}), 400
+
+        # Create Spotify track data format expected by wishlist service
+        spotify_track_data = {
+            'id': track.get('id'),
+            'name': track.get('name'),
+            'artists': track.get('artists', []),
+            'album': {
+                'id': album.get('id'),
+                'name': album.get('name'),
+                'images': album.get('images', []) if 'images' in album else [{'url': album.get('image_url', '')}],
+                'album_type': album.get('album_type', 'album'),
+                'release_date': album.get('release_date', ''),
+                'total_tracks': album.get('total_tracks', 1)
+            },
+            'duration_ms': track.get('duration_ms', 0),
+            'track_number': track.get('track_number', 1),
+            'explicit': track.get('explicit', False),
+            'popularity': track.get('popularity', 0),
+            'preview_url': track.get('preview_url'),
+            'external_urls': track.get('external_urls', {})
+        }
+
+        # Add source context information
+        enhanced_source_context = {
+            **source_context,
+            'artist_id': artist.get('id'),
+            'artist_name': artist.get('name'),
+            'album_id': album.get('id'),
+            'album_name': album.get('name'),
+            'added_via': 'library_wishlist_modal'
+        }
+
+        # Get wishlist service and add track
+        wishlist_service = get_wishlist_service()
+
+        success = wishlist_service.add_spotify_track_to_wishlist(
+            spotify_track_data=spotify_track_data,
+            failure_reason="Added from library (incomplete album)",
+            source_type=source_type,
+            source_context=enhanced_source_context
+        )
+
+        if success:
+            print(f"✅ Added track '{track.get('name')}' by '{artist.get('name')}' to wishlist")
+            return jsonify({
+                "success": True,
+                "message": f"Added '{track.get('name')}' to wishlist"
+            })
+        else:
+            print(f"❌ Failed to add track '{track.get('name')}' to wishlist")
+            return jsonify({
+                "success": False,
+                "error": "Failed to add track to wishlist"
+            })
+
+    except Exception as e:
+        print(f"❌ Error adding track to wishlist: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
 @app.route('/api/database/update', methods=['POST'])
 def start_database_update():
     """Endpoint to start the database update process."""
