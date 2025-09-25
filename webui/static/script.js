@@ -14688,10 +14688,49 @@ function createReleaseCard(release) {
     title.textContent = release.title;
     title.title = release.title;
 
-    // Create year
+    // Create year - extract from release_date (Spotify format) or fall back to year field
     const year = document.createElement("div");
     year.className = "release-year";
-    year.textContent = release.year || "Unknown Year";
+
+    let yearText = "Unknown Year";
+
+    // DEBUG: Log the release data to see what we're working with (remove this after testing)
+    // console.log(`🔍 DEBUG: Release "${release.title}" data:`, {
+    //     title: release.title,
+    //     owned: release.owned,
+    //     year: release.year,
+    //     release_date: release.release_date,
+    //     track_completion: release.track_completion
+    // });
+
+    // First try to extract year from release_date (Spotify format: "YYYY-MM-DD")
+    if (release.release_date) {
+        try {
+            // Extract year directly from string to avoid timezone issues
+            const yearMatch = release.release_date.match(/^(\d{4})/);
+            if (yearMatch) {
+                const releaseYear = parseInt(yearMatch[1]);
+                if (releaseYear && !isNaN(releaseYear) && releaseYear > 1900 && releaseYear <= new Date().getFullYear() + 1) {
+                    yearText = releaseYear.toString();
+                }
+            } else {
+                // Fallback to Date parsing if format is different
+                const releaseYear = new Date(release.release_date).getFullYear();
+                if (releaseYear && !isNaN(releaseYear) && releaseYear > 1900 && releaseYear <= new Date().getFullYear() + 1) {
+                    yearText = releaseYear.toString();
+                }
+            }
+        } catch (e) {
+            console.warn('Error parsing release_date:', release.release_date, e);
+        }
+    }
+
+    // Fallback to direct year field if release_date parsing failed
+    if (yearText === "Unknown Year" && release.year) {
+        yearText = release.year.toString();
+    }
+
+    year.textContent = yearText;
 
     // Create completion info
     const completion = document.createElement("div");

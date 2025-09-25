@@ -12753,6 +12753,15 @@ def merge_discography_data(owned_releases, spotify_discography):
                     if not owned_release.get('image_url') and spotify_release.get('image_url'):
                         owned_release['image_url'] = spotify_release['image_url']
 
+                    # Release date priority: Spotify first (more reliable), then owned fallback
+                    if spotify_release.get('release_date'):
+                        owned_release['release_date'] = spotify_release['release_date']
+                    elif spotify_release.get('year'):
+                        owned_release['release_date'] = f"{spotify_release['year']}-01-01"
+                    elif owned_release.get('year'):
+                        # Convert year to release_date format if needed
+                        owned_release['release_date'] = f"{owned_release['year']}-01-01"
+
                     cards.append(owned_release)
 
                     # Enhanced logging with track completion
