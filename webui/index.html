@@ -1241,7 +1241,47 @@
             </div>
         </div>
     </div>
-    
+
+    <!-- Add to Wishlist Modal -->
+    <div class="modal-overlay hidden" id="add-to-wishlist-modal-overlay">
+        <div class="add-to-wishlist-modal" id="add-to-wishlist-modal">
+            <div class="add-to-wishlist-modal-header">
+                <div class="add-to-wishlist-modal-hero" id="add-to-wishlist-modal-hero">
+                    <!-- Hero content will be dynamically populated -->
+                </div>
+                <div class="add-to-wishlist-modal-header-actions">
+                    <span class="add-to-wishlist-modal-close" onclick="closeAddToWishlistModal()">&times;</span>
+                </div>
+            </div>
+
+            <div class="add-to-wishlist-modal-content">
+                <div class="add-to-wishlist-modal-body">
+                    <div class="wishlist-track-list-container">
+                        <div class="wishlist-track-list-header">
+                            <h3>Tracks to Add to Wishlist</h3>
+                            <p class="wishlist-track-list-subtitle">All tracks from this release will be added to your wishlist</p>
+                        </div>
+
+                        <div class="wishlist-track-list" id="wishlist-track-list">
+                            <!-- Track list will be dynamically populated -->
+                        </div>
+                    </div>
+                </div>
+
+                <div class="add-to-wishlist-modal-footer">
+                    <div class="wishlist-modal-actions">
+                        <button class="wishlist-modal-btn wishlist-modal-btn-secondary" onclick="closeAddToWishlistModal()">
+                            Close
+                        </button>
+                        <button class="wishlist-modal-btn wishlist-modal-btn-primary" id="confirm-add-to-wishlist-btn">
+                            Add to Wishlist
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
 </html>

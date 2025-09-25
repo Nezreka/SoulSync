@@ -6297,6 +6297,300 @@ function getSuccessfulDownloadCount(process) {
     }
 }
 
+// ===============================
+// ADD TO WISHLIST MODAL FUNCTIONS
+// ===============================
+
+let currentWishlistModalData = null;
+
+/**
+ * Open the Add to Wishlist modal for an album/EP/single
+ * @param {Object} album - Album object with id, name, image_url, etc.
+ * @param {Object} artist - Artist object with id, name, image_url
+ * @param {Array} tracks - Array of track objects
+ * @param {string} albumType - Type of release (album, EP, single)
+ */
+async function openAddToWishlistModal(album, artist, tracks, albumType) {
+    console.log(`🎵 Opening Add to Wishlist modal for: ${artist.name} - ${album.name}`);
+
+    try {
+        // Store current modal data for use by other functions
+        currentWishlistModalData = {
+            album,
+            artist,
+            tracks,
+            albumType
+        };
+
+        const modal = document.getElementById('add-to-wishlist-modal');
+        const overlay = document.getElementById('add-to-wishlist-modal-overlay');
+
+        if (!modal || !overlay) {
+            console.error('Add to wishlist modal elements not found');
+            return;
+        }
+
+        // Generate and populate hero section
+        const heroContent = generateWishlistModalHeroSection(album, artist, tracks, albumType);
+        const heroContainer = document.getElementById('add-to-wishlist-modal-hero');
+        if (heroContainer) {
+            heroContainer.innerHTML = heroContent;
+        }
+
+        // Generate and populate track list
+        const trackListHTML = generateWishlistTrackList(tracks);
+        const trackListContainer = document.getElementById('wishlist-track-list');
+        if (trackListContainer) {
+            trackListContainer.innerHTML = trackListHTML;
+        }
+
+        // Set up the "Add to Wishlist" button click handler
+        const addToWishlistBtn = document.getElementById('confirm-add-to-wishlist-btn');
+        if (addToWishlistBtn) {
+            addToWishlistBtn.onclick = () => handleAddToWishlist();
+        }
+
+        // Show the modal
+        overlay.classList.remove('hidden');
+
+        console.log(`✅ Successfully opened Add to Wishlist modal for: ${album.name}`);
+
+    } catch (error) {
+        console.error('❌ Error opening Add to Wishlist modal:', error);
+        showToast(`Error opening wishlist modal: ${error.message}`, 'error');
+    }
+}
+
+/**
+ * Generate the hero section HTML for the wishlist modal
+ */
+function generateWishlistModalHeroSection(album, artist, tracks, albumType) {
+    const artistImage = artist.image_url || '';
+    const albumImage = album.image_url || '';
+    const trackCount = tracks.length;
+
+    let heroBackgroundImage = '';
+    if (albumImage) {
+        heroBackgroundImage = `<div class="add-to-wishlist-modal-hero-bg" style="background-image: url('${albumImage}');"></div>`;
+    }
+
+    const heroContent = `
+        <div class="add-to-wishlist-modal-hero-content">
+            <div class="add-to-wishlist-modal-hero-images">
+                ${artistImage ? `<img class="add-to-wishlist-modal-hero-image artist" src="${artistImage}" alt="${escapeHtml(artist.name)}">` : ''}
+                ${albumImage ? `<img class="add-to-wishlist-modal-hero-image album" src="${albumImage}" alt="${escapeHtml(album.name)}">` : ''}
+            </div>
+            <div class="add-to-wishlist-modal-hero-metadata">
+                <h1 class="add-to-wishlist-modal-hero-title">${escapeHtml(album.name || 'Unknown Album')}</h1>
+                <div class="add-to-wishlist-modal-hero-subtitle">by ${escapeHtml(artist.name || 'Unknown Artist')}</div>
+                <div class="add-to-wishlist-modal-hero-details">
+                    <span class="add-to-wishlist-modal-hero-detail">${albumType || 'Album'}</span>
+                    <span class="add-to-wishlist-modal-hero-detail">${trackCount} track${trackCount !== 1 ? 's' : ''}</span>
+                </div>
+            </div>
+        </div>
+    `;
+
+    return `
+        ${heroBackgroundImage}
+        ${heroContent}
+    `;
+}
+
+/**
+ * Generate the track list HTML for the wishlist modal
+ */
+function generateWishlistTrackList(tracks) {
+    if (!tracks || tracks.length === 0) {
+        return '<div style="text-align: center; padding: 40px; color: rgba(255, 255, 255, 0.6);">No tracks found</div>';
+    }
+
+    return tracks.map((track, index) => {
+        const trackNumber = track.track_number || (index + 1);
+        const trackName = escapeHtml(track.name || 'Unknown Track');
+        const artistsString = formatArtists(track.artists) || 'Unknown Artist';
+        const duration = formatDuration(track.duration_ms);
+
+        return `
+            <div class="wishlist-track-item">
+                <div class="wishlist-track-number">${trackNumber}</div>
+                <div class="wishlist-track-info">
+                    <div class="wishlist-track-name">${trackName}</div>
+                    <div class="wishlist-track-artists">${artistsString}</div>
+                </div>
+                <div class="wishlist-track-duration">${duration}</div>
+            </div>
+        `;
+    }).join('');
+}
+
+/**
+ * Handle the "Add to Wishlist" button click
+ */
+async function handleAddToWishlist() {
+    if (!currentWishlistModalData) {
+        console.error('❌ No wishlist modal data available');
+        return;
+    }
+
+    const { album, artist, tracks, albumType } = currentWishlistModalData;
+    const addToWishlistBtn = document.getElementById('confirm-add-to-wishlist-btn');
+
+    try {
+        // Show loading state
+        if (addToWishlistBtn) {
+            addToWishlistBtn.classList.add('loading');
+            addToWishlistBtn.textContent = 'Adding...';
+            addToWishlistBtn.disabled = true;
+        }
+
+        console.log(`🔄 Adding ${tracks.length} tracks to wishlist for: ${artist.name} - ${album.name}`);
+
+        let successCount = 0;
+        let errorCount = 0;
+
+        // Add each track to wishlist individually
+        for (const track of tracks) {
+            try {
+                // Ensure artists field is in the correct format (array of objects)
+                let formattedArtists = track.artists;
+                if (typeof track.artists === 'string') {
+                    // If artists is a string, convert to array of objects
+                    formattedArtists = [{ name: track.artists }];
+                } else if (Array.isArray(track.artists)) {
+                    // If artists is already an array, ensure each item is an object
+                    formattedArtists = track.artists.map(artistItem => {
+                        if (typeof artistItem === 'string') {
+                            return { name: artistItem };
+                        } else if (typeof artistItem === 'object' && artistItem !== null) {
+                            return artistItem;
+                        } else {
+                            return { name: 'Unknown Artist' };
+                        }
+                    });
+                } else {
+                    // Fallback to array with single artist object
+                    formattedArtists = [{ name: artist.name }];
+                }
+
+                const formattedTrack = {
+                    ...track,
+                    artists: formattedArtists
+                };
+
+                console.log(`🔄 Adding track with formatted artists:`, formattedTrack.name, formattedTrack.artists);
+
+                const response = await fetch('/api/add-album-to-wishlist', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        track: formattedTrack,
+                        artist: artist,
+                        album: album,
+                        source_type: 'album',
+                        source_context: {
+                            album_name: album.name,
+                            artist_name: artist.name,
+                            album_type: albumType
+                        }
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    successCount++;
+                    console.log(`✅ Added "${track.name}" to wishlist`);
+                } else {
+                    errorCount++;
+                    console.error(`❌ Failed to add "${track.name}" to wishlist: ${result.error}`);
+                }
+
+            } catch (error) {
+                errorCount++;
+                console.error(`❌ Error adding "${track.name}" to wishlist:`, error);
+            }
+        }
+
+        // Show completion message
+        if (successCount > 0) {
+            const message = errorCount > 0
+                ? `Added ${successCount}/${tracks.length} tracks to wishlist (${errorCount} failed)`
+                : `Added ${successCount} tracks to wishlist`;
+            showToast(message, successCount === tracks.length ? 'success' : 'warning');
+        } else {
+            showToast('Failed to add any tracks to wishlist', 'error');
+        }
+
+        // Close the modal
+        closeAddToWishlistModal();
+
+        console.log(`✅ Wishlist addition complete: ${successCount} successful, ${errorCount} failed`);
+
+    } catch (error) {
+        console.error('❌ Error in handleAddToWishlist:', error);
+        showToast(`Error adding to wishlist: ${error.message}`, 'error');
+    } finally {
+        // Reset button state
+        if (addToWishlistBtn) {
+            addToWishlistBtn.classList.remove('loading');
+            addToWishlistBtn.textContent = 'Add to Wishlist';
+            addToWishlistBtn.disabled = false;
+        }
+    }
+}
+
+/**
+ * Close the Add to Wishlist modal
+ */
+function closeAddToWishlistModal() {
+    console.log('🔄 Closing Add to Wishlist modal');
+
+    try {
+        const overlay = document.getElementById('add-to-wishlist-modal-overlay');
+        if (overlay) {
+            overlay.classList.add('hidden');
+        }
+
+        // Clear current modal data
+        currentWishlistModalData = null;
+
+        // Clear hero content
+        const heroContainer = document.getElementById('add-to-wishlist-modal-hero');
+        if (heroContainer) {
+            heroContainer.innerHTML = '';
+        }
+
+        // Clear track list
+        const trackListContainer = document.getElementById('wishlist-track-list');
+        if (trackListContainer) {
+            trackListContainer.innerHTML = '';
+        }
+
+        console.log('✅ Add to Wishlist modal closed successfully');
+
+    } catch (error) {
+        console.error('❌ Error closing Add to Wishlist modal:', error);
+    }
+}
+
+/**
+ * Format duration from milliseconds to MM:SS format
+ */
+function formatDuration(durationMs) {
+    if (!durationMs || durationMs <= 0) {
+        return '--:--';
+    }
+
+    const totalSeconds = Math.floor(durationMs / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}
+
 // Download Missing Tracks Modal functions
 window.openDownloadMissingModal = openDownloadMissingModal;
 window.closeDownloadMissingModal = closeDownloadMissingModal;
@@ -6306,10 +6600,15 @@ window.cancelTrackDownload = cancelTrackDownload; // Legacy system
 window.cancelTrackDownloadV2 = cancelTrackDownloadV2; // NEW V2 system
 window.handleViewProgressClick = handleViewProgressClick;
 
-// Wishlist Modal functions
+// Wishlist Modal functions (existing)
 window.openDownloadMissingWishlistModal = openDownloadMissingWishlistModal;
 window.startWishlistMissingTracksProcess = startWishlistMissingTracksProcess;
 window.handleWishlistButtonClick = handleWishlistButtonClick;
+
+// Add to Wishlist Modal functions (new)
+window.openAddToWishlistModal = openAddToWishlistModal;
+window.closeAddToWishlistModal = closeAddToWishlistModal;
+window.handleAddToWishlist = handleAddToWishlist;
 
 // Helper functions
 window.escapeHtml = escapeHtml;
@@ -11537,21 +11836,108 @@ function showSearchLoadingCards() {
 // ===============================
 
 /**
+ * Get the completion status of an album from cached data or DOM
+ * @param {string} albumId - The album ID
+ * @param {string} albumType - The album type ('albums' or 'singles')
+ * @returns {Object|null} - Completion status object or null
+ */
+function getAlbumCompletionStatus(albumId, albumType) {
+    try {
+        // First, check cached completion data
+        const artistId = artistsPageState.selectedArtist?.id;
+        if (artistId && artistsPageState.cache.completionData[artistId]) {
+            const cachedData = artistsPageState.cache.completionData[artistId];
+            const dataArray = albumType === 'albums' ? cachedData.albums : cachedData.singles;
+
+            if (dataArray) {
+                const completionData = dataArray.find(item => item.album_id === albumId || item.id === albumId);
+                if (completionData) {
+                    console.log(`📊 Found cached completion data for album ${albumId}:`, completionData);
+                    return completionData;
+                }
+            }
+        }
+
+        // Fallback: Check DOM completion overlay
+        const containerId = albumType === 'albums' ? 'album-cards-container' : 'singles-cards-container';
+        const container = document.getElementById(containerId);
+
+        if (container) {
+            const albumCard = container.querySelector(`[data-album-id="${albumId}"]`);
+            if (albumCard) {
+                const overlay = albumCard.querySelector('.completion-overlay');
+                if (overlay) {
+                    // Extract status from overlay classes
+                    const classList = Array.from(overlay.classList);
+                    const statusClasses = ['completed', 'nearly_complete', 'partial', 'missing', 'downloading', 'downloaded', 'error'];
+                    const status = statusClasses.find(cls => classList.includes(cls));
+
+                    if (status) {
+                        console.log(`📊 Found DOM completion status for album ${albumId}: ${status}`);
+                        return { status, completion_percentage: status === 'completed' ? 100 : 0 };
+                    }
+                }
+            }
+        }
+
+        console.warn(`⚠️ No completion status found for album ${albumId}`);
+        return null;
+
+    } catch (error) {
+        console.error(`❌ Error getting album completion status for ${albumId}:`, error);
+        return null;
+    }
+}
+
+/**
  * Handle album/single/EP click to open download missing tracks modal
  */
 async function handleArtistAlbumClick(album, albumType) {
     console.log(`🎵 Album clicked: ${album.name} (${album.album_type}) from artist: ${artistsPageState.selectedArtist?.name}`);
-    
+
     if (!artistsPageState.selectedArtist) {
         console.error('❌ No selected artist found');
         showToast('Error: No artist selected', 'error');
         return;
     }
-    
+
     try {
+        // Check completion status of the album
+        const completionStatus = getAlbumCompletionStatus(album.id, albumType);
+        console.log(`📊 Album completion status: ${completionStatus?.status || 'unknown'} (${completionStatus?.completion_percentage || 0}%)`);
+
+        // If album is complete, show informational message and exit
+        if (completionStatus?.status === 'completed') {
+            showToast(`${album.name} is already complete in your library`, 'info');
+            return;
+        }
+
+        // If album has missing tracks, show Add to Wishlist modal
+        if (completionStatus?.status && ['partial', 'missing', 'nearly_complete'].includes(completionStatus.status)) {
+            console.log(`🎵 Album has missing tracks, opening Add to Wishlist modal`);
+
+            // Load tracks for the album
+            const response = await fetch(`/api/artist/${artistsPageState.selectedArtist.id}/album/${album.id}/tracks`);
+            if (!response.ok) {
+                throw new Error(`Failed to load album tracks: ${response.status}`);
+            }
+
+            const data = await response.json();
+            if (!data.success || !data.tracks || data.tracks.length === 0) {
+                throw new Error('No tracks found for this album');
+            }
+
+            // Open the Add to Wishlist modal
+            await openAddToWishlistModal(album, artistsPageState.selectedArtist, data.tracks, albumType);
+            return;
+        }
+
+        // For unknown status or if we want to check what's missing, use the existing download modal
+        console.log(`🔄 Opening existing download missing tracks modal for status analysis`);
+
         // Create virtual playlist ID
         const virtualPlaylistId = `artist_album_${artistsPageState.selectedArtist.id}_${album.id}`;
-        
+
         // Check if modal already exists and show it
         if (activeDownloadProcesses[virtualPlaylistId]) {
             console.log(`📱 Reopening existing modal for ${album.name}`);
@@ -11564,12 +11950,12 @@ async function handleArtistAlbumClick(album, albumType) {
                 return;
             }
         }
-        
+
         // Create virtual playlist and open modal
         await createArtistAlbumVirtualPlaylist(album, albumType);
-        
+
     } catch (error) {
-        console.error('❌ Error opening download missing tracks modal:', error);
+        console.error('❌ Error handling album click:', error);
         showToast(`Error opening download modal: ${error.message}`, 'error');
     }
 }
@@ -14373,17 +14759,99 @@ function createReleaseCard(release) {
     card.appendChild(year);
     card.appendChild(completion);
 
-    // Add click handler for future functionality
-    card.addEventListener("click", () => {
+    // Add click handler for release card
+    card.addEventListener("click", async () => {
         console.log(`Clicked on release: ${release.title} (Owned: ${release.owned})`);
-        if (release.owned) {
-            showToast(`Album details coming soon!`, "info");
-        } else {
-            showToast(`Add to download queue coming soon!`, "info");
+
+        // For owned/complete releases, show info message
+        if (release.owned && (!release.track_completion ||
+            (typeof release.track_completion === 'object' && release.track_completion.missing_tracks === 0) ||
+            (typeof release.track_completion === 'number' && release.track_completion === 100))) {
+            showToast(`${release.title} is already complete in your library`, "info");
+            return;
+        }
+
+        // For missing or incomplete releases, open wishlist modal
+        try {
+            // Convert release object to album format expected by our function
+            const albumData = {
+                id: release.spotify_id || release.id,
+                name: release.title,
+                image_url: release.image_url,
+                release_date: release.year ? `${release.year}-01-01` : '',
+                album_type: release.type || 'album',
+                total_tracks: (release.track_completion && typeof release.track_completion === 'object')
+                    ? release.track_completion.total_tracks : 1
+            };
+
+            // Get current artist from artist detail page state
+            const currentArtist = artistDetailPageState.currentArtistName ? {
+                id: artistDetailPageState.currentArtistId,
+                name: artistDetailPageState.currentArtistName,
+                image_url: getArtistImageFromPage() || '' // Get artist image from page
+            } : null;
+
+            if (!currentArtist) {
+                console.error('❌ No current artist found for release click');
+                showToast('Error: No artist information available', 'error');
+                return;
+            }
+
+            // Load tracks for the album
+            const response = await fetch(`/api/artist/${currentArtist.id}/album/${albumData.id}/tracks`);
+            if (!response.ok) {
+                throw new Error(`Failed to load album tracks: ${response.status}`);
+            }
+
+            const data = await response.json();
+            if (!data.success || !data.tracks || data.tracks.length === 0) {
+                throw new Error('No tracks found for this release');
+            }
+
+            // Determine album type based on release data
+            const albumType = release.type === 'single' ? 'singles' : 'albums';
+
+            // Open the Add to Wishlist modal
+            await openAddToWishlistModal(albumData, currentArtist, data.tracks, albumType);
+
+        } catch (error) {
+            console.error('❌ Error handling release click:', error);
+            showToast(`Error opening wishlist modal: ${error.message}`, 'error');
         }
     });
 
     return card;
+}
+
+/**
+ * Helper function to get artist image from the current artist detail page
+ */
+function getArtistImageFromPage() {
+    try {
+        // Try to get from artist detail image element
+        const artistDetailImage = document.getElementById('artist-detail-image');
+        if (artistDetailImage && artistDetailImage.src && artistDetailImage.src !== window.location.href) {
+            return artistDetailImage.src;
+        }
+
+        // Try to get from artist hero image
+        const artistImage = document.getElementById('artist-image');
+        if (artistImage) {
+            const bgImage = window.getComputedStyle(artistImage).backgroundImage;
+            if (bgImage && bgImage !== 'none') {
+                // Extract URL from CSS background-image
+                const urlMatch = bgImage.match(/url\(["']?(.*?)["']?\)/);
+                if (urlMatch && urlMatch[1]) {
+                    return urlMatch[1];
+                }
+            }
+        }
+
+        return null;
+    } catch (error) {
+        console.warn('Error getting artist image from page:', error);
+        return null;
+    }
 }
 
 // UI state management functions
