@@ -489,15 +489,16 @@ class JellyfinClient:
         self._populate_aggressive_cache()
         
         try:
+            # Use proper AlbumArtists endpoint to match Jellyfin's "Album Artists" tab
+            # This should return 3,966 artists including Weird Al
             params = {
                 'ParentId': self.music_library_id,
-                'IncludeItemTypes': 'MusicArtist',
                 'Recursive': True,
                 'SortBy': 'SortName',
                 'SortOrder': 'Ascending'
             }
-            
-            response = self._make_request(f'/Users/{self.user_id}/Items', params)
+
+            response = self._make_request('/Artists/AlbumArtists', params)
             if not response:
                 return []
             
@@ -508,7 +509,7 @@ class JellyfinClient:
                 self._artist_cache[artist.ratingKey] = artist
                 artists.append(artist)
             
-            logger.info(f"Retrieved {len(artists)} artists from Jellyfin (with aggressive caching)")
+            logger.info(f"Retrieved {len(artists)} album artists from Jellyfin AlbumArtists endpoint (with aggressive caching)")
             return artists
             
         except Exception as e:
