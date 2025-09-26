@@ -11914,6 +11914,8 @@ async function handleArtistAlbumClick(album, albumType) {
         return;
     }
 
+    showLoadingOverlay('Loading album...');
+
     try {
         // Check completion status of the album
         const completionStatus = getAlbumCompletionStatus(album.id, albumType);
@@ -11921,6 +11923,7 @@ async function handleArtistAlbumClick(album, albumType) {
 
         // If album is complete, show informational message and exit
         if (completionStatus?.status === 'completed') {
+            hideLoadingOverlay();
             showToast(`${album.name} is already complete in your library`, 'info');
             return;
         }
@@ -11940,14 +11943,17 @@ async function handleArtistAlbumClick(album, albumType) {
                     showToast('Showing previous results. Close this modal to start a new analysis.', 'info');
                 }
                 process.modalElement.style.display = 'flex';
+                hideLoadingOverlay();
                 return;
             }
         }
 
         // Create virtual playlist and open modal
+        // Note: Don't hide loading overlay here - let the flow continue through to the modal
         await createArtistAlbumVirtualPlaylist(album, albumType);
 
     } catch (error) {
+        hideLoadingOverlay();
         console.error('❌ Error handling album click:', error);
         showToast(`Error opening download modal: ${error.message}`, 'error');
     }
@@ -11963,8 +11969,7 @@ async function createArtistAlbumVirtualPlaylist(album, albumType) {
     console.log(`🎵 Creating virtual playlist for: ${artist.name} - ${album.name}`);
     
     try {
-        // Show loading toast
-        showToast(`Loading tracks for ${album.name}...`, 'info');
+        // Loading overlay already shown by handleArtistAlbumClick
         
         // Fetch album tracks from backend
         const response = await fetch(`/api/artist/${artist.id}/album/${album.id}/tracks`);
@@ -11988,7 +11993,8 @@ async function createArtistAlbumVirtualPlaylist(album, albumType) {
         const playlistName = `[${artist.name}] ${album.name}`;
         
         // Open download missing tracks modal with formatted tracks
-        await openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlistName, data.tracks, album, artist);
+        // Pass false for showLoadingOverlay since we already have one from handleArtistAlbumClick
+        await openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlistName, data.tracks, album, artist, false);
         
         // Track this download for artist bubble management
         registerArtistDownload(artist, album, virtualPlaylistId, albumType);
@@ -12004,8 +12010,10 @@ async function createArtistAlbumVirtualPlaylist(album, albumType) {
  * Open download missing tracks modal specifically for artist albums
  * Similar to openDownloadMissingModalForYouTube but for artist albums
  */
-async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlistName, spotifyTracks, album, artist) {
-    showLoadingOverlay('Loading album...');
+async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlistName, spotifyTracks, album, artist, showLoadingOverlayParam = true) {
+    if (showLoadingOverlayParam) {
+        showLoadingOverlay('Loading album...');
+    }
     // Check if a process is already active for this virtual playlist
     if (activeDownloadProcesses[virtualPlaylistId]) {
         console.log(`Modal for ${virtualPlaylistId} already exists. Showing it.`);
@@ -12015,6 +12023,9 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
                 showToast('Showing previous results. Close this modal to start a new analysis.', 'info');
             }
             process.modalElement.style.display = 'flex';
+            if (showLoadingOverlayParam) {
+                hideLoadingOverlay();
+            }
         }
         return;
     }
@@ -14810,6 +14821,8 @@ function createReleaseCard(release) {
             return;
         }
 
+        showLoadingOverlay('Loading album...');
+
         // For missing or incomplete releases, open wishlist modal
         try {
             // Convert release object to album format expected by our function
@@ -14851,9 +14864,12 @@ function createReleaseCard(release) {
             const albumType = release.type === 'single' ? 'singles' : 'albums';
 
             // Open the Add to Wishlist modal
+            // Note: openAddToWishlistModal has its own loading overlay
+            hideLoadingOverlay();
             await openAddToWishlistModal(albumData, currentArtist, data.tracks, albumType);
 
         } catch (error) {
+            hideLoadingOverlay();
             console.error('❌ Error handling release click:', error);
             showToast(`Error opening wishlist modal: ${error.message}`, 'error');
         }
