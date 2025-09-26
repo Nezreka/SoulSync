@@ -341,6 +341,9 @@
                             <button class="sync-tab-button" data-tab="youtube">
                                 <span class="tab-icon youtube-icon"></span> YouTube
                             </button>
+                            <button class="sync-tab-button" data-tab="beatport">
+                                <span class="tab-icon beatport-icon"></span> Beatport
+                            </button>
                         </div>
 
                         <!-- Spotify Tab Content -->
@@ -373,6 +376,73 @@
                             </div>
                             <div class="playlist-scroll-container" id="youtube-playlist-container">
                                 <div class="playlist-placeholder">Parsed YouTube playlists will appear here.</div>
+                            </div>
+                        </div>
+
+                        <!-- Beatport Tab Content -->
+                        <div class="sync-tab-content" id="beatport-tab-content">
+                            <!-- Beatport Nested Tabs -->
+                            <div class="beatport-tabs">
+                                <button class="beatport-tab-button active" data-beatport-tab="browse">
+                                    <span class="tab-icon browse-icon"></span> Browse Charts
+                                </button>
+                                <button class="beatport-tab-button" data-beatport-tab="playlists">
+                                    <span class="tab-icon playlist-icon"></span> My Playlists
+                                </button>
+                            </div>
+
+                            <!-- Browse Charts Tab Content -->
+                            <div class="beatport-tab-content active" id="beatport-browse-content">
+                                <div class="beatport-hero">
+                                    <div class="beatport-hero-bg"></div>
+                                    <div class="beatport-hero-content">
+                                        <h2>Browse Beatport Charts</h2>
+                                        <p>Explore top electronic music charts and discover new tracks</p>
+                                        <div class="beatport-stats">
+                                            <span class="stat-item">39 Genres</span>
+                                            <span class="stat-divider">•</span>
+                                            <span class="stat-item">Top 100</span>
+                                            <span class="stat-divider">•</span>
+                                            <span class="stat-item">Weekly Updates</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="beatport-navigation">
+                                    <div class="beatport-category-cards">
+                                        <div class="beatport-category-card" data-category="top-charts">
+                                            <div class="category-icon top-charts-icon"></div>
+                                            <h3>🔥 Top Charts</h3>
+                                            <p>Beatport Top 100, Hype Top 10, New Releases</p>
+                                            <span class="category-count">3 Charts</span>
+                                        </div>
+
+                                        <div class="beatport-category-card" data-category="genres">
+                                            <div class="category-icon genres-icon"></div>
+                                            <h3>🎵 Genre Explorer</h3>
+                                            <p>House, Techno, Trance, and 36 more genres</p>
+                                            <span class="category-count">39 Genres</span>
+                                        </div>
+
+                                        <div class="beatport-category-card" data-category="staff-picks">
+                                            <div class="category-icon staff-picks-icon"></div>
+                                            <h3>📊 Staff Picks</h3>
+                                            <p>Curated selections and secret weapons</p>
+                                            <span class="category-count">5 Collections</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- My Playlists Tab Content -->
+                            <div class="beatport-tab-content" id="beatport-playlists-content">
+                                <div class="playlist-header">
+                                    <h3>My Beatport Playlists</h3>
+                                    <button class="refresh-button beatport" id="beatport-refresh-btn">🔄 Refresh</button>
+                                </div>
+                                <div class="playlist-scroll-container" id="beatport-playlist-container">
+                                    <div class="playlist-placeholder">Your created Beatport playlists will appear here.</div>
+                                </div>
                             </div>
                         </div>
                     </div>
