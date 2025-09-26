@@ -9190,6 +9190,39 @@ function initializeSyncPage() {
         tidalRefreshBtn.addEventListener('click', loadTidalPlaylists);
     }
 
+    // Logic for the Beatport refresh button
+    const beatportRefreshBtn = document.getElementById('beatport-refresh-btn');
+    if (beatportRefreshBtn) {
+        beatportRefreshBtn.addEventListener('click', loadBeatportCharts);
+    }
+
+    // Logic for Beatport nested tabs
+    const beatportTabButtons = document.querySelectorAll('.beatport-tab-button');
+    beatportTabButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            const tabId = button.dataset.beatportTab;
+
+            // Update button active state
+            beatportTabButtons.forEach(btn => btn.classList.remove('active'));
+            button.classList.add('active');
+
+            // Update content active state
+            document.querySelectorAll('.beatport-tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            document.getElementById(`beatport-${tabId}-content`).classList.add('active');
+        });
+    });
+
+    // Logic for Beatport category cards
+    const beatportCategoryCards = document.querySelectorAll('.beatport-category-card');
+    beatportCategoryCards.forEach(card => {
+        card.addEventListener('click', () => {
+            const category = card.dataset.category;
+            handleBeatportCategoryClick(category);
+        });
+    });
+
     // Logic for the Start Sync button
     const startSyncBtn = document.getElementById('start-sync-btn');
     if (startSyncBtn) {
@@ -9466,6 +9499,63 @@ async function clearWishlist(playlistId) {
     }
 }
 
+
+// ===============================
+// BEATPORT CHARTS FUNCTIONALITY
+// ===============================
+
+async function loadBeatportCharts() {
+    const container = document.getElementById('beatport-playlist-container');
+    const refreshBtn = document.getElementById('beatport-refresh-btn');
+
+    container.innerHTML = `<div class="playlist-placeholder">🔄 Loading Beatport playlists...</div>`;
+    refreshBtn.disabled = true;
+    refreshBtn.textContent = '🔄 Loading...';
+
+    try {
+        // Placeholder functionality - will be implemented later with actual Beatport playlist management
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Simulate loading
+
+        container.innerHTML = `
+            <div class="playlist-placeholder">
+                <h4 style="color: #01FF95; margin-bottom: 10px;">🎵 My Beatport Playlists</h4>
+                <p>Your created Beatport playlists will appear here.</p>
+                <p style="font-size: 12px; color: #888;">
+                    Create playlists from Beatport charts using the Browse Charts tab,<br>
+                    then sync them directly to your media server.
+                </p>
+            </div>
+        `;
+
+        showToast('Beatport playlists loaded successfully!', 'success');
+
+    } catch (error) {
+        container.innerHTML = `<div class="playlist-placeholder">❌ Error: ${error.message}</div>`;
+        showToast(`Error loading Beatport playlists: ${error.message}`, 'error');
+    } finally {
+        refreshBtn.disabled = false;
+        refreshBtn.textContent = '🔄 Refresh';
+    }
+}
+
+function handleBeatportCategoryClick(category) {
+    console.log(`🎵 Beatport category clicked: ${category}`);
+
+    // Placeholder functionality for category navigation
+    switch(category) {
+        case 'top-charts':
+            showToast('🔥 Top Charts navigation coming soon!', 'info');
+            break;
+        case 'genres':
+            showToast('🎵 Genre Explorer navigation coming soon!', 'info');
+            break;
+        case 'staff-picks':
+            showToast('📊 Staff Picks navigation coming soon!', 'info');
+            break;
+        default:
+            showToast(`Category "${category}" clicked`, 'info');
+    }
+}
 
 // ===============================
 // YOUTUBE PLAYLIST FUNCTIONALITY
