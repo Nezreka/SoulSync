@@ -8613,6 +8613,8 @@ body {
     justify-content: center;
     transform: scale(1);
     text-shadow: none;
+    padding-top: 30px;
+    padding-bottom: 30px;
 }
 
 .alphabet-btn:hover {

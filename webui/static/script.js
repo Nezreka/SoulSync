@@ -14229,16 +14229,11 @@ function createLibraryArtistCard(artist) {
     const stats = document.createElement("div");
     stats.className = "library-artist-stats";
 
-    if (artist.album_count > 0 || artist.track_count > 0) {
-        const albumStat = document.createElement("span");
-        albumStat.className = "library-artist-stat";
-        albumStat.textContent = `${artist.album_count} album${artist.album_count !== 1 ? "s" : ""}`;
-
+    if (artist.track_count > 0) {
         const trackStat = document.createElement("span");
         trackStat.className = "library-artist-stat";
         trackStat.textContent = `${artist.track_count} track${artist.track_count !== 1 ? "s" : ""}`;
 
-        stats.appendChild(albumStat);
         stats.appendChild(trackStat);
     }
 
