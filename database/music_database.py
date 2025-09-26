@@ -196,7 +196,7 @@ class MusicDatabase:
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
-            
+
             # Create indexes for performance
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_artist_id ON albums (artist_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_album_id ON tracks (album_id)")
@@ -387,7 +387,7 @@ class MusicDatabase:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 
-                cursor.execute("SELECT COUNT(*) FROM artists")
+                cursor.execute("SELECT COUNT(DISTINCT name) FROM artists")
                 artist_count = cursor.fetchone()[0]
                 
                 cursor.execute("SELECT COUNT(*) FROM albums")
@@ -412,8 +412,8 @@ class MusicDatabase:
                 cursor = conn.cursor()
                 
                 if server_source:
-                    # Get counts for specific server
-                    cursor.execute("SELECT COUNT(*) FROM artists WHERE server_source = ?", (server_source,))
+                    # Get counts for specific server (deduplicate by name like general count)
+                    cursor.execute("SELECT COUNT(DISTINCT name) FROM artists WHERE server_source = ?", (server_source,))
                     artist_count = cursor.fetchone()[0]
                     
                     cursor.execute("SELECT COUNT(*) FROM albums WHERE server_source = ?", (server_source,))
@@ -555,7 +555,13 @@ class MusicDatabase:
                 
                 # Convert artist ID to string (handles both Plex integer IDs and Jellyfin GUIDs)
                 artist_id = str(artist_obj.ratingKey)
-                name = artist_obj.title
+                raw_name = artist_obj.title
+                # Normalize artist name to handle quote variations and other inconsistencies
+                name = self._normalize_artist_name(raw_name)
+
+                # Debug logging to see if normalization is working
+                if raw_name != name:
+                    logger.info(f"Artist name normalized: '{raw_name}' -> '{name}'")
                 thumb_url = getattr(artist_obj, 'thumb', None)
                 
                 # Only preserve timestamps and flags from summary, not full biography
@@ -593,23 +599,44 @@ class MusicDatabase:
                 if exists:
                     # Update existing artist
                     cursor.execute("""
-                        UPDATE artists 
+                        UPDATE artists
                         SET name = ?, thumb_url = ?, genres = ?, summary = ?, updated_at = CURRENT_TIMESTAMP
                         WHERE id = ? AND server_source = ?
                     """, (name, thumb_url, genres_json, summary, artist_id, server_source))
+                    logger.debug(f"Updated existing {server_source} artist: {name} (ID: {artist_id})")
                 else:
                     # Insert new artist
                     cursor.execute("""
                         INSERT INTO artists (id, name, thumb_url, genres, summary, server_source)
                         VALUES (?, ?, ?, ?, ?, ?)
                     """, (artist_id, name, thumb_url, genres_json, summary, server_source))
-                
+                    logger.debug(f"Inserted new {server_source} artist: {name} (ID: {artist_id})")
+
                 conn.commit()
+                rows_affected = cursor.rowcount
+                if rows_affected == 0:
+                    logger.warning(f"Database insertion returned 0 rows affected for {server_source} artist: {name} (ID: {artist_id})")
+
                 return True
                 
         except Exception as e:
             logger.error(f"Error inserting/updating {server_source} artist {getattr(artist_obj, 'title', 'Unknown')}: {e}")
             return False
+
+    def _normalize_artist_name(self, name: str) -> str:
+        """
+        Normalize artist names to handle inconsistencies like quote variations.
+        Converts Unicode smart quotes to ASCII quotes for consistency.
+        """
+        if not name:
+            return name
+
+        # Replace Unicode smart quotes with regular ASCII quotes
+        normalized = name.replace('\u201c', '"').replace('\u201d', '"')  # Left and right double quotes
+        normalized = normalized.replace('\u2018', "'").replace('\u2019', "'")  # Left and right single quotes
+        normalized = normalized.replace('\u00ab', '"').replace('\u00bb', '"')  # « » guillemets
+
+        return normalized
     
     def get_artist(self, artist_id: int) -> Optional[DatabaseArtist]:
         """Get artist by ID"""
@@ -2217,6 +2244,305 @@ class MusicDatabase:
                 'last_update': None,
                 'last_full_refresh': None,
                 'server_source': server_source
+            }
+
+    def get_library_artists(self, search_query: str = "", letter: str = "", page: int = 1, limit: int = 50) -> Dict[str, Any]:
+        """
+        Get artists for the library page with search, filtering, and pagination
+
+        Args:
+            search_query: Search term to filter artists by name
+            letter: Filter by first letter (a-z, #, or "" for all)
+            page: Page number (1-based)
+            limit: Number of results per page
+
+        Returns:
+            Dict containing artists list, pagination info, and total count
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                # Build WHERE clause
+                where_conditions = []
+                params = []
+
+                if search_query:
+                    where_conditions.append("LOWER(name) LIKE LOWER(?)")
+                    params.append(f"%{search_query}%")
+
+                if letter and letter != "all":
+                    if letter == "#":
+                        # Numbers and special characters
+                        where_conditions.append("SUBSTR(UPPER(name), 1, 1) NOT GLOB '[A-Z]'")
+                    else:
+                        # Specific letter
+                        where_conditions.append("UPPER(SUBSTR(name, 1, 1)) = UPPER(?)")
+                        params.append(letter)
+
+                # Get active server for filtering
+                from config.settings import config_manager
+                active_server = config_manager.get_active_media_server()
+
+                # Add active server filter to where conditions
+                where_conditions.append("a.server_source = ?")
+                params.append(active_server)
+
+                where_clause = " AND ".join(where_conditions) if where_conditions else "1=1"
+
+                # Get total count (matching dashboard method)
+                count_query = f"""
+                    SELECT COUNT(*) as total_count
+                    FROM artists a
+                    WHERE {where_clause}
+                """
+                cursor.execute(count_query, params)
+                total_count = cursor.fetchone()['total_count']
+
+                # Get artists with pagination
+                offset = (page - 1) * limit
+
+                artists_query = f"""
+                    SELECT
+                        a.id,
+                        a.name,
+                        a.thumb_url,
+                        a.genres,
+                        COUNT(DISTINCT al.id) as album_count,
+                        COUNT(DISTINCT t.id) as track_count
+                    FROM artists a
+                    LEFT JOIN albums al ON a.id = al.artist_id
+                    LEFT JOIN tracks t ON al.id = t.album_id
+                    WHERE {where_clause}
+                    GROUP BY a.id, a.name, a.thumb_url, a.genres
+                    ORDER BY a.name COLLATE NOCASE
+                    LIMIT ? OFFSET ?
+                """
+                # No need for complex query params now
+                query_params = params + [limit, offset]
+
+                cursor.execute(artists_query, query_params)
+                rows = cursor.fetchall()
+
+                # Convert to artist objects
+                artists = []
+                for row in rows:
+                    # Parse genres from GROUP_CONCAT result
+                    genres_str = row['genres'] or ''
+                    genres = []
+                    if genres_str:
+                        # Split by comma and clean up duplicates
+                        genre_set = set()
+                        for genre in genres_str.split(','):
+                            if genre and genre.strip():
+                                genre_set.update(g.strip() for g in genre.split(',') if g.strip())
+                        genres = list(genre_set)
+
+                    artist = DatabaseArtist(
+                        id=row['id'],
+                        name=row['name'],
+                        thumb_url=row['thumb_url'] if row['thumb_url'] else None,
+                        genres=genres
+                    )
+
+                    # Add stats
+                    artist_data = {
+                        'id': artist.id,
+                        'name': artist.name,
+                        'image_url': artist.thumb_url,
+                        'genres': artist.genres,
+                        'album_count': row['album_count'] or 0,
+                        'track_count': row['track_count'] or 0
+                    }
+                    artists.append(artist_data)
+
+                # Calculate pagination info
+                total_pages = (total_count + limit - 1) // limit
+                has_prev = page > 1
+                has_next = page < total_pages
+
+                return {
+                    'artists': artists,
+                    'pagination': {
+                        'page': page,
+                        'limit': limit,
+                        'total_count': total_count,
+                        'total_pages': total_pages,
+                        'has_prev': has_prev,
+                        'has_next': has_next
+                    }
+                }
+
+        except Exception as e:
+            logger.error(f"Error getting library artists: {e}")
+            return {
+                'artists': [],
+                'pagination': {
+                    'page': 1,
+                    'limit': limit,
+                    'total_count': 0,
+                    'total_pages': 0,
+                    'has_prev': False,
+                    'has_next': False
+                }
+            }
+
+    def get_artist_discography(self, artist_id) -> Dict[str, Any]:
+        """
+        Get complete artist information and their releases from the database.
+        This will be combined with Spotify data for the full discography view.
+
+        Args:
+            artist_id: The artist ID from the database (string or int)
+
+        Returns:
+            Dict containing artist info and their owned releases
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                # Get artist information
+                cursor.execute("""
+                    SELECT
+                        id, name, thumb_url, genres, server_source
+                    FROM artists
+                    WHERE id = ?
+                """, (artist_id,))
+
+                artist_row = cursor.fetchone()
+
+                if not artist_row:
+                    return {
+                        'success': False,
+                        'error': f'Artist with ID {artist_id} not found'
+                    }
+
+                # Parse genres
+                genres_str = artist_row['genres'] or ''
+                genres = []
+                if genres_str:
+                    genre_set = set()
+                    for genre in genres_str.split(','):
+                        if genre and genre.strip():
+                            genre_set.add(genre.strip())
+                    genres = list(genre_set)
+
+                # Get artist's albums with track counts and completion
+                # Include albums from ALL artists with the same name (fixes duplicate artist issue)
+                cursor.execute("""
+                    SELECT
+                        a.id,
+                        a.title,
+                        a.year,
+                        a.track_count,
+                        a.thumb_url,
+                        COUNT(t.id) as owned_tracks
+                    FROM albums a
+                    LEFT JOIN tracks t ON a.id = t.album_id
+                    WHERE a.artist_id IN (
+                        SELECT id FROM artists
+                        WHERE name = (SELECT name FROM artists WHERE id = ?)
+                        AND server_source = (SELECT server_source FROM artists WHERE id = ?)
+                    )
+                    GROUP BY a.id, a.title, a.year, a.track_count, a.thumb_url
+                    ORDER BY a.year DESC, a.title
+                """, (artist_id, artist_id))
+
+                album_rows = cursor.fetchall()
+
+                # Process albums and categorize by type
+                albums = []
+                eps = []
+                singles = []
+
+                # Get total stats for the artist (including all artists with same name)
+                cursor.execute("""
+                    SELECT
+                        COUNT(DISTINCT a.id) as album_count,
+                        COUNT(DISTINCT t.id) as track_count
+                    FROM albums a
+                    LEFT JOIN tracks t ON a.id = t.album_id
+                    WHERE a.artist_id IN (
+                        SELECT id FROM artists
+                        WHERE name = (SELECT name FROM artists WHERE id = ?)
+                        AND server_source = (SELECT server_source FROM artists WHERE id = ?)
+                    )
+                """, (artist_id, artist_id))
+
+                stats_row = cursor.fetchone()
+                album_count = stats_row['album_count'] if stats_row else 0
+                track_count = stats_row['track_count'] if stats_row else 0
+
+                for album_row in album_rows:
+                    # Calculate completion percentage
+                    expected_tracks = album_row['track_count'] or 1
+                    owned_tracks = album_row['owned_tracks'] or 0
+                    completion_percentage = min(100, round((owned_tracks / expected_tracks) * 100))
+
+                    album_data = {
+                        'id': album_row['id'],
+                        'title': album_row['title'],
+                        'year': album_row['year'],
+                        'image_url': album_row['thumb_url'],
+                        'owned': True,  # All albums in our DB are owned
+                        'track_count': album_row['track_count'],
+                        'owned_tracks': owned_tracks,
+                        'track_completion': completion_percentage
+                    }
+
+                    # Categorize based on actual track count and title patterns
+                    # Use actual owned tracks, fallback to expected track count, then to 0
+                    actual_track_count = owned_tracks or album_row['track_count'] or 0
+                    title_lower = album_row['title'].lower()
+
+                    # Check for single indicators in title
+                    single_indicators = ['single', ' - single', '(single)']
+                    is_single_by_title = any(indicator in title_lower for indicator in single_indicators)
+
+                    # Check for EP indicators in title
+                    ep_indicators = ['ep', ' - ep', '(ep)', 'extended play']
+                    is_ep_by_title = any(indicator in title_lower for indicator in ep_indicators)
+
+                    # Categorization logic - be more conservative about singles
+                    # Only treat as single if explicitly labeled as single AND has few tracks
+                    if is_single_by_title and actual_track_count <= 3:
+                        singles.append(album_data)
+                    elif is_ep_by_title or (4 <= actual_track_count <= 7):
+                        eps.append(album_data)
+                    else:
+                        # Default to album for most releases, especially if track count is unknown
+                        albums.append(album_data)
+
+                # Fix image URLs if needed
+                artist_image_url = artist_row['thumb_url']
+                if artist_image_url and artist_image_url.startswith('/library/'):
+                    # This will be fixed in the API layer
+                    pass
+
+                return {
+                    'success': True,
+                    'artist': {
+                        'id': artist_row['id'],
+                        'name': artist_row['name'],
+                        'image_url': artist_image_url,
+                        'genres': genres,
+                        'server_source': artist_row['server_source'],
+                        'album_count': album_count,
+                        'track_count': track_count
+                    },
+                    'owned_releases': {
+                        'albums': albums,
+                        'eps': eps,
+                        'singles': singles
+                    }
+                }
+
+        except Exception as e:
+            logger.error(f"Error getting artist discography for ID {artist_id}: {e}")
+            return {
+                'success': False,
+                'error': str(e)
             }
 
 # Thread-safe singleton pattern for database access
