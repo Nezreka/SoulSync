@@ -14373,13 +14373,13 @@ function initializeArtistDetailPage() {
 async function loadArtistDetailData(artistId, artistName) {
     console.log(`🔄 Loading artist detail data for: ${artistName} (ID: ${artistId})`);
 
-    // Show loading state
+    // Show loading state and hide all content
     showArtistDetailLoading(true);
     showArtistDetailError(false);
     showArtistDetailMain(false);
+    showArtistDetailHero(false);
 
-    // Update header with artist name
-    updateArtistDetailPageHeader(artistName);
+    // Don't update header until data loads to avoid showing stale data
 
     try {
         // Call API to get artist discography data
@@ -14397,12 +14397,16 @@ async function loadArtistDetailData(artistId, artistName) {
 
         console.log(`✅ Loaded artist detail data:`, data);
 
-        // Hide loading and show main content
+        // Hide loading and show all content
         showArtistDetailLoading(false);
         showArtistDetailMain(true);
+        showArtistDetailHero(true);
 
         console.log(`🎨 Main content visibility:`, document.getElementById('artist-detail-main'));
         console.log(`🎨 Albums section:`, document.getElementById('albums-section'));
+
+        // Update header with artist name now that data is loaded
+        updateArtistDetailPageHeader(data.artist.name);
 
         // Populate the page with data
         populateArtistDetailPage(data);
@@ -14410,9 +14414,10 @@ async function loadArtistDetailData(artistId, artistName) {
     } catch (error) {
         console.error(`❌ Error loading artist detail data:`, error);
 
-        // Show error state
+        // Show error state (keep hero section hidden)
         showArtistDetailLoading(false);
         showArtistDetailError(true, error.message);
+        showArtistDetailHero(false);
 
         showToast(`Failed to load artist details: ${error.message}`, "error");
     }
@@ -14928,6 +14933,17 @@ function showArtistDetailMain(show) {
             mainElement.classList.remove("hidden");
         } else {
             mainElement.classList.add("hidden");
+        }
+    }
+}
+
+function showArtistDetailHero(show) {
+    const heroElement = document.getElementById("artist-hero-section");
+    if (heroElement) {
+        if (show) {
+            heroElement.classList.remove("hidden");
+        } else {
+            heroElement.classList.add("hidden");
         }
     }
 }
