@@ -2920,7 +2920,7 @@ function showPlaylistDetailsModal(playlist) {
             </div>
         </div>
     `;
-    
+
     modal.style.display = 'flex';
 }
 
@@ -3057,6 +3057,8 @@ let currentModalPlaylistId = null;
 let cancelledTracks = new Set(); // Track cancelled track indices like GUI's cancelled_tracks
 
 async function openDownloadMissingModal(playlistId) {
+    showLoadingOverlay('Loading playlist...');
+
     // **NEW**: Check if a process is already active for this playlist
     if (activeDownloadProcesses[playlistId]) {
         console.log(`Modal for ${playlistId} already exists. Showing it.`);
@@ -3069,6 +3071,7 @@ async function openDownloadMissingModal(playlistId) {
             }
             process.modalElement.style.display = 'flex';
         }
+        hideLoadingOverlay();
         return; // Don't create a new one
     }
 
@@ -3227,9 +3230,11 @@ async function openDownloadMissingModal(playlistId) {
     `;
 
     modal.style.display = 'flex';
+    hideLoadingOverlay();
 }
 
 async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistName, spotifyTracks) {
+    showLoadingOverlay('Loading YouTube playlist...');
     // Check if a process is already active for this virtual playlist
     if (activeDownloadProcesses[virtualPlaylistId]) {
         console.log(`Modal for ${virtualPlaylistId} already exists. Showing it.`);
@@ -3387,6 +3392,7 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
     `;
 
     modal.style.display = 'flex';
+    hideLoadingOverlay();
 }
 
 async function closeDownloadMissingModal(playlistId) {
@@ -3523,6 +3529,7 @@ async function closeDownloadMissingModal(playlistId) {
 }
 
 async function openDownloadMissingWishlistModal() {
+    showLoadingOverlay('Loading wishlist...');
     const playlistId = "wishlist"; // Use a consistent ID for wishlist
     
     // Check if a process is already active for the wishlist
@@ -3700,6 +3707,7 @@ async function openDownloadMissingWishlistModal() {
     `;
 
     modal.style.display = 'flex';
+    hideLoadingOverlay();
     WishlistModalState.setVisible(); // Track that new wishlist modal is now visible
 }
 
@@ -6311,6 +6319,7 @@ let currentWishlistModalData = null;
  * @param {string} albumType - Type of release (album, EP, single)
  */
 async function openAddToWishlistModal(album, artist, tracks, albumType) {
+    showLoadingOverlay('Preparing wishlist...');
     console.log(`🎵 Opening Add to Wishlist modal for: ${artist.name} - ${album.name}`);
 
     try {
@@ -6352,11 +6361,13 @@ async function openAddToWishlistModal(album, artist, tracks, albumType) {
 
         // Show the modal
         overlay.classList.remove('hidden');
+        hideLoadingOverlay();
 
         console.log(`✅ Successfully opened Add to Wishlist modal for: ${album.name}`);
 
     } catch (error) {
         console.error('❌ Error opening Add to Wishlist modal:', error);
+        hideLoadingOverlay();
         showToast(`Error opening wishlist modal: ${error.message}`, 'error');
     }
 }
@@ -8986,6 +8997,7 @@ async function startTidalDownloadMissing(urlHash) {
 }
 
 async function openDownloadMissingModalForTidal(virtualPlaylistId, playlistName, spotifyTracks) {
+    showLoadingOverlay('Loading Tidal playlist...');
     // Check if a process is already active for this virtual playlist
     if (activeDownloadProcesses[virtualPlaylistId]) {
         console.log(`Modal for ${virtualPlaylistId} already exists. Showing it.`);
@@ -9136,6 +9148,7 @@ async function openDownloadMissingModalForTidal(virtualPlaylistId, playlistName,
     `;
 
     modal.style.display = 'flex';
+    hideLoadingOverlay();
 }
 
 
@@ -11912,28 +11925,8 @@ async function handleArtistAlbumClick(album, albumType) {
             return;
         }
 
-        // If album has missing tracks, show Add to Wishlist modal
-        if (completionStatus?.status && ['partial', 'missing', 'nearly_complete'].includes(completionStatus.status)) {
-            console.log(`🎵 Album has missing tracks, opening Add to Wishlist modal`);
-
-            // Load tracks for the album
-            const response = await fetch(`/api/artist/${artistsPageState.selectedArtist.id}/album/${album.id}/tracks`);
-            if (!response.ok) {
-                throw new Error(`Failed to load album tracks: ${response.status}`);
-            }
-
-            const data = await response.json();
-            if (!data.success || !data.tracks || data.tracks.length === 0) {
-                throw new Error('No tracks found for this album');
-            }
-
-            // Open the Add to Wishlist modal
-            await openAddToWishlistModal(album, artistsPageState.selectedArtist, data.tracks, albumType);
-            return;
-        }
-
-        // For unknown status or if we want to check what's missing, use the existing download modal
-        console.log(`🔄 Opening existing download missing tracks modal for status analysis`);
+        // For Artists page, always use Download Missing Tracks modal to analyze and download
+        console.log(`🔄 Opening download missing tracks modal for album analysis`);
 
         // Create virtual playlist ID
         const virtualPlaylistId = `artist_album_${artistsPageState.selectedArtist.id}_${album.id}`;
@@ -12012,6 +12005,7 @@ async function createArtistAlbumVirtualPlaylist(album, albumType) {
  * Similar to openDownloadMissingModalForYouTube but for artist albums
  */
 async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlistName, spotifyTracks, album, artist) {
+    showLoadingOverlay('Loading album...');
     // Check if a process is already active for this virtual playlist
     if (activeDownloadProcesses[virtualPlaylistId]) {
         console.log(`Modal for ${virtualPlaylistId} already exists. Showing it.`);
@@ -12174,7 +12168,8 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
     `;
 
     modal.style.display = 'flex';
-    
+    hideLoadingOverlay();
+
     console.log(`✅ Successfully opened download missing tracks modal for: ${playlistName}`);
 }
 
