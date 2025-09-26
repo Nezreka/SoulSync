@@ -21,6 +21,7 @@ Bridge the gap between streaming services and your local music library. Automati
 - **🆕 Auto database updates** keeps SoulSync database current
 - **File organization** creates clean folder structures
 - **Artist discovery** browse complete discographies
+- **Music library browser** comprehensive collection management with search and completion tracking
 - **Wishlist system** saves failed downloads for automatic retry
 - **Artist watchlist** monitors for new releases and adds missing tracks
 - **Background automation** retries failed downloads every hour
@@ -160,6 +161,7 @@ If accessing SoulSync from a different machine than where it's running:
 **Search & Download**: Manual track search with preview streaming
 **Playlist Sync**: Spotify/Tidal/YouTube playlist analysis and batch downloads
 **Artist Explorer**: Complete discography browsing with missing indicators
+**Library Browser**: Comprehensive local collection management with search, filtering, and completion tracking
 **Smart Matching**: Advanced algorithm prioritizes originals over remixes
 **🆕 Automatic Lyrics**: Downloads synchronized LRC files from LRClib.net - works with any media player that supports .lrc files
 **🆕 Server Integration**: Auto-triggers library scans on Plex/Jellyfin/Navidrome after downloads complete
