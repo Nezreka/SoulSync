@@ -39,6 +39,7 @@ from services.sync_service import PlaylistSyncService
 from datetime import datetime
 import yt_dlp
 from core.matching_engine import MusicMatchingEngine
+from beatport_unified_scraper import BeatportUnifiedScraper
 
 # --- Flask App Setup ---
 base_dir = os.path.abspath(os.path.dirname(__file__))
@@ -11854,6 +11855,161 @@ def get_active_media_server():
     except Exception as e:
         print(f"Error getting active media server: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
+# ================================= #
+# BEATPORT API ENDPOINTS            #
+# ================================= #
+
+@app.route('/api/beatport/genres', methods=['GET'])
+def get_beatport_genres():
+    """Get current Beatport genres with images dynamically scraped from homepage"""
+    try:
+        logger.info("🔍 API request for Beatport genres")
+
+        # Initialize the Beatport scraper
+        scraper = BeatportUnifiedScraper()
+
+        # Get query parameters
+        include_images = request.args.get('include_images', 'false').lower() == 'true'
+
+        # Discover genres dynamically
+        if include_images:
+            logger.info("🖼️ Including genre images in response (slower)")
+            genres = scraper.discover_genres_with_images(include_images=True)
+        else:
+            logger.info("📝 Returning genres without images (faster)")
+            genres = scraper.discover_genres_from_homepage()
+
+        logger.info(f"✅ Successfully discovered {len(genres)} Beatport genres")
+
+        return jsonify({
+            "success": True,
+            "genres": genres,
+            "count": len(genres),
+            "includes_images": include_images
+        })
+
+    except Exception as e:
+        logger.error(f"❌ Error fetching Beatport genres: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "genres": [],
+            "count": 0
+        }), 500
+
+@app.route('/api/beatport/genre/<genre_slug>/<genre_id>/tracks', methods=['GET'])
+def get_beatport_genre_tracks(genre_slug, genre_id):
+    """Get tracks for a specific Beatport genre"""
+    try:
+        logger.info(f"🎵 API request for {genre_slug} genre tracks (ID: {genre_id})")
+
+        # Initialize the Beatport scraper
+        scraper = BeatportUnifiedScraper()
+
+        # Get query parameters
+        limit = int(request.args.get('limit', '100'))
+
+        # Create genre dict for scraper
+        genre = {
+            'name': genre_slug.replace('-', ' ').title(),
+            'slug': genre_slug,
+            'id': genre_id
+        }
+
+        # Scrape tracks for this genre
+        tracks = scraper.scrape_genre_charts(genre, limit=limit)
+
+        logger.info(f"✅ Successfully scraped {len(tracks)} tracks for {genre_slug}")
+
+        return jsonify({
+            "success": True,
+            "tracks": tracks,
+            "genre": genre,
+            "count": len(tracks)
+        })
+
+    except Exception as e:
+        logger.error(f"❌ Error fetching tracks for {genre_slug}: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "tracks": [],
+            "count": 0
+        }), 500
+
+@app.route('/api/beatport/top-100', methods=['GET'])
+def get_beatport_top_100():
+    """Get Beatport Top 100 tracks"""
+    try:
+        logger.info("🔥 API request for Beatport Top 100")
+
+        # Initialize the Beatport scraper
+        scraper = BeatportUnifiedScraper()
+
+        # Get query parameters
+        limit = int(request.args.get('limit', '100'))
+
+        # Scrape Top 100
+        tracks = scraper.scrape_top_100(limit=limit)
+
+        logger.info(f"✅ Successfully scraped {len(tracks)} tracks from Beatport Top 100")
+
+        return jsonify({
+            "success": True,
+            "tracks": tracks,
+            "chart_name": "Beatport Top 100",
+            "count": len(tracks)
+        })
+
+    except Exception as e:
+        logger.error(f"❌ Error fetching Beatport Top 100: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "tracks": [],
+            "count": 0
+        }), 500
+
+@app.route('/api/beatport/genre-image/<genre_slug>/<genre_id>', methods=['GET'])
+def get_beatport_genre_image(genre_slug, genre_id):
+    """Get image for a specific Beatport genre"""
+    try:
+        logger.info(f"🖼️ API request for {genre_slug} genre image")
+
+        # Initialize the Beatport scraper
+        scraper = BeatportUnifiedScraper()
+
+        # Construct genre URL
+        genre_url = f"{scraper.base_url}/genre/{genre_slug}/{genre_id}"
+
+        # Get genre image
+        image_url = scraper.get_genre_image(genre_url)
+
+        if image_url:
+            logger.info(f"✅ Found image for {genre_slug}")
+            return jsonify({
+                "success": True,
+                "image_url": image_url,
+                "genre_slug": genre_slug,
+                "genre_id": genre_id
+            })
+        else:
+            logger.info(f"⚠️ No image found for {genre_slug}")
+            return jsonify({
+                "success": False,
+                "image_url": None,
+                "genre_slug": genre_slug,
+                "genre_id": genre_id
+            })
+
+    except Exception as e:
+        logger.error(f"❌ Error fetching image for {genre_slug}: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "image_url": None
+        }), 500
 
 class WebMetadataUpdateWorker:
     """Web-based metadata update worker - EXACT port of dashboard.py MetadataUpdateWorker"""

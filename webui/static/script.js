@@ -9223,6 +9223,34 @@ function initializeSyncPage() {
         });
     });
 
+    // Logic for Beatport breadcrumb back buttons
+    const beatportBackButtons = document.querySelectorAll('.breadcrumb-back');
+    beatportBackButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            showBeatportMainView();
+        });
+    });
+
+    // Logic for Beatport chart items
+    const beatportChartItems = document.querySelectorAll('.beatport-chart-item');
+    beatportChartItems.forEach(item => {
+        item.addEventListener('click', () => {
+            const chartType = item.dataset.chartType;
+            const chartId = item.dataset.chartId;
+            handleBeatportChartClick(chartType, chartId);
+        });
+    });
+
+    // Logic for Beatport genre items
+    const beatportGenreItems = document.querySelectorAll('.beatport-genre-item');
+    beatportGenreItems.forEach(item => {
+        item.addEventListener('click', () => {
+            const genreSlug = item.dataset.genreSlug;
+            const genreId = item.dataset.genreId;
+            handleBeatportGenreClick(genreSlug, genreId);
+        });
+    });
+
     // Logic for the Start Sync button
     const startSyncBtn = document.getElementById('start-sync-btn');
     if (startSyncBtn) {
@@ -9541,20 +9569,234 @@ async function loadBeatportCharts() {
 function handleBeatportCategoryClick(category) {
     console.log(`🎵 Beatport category clicked: ${category}`);
 
-    // Placeholder functionality for category navigation
+    // Show the appropriate sub-view based on category
     switch(category) {
         case 'top-charts':
-            showToast('🔥 Top Charts navigation coming soon!', 'info');
+            showBeatportSubView('top-charts');
             break;
         case 'genres':
-            showToast('🎵 Genre Explorer navigation coming soon!', 'info');
+            showBeatportSubView('genres');
+            loadBeatportGenres(); // Load genres dynamically
             break;
         case 'staff-picks':
-            showToast('📊 Staff Picks navigation coming soon!', 'info');
+            showBeatportSubView('staff-picks');
             break;
         default:
-            showToast(`Category "${category}" clicked`, 'info');
+            showToast(`Unknown category: ${category}`, 'error');
     }
+}
+
+async function loadBeatportGenres() {
+    console.log('🔍 Loading Beatport genres dynamically...');
+
+    const genreGrid = document.querySelector('#beatport-genres-view .beatport-genre-grid');
+    if (!genreGrid) {
+        console.error('❌ Could not find genre grid element');
+        return;
+    }
+
+    // Show loading state
+    genreGrid.innerHTML = `
+        <div class="genre-loading-placeholder">
+            <div class="loading-spinner"></div>
+            <p>🔍 Discovering current Beatport genres...</p>
+        </div>
+    `;
+
+    try {
+        // First, fetch genres quickly without images
+        console.log('🚀 Fetching genres without images for fast loading...');
+        const fastResponse = await fetch('/api/beatport/genres');
+        if (!fastResponse.ok) {
+            throw new Error(`API returned ${fastResponse.status}: ${fastResponse.statusText}`);
+        }
+
+        const fastData = await fastResponse.json();
+        const genres = fastData.genres || [];
+
+        if (genres.length === 0) {
+            genreGrid.innerHTML = `
+                <div class="genre-error-placeholder">
+                    <p>⚠️ No genres available</p>
+                    <button onclick="loadBeatportGenres()" class="refresh-genres-btn">🔄 Retry</button>
+                </div>
+            `;
+            return;
+        }
+
+        // Generate genre cards dynamically (without images first)
+        const genreCardsHTML = genres.map(genre => `
+            <div class="beatport-genre-item"
+                 data-genre-slug="${genre.slug}"
+                 data-genre-id="${genre.id}"
+                 data-genre-name="${genre.name}">
+                <div class="genre-icon">🎵</div>
+                <h3>${genre.name}</h3>
+                <span class="track-count">Top 100</span>
+            </div>
+        `).join('');
+
+        genreGrid.innerHTML = genreCardsHTML;
+
+        // Add click handlers to dynamically created genre items
+        const genreItems = genreGrid.querySelectorAll('.beatport-genre-item');
+        genreItems.forEach(item => {
+            item.addEventListener('click', () => {
+                const genreSlug = item.dataset.genreSlug;
+                const genreId = item.dataset.genreId;
+                const genreName = item.dataset.genreName;
+                handleBeatportGenreClick(genreSlug, genreId, genreName);
+            });
+        });
+
+        console.log(`✅ Loaded ${genres.length} Beatport genres dynamically (fast mode)`);
+        showToast(`Loaded ${genres.length} current Beatport genres`, 'success');
+
+        // Now fetch images progressively in the background if there are many genres
+        if (genres.length > 10) {
+            console.log('🖼️ Loading genre images progressively...');
+            loadGenreImagesProgressively(genres);
+        }
+
+    } catch (error) {
+        console.error('❌ Error loading Beatport genres:', error);
+        genreGrid.innerHTML = `
+            <div class="genre-error-placeholder">
+                <p>❌ Failed to load genres: ${error.message}</p>
+                <button onclick="loadBeatportGenres()" class="refresh-genres-btn">🔄 Retry</button>
+            </div>
+        `;
+        showToast(`Error loading Beatport genres: ${error.message}`, 'error');
+    }
+}
+
+async function loadGenreImagesProgressively(genres) {
+    // Load genre images with 2 concurrent workers for faster loading
+
+    const imageQueue = [...genres]; // Create a copy for processing
+    let imagesLoaded = 0;
+    const maxWorkers = 2;
+
+    console.log(`🖼️ Starting progressive image loading with ${maxWorkers} workers for ${imageQueue.length} genres`);
+
+    // Function to process a single image
+    async function processImage(genre) {
+        try {
+            // Fetch individual genre image from backend
+            const response = await fetch(`/api/beatport/genre-image/${genre.slug}/${genre.id}`);
+
+            if (response.ok) {
+                const data = await response.json();
+
+                if (data.success && data.image_url) {
+                    // Find the genre item in the DOM
+                    const genreItem = document.querySelector(
+                        `[data-genre-slug="${genre.slug}"][data-genre-id="${genre.id}"]`
+                    );
+
+                    if (genreItem) {
+                        const iconElement = genreItem.querySelector('.genre-icon');
+                        if (iconElement) {
+                            // Create new image element with smooth transition
+                            const imageDiv = document.createElement('div');
+                            imageDiv.className = 'genre-image';
+                            imageDiv.style.backgroundImage = `url('${data.image_url}')`;
+                            imageDiv.style.opacity = '0';
+                            imageDiv.style.transition = 'opacity 0.3s ease';
+
+                            // Replace icon with image
+                            iconElement.replaceWith(imageDiv);
+
+                            // Trigger fade-in animation
+                            setTimeout(() => {
+                                imageDiv.style.opacity = '1';
+                            }, 50);
+
+                            imagesLoaded++;
+                            console.log(`🖼️ [${imagesLoaded}/${imageQueue.length}] Loaded image for ${genre.name}`);
+                        }
+                    }
+                }
+            }
+        } catch (error) {
+            console.warn(`⚠️ Failed to load image for ${genre.name}:`, error);
+        }
+    }
+
+    // Worker function that processes images from the queue
+    async function imageWorker(workerId) {
+        while (imageQueue.length > 0) {
+            const genre = imageQueue.shift(); // Take next image from queue
+            if (genre) {
+                await processImage(genre);
+
+                // Small delay between requests to be respectful (500ms per worker = ~2 images per second total)
+                await new Promise(resolve => setTimeout(resolve, 500));
+            }
+        }
+        console.log(`✅ Worker ${workerId} finished`);
+    }
+
+    // Start the workers
+    const workers = [];
+    for (let i = 0; i < maxWorkers; i++) {
+        workers.push(imageWorker(i + 1));
+    }
+
+    // Wait for all workers to complete
+    await Promise.all(workers);
+
+    console.log(`✅ Progressive image loading complete: ${imagesLoaded}/${genres.length} images loaded`);
+}
+
+function showBeatportSubView(viewType) {
+    // Hide main category view
+    const mainView = document.getElementById('beatport-main-view');
+    if (mainView) {
+        mainView.classList.remove('active');
+    }
+
+    // Hide all sub-views
+    document.querySelectorAll('.beatport-sub-view').forEach(view => {
+        view.classList.remove('active');
+    });
+
+    // Show the requested sub-view
+    const targetView = document.getElementById(`beatport-${viewType}-view`);
+    if (targetView) {
+        targetView.classList.add('active');
+        console.log(`🎵 Showing Beatport ${viewType} view`);
+    } else {
+        console.error(`🎵 Could not find view: beatport-${viewType}-view`);
+    }
+}
+
+function showBeatportMainView() {
+    // Hide all sub-views
+    document.querySelectorAll('.beatport-sub-view').forEach(view => {
+        view.classList.remove('active');
+    });
+
+    // Show main category view
+    const mainView = document.getElementById('beatport-main-view');
+    if (mainView) {
+        mainView.classList.add('active');
+        console.log('🎵 Showing Beatport main view');
+    }
+}
+
+function handleBeatportChartClick(chartType, chartId) {
+    console.log(`🎵 Beatport chart clicked: ${chartType} - ${chartId}`);
+
+    // Placeholder for Phase 2 - will open discovery modal
+    showToast(`🎵 Chart "${chartId}" selected - Discovery modal coming in Phase 2!`, 'info');
+}
+
+function handleBeatportGenreClick(genreSlug, genreId) {
+    console.log(`🎵 Beatport genre clicked: ${genreSlug} (${genreId})`);
+
+    // Placeholder for Phase 2 - will open discovery modal
+    showToast(`🎵 Genre "${genreSlug}" selected - Discovery modal coming in Phase 2!`, 'info');
 }
 
 // ===============================

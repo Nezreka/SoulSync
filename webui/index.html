@@ -409,26 +409,183 @@
                                 </div>
 
                                 <div class="beatport-navigation">
-                                    <div class="beatport-category-cards">
-                                        <div class="beatport-category-card" data-category="top-charts">
-                                            <div class="category-icon top-charts-icon"></div>
-                                            <h3>🔥 Top Charts</h3>
-                                            <p>Beatport Top 100, Hype Top 10, New Releases</p>
-                                            <span class="category-count">3 Charts</span>
-                                        </div>
+                                    <!-- Main Category Cards View -->
+                                    <div class="beatport-main-view active" id="beatport-main-view">
+                                        <div class="beatport-category-cards">
+                                            <div class="beatport-category-card" data-category="top-charts">
+                                                <div class="category-icon top-charts-icon"></div>
+                                                <h3>🔥 Top Charts</h3>
+                                                <p>Beatport Top 100, Hype Top 10, New Releases</p>
+                                                <span class="category-count">3 Charts</span>
+                                            </div>
 
-                                        <div class="beatport-category-card" data-category="genres">
-                                            <div class="category-icon genres-icon"></div>
-                                            <h3>🎵 Genre Explorer</h3>
-                                            <p>House, Techno, Trance, and 36 more genres</p>
-                                            <span class="category-count">39 Genres</span>
-                                        </div>
+                                            <div class="beatport-category-card" data-category="genres">
+                                                <div class="category-icon genres-icon"></div>
+                                                <h3>🎵 Genre Explorer</h3>
+                                                <p>House, Techno, Trance, and 36 more genres</p>
+                                                <span class="category-count">39 Genres</span>
+                                            </div>
 
-                                        <div class="beatport-category-card" data-category="staff-picks">
-                                            <div class="category-icon staff-picks-icon"></div>
-                                            <h3>📊 Staff Picks</h3>
-                                            <p>Curated selections and secret weapons</p>
-                                            <span class="category-count">5 Collections</span>
+                                            <div class="beatport-category-card" data-category="staff-picks">
+                                                <div class="category-icon staff-picks-icon"></div>
+                                                <h3>📊 Staff Picks</h3>
+                                                <p>Curated selections and secret weapons</p>
+                                                <span class="category-count">5 Collections</span>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Top Charts Sub-View -->
+                                    <div class="beatport-sub-view" id="beatport-top-charts-view">
+                                        <div class="beatport-breadcrumb">
+                                            <button class="breadcrumb-back">← Back to Categories</button>
+                                            <span class="breadcrumb-path">Browse Charts > Top Charts</span>
+                                        </div>
+                                        <div class="beatport-chart-list">
+                                            <div class="beatport-chart-item" data-chart-type="top-100" data-chart-id="top-100">
+                                                <div class="chart-icon">🏆</div>
+                                                <div class="chart-info">
+                                                    <h3>Beatport Top 100</h3>
+                                                    <p>The hottest electronic tracks right now</p>
+                                                    <span class="track-count">100 tracks</span>
+                                                </div>
+                                            </div>
+                                            <div class="beatport-chart-item" data-chart-type="hype" data-chart-id="hype-10">
+                                                <div class="chart-icon">🚀</div>
+                                                <div class="chart-info">
+                                                    <h3>Hype Top 10</h3>
+                                                    <p>Rising stars and breakthrough tracks</p>
+                                                    <span class="track-count">10 tracks</span>
+                                                </div>
+                                            </div>
+                                            <div class="beatport-chart-item" data-chart-type="new-releases" data-chart-id="new-releases">
+                                                <div class="chart-icon">✨</div>
+                                                <div class="chart-info">
+                                                    <h3>New Releases</h3>
+                                                    <p>Fresh tracks added to Beatport</p>
+                                                    <span class="track-count">50 tracks</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Genre Explorer Sub-View -->
+                                    <div class="beatport-sub-view" id="beatport-genres-view">
+                                        <div class="beatport-breadcrumb">
+                                            <button class="breadcrumb-back">← Back to Categories</button>
+                                            <span class="breadcrumb-path">Browse Charts > Genre Explorer</span>
+                                        </div>
+                                        <div class="beatport-genre-grid">
+                                            <div class="beatport-genre-item" data-genre-slug="house" data-genre-id="5">
+                                                <div class="genre-icon">🏠</div>
+                                                <h3>House</h3>
+                                                <span class="genre-track-count">Top 100</span>
+                                            </div>
+                                            <div class="beatport-genre-item" data-genre-slug="tech-house" data-genre-id="11">
+                                                <div class="genre-icon">🔧</div>
+                                                <h3>Tech House</h3>
+                                                <span class="genre-track-count">Top 100</span>
+                                            </div>
+                                            <div class="beatport-genre-item" data-genre-slug="techno" data-genre-id="6">
+                                                <div class="genre-icon">⚡</div>
+                                                <h3>Techno</h3>
+                                                <span class="genre-track-count">Top 100</span>
+                                            </div>
+                                            <div class="beatport-genre-item" data-genre-slug="deep-house" data-genre-id="12">
+                                                <div class="genre-icon">🌊</div>
+                                                <h3>Deep House</h3>
+                                                <span class="genre-track-count">Top 100</span>
+                                            </div>
+                                            <div class="beatport-genre-item" data-genre-slug="trance" data-genre-id="7">
+                                                <div class="genre-icon">🌀</div>
+                                                <h3>Trance</h3>
+                                                <span class="genre-track-count">Top 100</span>
+                                            </div>
+                                            <div class="beatport-genre-item" data-genre-slug="drum-and-bass" data-genre-id="1">
+                                                <div class="genre-icon">🥁</div>
+                                                <h3>Drum & Bass</h3>
+                                                <span class="genre-track-count">Top 100</span>
+                                            </div>
+                                            <div class="beatport-genre-item" data-genre-slug="dubstep" data-genre-id="18">
+                                                <div class="genre-icon">🎵</div>
+                                                <h3>Dubstep</h3>
+                                                <span class="genre-track-count">Top 100</span>
+                                            </div>
+                                            <div class="beatport-genre-item" data-genre-slug="progressive-house" data-genre-id="15">
+                                                <div class="genre-icon">📈</div>
+                                                <h3>Progressive House</h3>
+                                                <span class="genre-track-count">Top 100</span>
+                                            </div>
+                                            <div class="beatport-genre-item" data-genre-slug="melodic-house-and-techno" data-genre-id="90">
+                                                <div class="genre-icon">🎼</div>
+                                                <h3>Melodic House & Techno</h3>
+                                                <span class="genre-track-count">Top 100</span>
+                                            </div>
+                                            <div class="beatport-genre-item" data-genre-slug="afro-house" data-genre-id="89">
+                                                <div class="genre-icon">🌍</div>
+                                                <h3>Afro House</h3>
+                                                <span class="genre-track-count">Top 100</span>
+                                            </div>
+                                            <div class="beatport-genre-item" data-genre-slug="minimal" data-genre-id="14">
+                                                <div class="genre-icon">⚫</div>
+                                                <h3>Minimal</h3>
+                                                <span class="genre-track-count">Top 100</span>
+                                            </div>
+                                            <div class="beatport-genre-item" data-genre-slug="nu-disco" data-genre-id="50">
+                                                <div class="genre-icon">✨</div>
+                                                <h3>Nu Disco</h3>
+                                                <span class="genre-track-count">Top 100</span>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Staff Picks Sub-View -->
+                                    <div class="beatport-sub-view" id="beatport-staff-picks-view">
+                                        <div class="beatport-breadcrumb">
+                                            <button class="breadcrumb-back">← Back to Categories</button>
+                                            <span class="breadcrumb-path">Browse Charts > Staff Picks</span>
+                                        </div>
+                                        <div class="beatport-chart-list">
+                                            <div class="beatport-chart-item" data-chart-type="staff-pick" data-chart-id="best-new-tracks">
+                                                <div class="chart-icon">⭐</div>
+                                                <div class="chart-info">
+                                                    <h3>Best New Tracks</h3>
+                                                    <p>Editor's picks of the week</p>
+                                                    <span class="track-count">20 tracks</span>
+                                                </div>
+                                            </div>
+                                            <div class="beatport-chart-item" data-chart-type="staff-pick" data-chart-id="secret-weapons">
+                                                <div class="chart-icon">🔫</div>
+                                                <div class="chart-info">
+                                                    <h3>Secret Weapons</h3>
+                                                    <p>Underground gems for DJs</p>
+                                                    <span class="track-count">15 tracks</span>
+                                                </div>
+                                            </div>
+                                            <div class="beatport-chart-item" data-chart-type="staff-pick" data-chart-id="closing-essentials">
+                                                <div class="chart-icon">🌅</div>
+                                                <div class="chart-info">
+                                                    <h3>Closing Essentials</h3>
+                                                    <p>Perfect tracks to end the night</p>
+                                                    <span class="track-count">12 tracks</span>
+                                                </div>
+                                            </div>
+                                            <div class="beatport-chart-item" data-chart-type="staff-pick" data-chart-id="peak-time-driving">
+                                                <div class="chart-icon">🔥</div>
+                                                <div class="chart-info">
+                                                    <h3>Peak Time Driving</h3>
+                                                    <p>High-energy dancefloor destroyers</p>
+                                                    <span class="track-count">25 tracks</span>
+                                                </div>
+                                            </div>
+                                            <div class="beatport-chart-item" data-chart-type="staff-pick" data-chart-id="underground-gems">
+                                                <div class="chart-icon">💎</div>
+                                                <div class="chart-info">
+                                                    <h3>Underground Gems</h3>
+                                                    <p>Hidden treasures from emerging artists</p>
+                                                    <span class="track-count">18 tracks</span>
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
