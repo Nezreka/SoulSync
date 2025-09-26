@@ -876,6 +876,9 @@ body {
 }
 
 .page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
     margin-bottom: 30px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
     padding-bottom: 20px;
@@ -7274,6 +7277,51 @@ body {
 }
 
 .artist-detail-watchlist-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
+/* Library Artist Watchlist Button */
+
+.library-artist-watchlist-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 18px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #e0e0e0;
+
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 16px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    outline: none;
+    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.library-artist-watchlist-btn:hover:not(:disabled) {
+    background: rgba(29, 185, 84, 0.15);
+    color: #ffffff;
+    border-color: rgba(29, 185, 84, 0.3);
+    transform: translateY(-1px);
+}
+
+.library-artist-watchlist-btn.watching {
+    background: rgba(255, 193, 7, 0.15);
+    color: #ffc107;
+    border-color: rgba(255, 193, 7, 0.3);
+}
+
+.library-artist-watchlist-btn.watching:hover:not(:disabled) {
+    background: rgba(255, 193, 7, 0.25);
+    color: #ffffff;
+    border-color: rgba(255, 193, 7, 0.5);
+}
+
+.library-artist-watchlist-btn:disabled {
     opacity: 0.6;
     cursor: not-allowed;
     transform: none;

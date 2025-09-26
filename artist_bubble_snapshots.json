@@ -1,0 +1,42 @@
+{
+  "bubbles": {
+    "6FBDaR13swtiWwGhX1WQsP": {
+      "artist": {
+        "id": "6FBDaR13swtiWwGhX1WQsP",
+        "name": "blink-182",
+        "image_url": "https://i.scdn.co/image/ab6761610000e5eb5da36f8b98dd965336a1507a",
+        "genres": [
+          "pop punk",
+          "punk",
+          "rock",
+          "skate punk",
+          "emo"
+        ],
+        "popularity": 80,
+        "confidence": 0.1111111111111111
+      },
+      "downloads": [
+        {
+          "virtualPlaylistId": "artist_album_6FBDaR13swtiWwGhX1WQsP_00txDYFrU4LjWqwKE8iQJA",
+          "album": {
+            "album_type": "album",
+            "external_urls": {
+              "spotify": "https://open.spotify.com/album/00txDYFrU4LjWqwKE8iQJA"
+            },
+            "id": "00txDYFrU4LjWqwKE8iQJA",
+            "image_url": "https://i.scdn.co/image/ab67616d0000b273d07226d60768eb99f38997f8",
+            "name": "ONE MORE TIME...",
+            "release_date": "2023-10-27",
+            "total_tracks": 19
+          },
+          "albumType": "albums",
+          "status": "in_progress",
+          "startTime": "2025-09-26T14:42:42.028Z"
+        }
+      ],
+      "hasCompletedDownloads": false
+    }
+  },
+  "timestamp": "2025-09-26T07:42:43.033178",
+  "snapshot_id": "20250926_074243"
+}

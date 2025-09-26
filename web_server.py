@@ -2852,11 +2852,19 @@ def get_artist_detail(artist_id):
                 single['image_url'] = fix_artist_image_url(single['image_url'])
 
         # Get Spotify discography for proper categorization and missing releases
+        spotify_artist_data = None
         try:
             spotify_discography = get_spotify_artist_discography(artist_info['name'])
 
             if spotify_discography['success']:
                 print(f"🎵 Spotify discography found - Albums: {len(spotify_discography['albums'])}, EPs: {len(spotify_discography['eps'])}, Singles: {len(spotify_discography['singles'])}")
+
+                # Store Spotify artist data for the response
+                spotify_artist_data = {
+                    'spotify_artist_id': spotify_discography.get('spotify_artist_id'),
+                    'spotify_artist_name': spotify_discography.get('spotify_artist_name'),
+                    'artist_image': spotify_discography.get('artist_image')
+                }
 
                 # Merge owned and Spotify data for complete picture
                 merged_discography = merge_discography_data(owned_releases, spotify_discography)
@@ -2869,11 +2877,17 @@ def get_artist_detail(artist_id):
             # Fall back to our database categorization
             merged_discography = owned_releases
 
-        return jsonify({
+        response_data = {
             "success": True,
             "artist": artist_info,
             "discography": merged_discography
-        })
+        }
+
+        # Add Spotify artist data if available
+        if spotify_artist_data:
+            response_data["spotify_artist"] = spotify_artist_data
+
+        return jsonify(response_data)
 
     except Exception as e:
         print(f"❌ Error in get_artist_detail: {e}")
@@ -12649,7 +12663,9 @@ def get_spotify_artist_discography(artist_name):
             'albums': albums,
             'eps': eps,
             'singles': singles,
-            'artist_image': artist.image_url if hasattr(artist, 'image_url') else None
+            'artist_image': artist.image_url if hasattr(artist, 'image_url') else None,
+            'spotify_artist_id': spotify_artist_id,
+            'spotify_artist_name': artist.name
         }
 
     except Exception as e:
