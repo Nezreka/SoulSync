@@ -2481,7 +2481,7 @@ async function loadBeatportChartsFromBackend() {
                     // Rehydrate the chart state first to get discovery results
                     await rehydrateBeatportChart(chartInfo, false);
 
-                    // Create/update active download process with tracks
+                    // Create the download modal using the Beatport-specific function (like YouTube)
                     if (!activeDownloadProcesses[convertedPlaylistId]) {
                         // Get tracks from the rehydrated state
                         const ytState = youtubePlaylistStates[chartInfo.hash];
@@ -2513,15 +2513,36 @@ async function loadBeatportChartsFromBackend() {
                                 });
                         }
 
-                        activeDownloadProcesses[convertedPlaylistId] = {
-                            status: chartInfo.phase === 'download_complete' ? 'complete' : 'running',
-                            batchId: chartInfo.download_process_id,
-                            tracks: spotifyTracks,
-                            modalElement: null
-                        };
-                    }
+                        if (spotifyTracks.length > 0) {
+                            await openDownloadMissingModalForYouTube(
+                                convertedPlaylistId,
+                                `[Beatport] ${chartInfo.name}`,
+                                spotifyTracks
+                            );
 
-                    console.log(`✅ Set up active download process for Beatport chart: ${chartInfo.name} with ${activeDownloadProcesses[convertedPlaylistId].tracks.length} tracks`);
+                            // Set the modal to running state with the correct batch ID
+                            const process = activeDownloadProcesses[convertedPlaylistId];
+                            if (process) {
+                                process.status = chartInfo.phase === 'download_complete' ? 'complete' : 'running';
+                                process.batchId = chartInfo.download_process_id;
+
+                                // Update UI to running state
+                                const beginBtn = document.getElementById(`begin-analysis-btn-${convertedPlaylistId}`);
+                                const cancelBtn = document.getElementById(`cancel-all-btn-${convertedPlaylistId}`);
+                                if (beginBtn) beginBtn.style.display = 'none';
+                                if (cancelBtn) cancelBtn.style.display = 'inline-block';
+
+                                // Start polling for this process
+                                startModalDownloadPolling(convertedPlaylistId);
+
+                                // Hide modal since this is background rehydration
+                                process.modalElement.style.display = 'none';
+                                console.log(`✅ Rehydrated download modal for Beatport chart: ${chartInfo.name}`);
+                            }
+                        } else {
+                            console.warn(`⚠️ No Spotify tracks found for Beatport download modal: ${chartInfo.name}`);
+                        }
+                    }
                 } catch (error) {
                     console.warn(`⚠️ Error setting up download process for Beatport chart "${chartInfo.name}":`, error.message);
                 }
@@ -4270,6 +4291,29 @@ async function startMissingTracksProcess(playlistId) {
         }
 
         process.batchId = data.batch_id;
+
+        // Update Beatport backend state with download_process_id now that we have the batchId
+        if (playlistId.startsWith('beatport_')) {
+            const urlHash = playlistId.replace('beatport_', '');
+            const state = youtubePlaylistStates[urlHash];
+            if (state && state.is_beatport_playlist) {
+                const chartHash = state.beatport_chart_hash || urlHash;
+                try {
+                    fetch(`/api/beatport/charts/update-phase/${chartHash}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            phase: 'downloading',
+                            download_process_id: data.batch_id
+                        })
+                    });
+                    console.log(`🔄 Updated Beatport backend with download_process_id: ${data.batch_id}`);
+                } catch (error) {
+                    console.warn('⚠️ Error updating Beatport backend with download_process_id:', error);
+                }
+            }
+        }
+
         startModalDownloadPolling(playlistId);
     } catch (error) {
         showToast(`Failed to start process: ${error.message}`, 'error');
@@ -10658,53 +10702,131 @@ async function handleBeatportCardClick(chartHash) {
         console.log(`🎧 [Card Click] Opening Beatport discovery modal for ${state.phase} phase`);
         openYouTubeDiscoveryModal(chartHash);
     } else if (state.phase === 'downloading' || state.phase === 'download_complete') {
-        // Open download modal if we have the converted playlist ID
+        // Open download modal if we have the converted playlist ID (following YouTube/Tidal pattern)
         const ytState = youtubePlaylistStates[chartHash];
         if (ytState && ytState.is_beatport_playlist && ytState.convertedSpotifyPlaylistId) {
-            console.log(`📥 [Card Click] Opening Beatport download modal for ${state.phase} phase`);
+            console.log(`📥 [Card Click] Opening download modal for Beatport chart: ${ytState.playlist.name} (phase: ${state.phase})`);
 
-            // Get Spotify tracks from discovery results (like startBeatportDownloadMissing does)
-            if (ytState.discovery_results && ytState.discovery_results.length > 0) {
-                const spotifyTracks = ytState.discovery_results
-                    .filter(result => result.spotify_data)
-                    .map(result => {
-                        const track = result.spotify_data;
-                        // Ensure artists is an array of strings
-                        if (track.artists && Array.isArray(track.artists)) {
-                            track.artists = track.artists.map(artist =>
-                                typeof artist === 'string' ? artist : (artist.name || artist)
-                            );
-                        } else if (track.artists && typeof track.artists === 'string') {
-                            track.artists = [track.artists];
-                        } else {
-                            track.artists = ['Unknown Artist'];
-                        }
-                        return {
-                            id: track.id,
-                            name: track.name,
-                            artists: track.artists,
-                            album: track.album || 'Unknown Album',
-                            duration_ms: track.duration_ms || 0,
-                            external_urls: track.external_urls || {}
-                        };
-                    });
-
-                const playlistName = `[Beatport] ${ytState.playlist.name}`;
-                try {
-                    await openDownloadMissingModalForYouTube(ytState.convertedSpotifyPlaylistId, playlistName, spotifyTracks);
-                } catch (error) {
-                    console.error(`❌ Error opening Beatport download modal:`, error);
-                    hideLoadingOverlay();
-                    showToast('Error opening download modal', 'error');
+            // Check if modal already exists, if not create it (like Tidal implementation)
+            if (activeDownloadProcesses[ytState.convertedSpotifyPlaylistId]) {
+                const process = activeDownloadProcesses[ytState.convertedSpotifyPlaylistId];
+                if (process.modalElement) {
+                    console.log(`📱 [Card Click] Showing existing download modal for ${state.phase} phase`);
+                    process.modalElement.style.display = 'flex';
+                } else {
+                    console.warn(`⚠️ [Card Click] Download process exists but modal element missing - rehydrating`);
+                    await rehydrateBeatportDownloadModal(chartHash, ytState);
                 }
             } else {
-                console.warn(`⚠️ [Card Click] No discovery results found for Beatport chart: ${chartHash}`);
-                showToast('No tracks found - try refreshing the page', 'error');
+                // Need to create the download modal - fetch the discovery results if needed
+                console.log(`🔧 [Card Click] Rehydrating Beatport download modal for ${state.phase} phase`);
+                await rehydrateBeatportDownloadModal(chartHash, ytState);
             }
         } else {
-            console.warn(`⚠️ [Card Click] No converted playlist ID found for Beatport chart: ${chartHash}`);
-            showToast('Download data not found - try refreshing the page', 'error');
+            console.error('❌ [Card Click] No converted Spotify playlist ID found for Beatport download modal');
+            console.log('📊 [Card Click] Available state data:', Object.keys(ytState || {}));
+
+            // Fallback: try to open discovery modal if we have discovery results
+            if (ytState && ytState.discovery_results && ytState.discovery_results.length > 0) {
+                console.log(`🔄 [Card Click] Fallback: Opening discovery modal with ${ytState.discovery_results.length} results`);
+                openYouTubeDiscoveryModal(chartHash);
+            } else {
+                showToast('Unable to open download modal - missing playlist data', 'error');
+            }
         }
+    }
+}
+
+async function rehydrateBeatportDownloadModal(chartHash, ytState) {
+    try {
+        console.log(`💧 [Rehydration] Attempting fallback rehydration for Beatport chart: ${chartHash}`);
+
+        // This function is only called as a fallback when the modal wasn't created during backend loading
+        // In most cases, the modal should already exist from loadBeatportChartsFromBackend()
+
+        if (!ytState || !ytState.playlist || !ytState.convertedSpotifyPlaylistId) {
+            console.error(`❌ [Rehydration] Invalid state data for Beatport chart: ${chartHash}`);
+            showToast('Cannot open download modal - invalid playlist data', 'error');
+            return;
+        }
+
+        // Get discovery results from backend if not already loaded
+        if (!ytState.discovery_results) {
+            console.log(`🔍 Fetching discovery results from backend for Beatport chart: ${chartHash}`);
+            const stateResponse = await fetch(`/api/beatport/charts/status/${chartHash}`);
+            if (stateResponse.ok) {
+                const fullState = await stateResponse.json();
+                ytState.discovery_results = fullState.discovery_results;
+                ytState.download_process_id = fullState.download_process_id;
+                console.log(`✅ Loaded ${fullState.discovery_results?.length || 0} discovery results from backend`);
+            } else {
+                console.error('❌ Failed to fetch Beatport discovery results from backend');
+                showToast('Error loading playlist data', 'error');
+                return;
+            }
+        }
+
+        // Extract Spotify tracks from discovery results
+        const spotifyTracks = ytState.discovery_results
+            .filter(result => result.spotify_data)
+            .map(result => {
+                const track = result.spotify_data;
+                // Ensure artists is an array of strings
+                if (track.artists && Array.isArray(track.artists)) {
+                    track.artists = track.artists.map(artist =>
+                        typeof artist === 'string' ? artist : (artist.name || artist)
+                    );
+                } else if (track.artists && typeof track.artists === 'string') {
+                    track.artists = [track.artists];
+                } else {
+                    track.artists = ['Unknown Artist'];
+                }
+                return {
+                    id: track.id,
+                    name: track.name,
+                    artists: track.artists,
+                    album: track.album || 'Unknown Album',
+                    duration_ms: track.duration_ms || 0,
+                    external_urls: track.external_urls || {}
+                };
+            });
+
+        if (spotifyTracks.length === 0) {
+            console.error('❌ No Spotify tracks found for download modal');
+            showToast('No Spotify matches found for download', 'error');
+            return;
+        }
+
+        const virtualPlaylistId = ytState.convertedSpotifyPlaylistId;
+        const playlistName = `[Beatport] ${ytState.playlist.name}`;
+
+        // Create the download modal
+        await openDownloadMissingModalForYouTube(virtualPlaylistId, playlistName, spotifyTracks);
+
+        // Set up the modal for the running state if we have a download process ID
+        if (ytState.download_process_id) {
+            const process = activeDownloadProcesses[virtualPlaylistId];
+            if (process) {
+                process.status = 'running';
+                process.batchId = ytState.download_process_id;
+
+                // Update UI to reflect running state
+                const beginBtn = document.getElementById(`begin-analysis-btn-${virtualPlaylistId}`);
+                const cancelBtn = document.getElementById(`cancel-all-btn-${virtualPlaylistId}`);
+                if (beginBtn) beginBtn.style.display = 'none';
+                if (cancelBtn) cancelBtn.style.display = 'inline-block';
+
+                // Start polling for this process
+                startModalDownloadPolling(virtualPlaylistId);
+
+                console.log(`✅ [Rehydration] Fallback modal rehydrated for running download process`);
+            }
+        }
+
+    } catch (error) {
+        console.error(`❌ [Rehydration] Error in fallback rehydration for Beatport chart:`, error);
+        showToast('Error opening download modal', 'error');
+        hideLoadingOverlay();
     }
 }
 
@@ -10723,7 +10845,7 @@ function updateBeatportCardPhase(chartHash, phase) {
         // Re-attach click handler
         const newCard = document.getElementById(`beatport-card-${chartHash}`);
         if (newCard) {
-            newCard.addEventListener('click', () => handleBeatportCardClick(chartHash));
+            newCard.addEventListener('click', async () => await handleBeatportCardClick(chartHash));
             state.cardElement = newCard;
         }
     }
