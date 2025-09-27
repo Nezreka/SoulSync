@@ -10155,6 +10155,10 @@ def cancel_tidal_sync(playlist_id):
 youtube_playlist_states = {}  # Key: url_hash, Value: persistent playlist state
 youtube_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="youtube_discovery")
 
+# Global state for Beatport chart management (persistent across page reloads)
+beatport_chart_states = {}  # Key: url_hash, Value: persistent chart state
+beatport_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="beatport_discovery")
+
 @app.route('/api/youtube/parse', methods=['POST'])
 def parse_youtube_playlist_endpoint():
     """Parse a YouTube playlist URL and return structured track data"""
@@ -12010,6 +12014,390 @@ def get_beatport_genre_image(genre_slug, genre_id):
             "error": str(e),
             "image_url": None
         }), 500
+
+@app.route('/api/beatport/hype-top-100', methods=['GET'])
+def get_beatport_hype_top_100():
+    """Get Beatport Hype Top 100 - Improved with fixed URL"""
+    try:
+        logger.info("🔥 API request for Beatport Hype Top 100")
+
+        # Initialize the Beatport scraper
+        scraper = BeatportUnifiedScraper()
+
+        # Get query parameters
+        limit = int(request.args.get('limit', '100'))
+
+        # Scrape Hype Top 100 using improved method
+        tracks = scraper.scrape_hype_top_100(limit=limit)
+
+        logger.info(f"✅ Successfully scraped {len(tracks)} tracks from Beatport Hype Top 100")
+
+        return jsonify({
+            "success": True,
+            "tracks": tracks,
+            "chart_name": "Beatport Hype Top 100",
+            "count": len(tracks)
+        })
+
+    except Exception as e:
+        logger.error(f"❌ Error fetching Beatport Hype Top 100: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "tracks": [],
+            "count": 0
+        }), 500
+
+@app.route('/api/beatport/top-100-releases', methods=['GET'])
+def get_beatport_top_100_releases():
+    """Get Beatport Top 100 Releases - New endpoint"""
+    try:
+        logger.info("📊 API request for Beatport Top 100 Releases")
+
+        # Initialize the Beatport scraper
+        scraper = BeatportUnifiedScraper()
+
+        # Get query parameters
+        limit = int(request.args.get('limit', '100'))
+
+        # Scrape Top 100 Releases using new method
+        tracks = scraper.scrape_top_100_releases(limit=limit)
+
+        logger.info(f"✅ Successfully scraped {len(tracks)} tracks from Beatport Top 100 Releases")
+
+        return jsonify({
+            "success": True,
+            "tracks": tracks,
+            "chart_name": "Beatport Top 100 Releases",
+            "count": len(tracks)
+        })
+
+    except Exception as e:
+        logger.error(f"❌ Error fetching Beatport Top 100 Releases: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "tracks": [],
+            "count": 0
+        }), 500
+
+@app.route('/api/beatport/chart-sections', methods=['GET'])
+def get_beatport_chart_sections():
+    """Get dynamically discovered Beatport chart sections"""
+    try:
+        logger.info("🔍 API request for Beatport chart sections discovery")
+
+        # Initialize the Beatport scraper
+        scraper = BeatportUnifiedScraper()
+
+        # Discover chart sections dynamically
+        chart_sections = scraper.discover_chart_sections()
+
+        logger.info(f"✅ Successfully discovered chart sections")
+
+        return jsonify({
+            "success": True,
+            "chart_sections": chart_sections,
+            "summary": chart_sections.get('summary', {})
+        })
+
+    except Exception as e:
+        logger.error(f"❌ Error discovering Beatport chart sections: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "chart_sections": {},
+            "summary": {}
+        }), 500
+
+@app.route('/api/beatport/dj-charts-improved', methods=['GET'])
+def get_beatport_dj_charts_improved():
+    """Get Beatport DJ Charts using improved method"""
+    try:
+        logger.info("🎧 API request for Beatport DJ Charts (improved)")
+
+        # Initialize the Beatport scraper
+        scraper = BeatportUnifiedScraper()
+
+        # Get query parameters
+        limit = int(request.args.get('limit', '20'))
+
+        # Scrape DJ Charts using improved method
+        charts = scraper.scrape_dj_charts(limit=limit)
+
+        logger.info(f"✅ Successfully scraped {len(charts)} DJ charts")
+
+        return jsonify({
+            "success": True,
+            "charts": charts,
+            "chart_name": "Beatport DJ Charts",
+            "count": len(charts)
+        })
+
+    except Exception as e:
+        logger.error(f"❌ Error fetching Beatport DJ Charts: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "charts": [],
+            "count": 0
+        }), 500
+
+@app.route('/api/beatport/discovery/start/<url_hash>', methods=['POST'])
+def start_beatport_discovery(url_hash):
+    """Start Spotify discovery for Beatport chart tracks"""
+    import json
+    try:
+        logger.info(f"🔍 Starting Beatport discovery for: {url_hash}")
+
+        # Get chart data from request body
+        data = request.get_json() or {}
+        print(f"🔍 Raw request data: {data}")
+
+        chart_data = data.get('chart_data')
+        print(f"🔍 Chart data extracted: {chart_data is not None}")
+
+        # Debug logging
+        if chart_data:
+            print(f"🔍 Chart data keys: {list(chart_data.keys()) if isinstance(chart_data, dict) else 'Not a dict'}")
+            print(f"🔍 Chart name: {chart_data.get('name') if isinstance(chart_data, dict) else 'N/A'}")
+            if isinstance(chart_data, dict) and 'tracks' in chart_data:
+                print(f"🔍 Number of tracks: {len(chart_data['tracks'])}")
+                if chart_data['tracks']:
+                    print(f"🔍 First track: {chart_data['tracks'][0]}")
+        else:
+            print("🔍 No chart data received")
+
+        if not chart_data or not chart_data.get('tracks'):
+            return jsonify({"error": "Chart data with tracks is required"}), 400
+
+        # Initialize Beatport chart state (similar to YouTube)
+        if url_hash not in beatport_chart_states:
+            beatport_chart_states[url_hash] = {
+                'chart': chart_data,
+                'phase': 'fresh',
+                'discovery_results': [],
+                'discovery_progress': 0,
+                'spotify_matches': 0,
+                'spotify_total': len(chart_data['tracks']),
+                'status': 'fresh',
+                'last_accessed': time.time()
+            }
+
+        state = beatport_chart_states[url_hash]
+        state['last_accessed'] = time.time()
+
+        if state['phase'] == 'discovering':
+            return jsonify({"error": "Discovery already in progress"}), 400
+
+        # Update phase to discovering
+        state['phase'] = 'discovering'
+        state['status'] = 'discovering'
+        state['discovery_progress'] = 0
+        state['spotify_matches'] = 0
+
+        # Add activity for discovery start
+        chart_name = chart_data.get('name', 'Unknown Chart')
+        track_count = len(chart_data['tracks'])
+        add_activity_item("🔍", "Beatport Discovery Started", f"'{chart_name}' - {track_count} tracks", "Now")
+
+        # Start discovery worker
+        future = beatport_discovery_executor.submit(_run_beatport_discovery_worker, url_hash)
+        state['discovery_future'] = future
+
+        print(f"🔍 Started Spotify discovery for Beatport chart: {chart_name}")
+        return jsonify({"success": True, "message": "Discovery started", "status": "discovering"})
+
+    except Exception as e:
+        logger.error(f"❌ Error starting Beatport discovery: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/beatport/discovery/status/<url_hash>', methods=['GET'])
+def get_beatport_discovery_status(url_hash):
+    """Get real-time discovery status for a Beatport chart"""
+    try:
+        if url_hash not in beatport_chart_states:
+            return jsonify({"error": "Beatport chart not found"}), 404
+
+        state = beatport_chart_states[url_hash]
+        state['last_accessed'] = time.time()
+
+        response = {
+            'phase': state['phase'],
+            'status': state['status'],
+            'progress': state['discovery_progress'],
+            'spotify_matches': state['spotify_matches'],
+            'spotify_total': state['spotify_total'],
+            'results': state['discovery_results'],
+            'complete': state['phase'] == 'discovered'
+        }
+
+        return jsonify(response)
+
+    except Exception as e:
+        logger.error(f"❌ Error getting Beatport discovery status: {e}")
+        return jsonify({"error": str(e)}), 500
+
+def _run_beatport_discovery_worker(url_hash):
+    """Background worker for Beatport Spotify discovery process"""
+    try:
+        state = beatport_chart_states[url_hash]
+        chart = state['chart']
+        tracks = chart['tracks']
+
+        print(f"🔍 Starting Spotify discovery for {len(tracks)} Beatport tracks...")
+
+        if not spotify_client or not spotify_client.is_authenticated():
+            print("❌ Spotify client not authenticated")
+            state['status'] = 'error'
+            state['phase'] = 'fresh'
+            return
+
+        # Process each track for Spotify discovery
+        for i, track in enumerate(tracks):
+            try:
+                # Update progress
+                state['discovery_progress'] = int((i / len(tracks)) * 100)
+
+                # Get track info from Beatport data (frontend sends 'name' and 'artists' fields)
+                track_title = track.get('name', 'Unknown Title')
+                track_artists = track.get('artists', ['Unknown Artist'])
+                # Handle artists - could be a list or string
+                if isinstance(track_artists, list):
+                    if len(track_artists) > 0 and isinstance(track_artists[0], str):
+                        # Handle case like ["CID,Taylr Renee"] - split on comma
+                        track_artist = track_artists[0].split(',')[0].strip()
+                    else:
+                        track_artist = track_artists[0] if track_artists else 'Unknown Artist'
+                else:
+                    track_artist = str(track_artists)
+
+                print(f"🔍 Searching Spotify for: '{track_artist}' - '{track_title}'")
+
+                # Try multiple search strategies
+                spotify_track = None
+
+                # Clean track title for search (remove remix info)
+                import re
+                clean_title = re.sub(r'\s*\([^)]*\)', '', track_title).strip()  # Remove (Extended Mix), (Original Mix), etc.
+                clean_title = re.sub(r'\s*\[[^\]]*\]', '', clean_title).strip()  # Remove [brackets]
+
+                # Strategy 1: Simple search with cleaned terms
+                search_query = f"{track_artist} {clean_title}"
+                print(f"🔍 Search query: {search_query}")
+
+                try:
+                    search_results = spotify_client.search_tracks(search_query, limit=10)
+                    print(f"🔍 Search results type: {type(search_results)}, length: {len(search_results) if search_results else 0}")
+
+                    # Find best match from search_tracks result
+                    if search_results:
+                        for result in search_results:
+                            try:
+                                # Check if artist matches (case insensitive, flexible)
+                                result_artists = [artist.lower() for artist in result.artists]
+                                artist_match = any(track_artist.lower() in artist for artist in result_artists) or any(artist in track_artist.lower() for artist in result_artists)
+
+                                # Check if title matches (case insensitive, flexible)
+                                title_match = clean_title.lower() in result.name.lower() or result.name.lower() in clean_title.lower()
+
+                                if artist_match and title_match:
+                                    spotify_track = result
+                                    print(f"✅ Found match: {result.artists[0]} - {result.name}")
+                                    break
+                            except Exception as e:
+                                print(f"❌ Error processing search result: {e}")
+                                continue
+                except Exception as e:
+                    print(f"❌ Error in Spotify search: {e}")
+
+                # Strategy 2: Try artist-only search if no match
+                if not spotify_track:
+                    print(f"🔍 Trying artist-only search: {track_artist}")
+                    search_results = spotify_client.search_tracks(track_artist, limit=5)
+
+                    if search_results:
+                        for result in search_results:
+                            result_artists = [artist.lower() for artist in result.artists]
+                            if any(track_artist.lower() in artist for artist in result_artists):
+                                print(f"✅ Found by artist: {result.artists[0]} - {result.name}")
+                                spotify_track = result
+                                break
+
+                # Create result entry
+                result_entry = {
+                    'index': i,  # Add index for frontend table row identification
+                    'beatport_track': {
+                        'title': track_title,
+                        'artist': track_artist
+                    },
+                    'status': 'found' if spotify_track else 'not_found',
+                    'status_class': 'found' if spotify_track else 'not-found'  # Add status class for CSS styling
+                }
+
+                if spotify_track:
+                    # Debug: show available attributes
+                    print(f"🔍 Spotify track attributes: {dir(spotify_track)}")
+
+                    # Format artists correctly for frontend compatibility
+                    formatted_artists = []
+                    if isinstance(spotify_track.artists, list):
+                        # If it's already a list of strings, convert to objects with 'name' property
+                        for artist in spotify_track.artists:
+                            if isinstance(artist, str):
+                                formatted_artists.append({'name': artist})
+                            else:
+                                # If it's already an object, use as-is
+                                formatted_artists.append(artist)
+                    else:
+                        # Single artist case
+                        formatted_artists = [{'name': str(spotify_track.artists)}]
+
+                    result_entry['spotify_data'] = {
+                        'name': spotify_track.name,
+                        'artists': formatted_artists,  # Now formatted as list of objects with 'name' property
+                        'album': spotify_track.album,  # Already a string
+                        'id': spotify_track.id
+                        # Remove uri for now since it's causing errors
+                    }
+                    state['spotify_matches'] += 1
+
+                state['discovery_results'].append(result_entry)
+
+                # Small delay to avoid rate limiting
+                time.sleep(0.1)
+
+            except Exception as e:
+                print(f"❌ Error processing Beatport track {i}: {e}")
+                # Add error result
+                state['discovery_results'].append({
+                    'index': i,  # Add index for frontend table row identification
+                    'beatport_track': {
+                        'title': track.get('name', 'Unknown'),  # Changed from 'title' to 'name' to match track structure
+                        'artist': track.get('artists', ['Unknown'])[0] if isinstance(track.get('artists'), list) else 'Unknown'
+                    },
+                    'status': 'error',
+                    'status_class': 'error',  # Add status class for CSS styling
+                    'error': str(e)
+                })
+
+        # Mark discovery as complete
+        state['discovery_progress'] = 100
+        state['phase'] = 'discovered'
+        state['status'] = 'discovered'
+
+        # Add activity for completion
+        chart_name = chart.get('name', 'Unknown Chart')
+        add_activity_item("✅", "Beatport Discovery Complete",
+                         f"'{chart_name}' - {state['spotify_matches']}/{len(tracks)} tracks found", "Now")
+
+        print(f"✅ Beatport discovery complete: {state['spotify_matches']}/{len(tracks)} tracks found")
+
+    except Exception as e:
+        print(f"❌ Error in Beatport discovery worker: {e}")
+        if url_hash in beatport_chart_states:
+            beatport_chart_states[url_hash]['status'] = 'error'
+            beatport_chart_states[url_hash]['phase'] = 'fresh'
 
 class WebMetadataUpdateWorker:
     """Web-based metadata update worker - EXACT port of dashboard.py MetadataUpdateWorker"""

@@ -47,6 +47,9 @@ let tidalPlaylists = [];
 let tidalPlaylistStates = {}; // Key: playlist_id, Value: playlist state with phases
 let tidalPlaylistsLoaded = false;
 
+// --- Beatport Chart State Management (Similar to YouTube/Tidal) ---
+let beatportChartStates = {}; // Key: chart_hash, Value: chart state with phases
+
 // --- Artists Page State Management ---
 let artistsPageState = {
     currentView: 'search', // 'search', 'results', 'detail'
@@ -9237,7 +9240,9 @@ function initializeSyncPage() {
         item.addEventListener('click', () => {
             const chartType = item.dataset.chartType;
             const chartId = item.dataset.chartId;
-            handleBeatportChartClick(chartType, chartId);
+            const chartName = item.dataset.chartName;
+            const chartEndpoint = item.dataset.chartEndpoint;
+            handleBeatportChartClick(chartType, chartId, chartName, chartEndpoint);
         });
     });
 
@@ -9573,6 +9578,7 @@ function handleBeatportCategoryClick(category) {
     switch(category) {
         case 'top-charts':
             showBeatportSubView('top-charts');
+            loadBeatportTopCharts(); // Load top charts dynamically
             break;
         case 'genres':
             showBeatportSubView('genres');
@@ -9749,6 +9755,287 @@ async function loadGenreImagesProgressively(genres) {
     console.log(`✅ Progressive image loading complete: ${imagesLoaded}/${genres.length} images loaded`);
 }
 
+async function loadBeatportTopCharts() {
+    console.log('🔥 Loading Beatport top charts dynamically...');
+
+    const chartList = document.querySelector('#beatport-top-charts-view .beatport-chart-list');
+    if (!chartList) {
+        console.error('❌ Could not find chart list element');
+        return;
+    }
+
+    // Show loading state
+    chartList.innerHTML = `
+        <div class="chart-loading-placeholder">
+            <div class="loading-spinner"></div>
+            <p>🔥 Discovering current Beatport top charts...</p>
+        </div>
+    `;
+
+    try {
+        // Define the top charts we want to show (based on our working endpoints)
+        const topCharts = [
+            {
+                id: 'beatport-top-100',
+                name: 'Beatport Top 100',
+                description: 'The hottest electronic tracks right now',
+                icon: '🏆',
+                endpoint: '/api/beatport/top-100',
+                trackCount: '100 tracks'
+            },
+            {
+                id: 'hype-top-100',
+                name: 'Hype Top 100',
+                description: 'Trending tracks gaining momentum',
+                icon: '🚀',
+                endpoint: '/api/beatport/hype-top-100',
+                trackCount: '100 tracks'
+            }
+        ];
+
+        // Generate chart cards dynamically
+        const chartCardsHTML = topCharts.map(chart => `
+            <div class="beatport-chart-item"
+                 data-chart-type="${chart.id}"
+                 data-chart-id="${chart.id}"
+                 data-chart-name="${chart.name}"
+                 data-chart-endpoint="${chart.endpoint}">
+                <div class="chart-icon">${chart.icon}</div>
+                <div class="chart-info">
+                    <h3>${chart.name}</h3>
+                    <p>${chart.description}</p>
+                    <span class="track-count">${chart.trackCount}</span>
+                </div>
+            </div>
+        `).join('');
+
+        chartList.innerHTML = chartCardsHTML;
+
+        // Add click handlers to dynamically created chart items
+        const chartItems = chartList.querySelectorAll('.beatport-chart-item');
+        chartItems.forEach(item => {
+            item.addEventListener('click', () => {
+                const chartType = item.dataset.chartType;
+                const chartId = item.dataset.chartId;
+                const chartName = item.dataset.chartName;
+                const chartEndpoint = item.dataset.chartEndpoint;
+                handleBeatportTopChartClick(chartType, chartId, chartName, chartEndpoint);
+            });
+        });
+
+        console.log(`✅ Loaded ${topCharts.length} Beatport top charts dynamically`);
+        showToast(`Loaded ${topCharts.length} top charts`, 'success');
+
+    } catch (error) {
+        console.error('❌ Error loading Beatport top charts:', error);
+        chartList.innerHTML = `
+            <div class="chart-error-placeholder">
+                <p>❌ Failed to load top charts: ${error.message}</p>
+                <button onclick="loadBeatportTopCharts()" class="refresh-charts-btn">🔄 Retry</button>
+            </div>
+        `;
+        showToast(`Error loading Beatport top charts: ${error.message}`, 'error');
+    }
+}
+
+async function handleBeatportTopChartClick(chartType, chartId, chartName, chartEndpoint) {
+    console.log(`🔥 Beatport top chart clicked: ${chartName} - CREATING PLAYLIST CARD`);
+
+    try {
+        // First, create a chart hash for state management
+        const chartHash = `${chartType}_${chartId}_${Date.now()}`;
+
+        showToast(`Loading ${chartName}...`, 'info');
+
+        // Fetch tracks from the chart endpoint
+        const response = await fetch(`${chartEndpoint}?limit=100`);
+        if (!response.ok) {
+            throw new Error(`Failed to fetch ${chartName}: ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (!data.success || !data.tracks || data.tracks.length === 0) {
+            throw new Error(`No tracks found in ${chartName}`);
+        }
+
+        // Create chart data object for playlist card
+        const chartData = {
+            hash: chartHash,
+            name: chartName,
+            chart_type: chartType,
+            track_count: data.tracks.length,
+            tracks: data.tracks.map(track => ({
+                name: track.title || 'Unknown Title',
+                artists: [track.artist || 'Unknown Artist'],
+                album: chartName,
+                duration_ms: 0,
+                external_urls: { beatport: track.url || '' },
+                source: 'beatport'
+            }))
+        };
+
+        // Add card to container (in background, like YouTube does)
+        console.log(`🃏 Creating Beatport playlist card for: ${chartName}`);
+        addBeatportCardToContainer(chartData);
+
+        // Automatically open discovery modal (like when you click a YouTube or Tidal card in fresh state)
+        handleBeatportCardClick(chartHash);
+
+        console.log(`✅ Created Beatport card and opened discovery modal for ${chartName}`);
+
+    } catch (error) {
+        console.error(`❌ Error loading ${chartName}:`, error);
+        showToast(`Error loading ${chartName}: ${error.message}`, 'error');
+    }
+}
+
+async function openBeatportDiscoveryModal(chartHash, chartData) {
+    console.log(`🎵 Opening Beatport discovery modal (reusing YouTube modal): ${chartData.name}`);
+
+    // Create YouTube-style state entry for this Beatport chart
+    const beatportState = {
+        phase: 'fresh',
+        playlist: {
+            name: chartData.name,
+            tracks: chartData.tracks,
+            description: `${chartData.track_count} tracks from ${chartData.name}`,
+            source: 'beatport'
+        },
+        is_beatport_playlist: true,
+        beatport_chart_type: chartData.chart_type,
+        beatport_chart_hash: chartHash  // Link to Beatport card state
+    };
+
+    // Store in YouTube playlist states (reusing the infrastructure)
+    youtubePlaylistStates[chartHash] = beatportState;
+
+    // Start discovery automatically (like Tidal does)
+    try {
+        console.log(`🔍 Starting Beatport discovery for: ${chartData.name}`);
+
+        // Update card phase to discovering immediately
+        updateBeatportCardPhase(chartHash, 'discovering');
+
+        // Call the discovery start endpoint with chart data
+        const response = await fetch(`/api/beatport/discovery/start/${chartHash}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                chart_data: chartData
+            })
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            // Update state to discovering
+            youtubePlaylistStates[chartHash].phase = 'discovering';
+
+            // Start polling for progress
+            startBeatportDiscoveryPolling(chartHash);
+
+            console.log(`✅ Started Beatport discovery for: ${chartData.name}`);
+        } else {
+            console.error('❌ Error starting Beatport discovery:', result.error);
+            showToast(`Error starting discovery: ${result.error}`, 'error');
+            // Revert card phase on error
+            updateBeatportCardPhase(chartHash, 'fresh');
+        }
+    } catch (error) {
+        console.error('❌ Error starting Beatport discovery:', error);
+        showToast(`Error starting discovery: ${error.message}`, 'error');
+        // Revert card phase on error
+        updateBeatportCardPhase(chartHash, 'fresh');
+    }
+
+    // Open the existing YouTube discovery modal infrastructure
+    openYouTubeDiscoveryModal(chartHash);
+
+    console.log(`✅ Beatport discovery modal opened for ${chartData.name} with ${chartData.tracks.length} tracks`);
+}
+
+function startBeatportDiscoveryPolling(urlHash) {
+    console.log(`🔄 Starting Beatport discovery polling for: ${urlHash}`);
+
+    // Stop any existing polling (reuse YouTube polling infrastructure)
+    if (activeYouTubePollers[urlHash]) {
+        clearInterval(activeYouTubePollers[urlHash]);
+    }
+
+    const pollInterval = setInterval(async () => {
+        try {
+            const response = await fetch(`/api/beatport/discovery/status/${urlHash}`);
+            const status = await response.json();
+
+            if (status.error) {
+                console.error('❌ Error polling Beatport discovery status:', status.error);
+                clearInterval(pollInterval);
+                delete activeYouTubePollers[urlHash];
+                return;
+            }
+
+            // Update state and modal (reuse YouTube infrastructure like Tidal)
+            if (youtubePlaylistStates[urlHash]) {
+                // Transform Beatport results to YouTube modal format (like Tidal does)
+                const transformedStatus = {
+                    progress: status.progress || 0,
+                    spotify_matches: status.spotify_matches || 0,
+                    spotify_total: status.spotify_total || 0,
+                    results: (status.results || []).map((result, index) => ({
+                        index: result.index !== undefined ? result.index : index,
+                        yt_track: result.beatport_track ? result.beatport_track.title : 'Unknown',
+                        yt_artist: result.beatport_track ? result.beatport_track.artist : 'Unknown',
+                        status: result.status === 'found' ? '✅ Found' : (result.status === 'error' ? '❌ Error' : '❌ Not Found'),
+                        status_class: result.status_class || (result.status === 'found' ? 'found' : (result.status === 'error' ? 'error' : 'not-found')),
+                        spotify_track: result.spotify_data ? result.spotify_data.name : '-',
+                        spotify_artist: result.spotify_data && result.spotify_data.artists ?
+                            result.spotify_data.artists.map(a => a.name || a).join(', ') : '-',
+                        spotify_album: result.spotify_data ? result.spotify_data.album : '-'
+                    }))
+                };
+
+                // Update state with both backend and frontend formats (like Tidal)
+                const state = youtubePlaylistStates[urlHash];
+                state.discovery_progress = status.progress; // Backend format
+                state.discoveryProgress = status.progress; // Frontend format - for modal progress display
+                state.spotify_matches = status.spotify_matches; // Backend format
+                state.spotifyMatches = status.spotify_matches; // Frontend format - for button logic
+                state.discovery_results = status.results; // Backend format
+                state.discoveryResults = transformedStatus.results; // Frontend format - for button logic
+                state.phase = status.phase || 'discovering';
+
+                // Update Beatport card phase and progress
+                const chartHash = state.beatport_chart_hash || urlHash;
+                updateBeatportCardPhase(chartHash, status.phase || 'discovering');
+                updateBeatportCardProgress(chartHash, {
+                    spotify_total: status.spotify_total || 0,
+                    spotify_matches: status.spotify_matches || 0,
+                    failed: (status.spotify_total || 0) - (status.spotify_matches || 0)
+                });
+
+                // Update modal display with transformed data
+                updateYouTubeDiscoveryModal(urlHash, transformedStatus);
+            }
+
+            // Stop polling when discovery is complete
+            if (status.phase === 'discovered' || status.phase === 'error') {
+                console.log(`✅ Beatport discovery polling complete for: ${urlHash}`);
+                clearInterval(pollInterval);
+                delete activeYouTubePollers[urlHash];
+            }
+
+        } catch (error) {
+            console.error('❌ Error polling Beatport discovery:', error);
+            clearInterval(pollInterval);
+            delete activeYouTubePollers[urlHash];
+        }
+    }, 2000); // Poll every 2 seconds like Tidal
+
+    // Store the interval so we can clean it up later
+    activeYouTubePollers[urlHash] = pollInterval;
+}
+
 function showBeatportSubView(viewType) {
     // Hide main category view
     const mainView = document.getElementById('beatport-main-view');
@@ -9785,11 +10072,211 @@ function showBeatportMainView() {
     }
 }
 
-function handleBeatportChartClick(chartType, chartId) {
-    console.log(`🎵 Beatport chart clicked: ${chartType} - ${chartId}`);
+// ===============================
+// BEATPORT CHART FUNCTIONALITY
+// ===============================
 
-    // Placeholder for Phase 2 - will open discovery modal
-    showToast(`🎵 Chart "${chartId}" selected - Discovery modal coming in Phase 2!`, 'info');
+function createBeatportCard(chartData) {
+    const state = beatportChartStates[chartData.hash];
+    const phase = state ? state.phase : 'fresh';
+
+    let buttonText = getActionButtonText(phase);
+    let phaseText = getPhaseText(phase);
+    let phaseColor = getPhaseColor(phase);
+
+    return `
+        <div class="youtube-playlist-card beatport-chart-card" id="beatport-card-${chartData.hash}">
+            <div class="playlist-card-icon">🎧</div>
+            <div class="playlist-card-content">
+                <div class="playlist-card-name">${escapeHtml(chartData.name)}</div>
+                <div class="playlist-card-info">
+                    <span class="playlist-card-track-count">${chartData.track_count} tracks</span>
+                    <span class="playlist-card-phase-text" style="color: ${phaseColor};">${phaseText}</span>
+                </div>
+            </div>
+            <div class="playlist-card-progress ${phase === 'fresh' ? 'hidden' : ''}">
+                <!-- Progress will be dynamically updated based on phase -->
+            </div>
+            <button class="playlist-card-action-btn">${buttonText}</button>
+        </div>
+    `;
+}
+
+function addBeatportCardToContainer(chartData) {
+    const container = document.getElementById('beatport-playlist-container');
+
+    // Remove placeholder if it exists
+    const placeholder = container.querySelector('.playlist-placeholder');
+    if (placeholder) {
+        placeholder.remove();
+    }
+
+    // Check if card already exists
+    const existingCard = document.getElementById(`beatport-card-${chartData.hash}`);
+    if (existingCard) {
+        console.log(`Card already exists for ${chartData.name}, updating instead`);
+        return;
+    }
+
+    // Create and add the card
+    const cardHtml = createBeatportCard(chartData);
+    container.insertAdjacentHTML('beforeend', cardHtml);
+
+    // Initialize state
+    beatportChartStates[chartData.hash] = {
+        phase: 'fresh',
+        chart: chartData,
+        cardElement: document.getElementById(`beatport-card-${chartData.hash}`)
+    };
+
+    // Add click handler
+    const card = document.getElementById(`beatport-card-${chartData.hash}`);
+    if (card) {
+        card.addEventListener('click', () => handleBeatportCardClick(chartData.hash));
+    }
+
+    console.log(`🃏 Created Beatport card: ${chartData.name}`);
+}
+
+async function handleBeatportCardClick(chartHash) {
+    const state = beatportChartStates[chartHash];
+    if (!state) {
+        console.error(`❌ [Card Click] No state found for Beatport chart: ${chartHash}`);
+        showToast('Chart state not found - try refreshing the page', 'error');
+        return;
+    }
+
+    if (!state.chart) {
+        console.error(`❌ [Card Click] No chart data found for Beatport chart: ${chartHash}`);
+        showToast('Chart data missing - try refreshing the page', 'error');
+        return;
+    }
+
+    console.log(`🎧 [Card Click] Beatport card clicked: ${chartHash}, Phase: ${state.phase}`);
+
+    if (state.phase === 'fresh') {
+        // Open discovery modal and start discovery
+        openBeatportDiscoveryModal(chartHash, state.chart);
+    } else if (state.phase === 'discovering' || state.phase === 'discovered' || state.phase === 'syncing' || state.phase === 'sync_complete') {
+        // Reopen existing modal with preserved discovery results
+        console.log(`🎧 [Card Click] Opening Beatport discovery modal for ${state.phase} phase`);
+        openYouTubeDiscoveryModal(chartHash);
+    } else if (state.phase === 'downloading' || state.phase === 'download_complete') {
+        // Show download modal
+        console.log(`📥 [Card Click] Opening Beatport download modal for ${state.phase} phase`);
+        showToast('Download modal for Beatport coming soon!', 'info');
+    }
+}
+
+function updateBeatportCardPhase(chartHash, phase) {
+    const state = beatportChartStates[chartHash];
+    if (!state) return;
+
+    state.phase = phase;
+
+    // Re-render the card with new phase
+    const card = document.getElementById(`beatport-card-${chartHash}`);
+    if (card) {
+        const newCardHtml = createBeatportCard(state.chart);
+        card.outerHTML = newCardHtml;
+
+        // Re-attach click handler
+        const newCard = document.getElementById(`beatport-card-${chartHash}`);
+        if (newCard) {
+            newCard.addEventListener('click', () => handleBeatportCardClick(chartHash));
+            state.cardElement = newCard;
+        }
+    }
+}
+
+function updateBeatportCardProgress(chartHash, progress) {
+    const state = beatportChartStates[chartHash];
+    if (!state) return;
+
+    const card = document.getElementById(`beatport-card-${chartHash}`);
+    if (!card) return;
+
+    const progressElement = card.querySelector('.playlist-card-progress');
+    if (!progressElement) return;
+
+    const { spotify_total, spotify_matches, failed } = progress;
+    const percentage = spotify_total > 0 ? Math.round((spotify_matches / spotify_total) * 100) : 0;
+
+    progressElement.textContent = `♪ ${spotify_total} / ✓ ${spotify_matches} / ✗ ${failed} / ${percentage}%`;
+    progressElement.classList.remove('hidden');
+
+    console.log('🎧 Updated Beatport card progress:', chartHash, `${spotify_matches}/${spotify_total} (${percentage}%)`);
+}
+
+function switchToBeatportPlaylistsTab() {
+    // Switch from "Browse Charts" to "My Playlists" tab
+    const browseTab = document.querySelector('.beatport-tab-button[data-beatport-tab="browse"]');
+    const playlistsTab = document.querySelector('.beatport-tab-button[data-beatport-tab="playlists"]');
+    const browseContent = document.getElementById('beatport-browse-content');
+    const playlistsContent = document.getElementById('beatport-playlists-content');
+
+    if (browseTab && playlistsTab && browseContent && playlistsContent) {
+        // Update tab buttons
+        browseTab.classList.remove('active');
+        playlistsTab.classList.add('active');
+
+        // Update tab content
+        browseContent.classList.remove('active');
+        playlistsContent.classList.add('active');
+
+        console.log('🔄 Switched to Beatport "My Playlists" tab');
+    }
+}
+
+async function handleBeatportChartClick(chartType, chartId, chartName, chartEndpoint) {
+    console.log(`🎵 Beatport chart clicked: ${chartType} - ${chartId} - ${chartName}`);
+
+    try {
+        // First, create a chart hash for state management
+        const chartHash = `${chartType}_${chartId}_${Date.now()}`;
+
+        // Load chart data from backend using the specific endpoint
+        console.log(`🔍 Loading ${chartName} tracks from ${chartEndpoint}...`);
+        showToast(`Loading ${chartName}...`, 'info');
+
+        const response = await fetch(`${chartEndpoint}?limit=100`);
+        if (!response.ok) {
+            throw new Error(`Failed to fetch ${chartName}: ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (!data.success || !data.tracks || data.tracks.length === 0) {
+            throw new Error(`No tracks found in ${chartName}`);
+        }
+
+        // Create chart data object
+        const chartData = {
+            hash: chartHash,
+            name: chartName,
+            chart_type: chartType,
+            track_count: data.tracks.length,
+            tracks: data.tracks.map(track => ({
+                name: track.title || 'Unknown Title',
+                artists: [track.artist || 'Unknown Artist'],
+                album: chartName,
+                duration_ms: 0,
+                external_urls: { beatport: track.url || '' },
+                source: 'beatport'
+            }))
+        };
+
+        // Add card to container (in background, like YouTube does)
+        addBeatportCardToContainer(chartData);
+
+        // Automatically open discovery modal (like when you click a YouTube or Tidal card in fresh state)
+        handleBeatportCardClick(chartHash);
+
+        console.log(`✅ Created Beatport card and opened discovery modal for ${chartName}`);
+
+    } catch (error) {
+        console.error(`❌ Error handling Beatport chart click:`, error);
+        showToast(`Error loading ${chartName || chartId}: ${error.message}`, 'error');
+    }
 }
 
 function handleBeatportGenreClick(genreSlug, genreId) {
@@ -10249,10 +10736,15 @@ function openYouTubeDiscoveryModal(urlHash) {
             startYouTubeDiscoveryPolling(urlHash);
         }
     } else {
-        // Create new modal (support both YouTube and Tidal like sync.py)
+        // Create new modal (support YouTube, Tidal, and Beatport like sync.py)
         const isTidal = state.is_tidal_playlist;
-        const modalTitle = isTidal ? '🎵 Tidal Playlist Discovery' : '🎵 YouTube Playlist Discovery';
-        const sourceLabel = isTidal ? 'Tidal' : 'YT';
+        const isBeatport = state.is_beatport_playlist;
+        const modalTitle = isTidal ? '🎵 Tidal Playlist Discovery' :
+                          isBeatport ? '🎵 Beatport Chart Discovery' :
+                          '🎵 YouTube Playlist Discovery';
+        const sourceLabel = isTidal ? 'Tidal' :
+                           isBeatport ? 'Beatport' :
+                           'YT';
         
         const modalHtml = `
             <div class="modal-overlay" id="youtube-discovery-modal-${urlHash}">
@@ -10270,7 +10762,7 @@ function openYouTubeDiscoveryModal(urlHash) {
                             <div class="progress-bar-container">
                                 <div class="progress-bar-fill" id="youtube-discovery-progress-${urlHash}" style="width: 0%;"></div>
                             </div>
-                            <div class="progress-text" id="youtube-discovery-progress-text-${urlHash}">${getInitialProgressText(state.phase, isTidal)}</div>
+                            <div class="progress-text" id="youtube-discovery-progress-text-${urlHash}">${getInitialProgressText(state.phase, isTidal, isBeatport)}</div>
                         </div>
                         
                         <div class="discovery-table-container">
@@ -10283,7 +10775,7 @@ function openYouTubeDiscoveryModal(urlHash) {
                                         <th>Spotify Track</th>
                                         <th>Spotify Artist</th>
                                         <th>Album</th>
-                                        ${isTidal ? '' : '<th>Duration</th>'}
+                                        ${(isTidal || isBeatport) ? '' : '<th>Duration</th>'}
                                     </tr>
                                 </thead>
                                 <tbody id="youtube-discovery-table-${urlHash}">
@@ -10334,6 +10826,7 @@ function getModalActionButtons(urlHash, phase, state = null) {
     }
     
     const isTidal = state && state.is_tidal_playlist;
+    const isBeatport = state && state.is_beatport_playlist;
     
     // Validate data availability for buttons
     const hasDiscoveryResults = state && state.discoveryResults && state.discoveryResults.length > 0;
@@ -10449,7 +10942,7 @@ function getModalDescription(phase, isTidal = false) {
     }
 }
 
-function getInitialProgressText(phase, isTidal = false) {
+function getInitialProgressText(phase, isTidal = false, isBeatport = false) {
     switch (phase) {
         case 'fresh':
             return 'Click Start Discovery to begin...';
@@ -10464,6 +10957,7 @@ function getInitialProgressText(phase, isTidal = false) {
 
 function generateTableRowsFromState(state, urlHash) {
     const isTidal = state.is_tidal_playlist;
+    const isBeatport = state.is_beatport_playlist;
     
     if (state.discoveryResults && state.discoveryResults.length > 0) {
         // Generate rows from existing discovery results
@@ -10475,16 +10969,16 @@ function generateTableRowsFromState(state, urlHash) {
                 <td class="spotify-track">${result.spotify_track || '-'}</td>
                 <td class="spotify-artist">${result.spotify_artist || '-'}</td>
                 <td class="spotify-album">${result.spotify_album || '-'}</td>
-                ${isTidal ? '' : `<td class="duration">${result.duration}</td>`}
+                ${(isTidal || isBeatport) ? '' : `<td class="duration">${result.duration}</td>`}
             </tr>
         `).join('');
     } else {
         // Generate initial rows from playlist tracks
-        return generateInitialTableRows(state.playlist.tracks, isTidal, urlHash);
+        return generateInitialTableRows(state.playlist.tracks, isTidal, urlHash, isBeatport);
     }
 }
 
-function generateInitialTableRows(tracks, isTidal = false, urlHash = '') {
+function generateInitialTableRows(tracks, isTidal = false, urlHash = '', isBeatport = false) {
     return tracks.map((track, index) => `
         <tr id="discovery-row-${urlHash}-${index}">
             <td class="yt-track">${track.name}</td>
@@ -10493,7 +10987,7 @@ function generateInitialTableRows(tracks, isTidal = false, urlHash = '') {
             <td class="spotify-track">-</td>
             <td class="spotify-artist">-</td>
             <td class="spotify-album">-</td>
-            ${isTidal ? '' : `<td class="duration">${formatDuration(track.duration_ms)}</td>`}
+            ${(isTidal || isBeatport) ? '' : `<td class="duration">${formatDuration(track.duration_ms)}</td>`}
         </tr>
     `).join('');
 }

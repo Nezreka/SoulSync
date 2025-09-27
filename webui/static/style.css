@@ -4980,7 +4980,7 @@ body {
     box-shadow: none;
 }
 
-.progress-section {
+.sync-sidebar .progress-section {
     flex-grow: 1;
     overflow: hidden;
     display: flex;
