@@ -12068,7 +12068,7 @@ def get_beatport_top_100_releases():
         return jsonify({
             "success": True,
             "tracks": tracks,
-            "chart_name": "Beatport Top 100 Releases",
+            "chart_name": "Top 100 New Releases",
             "count": len(tracks)
         })
 
