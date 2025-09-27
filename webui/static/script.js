@@ -9193,10 +9193,10 @@ function initializeSyncPage() {
         tidalRefreshBtn.addEventListener('click', loadTidalPlaylists);
     }
 
-    // Logic for the Beatport refresh button
-    const beatportRefreshBtn = document.getElementById('beatport-refresh-btn');
-    if (beatportRefreshBtn) {
-        beatportRefreshBtn.addEventListener('click', loadBeatportCharts);
+    // Logic for the Beatport clear button
+    const beatportClearBtn = document.getElementById('beatport-clear-btn');
+    if (beatportClearBtn) {
+        beatportClearBtn.addEventListener('click', clearBeatportPlaylists);
     }
 
     // Logic for Beatport nested tabs
@@ -9537,37 +9537,50 @@ async function clearWishlist(playlistId) {
 // BEATPORT CHARTS FUNCTIONALITY
 // ===============================
 
-async function loadBeatportCharts() {
+function clearBeatportPlaylists() {
     const container = document.getElementById('beatport-playlist-container');
-    const refreshBtn = document.getElementById('beatport-refresh-btn');
+    const clearBtn = document.getElementById('beatport-clear-btn');
 
-    container.innerHTML = `<div class="playlist-placeholder">🔄 Loading Beatport playlists...</div>`;
-    refreshBtn.disabled = true;
-    refreshBtn.textContent = '🔄 Loading...';
+    if (Object.keys(beatportChartStates).length === 0) {
+        showToast('No Beatport playlists to clear', 'info');
+        return;
+    }
+
+    // Show loading state
+    clearBtn.disabled = true;
+    clearBtn.textContent = '🗑️ Clearing...';
 
     try {
-        // Placeholder functionality - will be implemented later with actual Beatport playlist management
-        await new Promise(resolve => setTimeout(resolve, 1000)); // Simulate loading
+        // Clear all Beatport chart states
+        Object.keys(beatportChartStates).forEach(chartHash => {
+            // Close any open modals for this chart
+            const modal = document.getElementById(`youtube-discovery-modal-${chartHash}`);
+            if (modal) {
+                modal.remove();
+            }
 
+            // Remove from YouTube states (since Beatport reuses that infrastructure)
+            if (youtubePlaylistStates[chartHash]) {
+                delete youtubePlaylistStates[chartHash];
+            }
+        });
+
+        // Clear Beatport states
+        beatportChartStates = {};
+
+        // Reset container to placeholder
         container.innerHTML = `
-            <div class="playlist-placeholder">
-                <h4 style="color: #01FF95; margin-bottom: 10px;">🎵 My Beatport Playlists</h4>
-                <p>Your created Beatport playlists will appear here.</p>
-                <p style="font-size: 12px; color: #888;">
-                    Create playlists from Beatport charts using the Browse Charts tab,<br>
-                    then sync them directly to your media server.
-                </p>
-            </div>
+            <div class="playlist-placeholder">Your created Beatport playlists will appear here.</div>
         `;
 
-        showToast('Beatport playlists loaded successfully!', 'success');
+        showToast('Cleared all Beatport playlists', 'success');
 
     } catch (error) {
-        container.innerHTML = `<div class="playlist-placeholder">❌ Error: ${error.message}</div>`;
-        showToast(`Error loading Beatport playlists: ${error.message}`, 'error');
+        console.error('Error clearing Beatport playlists:', error);
+        showToast(`Error clearing playlists: ${error.message}`, 'error');
     } finally {
-        refreshBtn.disabled = false;
-        refreshBtn.textContent = '🔄 Refresh';
+        clearBtn.disabled = false;
+        clearBtn.textContent = '🗑️ Clear';
     }
 }
 
@@ -9842,6 +9855,17 @@ async function handleBeatportTopChartClick(chartType, chartId, chartName, chartE
     console.log(`🔥 Beatport top chart clicked: ${chartName} - CREATING PLAYLIST CARD`);
 
     try {
+        // Check if we already have a card for this chart
+        const existingState = Object.values(beatportChartStates).find(state =>
+            state.chart && state.chart.name === chartName && state.chart.chart_type === chartType
+        );
+
+        if (existingState) {
+            console.log(`🔄 Found existing Beatport card for ${chartName}, opening existing modal`);
+            handleBeatportCardClick(existingState.chart.hash);
+            return;
+        }
+
         // First, create a chart hash for state management
         const chartHash = `${chartType}_${chartId}_${Date.now()}`;
 
@@ -10232,6 +10256,17 @@ async function handleBeatportChartClick(chartType, chartId, chartName, chartEndp
     console.log(`🎵 Beatport chart clicked: ${chartType} - ${chartId} - ${chartName}`);
 
     try {
+        // Check if we already have a card for this chart
+        const existingState = Object.values(beatportChartStates).find(state =>
+            state.chart && state.chart.name === chartName && state.chart.chart_type === chartType
+        );
+
+        if (existingState) {
+            console.log(`🔄 Found existing Beatport card for ${chartName}, opening existing modal`);
+            handleBeatportCardClick(existingState.chart.hash);
+            return;
+        }
+
         // First, create a chart hash for state management
         const chartHash = `${chartType}_${chartId}_${Date.now()}`;
 
@@ -10752,7 +10787,7 @@ function openYouTubeDiscoveryModal(urlHash) {
                     <div class="modal-header">
                         <h2>${modalTitle}</h2>
                         <div class="modal-subtitle">${state.playlist.name} (${state.playlist.tracks.length} tracks)</div>
-                        <div class="modal-description">${getModalDescription(state.phase, isTidal)}</div>
+                        <div class="modal-description">${getModalDescription(state.phase, isTidal, isBeatport)}</div>
                         <button class="modal-close-btn" onclick="closeYouTubeDiscoveryModal('${urlHash}')">✕</button>
                     </div>
                     
@@ -10928,8 +10963,8 @@ function getModalActionButtons(urlHash, phase, state = null) {
     }
 }
 
-function getModalDescription(phase, isTidal = false) {
-    const source = isTidal ? 'Tidal' : 'YouTube';
+function getModalDescription(phase, isTidal = false, isBeatport = false) {
+    const source = isBeatport ? 'Beatport' : (isTidal ? 'Tidal' : 'YouTube');
     switch (phase) {
         case 'fresh':
             return `Ready to discover clean Spotify metadata for ${source} tracks...`;
