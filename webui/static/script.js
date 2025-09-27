@@ -2551,6 +2551,9 @@ async function loadBeatportChartsFromBackend() {
 
         console.log(`✅ Successfully loaded and rehydrated ${charts.length} Beatport charts`);
 
+        // Update clear button state after loading charts
+        updateBeatportClearButtonState();
+
     } catch (error) {
         console.error('❌ Error loading Beatport charts from backend:', error);
         showToast(`Error loading Beatport charts: ${error.message}`, 'error');
@@ -9700,6 +9703,8 @@ function initializeSyncPage() {
     const beatportClearBtn = document.getElementById('beatport-clear-btn');
     if (beatportClearBtn) {
         beatportClearBtn.addEventListener('click', clearBeatportPlaylists);
+        // Set initial clear button state
+        updateBeatportClearButtonState();
     }
 
     // Logic for Beatport nested tabs
@@ -10040,12 +10045,60 @@ async function clearWishlist(playlistId) {
 // BEATPORT CHARTS FUNCTIONALITY
 // ===============================
 
-function clearBeatportPlaylists() {
+function updateBeatportClearButtonState() {
+    const clearBtn = document.getElementById('beatport-clear-btn');
+    if (!clearBtn) return;
+
+    // Check if any Beatport cards are in active states
+    const activeCharts = Object.values(beatportChartStates).filter(state =>
+        state.phase === 'discovering' || state.phase === 'syncing' || state.phase === 'downloading'
+    );
+
+    const hasActiveCharts = activeCharts.length > 0;
+    const hasAnyCharts = Object.keys(beatportChartStates).length > 0;
+
+    if (!hasAnyCharts) {
+        // No charts at all
+        clearBtn.disabled = true;
+        clearBtn.textContent = '🗑️ Clear';
+        clearBtn.style.opacity = '0.5';
+        clearBtn.style.cursor = 'not-allowed';
+        clearBtn.title = 'No Beatport charts to clear';
+    } else if (hasActiveCharts) {
+        // Has charts but some are active
+        clearBtn.disabled = true;
+        clearBtn.textContent = '🚫 Clear Blocked';
+        clearBtn.style.opacity = '0.6';
+        clearBtn.style.cursor = 'not-allowed';
+        const activeNames = activeCharts.map(state => state.chart?.name || 'Unknown').join(', ');
+        clearBtn.title = `Cannot clear: ${activeCharts.length} chart(s) are currently active: ${activeNames}`;
+    } else {
+        // Has charts and none are active
+        clearBtn.disabled = false;
+        clearBtn.textContent = '🗑️ Clear';
+        clearBtn.style.opacity = '1';
+        clearBtn.style.cursor = 'pointer';
+        clearBtn.title = 'Clear all Beatport charts';
+    }
+}
+
+async function clearBeatportPlaylists() {
     const container = document.getElementById('beatport-playlist-container');
     const clearBtn = document.getElementById('beatport-clear-btn');
 
     if (Object.keys(beatportChartStates).length === 0) {
         showToast('No Beatport playlists to clear', 'info');
+        return;
+    }
+
+    // Check if any Beatport cards are in active states (discovering, syncing, or downloading)
+    const activeCharts = Object.values(beatportChartStates).filter(state =>
+        state.phase === 'discovering' || state.phase === 'syncing' || state.phase === 'downloading'
+    );
+
+    if (activeCharts.length > 0) {
+        const activeNames = activeCharts.map(state => state.chart?.name || 'Unknown').join(', ');
+        showToast(`Cannot clear: ${activeCharts.length} chart(s) are currently discovering, syncing, or downloading: ${activeNames}`, 'warning');
         return;
     }
 
@@ -10064,19 +10117,49 @@ function clearBeatportPlaylists() {
 
             // Remove from YouTube states (since Beatport reuses that infrastructure)
             if (youtubePlaylistStates[chartHash]) {
+                // Clean up any active download processes for this Beatport chart
+                const ytState = youtubePlaylistStates[chartHash];
+                if (ytState.is_beatport_playlist && ytState.convertedSpotifyPlaylistId) {
+                    const downloadProcess = activeDownloadProcesses[ytState.convertedSpotifyPlaylistId];
+                    if (downloadProcess) {
+                        console.log(`🗑️ Cleaning up download process for Beatport chart: ${chartHash}`);
+                        if (downloadProcess.modalElement) {
+                            downloadProcess.modalElement.remove();
+                        }
+                        delete activeDownloadProcesses[ytState.convertedSpotifyPlaylistId];
+                    }
+                }
+
                 delete youtubePlaylistStates[chartHash];
             }
         });
 
         // Clear Beatport states
+        const chartHashesToClear = Object.keys(beatportChartStates);
         beatportChartStates = {};
+
+        // Clear backend state for all charts
+        for (const chartHash of chartHashesToClear) {
+            try {
+                await fetch(`/api/beatport/charts/delete/${chartHash}`, {
+                    method: 'DELETE'
+                });
+                console.log(`🗑️ Deleted backend state for Beatport chart: ${chartHash}`);
+            } catch (error) {
+                console.warn(`⚠️ Error deleting backend state for chart ${chartHash}:`, error);
+            }
+        }
 
         // Reset container to placeholder
         container.innerHTML = `
             <div class="playlist-placeholder">Your created Beatport playlists will appear here.</div>
         `;
 
+        console.log(`🗑️ Cleared ${chartHashesToClear.length} Beatport charts from frontend and backend`);
         showToast('Cleared all Beatport playlists', 'success');
+
+        // Update clear button state after clearing all charts
+        updateBeatportClearButtonState();
 
     } catch (error) {
         console.error('Error clearing Beatport playlists:', error);
@@ -10676,6 +10759,9 @@ function addBeatportCardToContainer(chartData) {
     }
 
     console.log(`🃏 Created Beatport card: ${chartData.name}`);
+
+    // Update clear button state after creating card
+    updateBeatportClearButtonState();
 }
 
 async function handleBeatportCardClick(chartHash) {
@@ -10849,6 +10935,9 @@ function updateBeatportCardPhase(chartHash, phase) {
             state.cardElement = newCard;
         }
     }
+
+    // Update clear button state after phase change
+    updateBeatportClearButtonState();
 }
 
 function updateBeatportCardProgress(chartHash, progress) {
