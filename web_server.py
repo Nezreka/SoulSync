@@ -12557,71 +12557,8 @@ def convert_beatport_results_to_spotify_tracks(discovery_results):
 
     return spotify_tracks
 
-@app.route('/api/beatport/download/missing/<url_hash>', methods=['POST'])
-def start_beatport_download_missing(url_hash):
-    """Start download missing tracks for a Beatport chart"""
-    try:
-        if url_hash not in beatport_chart_states:
-            return jsonify({"error": "Beatport chart not found"}), 404
-
-        state = beatport_chart_states[url_hash]
-        state['last_accessed'] = time.time()  # Update access time
-
-        if state['phase'] not in ['discovered', 'sync_complete', 'downloading', 'download_complete']:
-            return jsonify({"error": "Beatport chart not ready for download"}), 400
-
-        # Get the converted Spotify playlist ID or create one from discovery results
-        converted_playlist_id = state.get('converted_spotify_playlist_id')
-
-        if not converted_playlist_id:
-            # If no converted playlist, create a virtual one from discovery results
-            spotify_tracks = convert_beatport_results_to_spotify_tracks(state['discovery_results'])
-            if not spotify_tracks:
-                return jsonify({"error": "No Spotify matches found for download"}), 400
-
-            # Create a virtual playlist ID for download tracking
-            converted_playlist_id = f"beatport_{url_hash}"
-            state['converted_spotify_playlist_id'] = converted_playlist_id
-
-        # Use the existing download missing functionality
-        chart_name = state.get('chart', {}).get('name', 'Unknown Chart')
-
-        # Create download batch using existing infrastructure
-        download_data = {
-            'playlist_id': converted_playlist_id,
-            'playlist_name': f"Beatport: {chart_name}",
-            'source': 'beatport',
-            'source_id': url_hash
-        }
-
-        # Start download using existing download system
-        batch_id = f"beatport_download_{url_hash}_{int(time.time())}"
-
-        # Add to download batches
-        download_batches[batch_id] = {
-            'id': batch_id,
-            'playlist_id': converted_playlist_id,
-            'status': 'starting',
-            'progress': 0,
-            'created_at': time.time(),
-            'source': 'beatport',
-            'source_id': url_hash
-        }
-
-        # Update Beatport state
-        state['phase'] = 'downloading'
-        state['download_process_id'] = batch_id
-
-        # Start download in background (this will use the existing download infrastructure)
-        future = download_executor.submit(process_playlist_download, converted_playlist_id, batch_id)
-        download_batches[batch_id]['future'] = future
-
-        print(f"🎧 Started Beatport download for chart: {chart_name}")
-        return jsonify({"success": True, "batch_id": batch_id})
-
-    except Exception as e:
-        print(f"❌ Error starting Beatport download: {e}")
-        return jsonify({"error": str(e)}), 500
+# Beatport download missing tracks is handled frontend-only (like YouTube)
+# No backend endpoint needed - uses existing download modal infrastructure
 
 class WebMetadataUpdateWorker:
     """Web-based metadata update worker - EXACT port of dashboard.py MetadataUpdateWorker"""

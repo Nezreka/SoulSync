@@ -3248,6 +3248,7 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
             }
             process.modalElement.style.display = 'flex';
         }
+        hideLoadingOverlay(); // Hide overlay when reopening existing modal
         return;
     }
 
@@ -10395,35 +10396,52 @@ async function startBeatportDownloadMissing(urlHash) {
         console.log('🔍 Starting download missing tracks for Beatport playlist:', urlHash);
 
         const state = youtubePlaylistStates[urlHash];
-        if (!state || !state.is_beatport_playlist) {
-            console.error('❌ Invalid Beatport playlist state for download');
-            showToast('Invalid Beatport playlist state', 'error');
+        if (!state || !state.discovery_results) {
+            showToast('No discovery results available for download', 'error');
             return;
         }
 
-        // Call Beatport download endpoint
-        const response = await fetch(`/api/beatport/download/missing/${urlHash}`, {
-            method: 'POST'
-        });
+        // Convert Beatport results to a format compatible with the download modal (same as YouTube)
+        const spotifyTracks = state.discovery_results
+            .filter(result => result.spotify_data)
+            .map(result => {
+                const track = result.spotify_data;
+                // Ensure artists is an array of strings (like YouTube format)
+                if (track.artists && Array.isArray(track.artists)) {
+                    track.artists = track.artists.map(artist =>
+                        typeof artist === 'string' ? artist : (artist.name || artist)
+                    );
+                }
+                return track;
+            });
 
-        const result = await response.json();
-
-        if (result.error) {
-            showToast(`Error starting download: ${result.error}`, 'error');
+        if (spotifyTracks.length === 0) {
+            showToast('No Spotify matches found for download', 'error');
             return;
         }
 
-        // Update state to downloading
-        state.phase = 'downloading';
-        updateBeatportCardPhase(state.beatport_chart_hash || urlHash, 'downloading');
+        // Create a virtual playlist for the download system (same as YouTube)
+        const virtualPlaylistId = `beatport_${urlHash}`;
+        const playlistName = `[Beatport] ${state.playlist.name}`;
 
-        showToast('Starting Beatport track downloads...', 'success');
+        // Store reference for card navigation (same as YouTube)
+        state.convertedSpotifyPlaylistId = virtualPlaylistId;
 
-        // The download progress will be handled by the existing download monitoring system
+        // Close the discovery modal if it's open (same as YouTube)
+        const discoveryModal = document.getElementById(`youtube-discovery-modal-${urlHash}`);
+        if (discoveryModal) {
+            discoveryModal.classList.add('hidden');
+            console.log('🔄 Closed Beatport discovery modal to show download modal');
+        }
+
+        // Open download missing tracks modal for Beatport playlist (same as YouTube)
+        await openDownloadMissingModalForYouTube(virtualPlaylistId, playlistName, spotifyTracks);
+
+        // Phase will change to 'downloading' when user clicks "Begin Analysis" button
 
     } catch (error) {
-        console.error('❌ Error starting Beatport download:', error);
-        showToast(`Error starting download: ${error.message}`, 'error');
+        console.error('❌ Error starting download missing tracks:', error);
+        showToast(`Error starting downloads: ${error.message}`, 'error');
     }
 }
 
