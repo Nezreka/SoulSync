@@ -12399,6 +12399,230 @@ def _run_beatport_discovery_worker(url_hash):
             beatport_chart_states[url_hash]['status'] = 'error'
             beatport_chart_states[url_hash]['phase'] = 'fresh'
 
+@app.route('/api/beatport/sync/start/<url_hash>', methods=['POST'])
+def start_beatport_sync(url_hash):
+    """Start sync process for a Beatport chart using discovered Spotify tracks"""
+    try:
+        print(f"🎧 Beatport sync start requested for: {url_hash}")
+
+        if url_hash not in beatport_chart_states:
+            print(f"❌ Beatport chart not found: {url_hash}")
+            return jsonify({"error": "Beatport chart not found"}), 404
+
+        state = beatport_chart_states[url_hash]
+        state['last_accessed'] = time.time()  # Update access time
+
+        print(f"🎧 Beatport chart state: phase={state.get('phase')}, has_discovery_results={len(state.get('discovery_results', []))}")
+
+        if state['phase'] not in ['discovered', 'sync_complete']:
+            print(f"❌ Beatport chart not ready for sync: {state['phase']}")
+            return jsonify({"error": "Beatport chart not ready for sync"}), 400
+
+        # Convert discovery results to Spotify tracks format
+        spotify_tracks = convert_beatport_results_to_spotify_tracks(state['discovery_results'])
+
+        if not spotify_tracks:
+            return jsonify({"error": "No Spotify matches found for sync"}), 400
+
+        # Create a temporary playlist ID for sync tracking
+        sync_playlist_id = f"beatport_sync_{url_hash}_{int(time.time())}"
+
+        # Initialize sync state
+        state['sync_playlist_id'] = sync_playlist_id
+        state['phase'] = 'syncing'
+        state['sync_progress'] = {'status': 'starting', 'progress': 0}
+
+        # Create sync job using existing infrastructure
+        sync_data = {
+            'id': sync_playlist_id,
+            'name': f"Beatport: {state['chart']['name']}",
+            'tracks': spotify_tracks,
+            'source': 'beatport',
+            'source_id': url_hash
+        }
+
+        # Add to sync states using existing sync system
+        with sync_lock:
+            sync_states[sync_playlist_id] = {"status": "starting", "progress": {}}
+
+        # Start sync in background using existing thread pool
+        future = sync_executor.submit(_run_sync_task, sync_playlist_id, sync_data['name'], spotify_tracks)
+        state['sync_future'] = future
+
+        print(f"🎧 Started Beatport sync for chart: {state['chart']['name']}")
+        return jsonify({"success": True, "sync_id": sync_playlist_id})
+
+    except Exception as e:
+        print(f"❌ Error starting Beatport sync: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/beatport/sync/status/<url_hash>', methods=['GET'])
+def get_beatport_sync_status(url_hash):
+    """Get sync status for a Beatport chart"""
+    try:
+        if url_hash not in beatport_chart_states:
+            return jsonify({"error": "Beatport chart not found"}), 404
+
+        state = beatport_chart_states[url_hash]
+        state['last_accessed'] = time.time()  # Update access time
+        sync_playlist_id = state.get('sync_playlist_id')
+
+        if not sync_playlist_id:
+            return jsonify({"error": "No sync process found"}), 404
+
+        # Get sync status from sync states
+        sync_state = sync_states.get(sync_playlist_id, {})
+
+        response = {
+            'status': sync_state.get('status', 'unknown'),
+            'progress': sync_state.get('progress', {}),
+            'sync_id': sync_playlist_id,
+            'complete': sync_state.get('status') == 'finished',
+            'error': sync_state.get('error')
+        }
+
+        # Check if sync completed successfully
+        if sync_state.get('status') == 'finished':
+            state['phase'] = 'sync_complete'
+            # Extract playlist ID from sync result
+            result = sync_state.get('result', {})
+            state['converted_spotify_playlist_id'] = result.get('spotify_playlist_id')
+            chart_name = state.get('chart', {}).get('name', 'Unknown Chart')
+            add_activity_item("🔄", "Sync Complete", f"Beatport chart '{chart_name}' synced successfully", "Now")
+        elif sync_state.get('status') == 'error':
+            state['phase'] = 'discovered'  # Revert on error
+            chart_name = state.get('chart', {}).get('name', 'Unknown Chart')
+            add_activity_item("❌", "Sync Failed", f"Beatport chart '{chart_name}' sync failed", "Now")
+
+        return jsonify(response)
+
+    except Exception as e:
+        print(f"❌ Error getting Beatport sync status: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/beatport/sync/cancel/<url_hash>', methods=['POST'])
+def cancel_beatport_sync(url_hash):
+    """Cancel sync for a Beatport chart"""
+    try:
+        if url_hash not in beatport_chart_states:
+            return jsonify({"error": "Beatport chart not found"}), 404
+
+        state = beatport_chart_states[url_hash]
+        state['last_accessed'] = time.time()  # Update access time
+        sync_playlist_id = state.get('sync_playlist_id')
+
+        if sync_playlist_id and sync_playlist_id in sync_states:
+            # Cancel the sync using existing sync infrastructure
+            with sync_lock:
+                sync_states[sync_playlist_id] = {"status": "cancelled"}
+
+            # Cancel future if still running
+            if 'sync_future' in state and state['sync_future']:
+                state['sync_future'].cancel()
+
+        # Revert Beatport state
+        state['phase'] = 'discovered'
+        state['sync_playlist_id'] = None
+        state['sync_progress'] = {}
+
+        print(f"🎧 Cancelled Beatport sync for: {url_hash}")
+        return jsonify({"success": True})
+
+    except Exception as e:
+        print(f"❌ Error cancelling Beatport sync: {e}")
+        return jsonify({"error": str(e)}), 500
+
+def convert_beatport_results_to_spotify_tracks(discovery_results):
+    """Convert Beatport discovery results to Spotify tracks format for sync"""
+    spotify_tracks = []
+
+    for result in discovery_results:
+        if result.get('spotify_data'):
+            spotify_data = result['spotify_data']
+
+            # Convert artists from objects to strings if needed
+            artists = spotify_data['artists']
+            if isinstance(artists, list) and len(artists) > 0:
+                if isinstance(artists[0], dict) and 'name' in artists[0]:
+                    # Convert from [{'name': 'Artist'}] to ['Artist']
+                    artists = [artist['name'] for artist in artists]
+
+            spotify_tracks.append({
+                'id': spotify_data['id'],
+                'name': spotify_data['name'],
+                'artists': artists,
+                'album': spotify_data['album'],
+                'source': 'beatport'
+            })
+
+    return spotify_tracks
+
+@app.route('/api/beatport/download/missing/<url_hash>', methods=['POST'])
+def start_beatport_download_missing(url_hash):
+    """Start download missing tracks for a Beatport chart"""
+    try:
+        if url_hash not in beatport_chart_states:
+            return jsonify({"error": "Beatport chart not found"}), 404
+
+        state = beatport_chart_states[url_hash]
+        state['last_accessed'] = time.time()  # Update access time
+
+        if state['phase'] not in ['discovered', 'sync_complete', 'downloading', 'download_complete']:
+            return jsonify({"error": "Beatport chart not ready for download"}), 400
+
+        # Get the converted Spotify playlist ID or create one from discovery results
+        converted_playlist_id = state.get('converted_spotify_playlist_id')
+
+        if not converted_playlist_id:
+            # If no converted playlist, create a virtual one from discovery results
+            spotify_tracks = convert_beatport_results_to_spotify_tracks(state['discovery_results'])
+            if not spotify_tracks:
+                return jsonify({"error": "No Spotify matches found for download"}), 400
+
+            # Create a virtual playlist ID for download tracking
+            converted_playlist_id = f"beatport_{url_hash}"
+            state['converted_spotify_playlist_id'] = converted_playlist_id
+
+        # Use the existing download missing functionality
+        chart_name = state.get('chart', {}).get('name', 'Unknown Chart')
+
+        # Create download batch using existing infrastructure
+        download_data = {
+            'playlist_id': converted_playlist_id,
+            'playlist_name': f"Beatport: {chart_name}",
+            'source': 'beatport',
+            'source_id': url_hash
+        }
+
+        # Start download using existing download system
+        batch_id = f"beatport_download_{url_hash}_{int(time.time())}"
+
+        # Add to download batches
+        download_batches[batch_id] = {
+            'id': batch_id,
+            'playlist_id': converted_playlist_id,
+            'status': 'starting',
+            'progress': 0,
+            'created_at': time.time(),
+            'source': 'beatport',
+            'source_id': url_hash
+        }
+
+        # Update Beatport state
+        state['phase'] = 'downloading'
+        state['download_process_id'] = batch_id
+
+        # Start download in background (this will use the existing download infrastructure)
+        future = download_executor.submit(process_playlist_download, converted_playlist_id, batch_id)
+        download_batches[batch_id]['future'] = future
+
+        print(f"🎧 Started Beatport download for chart: {chart_name}")
+        return jsonify({"success": True, "batch_id": batch_id})
+
+    except Exception as e:
+        print(f"❌ Error starting Beatport download: {e}")
+        return jsonify({"error": str(e)}), 500
+
 class WebMetadataUpdateWorker:
     """Web-based metadata update worker - EXACT port of dashboard.py MetadataUpdateWorker"""
     
