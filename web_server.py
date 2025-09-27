@@ -12532,6 +12532,147 @@ def cancel_beatport_sync(url_hash):
         print(f"❌ Error cancelling Beatport sync: {e}")
         return jsonify({"error": str(e)}), 500
 
+# ===================================================================
+# BEATPORT CHART PERSISTENCE API ENDPOINTS
+# ===================================================================
+
+@app.route('/api/beatport/charts', methods=['GET'])
+def get_beatport_charts():
+    """Get all persistent Beatport chart states for frontend hydration"""
+    try:
+        charts = []
+        current_time = time.time()
+
+        # Clean up old charts (older than 24 hours)
+        to_remove = []
+        for chart_hash, state in beatport_chart_states.items():
+            last_accessed = state.get('last_accessed', 0)
+            if current_time - last_accessed > 86400:  # 24 hours
+                to_remove.append(chart_hash)
+            else:
+                # Include in response
+                chart_info = {
+                    'hash': chart_hash,
+                    'name': state['chart']['name'],
+                    'track_count': len(state['chart']['tracks']),
+                    'phase': state.get('phase', 'fresh'),
+                    'discovery_progress': state.get('discovery_progress', 0),
+                    'spotify_matches': state.get('spotify_matches', 0),
+                    'spotify_total': state.get('spotify_total', 0),
+                    'converted_spotify_playlist_id': state.get('converted_spotify_playlist_id'),
+                    'download_process_id': state.get('download_process_id'),
+                    'last_accessed': last_accessed,
+                    'chart_data': state['chart']  # Full chart data for restoration
+                }
+                charts.append(chart_info)
+
+        # Remove old charts
+        for chart_hash in to_remove:
+            del beatport_chart_states[chart_hash]
+            logger.info(f"🧹 Cleaned up old Beatport chart: {chart_hash}")
+
+        logger.info(f"📊 Returning {len(charts)} Beatport charts for hydration")
+        return jsonify(charts)
+
+    except Exception as e:
+        logger.error(f"❌ Error getting Beatport charts: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/beatport/charts/status/<chart_hash>', methods=['GET'])
+def get_beatport_chart_status(chart_hash):
+    """Get individual Beatport chart status with full state data"""
+    try:
+        if chart_hash not in beatport_chart_states:
+            return jsonify({"error": "Beatport chart not found"}), 404
+
+        state = beatport_chart_states[chart_hash]
+        state['last_accessed'] = time.time()  # Update access time
+
+        # Return full state including discovery results for modal restoration
+        response = {
+            'hash': chart_hash,
+            'phase': state.get('phase', 'fresh'),
+            'status': state.get('status', 'fresh'),
+            'discovery_progress': state.get('discovery_progress', 0),
+            'spotify_matches': state.get('spotify_matches', 0),
+            'spotify_total': state.get('spotify_total', 0),
+            'discovery_results': state.get('discovery_results', []),
+            'converted_spotify_playlist_id': state.get('converted_spotify_playlist_id'),
+            'download_process_id': state.get('download_process_id'),
+            'sync_playlist_id': state.get('sync_playlist_id'),
+            'sync_progress': state.get('sync_progress', {}),
+            'chart_data': state['chart']  # Full chart data
+        }
+
+        return jsonify(response)
+
+    except Exception as e:
+        logger.error(f"❌ Error getting Beatport chart status: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/beatport/charts/update-phase/<chart_hash>', methods=['POST'])
+def update_beatport_chart_phase(chart_hash):
+    """Update Beatport chart phase (for modal close operations and reset)"""
+    try:
+        if chart_hash not in beatport_chart_states:
+            return jsonify({"error": "Beatport chart not found"}), 404
+
+        data = request.get_json() or {}
+        new_phase = data.get('phase')
+        is_reset = data.get('reset', False)
+
+        if not new_phase:
+            return jsonify({"error": "Phase is required"}), 400
+
+        state = beatport_chart_states[chart_hash]
+        state['phase'] = new_phase
+        state['last_accessed'] = time.time()
+
+        # Handle reset operation - clear discovery data
+        if is_reset and new_phase == 'fresh':
+            state['discovery_results'] = []
+            state['discovery_progress'] = 0
+            state['spotify_matches'] = 0
+            state['status'] = 'fresh'
+            state['converted_spotify_playlist_id'] = None
+            state['download_process_id'] = None
+            state['sync_playlist_id'] = None
+            state['sync_progress'] = {}
+            logger.info(f"🎧 Reset Beatport chart {chart_hash} to fresh state")
+        else:
+            # Handle other phase updates (like download phase transitions)
+            converted_playlist_id = data.get('converted_spotify_playlist_id')
+            if converted_playlist_id:
+                state['converted_spotify_playlist_id'] = converted_playlist_id
+
+            download_process_id = data.get('download_process_id')
+            if download_process_id:
+                state['download_process_id'] = download_process_id
+
+        logger.info(f"🎧 Updated Beatport chart {chart_hash} phase to: {new_phase}")
+        return jsonify({"success": True, "phase": new_phase})
+
+    except Exception as e:
+        logger.error(f"❌ Error updating Beatport chart phase: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/beatport/charts/delete/<chart_hash>', methods=['DELETE'])
+def delete_beatport_chart(chart_hash):
+    """Delete a Beatport chart from backend storage"""
+    try:
+        if chart_hash not in beatport_chart_states:
+            return jsonify({"error": "Beatport chart not found"}), 404
+
+        chart_name = beatport_chart_states[chart_hash]['chart']['name']
+        del beatport_chart_states[chart_hash]
+
+        logger.info(f"🗑️ Deleted Beatport chart: {chart_name}")
+        return jsonify({"success": True, "message": f"Deleted chart: {chart_name}"})
+
+    except Exception as e:
+        logger.error(f"❌ Error deleting Beatport chart: {e}")
+        return jsonify({"error": str(e)}), 500
+
 def convert_beatport_results_to_spotify_tracks(discovery_results):
     """Convert Beatport discovery results to Spotify tracks format for sync"""
     spotify_tracks = []
