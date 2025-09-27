@@ -10252,6 +10252,173 @@ function switchToBeatportPlaylistsTab() {
     }
 }
 
+// ===============================
+// BEATPORT SYNC FUNCTIONALITY
+// ===============================
+
+async function startBeatportPlaylistSync(urlHash) {
+    try {
+        console.log('🎧 Starting Beatport playlist sync:', urlHash);
+
+        const state = youtubePlaylistStates[urlHash];
+        if (!state || !state.is_beatport_playlist) {
+            console.error('❌ Invalid Beatport playlist state for sync');
+            showToast('Invalid Beatport playlist state', 'error');
+            return;
+        }
+
+        // Call Beatport sync endpoint
+        const response = await fetch(`/api/beatport/sync/start/${urlHash}`, {
+            method: 'POST'
+        });
+
+        const result = await response.json();
+
+        if (result.error) {
+            showToast(`Error starting sync: ${result.error}`, 'error');
+            return;
+        }
+
+        // Update state to syncing
+        state.phase = 'syncing';
+        updateBeatportCardPhase(state.beatport_chart_hash || urlHash, 'syncing');
+
+        // Update modal buttons and start polling
+        updateBeatportModalButtons(urlHash, 'syncing');
+        startBeatportSyncPolling(urlHash);
+
+        showToast('Starting Beatport playlist sync...', 'success');
+
+    } catch (error) {
+        console.error('❌ Error starting Beatport sync:', error);
+        showToast(`Error starting sync: ${error.message}`, 'error');
+    }
+}
+
+function startBeatportSyncPolling(urlHash) {
+    // Stop any existing polling (reuse activeYouTubePollers for Beatport)
+    if (activeYouTubePollers[urlHash]) {
+        clearInterval(activeYouTubePollers[urlHash]);
+    }
+
+    const pollInterval = setInterval(async () => {
+        try {
+            const response = await fetch(`/api/beatport/sync/status/${urlHash}`);
+            const status = await response.json();
+
+            if (status.error) {
+                console.error('❌ Error polling Beatport sync:', status.error);
+                clearInterval(pollInterval);
+                delete activeTidalPollers[urlHash];
+                return;
+            }
+
+            // Update modal with sync progress
+            updateBeatportModalSyncProgress(urlHash, status.progress);
+
+            // Stop polling when sync is complete
+            if (status.complete || status.status === 'error') {
+                console.log(`✅ Beatport sync polling complete for: ${urlHash}`);
+
+                // Update final state
+                const state = youtubePlaylistStates[urlHash];
+                if (state) {
+                    if (status.complete) {
+                        state.phase = 'sync_complete';
+                        state.convertedSpotifyPlaylistId = status.converted_spotify_playlist_id;
+                        updateBeatportCardPhase(state.beatport_chart_hash || urlHash, 'sync_complete');
+                        updateBeatportModalButtons(urlHash, 'sync_complete');
+                        console.log('✅ Beatport sync complete:', urlHash);
+                    } else {
+                        state.phase = 'discovered'; // Revert on error
+                        updateBeatportCardPhase(state.beatport_chart_hash || urlHash, 'discovered');
+                    }
+                }
+
+                clearInterval(pollInterval);
+                delete activeYouTubePollers[urlHash];
+            }
+
+        } catch (error) {
+            console.error('❌ Error polling Beatport sync:', error);
+            clearInterval(pollInterval);
+            delete activeYouTubePollers[urlHash];
+        }
+    }, 2000); // Poll every 2 seconds
+
+    activeYouTubePollers[urlHash] = pollInterval;
+}
+
+function updateBeatportModalSyncProgress(urlHash, progress) {
+    const statusDisplay = document.getElementById(`youtube-sync-status-${urlHash}`);
+    if (!statusDisplay || !progress) return;
+
+    console.log(`📊 Updating Beatport modal sync progress for ${urlHash}:`, progress);
+
+    // Update individual counters exactly like YouTube sync
+    const totalEl = document.getElementById(`youtube-total-${urlHash}`);
+    const matchedEl = document.getElementById(`youtube-matched-${urlHash}`);
+    const failedEl = document.getElementById(`youtube-failed-${urlHash}`);
+    const percentageEl = document.getElementById(`youtube-percentage-${urlHash}`);
+
+    const total = progress.total_tracks || 0;
+    const matched = progress.matched_tracks || 0;
+    const failed = progress.failed_tracks || 0;
+    const percentage = total > 0 ? Math.round((matched / total) * 100) : 0;
+
+    if (totalEl) totalEl.textContent = total;
+    if (matchedEl) matchedEl.textContent = matched;
+    if (failedEl) failedEl.textContent = failed;
+    if (percentageEl) percentageEl.textContent = percentage;
+}
+
+function updateBeatportModalButtons(urlHash, phase) {
+    const modal = document.getElementById(`youtube-discovery-modal-${urlHash}`);
+    if (!modal) return;
+
+    const footerLeft = modal.querySelector('.modal-footer-left');
+    if (footerLeft) {
+        footerLeft.innerHTML = getModalActionButtons(urlHash, phase);
+    }
+}
+
+async function startBeatportDownloadMissing(urlHash) {
+    try {
+        console.log('🔍 Starting download missing tracks for Beatport playlist:', urlHash);
+
+        const state = youtubePlaylistStates[urlHash];
+        if (!state || !state.is_beatport_playlist) {
+            console.error('❌ Invalid Beatport playlist state for download');
+            showToast('Invalid Beatport playlist state', 'error');
+            return;
+        }
+
+        // Call Beatport download endpoint
+        const response = await fetch(`/api/beatport/download/missing/${urlHash}`, {
+            method: 'POST'
+        });
+
+        const result = await response.json();
+
+        if (result.error) {
+            showToast(`Error starting download: ${result.error}`, 'error');
+            return;
+        }
+
+        // Update state to downloading
+        state.phase = 'downloading';
+        updateBeatportCardPhase(state.beatport_chart_hash || urlHash, 'downloading');
+
+        showToast('Starting Beatport track downloads...', 'success');
+
+        // The download progress will be handled by the existing download monitoring system
+
+    } catch (error) {
+        console.error('❌ Error starting Beatport download:', error);
+        showToast(`Error starting download: ${error.message}`, 'error');
+    }
+}
+
 async function handleBeatportChartClick(chartType, chartId, chartName, chartEndpoint) {
     console.log(`🎵 Beatport chart clicked: ${chartType} - ${chartId} - ${chartName}`);
 
@@ -10881,6 +11048,8 @@ function getModalActionButtons(urlHash, phase, state = null) {
             if (hasSpotifyMatches) {
                 if (isTidal) {
                     buttons += `<button class="modal-btn modal-btn-primary" onclick="startTidalPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                } else if (isBeatport) {
+                    buttons += `<button class="modal-btn modal-btn-primary" onclick="startBeatportPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
                 } else {
                     buttons += `<button class="modal-btn modal-btn-primary" onclick="startYouTubePlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
                 }
@@ -10890,6 +11059,8 @@ function getModalActionButtons(urlHash, phase, state = null) {
             if (hasSpotifyMatches || hasConvertedPlaylistId) {
                 if (isTidal) {
                     buttons += `<button class="modal-btn modal-btn-primary" onclick="startTidalDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
+                } else if (isBeatport) {
+                    buttons += `<button class="modal-btn modal-btn-primary" onclick="startBeatportDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
                 } else {
                     buttons += `<button class="modal-btn modal-btn-primary" onclick="startYouTubeDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
                 }
@@ -10935,6 +11106,8 @@ function getModalActionButtons(urlHash, phase, state = null) {
             if (hasSpotifyMatches) {
                 if (isTidal) {
                     syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startTidalPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                } else if (isBeatport) {
+                    syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startBeatportPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
                 } else {
                     syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startYouTubePlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
                 }
@@ -10944,6 +11117,8 @@ function getModalActionButtons(urlHash, phase, state = null) {
             if (hasSpotifyMatches || hasConvertedPlaylistId) {
                 if (isTidal) {
                     syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startTidalDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
+                } else if (isBeatport) {
+                    syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startBeatportDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
                 } else {
                     syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startYouTubeDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
                 }
