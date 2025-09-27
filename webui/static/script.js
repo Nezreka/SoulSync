@@ -9797,6 +9797,14 @@ async function loadBeatportTopCharts() {
                 trackCount: '100 tracks'
             },
             {
+                id: 'top-100-releases',
+                name: 'Top 100 New Releases',
+                description: 'Newest and most popular releases on Beatport',
+                icon: '📀',
+                endpoint: '/api/beatport/top-100-releases',
+                trackCount: '100 tracks'
+            },
+            {
                 id: 'hype-top-100',
                 name: 'Hype Top 100',
                 description: 'Trending tracks gaining momentum',
