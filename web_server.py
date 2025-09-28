@@ -11942,6 +11942,51 @@ def get_beatport_genre_tracks(genre_slug, genre_id):
             "count": 0
         }), 500
 
+@app.route('/api/beatport/chart/extract', methods=['POST'])
+def extract_beatport_chart_tracks():
+    """Extract tracks from a specific Beatport chart URL"""
+    try:
+        data = request.get_json()
+        chart_url = data.get('chart_url')
+        chart_name = data.get('chart_name', 'Unknown Chart')
+        limit = int(data.get('limit', 100))
+
+        if not chart_url:
+            return jsonify({
+                "success": False,
+                "error": "chart_url is required",
+                "tracks": [],
+                "count": 0
+            }), 400
+
+        logger.info(f"🔍 API request to extract tracks from chart: {chart_name}")
+        logger.info(f"🔗 Chart URL: {chart_url}")
+
+        # Initialize the Beatport scraper
+        scraper = BeatportUnifiedScraper()
+
+        # Extract tracks from the specific chart URL
+        tracks = scraper.extract_tracks_from_chart(chart_url, chart_name, limit)
+
+        logger.info(f"✅ Successfully extracted {len(tracks)} tracks from chart: {chart_name}")
+
+        return jsonify({
+            "success": True,
+            "tracks": tracks,
+            "chart_name": chart_name,
+            "chart_url": chart_url,
+            "count": len(tracks)
+        })
+
+    except Exception as e:
+        logger.error(f"❌ Error extracting tracks from chart: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "tracks": [],
+            "count": 0
+        }), 500
+
 @app.route('/api/beatport/genre/<genre_slug>/<genre_id>/top-10', methods=['GET'])
 def get_beatport_genre_top_10(genre_slug, genre_id):
     """Get top 10 tracks for a specific Beatport genre"""
