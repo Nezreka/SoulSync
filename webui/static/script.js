@@ -2410,7 +2410,7 @@ async function loadBeatportChartsFromBackend() {
             createBeatportCardFromBackendState(chartInfo);
 
             // Fetch full state for non-fresh charts to restore discovery results
-            if (chartInfo.phase !== 'fresh' && chartInfo.phase !== 'discovering') {
+            if (chartInfo.phase !== 'fresh') {
                 try {
                     console.log(`🔍 Fetching full state for: ${chartInfo.name}`);
                     const stateResponse = await fetch(`/api/beatport/charts/status/${chartHash}`);
@@ -2550,6 +2550,14 @@ async function loadBeatportChartsFromBackend() {
         }
 
         console.log(`✅ Successfully loaded and rehydrated ${charts.length} Beatport charts`);
+
+        // Start polling for any charts that are still in discovering phase
+        for (const chartInfo of charts) {
+            if (chartInfo.phase === 'discovering') {
+                console.log(`🔄 [Backend Loading] Auto-starting polling for discovering chart: ${chartInfo.name}`);
+                startBeatportDiscoveryPolling(chartInfo.hash);
+            }
+        }
 
         // Update clear button state after loading charts
         updateBeatportClearButtonState();
@@ -10786,7 +10794,68 @@ async function handleBeatportCardClick(chartHash) {
     } else if (state.phase === 'discovering' || state.phase === 'discovered' || state.phase === 'syncing' || state.phase === 'sync_complete') {
         // Reopen existing modal with preserved discovery results
         console.log(`🎧 [Card Click] Opening Beatport discovery modal for ${state.phase} phase`);
+
+        // Check if we have the required state data
+        const ytState = youtubePlaylistStates[chartHash];
+        if (!ytState || !ytState.playlist) {
+            console.log(`🔍 [Card Click] Missing playlist data for ${state.phase} phase, fetching from backend...`);
+
+            try {
+                // Fetch the full state from backend
+                const stateResponse = await fetch(`/api/beatport/charts/status/${chartHash}`);
+                if (stateResponse.ok) {
+                    const fullState = await stateResponse.json();
+
+                    // Restore the missing playlist data
+                    if (fullState.chart_data) {
+                        if (!youtubePlaylistStates[chartHash]) {
+                            youtubePlaylistStates[chartHash] = {};
+                        }
+                        youtubePlaylistStates[chartHash].playlist = fullState.chart_data;
+                        youtubePlaylistStates[chartHash].is_beatport_playlist = true;
+                        youtubePlaylistStates[chartHash].beatport_chart_hash = chartHash;
+
+                        // Also restore discovery results if available
+                        if (fullState.discovery_results) {
+                            youtubePlaylistStates[chartHash].discovery_results = fullState.discovery_results;
+                        }
+
+                        // Restore discovery progress state
+                        if (fullState.discovery_progress !== undefined) {
+                            youtubePlaylistStates[chartHash].discovery_progress = fullState.discovery_progress;
+                        }
+                        if (fullState.spotify_matches !== undefined) {
+                            youtubePlaylistStates[chartHash].spotify_matches = fullState.spotify_matches;
+                        }
+                        if (fullState.spotify_total !== undefined) {
+                            youtubePlaylistStates[chartHash].spotify_total = fullState.spotify_total;
+                        }
+
+                        console.log(`✅ [Card Click] Restored playlist data for ${state.phase} phase`);
+                    }
+                } else {
+                    console.error(`❌ [Card Click] Failed to fetch state for chart: ${chartHash}`);
+                    showToast('Error loading chart data', 'error');
+                    return;
+                }
+            } catch (error) {
+                console.error(`❌ [Card Click] Error fetching chart state:`, error);
+                showToast('Error loading chart data', 'error');
+                return;
+            }
+        }
+
         openYouTubeDiscoveryModal(chartHash);
+
+        // If still in discovering phase, start polling for live updates
+        if (state.phase === 'discovering') {
+            console.log(`🔄 [Card Click] Starting discovery polling for ${state.phase} phase`);
+
+            // Let the polling handle all modal updates to avoid data structure mismatches
+            console.log(`📊 [Card Click] Starting polling - it will update modal with current progress`);
+
+            startBeatportDiscoveryPolling(chartHash);
+        }
     } else if (state.phase === 'downloading' || state.phase === 'download_complete') {
         // Open download modal if we have the converted playlist ID (following YouTube/Tidal pattern)
         const ytState = youtubePlaylistStates[chartHash];
