@@ -445,7 +445,7 @@ class BeatportUnifiedScraper:
 
             try:
                 # Get track title
-                raw_title = link.get_text(strip=True)
+                raw_title = link.get_text(separator=' ', strip=True)
                 if not raw_title:
                     continue
 
@@ -978,31 +978,77 @@ class BeatportUnifiedScraper:
         return tracks
 
     def scrape_genre_hype_picks(self, genre: Dict, limit: int = 50) -> List[Dict]:
-        """Scrape hype picks for a specific genre"""
+        """Scrape hype picks for a specific genre - FIXED VERSION"""
         tracks = []
 
-        # Method 1: Try dedicated hype picks URL (similar to hype-100)
-        hype_picks_urls = [
-            f"{self.base_url}/genre/{genre['slug']}/{genre['id']}/hype-picks",
-            f"{self.base_url}/genre/{genre['slug']}/{genre['id']}/picks",
-            f"{self.base_url}/genre/{genre['slug']}/{genre['id']}"  # Main page
+        # Try multiple hype-related URLs
+        hype_urls_to_try = [
+            f"{self.base_url}/genre/{genre['slug']}/{genre['id']}/hype-100",
+            f"{self.base_url}/genre/{genre['slug']}/{genre['id']}/hype",
+            f"{self.base_url}/genre/{genre['slug']}/{genre['id']}/hype-10",
+            f"{self.base_url}/genre/{genre['slug']}/{genre['id']}"  # Main page as fallback
         ]
 
-        for hype_url in hype_picks_urls:
-            print(f"   ⚡ Trying hype picks URL: {hype_url}")
+        for hype_url in hype_urls_to_try:
+            print(f"   🔥 Trying hype URL: {hype_url}")
             soup = self.get_page(hype_url)
             if soup:
-                # Extract hype picks from carousel and individual HYPE labeled tracks
-                tracks = self.extract_comprehensive_hype_picks(soup, f"{genre['name']} Hype Picks", limit)
-                if tracks and len(tracks) >= min(limit, 10):
-                    print(f"   ✅ Successfully extracted {len(tracks)} hype picks from {hype_url}")
+                # First try direct track extraction
+                tracks = self.extract_tracks_from_page(soup, f"{genre['name']} Hype Picks", limit)
+
+                if len(tracks) >= 10:  # Good result
+                    print(f"   ✅ Found {len(tracks)} hype tracks from {hype_url}")
                     break
-                elif tracks:
-                    print(f"   ⚠️ Only found {len(tracks)} hype picks at {hype_url}, trying next URL...")
+                elif len(tracks) > 0:
+                    print(f"   ⚠️ Only found {len(tracks)} hype tracks, trying next URL...")
                 else:
-                    print(f"   ❌ No hype picks found at {hype_url}")
+                    print(f"   ❌ No hype tracks found at {hype_url}")
+
+                    # If main page, try to find hype section
+                    if hype_url.endswith(genre['id']):
+                        print(f"   🔍 Searching for hype section on main genre page...")
+                        hype_section_tracks = self.find_hype_section_on_genre_page(soup, genre, limit)
+                        if hype_section_tracks:
+                            tracks = hype_section_tracks
+                            print(f"   ✅ Found {len(tracks)} tracks in hype section")
+                            break
 
         return tracks[:limit]
+
+    def find_hype_section_on_genre_page(self, soup, genre: Dict, limit: int) -> List[Dict]:
+        """Find and extract tracks from hype section on main genre page"""
+        tracks = []
+
+        # Look for headings containing "hype"
+        hype_headings = soup.find_all(['h1', 'h2', 'h3', 'h4'],
+                                     string=re.compile(r'hype', re.I))
+
+        for heading in hype_headings:
+            print(f"   📝 Found hype heading: {heading.get_text(strip=True)}")
+
+            # Get the section after this heading
+            section_container = heading.find_parent()
+            if section_container:
+                # Look for tracks in the next sibling or current container
+                content_areas = [
+                    section_container.find_next_sibling(),
+                    section_container
+                ]
+
+                for content_area in content_areas:
+                    if content_area:
+                        section_tracks = self.extract_tracks_from_page(
+                            content_area, f"{genre['name']} Hype Picks", limit
+                        )
+                        if section_tracks:
+                            tracks.extend(section_tracks)
+                            if len(tracks) >= limit:
+                                break
+
+                if tracks:
+                    break
+
+        return tracks
 
     def extract_comprehensive_hype_picks(self, soup: BeautifulSoup, list_name: str, limit: int) -> List[Dict]:
         """Extract hype picks using multiple methods to get full 50 tracks"""
@@ -1061,7 +1107,7 @@ class BeatportUnifiedScraper:
                         if not title_link:
                             continue
 
-                        track_title = title_link.get_text(strip=True)
+                        track_title = title_link.get_text(separator=' ', strip=True)
                         track_url = urljoin(self.base_url, title_link['href'])
 
                         # Use release artist as fallback
@@ -1160,7 +1206,7 @@ class BeatportUnifiedScraper:
                     # Extract track info from the first track link in this container
                     for link in track_links[:1]:  # Just take the first track from each HYPE container
                         try:
-                            raw_title = link.get_text(strip=True)
+                            raw_title = link.get_text(separator=' ', strip=True)
                             if not raw_title or len(raw_title) < 2:
                                 continue
 
@@ -1308,7 +1354,7 @@ class BeatportUnifiedScraper:
                 if not title_elem:
                     title_elem = title_link
 
-                track_title = title_elem.get_text(strip=True)
+                track_title = title_elem.get_text(separator=' ', strip=True)
 
                 # Extract artists
                 artist_container = item.find(class_=re.compile(r'ArtistNames'))
@@ -1365,7 +1411,7 @@ class BeatportUnifiedScraper:
                 if not title_elem:
                     title_elem = title_link
 
-                track_title = title_elem.get_text(strip=True)
+                track_title = title_elem.get_text(separator=' ', strip=True)
 
                 # Extract artists
                 artist_container = row.find(class_=re.compile(r'ArtistNames'))
@@ -1397,7 +1443,7 @@ class BeatportUnifiedScraper:
         return tracks
 
     def scrape_genre_staff_picks(self, genre: Dict, limit: int = 50) -> List[Dict]:
-        """Scrape staff picks for a specific genre"""
+        """Scrape staff picks for a specific genre - FIXED VERSION"""
         genre_url = f"{self.base_url}/genre/{genre['slug']}/{genre['id']}"
 
         soup = self.get_page(genre_url)
@@ -1406,14 +1452,13 @@ class BeatportUnifiedScraper:
 
         tracks = []
 
-        # Look for staff picks, editorial, or featured sections on genre page
-        staff_sections = [
-            'staff pick', 'editorial', 'featured', 'editor', 'hype pick',
-            'weekend pick', 'best new', 'exclusives'
+        # Method 1: Look for editorial/staff pick sections directly
+        editorial_sections = [
+            'staff pick', 'editorial', 'featured', 'editor pick',
+            'beatport picks', 'weekend pick', 'best new', 'exclusives'
         ]
 
-        for section_name in staff_sections:
-            # Find section headings that match staff pick patterns
+        for section_name in editorial_sections:
             section_heading = soup.find(['h1', 'h2', 'h3', 'h4'],
                 string=re.compile(rf'{section_name}', re.I))
 
@@ -1428,29 +1473,41 @@ class BeatportUnifiedScraper:
                         )
                         if section_tracks:
                             tracks.extend(section_tracks)
-                            break  # Found staff picks, no need to continue
+                            break  # Found staff picks, stop looking
 
-        # If no specific staff picks section found, try to find any editorial content
+        # Method 2: If no direct sections found, look for editorial chart collections
         if not tracks:
-            print(f"   🔍 No specific staff picks section found, looking for editorial content...")
-            # Look for DJ charts or featured charts on the genre page
+            print(f"   🔍 No direct staff picks section found, checking editorial charts...")
+
             chart_links = soup.find_all('a', href=re.compile(r'/chart/'))
+            editorial_charts = []
+
             for chart_link in chart_links[:10]:  # Limit to first 10 charts
                 chart_name = chart_link.get_text(strip=True)
-                if chart_name and len(chart_name) > 3:
-                    track_info = {
-                        'position': len(tracks) + 1,
-                        'artist': 'Various Artists',
-                        'title': chart_name,
-                        'list_name': f"{genre['name']} Staff Picks",
-                        'url': urljoin(self.base_url, chart_link.get('href', '')),
-                        'chart_type': 'staff_pick'
-                    }
-                    tracks.append(track_info)
-                    if len(tracks) >= limit:
-                        break
+                chart_href = chart_link.get('href', '')
 
-        return tracks
+                # Filter for editorial-style chart names
+                if any(keyword in chart_name.lower() for keyword in
+                      ['best new', 'weekend pick', 'editor', 'staff', 'beatport picks', 'exclusive']):
+                    editorial_charts.append((chart_name, chart_href))
+
+            print(f"   📊 Found {len(editorial_charts)} editorial charts")
+
+            # Extract tracks from editorial charts
+            for chart_name, chart_href in editorial_charts[:3]:  # Limit to 3 charts
+                if len(tracks) >= limit:
+                    break
+
+                print(f"   📊 Processing editorial chart: {chart_name}")
+                chart_url = urljoin(self.base_url, chart_href)
+                remaining_limit = limit - len(tracks)
+                chart_tracks = self.extract_tracks_from_chart(chart_url, chart_name, remaining_limit)
+
+                if chart_tracks:
+                    tracks.extend(chart_tracks)
+                    print(f"   ✅ Added {len(chart_tracks)} tracks from {chart_name}")
+
+        return tracks[:limit]
 
     def scrape_genre_latest_releases(self, genre: Dict, limit: int = 50) -> List[Dict]:
         """Scrape latest releases for a specific genre"""
@@ -1489,59 +1546,43 @@ class BeatportUnifiedScraper:
         return tracks
 
     def scrape_genre_new_charts(self, genre: Dict, limit: int = 100) -> List[Dict]:
-        """Scrape tracks from new charts (DJ/artist curated) for a specific genre"""
+        """Scrape NEW CHARTS COLLECTION - Returns list of charts, not individual tracks"""
         genre_url = f"{self.base_url}/genre/{genre['slug']}/{genre['id']}"
 
         soup = self.get_page(genre_url)
         if not soup:
             return []
 
-        tracks = []
-
-        # Look for DJ charts, artist charts, or curated content on genre page
+        charts = []
         chart_links = soup.find_all('a', href=re.compile(r'/chart/'))
 
-        # Extract tracks from each chart until we reach the limit
-        charts_processed = 0
-        max_charts = 10  # Limit number of charts to process for performance
+        print(f"   🔍 Found {len(chart_links)} chart links on genre page")
 
-        for chart_link in chart_links[:max_charts]:
-            if len(tracks) >= limit:
-                break
-
+        for chart_link in chart_links[:limit]:
             chart_name = chart_link.get_text(strip=True)
             chart_href = chart_link.get('href', '')
 
             if chart_name and chart_href and len(chart_name) > 3:
-                charts_processed += 1
-                print(f"   📊 Processing chart {charts_processed}: {chart_name}")
+                # Create chart metadata entry (not individual tracks)
+                chart_info = {
+                    'position': len(charts) + 1,
+                    'artist': 'Various Artists',  # Charts are compilations
+                    'title': chart_name,
+                    'list_name': f"{genre['name']} New Charts",
+                    'url': urljoin(self.base_url, chart_href),
+                    'chart_name': chart_name,
+                    'chart_type': 'new_chart',
+                    'genre': genre['name']
+                }
+                charts.append(chart_info)
 
-                # Get tracks from this chart
-                chart_url = urljoin(self.base_url, chart_href)
-                chart_tracks = self.extract_tracks_from_chart(chart_url, chart_name, min(20, limit - len(tracks)))
+                print(f"   📊 Chart {len(charts)}: {chart_name}")
 
-                if chart_tracks:
-                    tracks.extend(chart_tracks)
-                    print(f"   ✅ Added {len(chart_tracks)} tracks from {chart_name}")
-                else:
-                    print(f"   ❌ No tracks found in {chart_name}")
-
-        # If not enough tracks from charts, get additional content from the genre page
-        if len(tracks) < limit:
-            print(f"   🔍 Getting additional tracks from genre page to reach {limit} total...")
-            additional_tracks = self.extract_tracks_from_page(soup, f"New {genre['name']} Charts", limit - len(tracks))
-
-            # Avoid duplicates
-            for track in additional_tracks:
-                if not any(existing['url'] == track['url'] for existing in tracks):
-                    tracks.append(track)
-                    if len(tracks) >= limit:
-                        break
-
-        return tracks[:limit]
+        print(f"   ✅ Found {len(charts)} charts in New Charts Collection")
+        return charts[:limit]
 
     def extract_tracks_from_chart(self, chart_url: str, chart_name: str, limit: int) -> List[Dict]:
-        """Extract individual tracks from a chart page"""
+        """Extract individual tracks from a chart page - OPTIMIZED FOR CHART PAGES"""
         tracks = []
 
         try:
@@ -1549,48 +1590,207 @@ class BeatportUnifiedScraper:
             if not soup:
                 return tracks
 
-            # Look for track items in the chart
-            track_items = soup.find_all(class_=re.compile(r'Track.*Item|Lists.*Item|Table.*Row'))
+            print(f"   🔍 Extracting tracks from chart page: {chart_url}")
+            print(f"   📋 Chart name: {chart_name}")
 
-            for item in track_items[:limit]:
-                try:
-                    # Skip header rows
-                    if item.get('role') == 'columnheader':
-                        continue
+            # DEBUG: Check page title to confirm we're on the right page
+            page_title = soup.find('title')
+            if page_title:
+                print(f"   📄 Page title: {page_title.get_text(strip=True)}")
 
-                    # Extract track title
-                    title_link = item.find('a', href=re.compile(r'/track/'))
-                    if not title_link:
-                        continue
+            # DEBUG: Look for the chart title on the page
+            chart_title_elem = soup.find(['h1', 'h2'], string=re.compile(chart_name.split(':')[0], re.I))
+            if chart_title_elem:
+                print(f"   ✅ Found chart title on page: {chart_title_elem.get_text(strip=True)}")
+            else:
+                print(f"   ⚠️ Chart title '{chart_name}' not found on page")
 
-                    track_title = title_link.get_text(strip=True)
-                    track_url = urljoin(self.base_url, title_link['href'])
+            # Method 1: Try chart-specific table extraction first (most reliable for chart pages)
+            tracks = self.extract_tracks_from_chart_table(soup, chart_name, limit)
 
-                    # Extract artist
-                    artist_container = item.find(class_=re.compile(r'ArtistNames|artist'))
-                    if artist_container:
-                        artist_links = artist_container.find_all('a', href=re.compile(r'/artist/'))
-                        artists = [link.get_text(strip=True) for link in artist_links]
-                        artist_text = ', '.join(artists) if artists else 'Unknown Artist'
-                    else:
-                        artist_text = 'Unknown Artist'
+            if len(tracks) >= 10:
+                print(f"   ✅ Chart table extraction found {len(tracks)} tracks")
+                return tracks
 
-                    track_data = {
-                        'position': len(tracks) + 1,
-                        'artist': artist_text,
-                        'title': track_title,
-                        'list_name': f"New Chart: {chart_name}",
-                        'url': track_url,
-                        'chart_source': chart_name
-                    }
+            # Method 2: Fallback to general page extraction
+            print(f"   ⚠️ Chart table extraction found {len(tracks)} tracks, trying general extraction...")
+            general_tracks = self.extract_tracks_from_page(soup, f"New Chart: {chart_name}", limit)
 
-                    tracks.append(track_data)
+            if len(general_tracks) > len(tracks):
+                tracks = general_tracks
+                print(f"   ✅ General extraction found {len(tracks)} tracks")
 
-                except Exception:
-                    continue
+            # Method 3: Last resort - generic table extraction
+            if len(tracks) < 10:
+                print(f"   ⚠️ Still low track count, trying generic table extraction...")
+                table_tracks = self.extract_tracks_from_table_format(soup, chart_name, limit)
+                if len(table_tracks) > len(tracks):
+                    tracks = table_tracks
+                    print(f"   ✅ Generic table extraction found {len(tracks)} tracks")
+
+            print(f"   📊 Final result: {len(tracks)} tracks extracted from {chart_name}")
+            return tracks
 
         except Exception as e:
             print(f"   ❌ Error extracting tracks from chart {chart_name}: {e}")
+            return []
+
+    def extract_tracks_from_chart_table(self, soup, chart_name: str, limit: int) -> List[Dict]:
+        """Extract tracks from Beatport chart table structure (tracks-table class)"""
+        tracks = []
+
+        print(f"   🔍 DEBUG: Looking for tracks-table container...")
+
+        # Look for the tracks table container
+        tracks_table = soup.find(class_=re.compile(r'tracks-table'))
+        if not tracks_table:
+            print(f"   ⚠️ No tracks-table container found")
+            # Debug: Let's see what table classes ARE available
+            all_tables = soup.find_all(['table', 'div'], class_=re.compile(r'table|Table', re.I))
+            print(f"   🔍 DEBUG: Found {len(all_tables)} table-like elements")
+            for i, table in enumerate(all_tables[:5]):
+                classes = table.get('class', [])
+                print(f"      Table {i+1}: {' '.join(classes)}")
+            return tracks
+
+        print(f"   ✅ Found tracks-table container with classes: {tracks_table.get('class', [])}")
+
+        # Find all track rows using data-testid or table row classes
+        track_rows_testid = tracks_table.find_all(['div', 'tr'], attrs={'data-testid': 'tracks-table-row'})
+        track_rows_class = tracks_table.find_all(class_=re.compile(r'Table.*Row.*tracks-table'))
+        track_rows_generic = tracks_table.find_all(class_=re.compile(r'Table.*Row'))
+
+        print(f"   🔍 DEBUG: Track rows found:")
+        print(f"      - By data-testid='tracks-table-row': {len(track_rows_testid)}")
+        print(f"      - By class pattern 'Table.*Row.*tracks-table': {len(track_rows_class)}")
+        print(f"      - By generic 'Table.*Row': {len(track_rows_generic)}")
+
+        # Use the best available option
+        track_rows = track_rows_testid or track_rows_class or track_rows_generic
+
+        if not track_rows:
+            print(f"   ❌ No track rows found in any format")
+            return tracks
+
+        print(f"   🔍 Using {len(track_rows)} track rows for extraction")
+
+        for i, row in enumerate(track_rows[:limit]):
+            try:
+                # Skip header rows
+                if row.get('role') == 'columnheader':
+                    continue
+
+                # Find track title link - look for the specific structure
+                title_cell = row.find(class_=re.compile(r'cell.*title|title.*cell'))
+                if not title_cell:
+                    # Fallback: look for any cell with track links
+                    title_cell = row
+
+                track_link = title_cell.find('a', href=re.compile(r'/track/'))
+                if not track_link:
+                    continue
+
+                # Extract track title from the ReleaseName span or link text
+                title_span = track_link.find(class_=re.compile(r'ReleaseName'))
+                if title_span:
+                    track_title = title_span.get_text(separator=' ', strip=True)
+                else:
+                    track_title = track_link.get_text(separator=' ', strip=True)
+
+                track_url = urljoin(self.base_url, track_link['href'])
+
+                # Extract artists from ArtistNames container
+                artists = []
+                artist_container = row.find(class_=re.compile(r'ArtistNames'))
+                if artist_container:
+                    artist_links = artist_container.find_all('a', href=re.compile(r'/artist/'))
+                    artists = [link.get_text(strip=True) for link in artist_links]
+
+                artist_text = ', '.join(artists) if artists else 'Unknown Artist'
+
+                # DEBUG: Print track details for first few
+                if len(tracks) < 3:
+                    print(f"   🔍 DEBUG Track {len(tracks)+1}:")
+                    print(f"      Title: '{track_title}'")
+                    print(f"      Artist: '{artist_text}'")
+                    print(f"      URL: {track_url}")
+                    print(f"      Track link href: {track_link.get('href', 'NO HREF')}")
+
+                # Extract track number if available
+                track_no_elem = row.find(class_=re.compile(r'TrackNo'))
+                position = track_no_elem.get_text(strip=True) if track_no_elem else str(len(tracks) + 1)
+
+                track_data = {
+                    'position': position,
+                    'artist': artist_text,
+                    'title': track_title,
+                    'list_name': f"Chart: {chart_name}",
+                    'url': track_url,
+                    'chart_source': chart_name
+                }
+
+                tracks.append(track_data)
+
+                # Debug output for first few tracks
+                if len(tracks) <= 5:
+                    print(f"   🎵 Track {len(tracks)}: {artist_text} - {track_title}")
+
+            except Exception as e:
+                print(f"   ⚠️ Error parsing track row {i+1}: {e}")
+                continue
+
+        print(f"   ✅ Chart table extraction completed: {len(tracks)} tracks found")
+        return tracks
+
+    def extract_tracks_from_table_format(self, soup, chart_name: str, limit: int) -> List[Dict]:
+        """Extract tracks from table format (for charts that use table layout)"""
+        tracks = []
+
+        # Look for table rows containing track data
+        table_rows = soup.find_all('tr') + soup.find_all('div', class_=re.compile(r'Table.*Row|track.*row', re.I))
+
+        print(f"   🔍 Found {len(table_rows)} potential table rows")
+
+        for i, row in enumerate(table_rows[:limit]):
+            try:
+                # Skip header rows
+                if row.name == 'tr' and row.find('th'):
+                    continue
+
+                # Look for track links
+                track_links = row.find_all('a', href=re.compile(r'/track/'))
+                if not track_links:
+                    continue
+
+                track_link = track_links[0]
+                track_title = track_link.get_text(separator=' ', strip=True)
+                track_url = urljoin(self.base_url, track_link['href'])
+
+                # Look for artist information
+                artist_text = 'Unknown Artist'
+
+                # Try multiple methods to find artist
+                artist_links = row.find_all('a', href=re.compile(r'/artist/'))
+                if artist_links:
+                    artists = [link.get_text(strip=True) for link in artist_links]
+                    artist_text = ', '.join(artists)
+
+                track_data = {
+                    'position': len(tracks) + 1,
+                    'artist': artist_text,
+                    'title': track_title,
+                    'list_name': f"New Chart: {chart_name}",
+                    'url': track_url,
+                    'chart_source': chart_name
+                }
+
+                tracks.append(track_data)
+
+                if len(tracks) <= 3:  # Debug first few
+                    print(f"   🎵 Track {len(tracks)}: {artist_text} - {track_title}")
+
+            except Exception as e:
+                continue
 
         return tracks
 

@@ -11612,6 +11612,7 @@ function setupNewChartItemHandlers(genreSlug, genreId, genreName) {
             const chartUrl = item.dataset.chartUrl;
 
             console.log(`🎵 Chart clicked: ${chartName} by ${chartArtist}`);
+            console.log(`🔗 Chart URL: ${chartUrl}`);
 
             try {
                 // Create a virtual chart data object
@@ -11620,8 +11621,18 @@ function setupNewChartItemHandlers(genreSlug, genreId, genreName) {
 
                 showToast(`Loading ${chartName}...`, 'info');
 
-                // For demonstration, we'll use the genre tracks as chart content
-                const response = await fetch(`/api/beatport/genre/${genreSlug}/${genreId}/tracks?limit=20`);
+                // Use the new chart extraction endpoint with the actual chart URL
+                const response = await fetch('/api/beatport/chart/extract', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        chart_url: chartUrl,
+                        chart_name: chartName,
+                        limit: 100
+                    })
+                });
                 if (!response.ok) {
                     throw new Error(`Failed to fetch chart content: ${response.status}`);
                 }
@@ -11814,9 +11825,8 @@ function setupGenreChartItemHandlers(genreSlug, genreId, genreName) {
             const chartUrl = item.dataset.chartUrl;
 
             console.log(`🎵 Chart clicked: ${chartName} by ${chartArtist}`);
+            console.log(`🔗 Chart URL: ${chartUrl}`);
 
-            // For now, we'll create a virtual playlist from this chart
-            // This would eventually fetch the actual chart contents from Beatport
             try {
                 // Create a virtual chart data object
                 const chartHash = `individual_chart_${genreSlug}_${Date.now()}`;
@@ -11824,9 +11834,18 @@ function setupGenreChartItemHandlers(genreSlug, genreId, genreName) {
 
                 showToast(`Loading ${chartName}...`, 'info');
 
-                // For demonstration, we'll use the genre tracks as chart content
-                // In a real implementation, this would fetch the specific chart tracks
-                const response = await fetch(`/api/beatport/genre/${genreSlug}/${genreId}/tracks?limit=20`);
+                // Use the new chart extraction endpoint with the actual chart URL
+                const response = await fetch('/api/beatport/chart/extract', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        chart_url: chartUrl,
+                        chart_name: chartName,
+                        limit: 100
+                    })
+                });
                 if (!response.ok) {
                     throw new Error(`Failed to fetch chart content: ${response.status}`);
                 }
