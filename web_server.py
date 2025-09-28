@@ -12096,6 +12096,120 @@ def get_beatport_genre_staff_picks(genre_slug, genre_id):
             "count": 0
         }), 500
 
+@app.route('/api/beatport/genre/<genre_slug>/<genre_id>/hype-top-10', methods=['GET'])
+def get_beatport_genre_hype_top_10(genre_slug, genre_id):
+    """Get hype top 10 tracks for a specific Beatport genre"""
+    try:
+        logger.info(f"🚀 API request for {genre_slug} genre hype top 10 (ID: {genre_id})")
+
+        # Initialize the Beatport scraper
+        scraper = BeatportUnifiedScraper()
+
+        # Create genre dict for scraper
+        genre = {
+            'name': genre_slug.replace('-', ' ').title(),
+            'slug': genre_slug,
+            'id': genre_id
+        }
+
+        # Scrape hype top 10 for this genre
+        tracks = scraper.scrape_genre_hype_top_10(genre)
+
+        logger.info(f"✅ Successfully scraped {len(tracks)} hype top 10 tracks for {genre_slug}")
+
+        return jsonify({
+            "success": True,
+            "tracks": tracks,
+            "genre": genre,
+            "count": len(tracks)
+        })
+
+    except Exception as e:
+        logger.error(f"❌ Error fetching hype top 10 for {genre_slug}: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "tracks": [],
+            "count": 0
+        }), 500
+
+@app.route('/api/beatport/genre/<genre_slug>/<genre_id>/hype-top-100', methods=['GET'])
+def get_beatport_genre_hype_top_100(genre_slug, genre_id):
+    """Get hype top 100 tracks for a specific Beatport genre"""
+    try:
+        logger.info(f"💥 API request for {genre_slug} genre hype top 100 (ID: {genre_id})")
+
+        # Initialize the Beatport scraper
+        scraper = BeatportUnifiedScraper()
+
+        # Create genre dict for scraper
+        genre = {
+            'name': genre_slug.replace('-', ' ').title(),
+            'slug': genre_slug,
+            'id': genre_id
+        }
+
+        # Scrape hype top 100 for this genre
+        tracks = scraper.scrape_genre_hype_charts(genre, limit=100)
+
+        logger.info(f"✅ Successfully scraped {len(tracks)} hype top 100 tracks for {genre_slug}")
+
+        return jsonify({
+            "success": True,
+            "tracks": tracks,
+            "genre": genre,
+            "count": len(tracks)
+        })
+
+    except Exception as e:
+        logger.error(f"❌ Error fetching hype top 100 for {genre_slug}: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "tracks": [],
+            "count": 0
+        }), 500
+
+@app.route('/api/beatport/genre/<genre_slug>/<genre_id>/hype-picks', methods=['GET'])
+def get_beatport_genre_hype_picks(genre_slug, genre_id):
+    """Get hype picks for a specific Beatport genre"""
+    try:
+        logger.info(f"⚡ API request for {genre_slug} genre hype picks (ID: {genre_id})")
+
+        # Initialize the Beatport scraper
+        scraper = BeatportUnifiedScraper()
+
+        # Get query parameters
+        limit = int(request.args.get('limit', '50'))
+
+        # Create genre dict for scraper
+        genre = {
+            'name': genre_slug.replace('-', ' ').title(),
+            'slug': genre_slug,
+            'id': genre_id
+        }
+
+        # Scrape hype picks for this genre
+        tracks = scraper.scrape_genre_hype_picks(genre, limit=limit)
+
+        logger.info(f"✅ Successfully scraped {len(tracks)} hype picks for {genre_slug}")
+
+        return jsonify({
+            "success": True,
+            "tracks": tracks,
+            "genre": genre,
+            "count": len(tracks)
+        })
+
+    except Exception as e:
+        logger.error(f"❌ Error fetching hype picks for {genre_slug}: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "tracks": [],
+            "count": 0
+        }), 500
+
 @app.route('/api/beatport/genre/<genre_slug>/<genre_id>/latest-releases', methods=['GET'])
 def get_beatport_genre_latest_releases(genre_slug, genre_id):
     """Get latest releases for a specific Beatport genre"""

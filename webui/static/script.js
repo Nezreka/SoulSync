@@ -11421,6 +11421,11 @@ function showBeatportGenreDetailView(genreSlug, genreId, genreName) {
         document.getElementById('genre-staff-picks-title').textContent = `${genreName} Staff Picks`;
         document.getElementById('genre-latest-releases-title').textContent = `Latest ${genreName} Releases`;
 
+        // Update Hype section titles
+        document.getElementById('genre-hype-top-10-title').textContent = `${genreName} Hype Top 10`;
+        document.getElementById('genre-hype-top-100-title').textContent = `${genreName} Hype Top 100`;
+        document.getElementById('genre-hype-picks-title').textContent = `${genreName} Hype Picks`;
+
         // Load new charts directly (no expansion needed)
         console.log(`🔄 Auto-loading new charts for ${genreName}...`);
         loadNewChartsInline(genreSlug, genreId, genreName);
@@ -11899,10 +11904,25 @@ async function handleGenreChartTypeClick(genreSlug, genreId, genreName, chartTyp
             name: `Latest ${genreName} Releases`,
             limit: 50
         },
+        'hype-top-10': {
+            endpoint: `/api/beatport/genre/${genreSlug}/${genreId}/hype-top-10`,
+            name: `${genreName} Hype Top 10`,
+            limit: 10
+        },
+        'hype-top-100': {
+            endpoint: `/api/beatport/genre/${genreSlug}/${genreId}/hype-top-100`,
+            name: `${genreName} Hype Top 100`,
+            limit: 100
+        },
+        'hype-picks': {
+            endpoint: `/api/beatport/genre/${genreSlug}/${genreId}/hype-picks`,
+            name: `${genreName} Hype Picks`,
+            limit: 50
+        },
         'new-charts': {
             endpoint: `/api/beatport/genre/${genreSlug}/${genreId}/new-charts`,
             name: `New ${genreName} Charts`,
-            limit: 50
+            limit: 100
         }
     };
 
