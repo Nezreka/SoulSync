@@ -427,6 +427,114 @@ class BeatportUnifiedScraper:
 
         return genres
 
+    def extract_release_data_from_card(self, release_card) -> Optional[Dict]:
+        """Extract data from a release card element (for homepage sections)"""
+        try:
+            # Get release link and name
+            link_elem = release_card.select_one('a[href*="/release/"]')
+            if not link_elem:
+                return None
+
+            release_url = urljoin(self.base_url, link_elem.get('href'))
+
+            # Extract release name
+            name_elem = release_card.select_one('[class*="ReleaseName"], [class*="release-name"]')
+            if not name_elem:
+                # Try to get from link text
+                name_elem = release_card.select_one('a[href*="/release/"]')
+
+            release_name = name_elem.get_text(strip=True) if name_elem else "Unknown Release"
+
+            # Extract artists
+            artist_elems = release_card.select('[href*="/artist/"]')
+            artists = []
+            for artist_elem in artist_elems:
+                artist_name = artist_elem.get_text(strip=True)
+                if artist_name and artist_name not in artists:
+                    artists.append(artist_name)
+
+            # Extract label
+            label_elem = release_card.select_one('[href*="/label/"]')
+            label = label_elem.get_text(strip=True) if label_elem else "Unknown Label"
+
+            # Extract image
+            img_elem = release_card.select_one('img')
+            image_url = img_elem.get('src') if img_elem else None
+
+            # Extract price
+            price_elem = release_card.select_one('[class*="price"], [class*="Price"]')
+            price = price_elem.get_text(strip=True) if price_elem else None
+
+            # Check for badges (EXCLUSIVE, HYPE, etc.)
+            badges = []
+            badge_elems = release_card.select('[class*="badge"], [class*="Badge"], .hype, .exclusive')
+            for badge in badge_elems:
+                badge_text = badge.get_text(strip=True).upper()
+                if badge_text and badge_text not in badges:
+                    badges.append(badge_text)
+
+            return {
+                'title': release_name,
+                'artist': ', '.join(artists) if artists else "Unknown Artist",
+                'artists': artists,
+                'label': label,
+                'url': release_url,
+                'image_url': image_url,
+                'price': price,
+                'badges': badges,
+                'type': 'release'
+            }
+
+        except Exception as e:
+            print(f"❌ Error extracting release data: {e}")
+            return None
+
+    def extract_chart_data_from_card(self, chart_card) -> Optional[Dict]:
+        """Extract data from a chart card element (for homepage sections)"""
+        try:
+            # Get chart link and name
+            link_elem = chart_card.select_one('a[href*="/chart/"]')
+            if not link_elem:
+                return None
+
+            chart_url = urljoin(self.base_url, link_elem.get('href'))
+
+            # Extract chart name from link text or card content
+            chart_name = link_elem.get_text(strip=True)
+            if not chart_name:
+                name_elem = chart_card.select_one('[class*="ChartName"], [class*="chart-name"], [class*="title"]')
+                chart_name = name_elem.get_text(strip=True) if name_elem else "Unknown Chart"
+
+            # Extract artist/curator
+            artist_elems = chart_card.select('[href*="/artist/"]')
+            curators = []
+            for artist_elem in artist_elems:
+                curator_name = artist_elem.get_text(strip=True)
+                if curator_name and curator_name not in curators:
+                    curators.append(curator_name)
+
+            # Extract image
+            img_elem = chart_card.select_one('img')
+            image_url = img_elem.get('src') if img_elem else None
+
+            # Extract price/value
+            price_elem = chart_card.select_one('[class*="price"], [class*="Price"]')
+            price = price_elem.get_text(strip=True) if price_elem else None
+
+            return {
+                'title': chart_name,
+                'artist': ', '.join(curators) if curators else "Beatport",
+                'curators': curators,
+                'url': chart_url,
+                'image_url': image_url,
+                'price': price,
+                'type': 'chart'
+            }
+
+        except Exception as e:
+            print(f"❌ Error extracting chart data: {e}")
+            return None
+
     def extract_tracks_from_page(self, soup: BeautifulSoup, list_name: str, limit: int = 100) -> List[Dict]:
         """Extract tracks from any Beatport page using reliable selectors"""
         tracks = []
@@ -538,35 +646,38 @@ class BeatportUnifiedScraper:
         return tracks
 
     def scrape_new_releases(self, limit: int = 40) -> List[Dict]:
-        """Scrape Beatport New Releases from homepage section"""
+        """Scrape Beatport New Releases from homepage section - FIXED"""
         print("\n🆕 Scraping Beatport New Releases...")
 
-        # Parse from homepage New Releases section (H2 heading)
         soup = self.get_page(self.base_url)
         if not soup:
             return []
 
-        # Find the New Releases H2 section
-        new_releases_heading = soup.find(['h1', 'h2', 'h3'], string=re.compile(r'New Releases', re.I))
-        if new_releases_heading:
-            # Get the section content after the heading
-            section_container = new_releases_heading.find_parent()
-            if section_container:
-                # Look for the next sibling or content area
-                content_area = section_container.find_next_sibling()
-                if content_area:
-                    tracks = self.extract_tracks_from_page(content_area, "New Releases", limit)
-                else:
-                    # Fallback: search in parent container
-                    tracks = self.extract_tracks_from_page(section_container, "New Releases", limit)
-            else:
-                tracks = []
-        else:
-            print("⚠️ New Releases section not found, scanning entire homepage...")
-            tracks = self.extract_tracks_from_page(soup, "New Releases", limit)
+        # Find New Releases section using data-testid
+        release_cards = soup.select('[data-testid="new-releases"]')
+        print(f"   Found {len(release_cards)} release cards in New Releases section")
 
-        print(f"✅ Extracted {len(tracks)} tracks from New Releases")
-        return tracks
+        releases = []
+        for i, card in enumerate(release_cards[:limit]):
+            release_data = self.extract_release_data_from_card(card)
+            if release_data:
+                # Convert to track format for compatibility
+                track_data = {
+                    'position': i + 1,
+                    'artist': release_data['artist'],
+                    'title': release_data['title'],
+                    'list_name': 'New Releases',
+                    'url': release_data['url'],
+                    'label': release_data.get('label', 'Unknown Label'),
+                    'image_url': release_data.get('image_url'),
+                    'price': release_data.get('price'),
+                    'badges': release_data.get('badges', []),
+                    'type': 'release'
+                }
+                releases.append(track_data)
+
+        print(f"✅ Extracted {len(releases)} releases from New Releases")
+        return releases
 
     def scrape_hype_top_100(self, limit: int = 100) -> List[Dict]:
         """Scrape Beatport Hype Top 100 - Fixed URL based on parser discovery"""
@@ -783,82 +894,119 @@ class BeatportUnifiedScraper:
         return charts
 
     def scrape_featured_charts(self, limit: int = 20) -> List[Dict]:
-        """Scrape Beatport Featured Charts from homepage section - Improved reliability"""
+        """Scrape Beatport Featured Charts from homepage section - FIXED"""
         print("\n📊 Scraping Beatport Featured Charts...")
 
         soup = self.get_page(self.base_url)
         if not soup:
             return []
 
-        tracks = []
+        # Find Featured Charts section using data-testid
+        chart_cards = soup.select('[data-testid="featured-charts"]')
+        print(f"   Found {len(chart_cards)} chart cards in Featured Charts section")
 
-        # Method 1: Find Featured Charts H2 section on homepage
-        featured_heading = soup.find(['h1', 'h2', 'h3'], string=re.compile(r'Featured Charts', re.I))
-        if featured_heading:
-            print("   Found Featured Charts section heading")
-            section_container = featured_heading.find_parent()
-            if section_container:
-                content_area = section_container.find_next_sibling()
-                if content_area:
-                    # Look for chart items within this section
-                    chart_items = content_area.find_all('a', href=re.compile(r'/chart/'))
-                    print(f"   Found {len(chart_items)} featured chart items")
+        charts = []
+        for i, card in enumerate(chart_cards[:limit]):
+            chart_data = self.extract_chart_data_from_card(card)
+            if chart_data:
+                # Convert to track format for compatibility
+                track_data = {
+                    'position': i + 1,
+                    'artist': chart_data['artist'],
+                    'title': chart_data['title'],
+                    'list_name': 'Featured Charts',
+                    'url': chart_data['url'],
+                    'chart_name': chart_data['title'],
+                    'chart_type': 'featured',
+                    'curators': chart_data.get('curators', []),
+                    'image_url': chart_data.get('image_url'),
+                    'price': chart_data.get('price'),
+                    'type': 'chart'
+                }
+                charts.append(track_data)
 
-                    for chart_item in chart_items[:limit]:
-                        chart_name = chart_item.get_text(strip=True)
-                        chart_href = chart_item.get('href', '')
+        print(f"✅ Extracted {len(charts)} charts from Featured Charts")
+        return charts
 
-                        if chart_name and chart_href:
-                            # Extract additional info if available (artist, price, etc.)
-                            chart_container = chart_item.find_parent()
-                            artist_name = "Beatport Editorial"
+    def scrape_hype_picks_homepage(self, limit: int = 40) -> List[Dict]:
+        """Scrape Hype Picks from homepage section - NEW"""
+        print("\n🔥 Scraping Hype Picks from homepage...")
 
-                            # Try to find artist name in the container
-                            if chart_container:
-                                # Look for artist info near the chart name
-                                potential_artist = chart_container.find_next(string=True)
-                                if potential_artist and len(potential_artist.strip()) > 2:
-                                    artist_name = potential_artist.strip()
+        soup = self.get_page(self.base_url)
+        if not soup:
+            return []
 
-                            track_info = {
-                                'position': len(tracks) + 1,
-                                'artist': artist_name,
-                                'title': chart_name,
-                                'list_name': 'Featured Charts',
-                                'url': urljoin(self.base_url, chart_href),
-                                'chart_name': chart_name,
-                                'chart_type': 'featured'
-                            }
-                            tracks.append(track_info)
+        # Find Hype Picks section using data-testid
+        hype_cards = soup.select('[data-testid="hype-picks"]')
+        print(f"   Found {len(hype_cards)} hype cards in Hype Picks section")
 
-        # Method 2: Look for other editorial/featured sections if main section not found
-        if not tracks:
-            print("   ⚠️ Featured Charts section not found, looking for staff picks or editorial sections...")
+        hype_releases = []
+        for i, card in enumerate(hype_cards[:limit]):
+            release_data = self.extract_release_data_from_card(card)
+            if release_data:
+                # Ensure it has HYPE badge
+                if 'HYPE' not in release_data.get('badges', []):
+                    release_data['badges'] = release_data.get('badges', []) + ['HYPE']
 
-            # Look for staff picks or other editorial content
-            editorial_headings = soup.find_all(['h1', 'h2', 'h3'],
-                string=re.compile(r'staff.*pick|editorial|hype.*pick|weekend.*pick|exclusives.*only', re.I))
+                # Convert to track format for compatibility
+                track_data = {
+                    'position': i + 1,
+                    'artist': release_data['artist'],
+                    'title': release_data['title'],
+                    'list_name': 'Hype Picks',
+                    'url': release_data['url'],
+                    'label': release_data.get('label', 'Unknown Label'),
+                    'image_url': release_data.get('image_url'),
+                    'price': release_data.get('price'),
+                    'badges': release_data.get('badges', []),
+                    'type': 'release',
+                    'hype': True
+                }
+                hype_releases.append(track_data)
 
-            for heading in editorial_headings:
-                section_name = heading.get_text(strip=True)
-                print(f"   Found editorial section: {section_name}")
+        print(f"✅ Extracted {len(hype_releases)} releases from Hype Picks")
+        return hype_releases
 
-                section_container = heading.find_parent()
-                if section_container:
-                    content_area = section_container.find_next_sibling()
-                    if content_area:
-                        # Try to extract tracks from this section
-                        section_tracks = self.extract_tracks_from_page(content_area, section_name, 5)
-                        for track in section_tracks:
-                            track['chart_type'] = 'featured'
-                            track['chart_name'] = section_name
-                        tracks.extend(section_tracks)
+    def scrape_top_10_releases_homepage(self, limit: int = 10) -> List[Dict]:
+        """Scrape Top 10 Releases from homepage section - NEW"""
+        print("\n🔟 Scraping Top 10 Releases from homepage...")
 
-                        if len(tracks) >= limit:
-                            break
+        soup = self.get_page(self.base_url)
+        if not soup:
+            return []
 
-        print(f"✅ Extracted {len(tracks)} items from Featured Charts")
-        return tracks
+        # Find Top 10 Releases section using data-testid
+        release_items = soup.select('[data-testid="top-10-releases-item"]')
+        print(f"   Found {len(release_items)} release items in Top 10 Releases section")
+
+        top_releases = []
+        for i, item in enumerate(release_items[:limit]):
+            # Extract rank number
+            rank_elem = item.select_one('[data-testid="track-number"]')
+            rank = rank_elem.get_text(strip=True) if rank_elem else str(i + 1)
+
+            # Extract release data
+            release_data = self.extract_release_data_from_card(item)
+            if release_data:
+                # Convert to track format for compatibility
+                track_data = {
+                    'position': int(rank) if rank.isdigit() else i + 1,
+                    'rank': rank,
+                    'artist': release_data['artist'],
+                    'title': release_data['title'],
+                    'list_name': 'Top 10 Releases',
+                    'url': release_data['url'],
+                    'label': release_data.get('label', 'Unknown Label'),
+                    'image_url': release_data.get('image_url'),
+                    'price': release_data.get('price'),
+                    'badges': release_data.get('badges', []),
+                    'type': 'release',
+                    'top_10': True
+                }
+                top_releases.append(track_data)
+
+        print(f"✅ Extracted {len(top_releases)} releases from Top 10 Releases")
+        return top_releases
 
     def scrape_genre_charts(self, genre: Dict, limit: int = 100) -> List[Dict]:
         """Scrape charts for a specific genre (default: top tracks)"""

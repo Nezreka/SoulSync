@@ -12509,6 +12509,130 @@ def get_beatport_top_100_releases():
             "count": 0
         }), 500
 
+@app.route('/api/beatport/homepage/new-releases', methods=['GET'])
+def get_beatport_homepage_new_releases():
+    """Get Beatport New Releases from homepage section"""
+    try:
+        limit = int(request.args.get('limit', 40))
+        logger.info(f"🆕 API request for Beatport homepage New Releases (limit: {limit})")
+
+        # Initialize the Beatport scraper
+        scraper = BeatportUnifiedScraper()
+
+        # Get new releases from homepage
+        new_releases = scraper.scrape_new_releases(limit=limit)
+
+        logger.info(f"✅ Successfully extracted {len(new_releases)} new releases from homepage")
+
+        return jsonify({
+            "success": True,
+            "tracks": new_releases,
+            "track_count": len(new_releases),
+            "source": "beatport_homepage_new_releases"
+        })
+
+    except Exception as e:
+        logger.error(f"❌ Error getting Beatport homepage new releases: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "tracks": [],
+            "track_count": 0
+        }), 500
+
+@app.route('/api/beatport/homepage/hype-picks', methods=['GET'])
+def get_beatport_homepage_hype_picks():
+    """Get Beatport Hype Picks from homepage section"""
+    try:
+        limit = int(request.args.get('limit', 40))
+        logger.info(f"🔥 API request for Beatport homepage Hype Picks (limit: {limit})")
+
+        # Initialize the Beatport scraper
+        scraper = BeatportUnifiedScraper()
+
+        # Get hype picks from homepage
+        hype_picks = scraper.scrape_hype_picks_homepage(limit=limit)
+
+        logger.info(f"✅ Successfully extracted {len(hype_picks)} hype picks from homepage")
+
+        return jsonify({
+            "success": True,
+            "tracks": hype_picks,
+            "track_count": len(hype_picks),
+            "source": "beatport_homepage_hype_picks"
+        })
+
+    except Exception as e:
+        logger.error(f"❌ Error getting Beatport homepage hype picks: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "tracks": [],
+            "track_count": 0
+        }), 500
+
+@app.route('/api/beatport/homepage/top-10-releases', methods=['GET'])
+def get_beatport_homepage_top_10_releases():
+    """Get Beatport Top 10 Releases from homepage section"""
+    try:
+        limit = int(request.args.get('limit', 10))
+        logger.info(f"🔟 API request for Beatport homepage Top 10 Releases (limit: {limit})")
+
+        # Initialize the Beatport scraper
+        scraper = BeatportUnifiedScraper()
+
+        # Get top 10 releases from homepage
+        top_10_releases = scraper.scrape_top_10_releases_homepage(limit=limit)
+
+        logger.info(f"✅ Successfully extracted {len(top_10_releases)} top 10 releases from homepage")
+
+        return jsonify({
+            "success": True,
+            "tracks": top_10_releases,
+            "track_count": len(top_10_releases),
+            "source": "beatport_homepage_top_10_releases"
+        })
+
+    except Exception as e:
+        logger.error(f"❌ Error getting Beatport homepage top 10 releases: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "tracks": [],
+            "track_count": 0
+        }), 500
+
+@app.route('/api/beatport/homepage/featured-charts', methods=['GET'])
+def get_beatport_homepage_featured_charts():
+    """Get Beatport Featured Charts from homepage section"""
+    try:
+        limit = int(request.args.get('limit', 20))
+        logger.info(f"📊 API request for Beatport homepage Featured Charts (limit: {limit})")
+
+        # Initialize the Beatport scraper
+        scraper = BeatportUnifiedScraper()
+
+        # Get featured charts from homepage
+        featured_charts = scraper.scrape_featured_charts(limit=limit)
+
+        logger.info(f"✅ Successfully extracted {len(featured_charts)} featured charts from homepage")
+
+        return jsonify({
+            "success": True,
+            "tracks": featured_charts,
+            "track_count": len(featured_charts),
+            "source": "beatport_homepage_featured_charts"
+        })
+
+    except Exception as e:
+        logger.error(f"❌ Error getting Beatport homepage featured charts: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "tracks": [],
+            "track_count": 0
+        }), 500
+
 @app.route('/api/beatport/chart-sections', methods=['GET'])
 def get_beatport_chart_sections():
     """Get dynamically discovered Beatport chart sections"""
