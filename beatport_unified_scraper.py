@@ -831,13 +831,221 @@ class BeatportUnifiedScraper:
         return tracks
 
     def scrape_genre_charts(self, genre: Dict, limit: int = 100) -> List[Dict]:
-        """Scrape charts for a specific genre"""
+        """Scrape charts for a specific genre (default: top tracks)"""
         genre_url = f"{self.base_url}/genre/{genre['slug']}/{genre['id']}"
 
         soup = self.get_page(genre_url)
         tracks = self.extract_tracks_from_page(soup, f"{genre['name']} Top 100", limit)
 
         return tracks
+
+    def scrape_genre_top_10(self, genre: Dict) -> List[Dict]:
+        """Scrape top 10 tracks for a specific genre"""
+        return self.scrape_genre_charts(genre, limit=10)
+
+    def scrape_genre_releases(self, genre: Dict, limit: int = 100) -> List[Dict]:
+        """Scrape top releases for a specific genre"""
+        genre_url = f"{self.base_url}/genre/{genre['slug']}/{genre['id']}"
+
+        soup = self.get_page(genre_url)
+        if not soup:
+            return []
+
+        # Try to find releases section on genre page
+        releases = self.extract_releases_from_page(soup, f"{genre['name']} Top Releases", limit)
+
+        # If no releases found with release extraction, try track extraction
+        if not releases:
+            print(f"   ⚠️ No releases found with release method, trying track method for {genre['name']}")
+            releases = self.extract_tracks_from_page(soup, f"{genre['name']} Top Releases", limit)
+            # Mark these as releases
+            for release in releases:
+                release['type'] = 'release'
+
+        return releases
+
+    def scrape_genre_staff_picks(self, genre: Dict, limit: int = 50) -> List[Dict]:
+        """Scrape staff picks for a specific genre"""
+        genre_url = f"{self.base_url}/genre/{genre['slug']}/{genre['id']}"
+
+        soup = self.get_page(genre_url)
+        if not soup:
+            return []
+
+        tracks = []
+
+        # Look for staff picks, editorial, or featured sections on genre page
+        staff_sections = [
+            'staff pick', 'editorial', 'featured', 'editor', 'hype pick',
+            'weekend pick', 'best new', 'exclusives'
+        ]
+
+        for section_name in staff_sections:
+            # Find section headings that match staff pick patterns
+            section_heading = soup.find(['h1', 'h2', 'h3', 'h4'],
+                string=re.compile(rf'{section_name}', re.I))
+
+            if section_heading:
+                print(f"   📝 Found staff picks section: {section_heading.get_text(strip=True)}")
+                section_container = section_heading.find_parent()
+                if section_container:
+                    content_area = section_container.find_next_sibling()
+                    if content_area:
+                        section_tracks = self.extract_tracks_from_page(
+                            content_area, f"{genre['name']} Staff Picks", limit
+                        )
+                        if section_tracks:
+                            tracks.extend(section_tracks)
+                            break  # Found staff picks, no need to continue
+
+        # If no specific staff picks section found, try to find any editorial content
+        if not tracks:
+            print(f"   🔍 No specific staff picks section found, looking for editorial content...")
+            # Look for DJ charts or featured charts on the genre page
+            chart_links = soup.find_all('a', href=re.compile(r'/chart/'))
+            for chart_link in chart_links[:10]:  # Limit to first 10 charts
+                chart_name = chart_link.get_text(strip=True)
+                if chart_name and len(chart_name) > 3:
+                    track_info = {
+                        'position': len(tracks) + 1,
+                        'artist': 'Various Artists',
+                        'title': chart_name,
+                        'list_name': f"{genre['name']} Staff Picks",
+                        'url': urljoin(self.base_url, chart_link.get('href', '')),
+                        'chart_type': 'staff_pick'
+                    }
+                    tracks.append(track_info)
+                    if len(tracks) >= limit:
+                        break
+
+        return tracks
+
+    def scrape_genre_latest_releases(self, genre: Dict, limit: int = 50) -> List[Dict]:
+        """Scrape latest releases for a specific genre"""
+        genre_url = f"{self.base_url}/genre/{genre['slug']}/{genre['id']}"
+
+        soup = self.get_page(genre_url)
+        if not soup:
+            return []
+
+        # Look for latest releases, new releases, or recent sections
+        latest_sections = ['latest', 'new releases', 'recent', 'newest']
+        tracks = []
+
+        for section_name in latest_sections:
+            section_heading = soup.find(['h1', 'h2', 'h3', 'h4'],
+                string=re.compile(rf'{section_name}', re.I))
+
+            if section_heading:
+                print(f"   🕒 Found latest releases section: {section_heading.get_text(strip=True)}")
+                section_container = section_heading.find_parent()
+                if section_container:
+                    content_area = section_container.find_next_sibling()
+                    if content_area:
+                        section_tracks = self.extract_tracks_from_page(
+                            content_area, f"Latest {genre['name']} Releases", limit
+                        )
+                        if section_tracks:
+                            tracks.extend(section_tracks)
+                            break
+
+        # If no specific latest section found, try releases extraction
+        if not tracks:
+            print(f"   🔍 No specific latest releases section found, trying general releases...")
+            tracks = self.scrape_genre_releases(genre, limit)
+
+        return tracks
+
+    def scrape_genre_new_charts(self, genre: Dict, limit: int = 50) -> List[Dict]:
+        """Scrape new charts (DJ/artist curated) for a specific genre"""
+        genre_url = f"{self.base_url}/genre/{genre['slug']}/{genre['id']}"
+
+        soup = self.get_page(genre_url)
+        if not soup:
+            return []
+
+        tracks = []
+
+        # Look for DJ charts, artist charts, or curated content on genre page
+        chart_links = soup.find_all('a', href=re.compile(r'/chart/'))
+
+        for chart_link in chart_links[:limit]:
+            chart_name = chart_link.get_text(strip=True)
+            chart_href = chart_link.get('href', '')
+
+            if chart_name and chart_href and len(chart_name) > 3:
+                # Extract additional info if available (artist name, etc.)
+                chart_container = chart_link.find_parent()
+                artist_name = "Various Artists"
+
+                # Try to find artist info near the chart
+                if chart_container:
+                    # Look for artist links in the same container
+                    artist_link = chart_container.find('a', href=re.compile(r'/artist/'))
+                    if artist_link:
+                        artist_name = artist_link.get_text(strip=True)
+
+                chart_info = {
+                    'position': len(tracks) + 1,
+                    'artist': artist_name,
+                    'title': chart_name,
+                    'list_name': f"New {genre['name']} Charts",
+                    'url': urljoin(self.base_url, chart_href),
+                    'chart_type': 'new_chart'
+                }
+                tracks.append(chart_info)
+
+        return tracks
+
+    def discover_genre_page_sections(self, genre: Dict) -> Dict:
+        """Analyze a genre page to discover all available sections"""
+        genre_url = f"{self.base_url}/genre/{genre['slug']}/{genre['id']}"
+
+        print(f"🔍 Discovering sections for {genre['name']} genre page...")
+
+        soup = self.get_page(genre_url)
+        if not soup:
+            return {}
+
+        sections = {
+            'top_tracks': [],
+            'top_releases': [],
+            'staff_picks': [],
+            'latest_releases': [],
+            'new_charts': [],
+            'other_sections': []
+        }
+
+        # Find all section headings
+        headings = soup.find_all(['h1', 'h2', 'h3', 'h4'])
+
+        for heading in headings:
+            text = heading.get_text(strip=True).lower()
+
+            if any(keyword in text for keyword in ['top 100', 'top 10', 'chart']):
+                sections['top_tracks'].append(heading.get_text(strip=True))
+            elif any(keyword in text for keyword in ['release', 'album', 'ep']):
+                sections['top_releases'].append(heading.get_text(strip=True))
+            elif any(keyword in text for keyword in ['staff', 'editor', 'pick', 'featured']):
+                sections['staff_picks'].append(heading.get_text(strip=True))
+            elif any(keyword in text for keyword in ['latest', 'new', 'recent']):
+                sections['latest_releases'].append(heading.get_text(strip=True))
+            elif 'chart' in text:
+                sections['new_charts'].append(heading.get_text(strip=True))
+            else:
+                sections['other_sections'].append(heading.get_text(strip=True))
+
+        # Count DJ/artist charts
+        chart_links = soup.find_all('a', href=re.compile(r'/chart/'))
+        sections['chart_count'] = len(chart_links)
+
+        print(f"✅ Discovered sections for {genre['name']}:")
+        for section_type, items in sections.items():
+            if items and section_type != 'chart_count':
+                print(f"   • {section_type}: {len(items)} sections")
+        print(f"   • Individual charts found: {sections['chart_count']}")
+
+        return sections
 
     def scrape_all_genres(self, tracks_per_genre: int = 100, max_workers: int = 5, include_images: bool = False) -> Dict[str, List[Dict]]:
         """Scrape all genres in parallel"""

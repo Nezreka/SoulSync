@@ -539,6 +539,128 @@
                                         </div>
                                     </div>
 
+                                    <!-- Genre Detail Sub-View -->
+                                    <div class="beatport-sub-view" id="beatport-genre-detail-view">
+                                        <div class="beatport-breadcrumb">
+                                            <button class="breadcrumb-back" id="genre-detail-back">← Back to Genre Explorer</button>
+                                            <span class="breadcrumb-path" id="genre-detail-breadcrumb">Browse Charts > Genre Explorer > Loading...</span>
+                                        </div>
+                                        <div class="genre-detail-header">
+                                            <div class="genre-detail-info">
+                                                <h2 id="genre-detail-title">Loading Genre...</h2>
+                                                <p id="genre-detail-description">Explore all chart types for this genre</p>
+                                            </div>
+                                        </div>
+                                        <!-- Main Chart Types Section -->
+                                        <div class="genre-main-charts-section">
+                                            <h3 class="section-title">📊 Main Charts</h3>
+                                            <div class="genre-chart-types-grid">
+                                                <div class="genre-chart-type-card" data-chart-type="top-10">
+                                                    <div class="chart-type-icon">🔥</div>
+                                                    <div class="chart-type-info">
+                                                        <h3 id="genre-top-10-title">Top 10</h3>
+                                                        <p>Current hottest tracks</p>
+                                                        <span class="track-count">10 tracks</span>
+                                                    </div>
+                                                </div>
+                                                <div class="genre-chart-type-card" data-chart-type="top-100">
+                                                    <div class="chart-type-icon">💯</div>
+                                                    <div class="chart-type-info">
+                                                        <h3 id="genre-top-100-title">Top 100</h3>
+                                                        <p>Complete chart rankings</p>
+                                                        <span class="track-count">100 tracks</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <!-- Releases Section -->
+                                        <div class="genre-releases-section">
+                                            <h3 class="section-title">🎵 Releases</h3>
+                                            <div class="genre-chart-types-grid">
+                                                <div class="genre-chart-type-card" data-chart-type="releases-top-10">
+                                                    <div class="chart-type-icon">🆕</div>
+                                                    <div class="chart-type-info">
+                                                        <h3 id="genre-releases-top-10-title">Top 10 Releases</h3>
+                                                        <p>Newest releases trending</p>
+                                                        <span class="track-count">10 releases</span>
+                                                    </div>
+                                                </div>
+                                                <div class="genre-chart-type-card" data-chart-type="releases-top-100">
+                                                    <div class="chart-type-icon">📊</div>
+                                                    <div class="chart-type-info">
+                                                        <h3 id="genre-releases-top-100-title">Top 100 Releases</h3>
+                                                        <p>All trending releases</p>
+                                                        <span class="track-count">100 releases</span>
+                                                    </div>
+                                                </div>
+                                                <div class="genre-chart-type-card" data-chart-type="latest-releases">
+                                                    <div class="chart-type-icon">🕒</div>
+                                                    <div class="chart-type-info">
+                                                        <h3 id="genre-latest-releases-title">Latest Releases</h3>
+                                                        <p>Recently published</p>
+                                                        <span class="track-count">~ releases</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <!-- Editorial Section -->
+                                        <div class="genre-editorial-section">
+                                            <h3 class="section-title">⭐ Editorial</h3>
+                                            <div class="genre-chart-types-grid">
+                                                <div class="genre-chart-type-card" data-chart-type="staff-picks">
+                                                    <div class="chart-type-icon">⭐</div>
+                                                    <div class="chart-type-info">
+                                                        <h3 id="genre-staff-picks-title">Staff Picks</h3>
+                                                        <p>Editor curated selection</p>
+                                                        <span class="track-count">~ tracks</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <!-- New Charts Section (Always Visible) -->
+                                        <div class="genre-new-charts-section">
+                                            <h3 class="section-title">📈 New Charts Collection</h3>
+                                            <p class="section-description">Artist and DJ curated chart collections</p>
+
+                                            <!-- Always Visible Charts List -->
+                                            <div class="new-charts-content" id="new-charts-content">
+                                                <div class="charts-loading-inline" id="charts-loading-inline">
+                                                    <div class="loading-spinner-small"></div>
+                                                    <p>Loading chart collections...</p>
+                                                </div>
+                                                <div class="new-charts-grid" id="new-charts-grid">
+                                                    <!-- Charts will be populated here -->
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Genre Charts List Sub-View -->
+                                    <div class="beatport-sub-view" id="beatport-genre-charts-list-view">
+                                        <div class="beatport-breadcrumb">
+                                            <button class="breadcrumb-back" id="genre-charts-list-back">← Back to Genre Charts</button>
+                                            <span class="breadcrumb-path" id="genre-charts-list-breadcrumb">Browse Charts > Genre Explorer > Genre Charts > New Charts</span>
+                                        </div>
+                                        <div class="genre-charts-list-header">
+                                            <div class="genre-charts-list-info">
+                                                <h2 id="genre-charts-list-title">Loading Charts...</h2>
+                                                <p id="genre-charts-list-description">Browse all available chart collections for this genre</p>
+                                            </div>
+                                        </div>
+                                        <div class="genre-charts-list-container">
+                                            <div class="charts-loading-placeholder" id="charts-loading-placeholder">
+                                                <div class="loading-spinner"></div>
+                                                <p>🔍 Loading chart collections...</p>
+                                            </div>
+                                            <div class="genre-charts-grid" id="genre-charts-grid">
+                                                <!-- Charts will be populated dynamically -->
+                                            </div>
+                                        </div>
+                                    </div>
+
                                     <!-- Staff Picks Sub-View -->
                                     <div class="beatport-sub-view" id="beatport-staff-picks-view">
                                         <div class="beatport-breadcrumb">

@@ -11942,6 +11942,275 @@ def get_beatport_genre_tracks(genre_slug, genre_id):
             "count": 0
         }), 500
 
+@app.route('/api/beatport/genre/<genre_slug>/<genre_id>/top-10', methods=['GET'])
+def get_beatport_genre_top_10(genre_slug, genre_id):
+    """Get top 10 tracks for a specific Beatport genre"""
+    try:
+        logger.info(f"🔥 API request for {genre_slug} genre top 10 tracks (ID: {genre_id})")
+
+        # Initialize the Beatport scraper
+        scraper = BeatportUnifiedScraper()
+
+        # Create genre dict for scraper
+        genre = {
+            'name': genre_slug.replace('-', ' ').title(),
+            'slug': genre_slug,
+            'id': genre_id
+        }
+
+        # Scrape top 10 tracks for this genre
+        tracks = scraper.scrape_genre_top_10(genre)
+
+        logger.info(f"✅ Successfully scraped {len(tracks)} top 10 tracks for {genre_slug}")
+
+        return jsonify({
+            "success": True,
+            "tracks": tracks,
+            "genre": genre,
+            "count": len(tracks)
+        })
+
+    except Exception as e:
+        logger.error(f"❌ Error fetching top 10 tracks for {genre_slug}: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "tracks": [],
+            "count": 0
+        }), 500
+
+@app.route('/api/beatport/genre/<genre_slug>/<genre_id>/releases-top-10', methods=['GET'])
+def get_beatport_genre_releases_top_10(genre_slug, genre_id):
+    """Get top 10 releases for a specific Beatport genre"""
+    try:
+        logger.info(f"📊 API request for {genre_slug} genre top 10 releases (ID: {genre_id})")
+
+        # Initialize the Beatport scraper
+        scraper = BeatportUnifiedScraper()
+
+        # Create genre dict for scraper
+        genre = {
+            'name': genre_slug.replace('-', ' ').title(),
+            'slug': genre_slug,
+            'id': genre_id
+        }
+
+        # Scrape top 10 releases for this genre
+        releases = scraper.scrape_genre_releases(genre, limit=10)
+
+        logger.info(f"✅ Successfully scraped {len(releases)} top 10 releases for {genre_slug}")
+
+        return jsonify({
+            "success": True,
+            "tracks": releases,
+            "genre": genre,
+            "count": len(releases)
+        })
+
+    except Exception as e:
+        logger.error(f"❌ Error fetching top 10 releases for {genre_slug}: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "tracks": [],
+            "count": 0
+        }), 500
+
+@app.route('/api/beatport/genre/<genre_slug>/<genre_id>/releases-top-100', methods=['GET'])
+def get_beatport_genre_releases_top_100(genre_slug, genre_id):
+    """Get top 100 releases for a specific Beatport genre"""
+    try:
+        logger.info(f"📊 API request for {genre_slug} genre top 100 releases (ID: {genre_id})")
+
+        # Initialize the Beatport scraper
+        scraper = BeatportUnifiedScraper()
+
+        # Get query parameters
+        limit = int(request.args.get('limit', '100'))
+
+        # Create genre dict for scraper
+        genre = {
+            'name': genre_slug.replace('-', ' ').title(),
+            'slug': genre_slug,
+            'id': genre_id
+        }
+
+        # Scrape top releases for this genre
+        releases = scraper.scrape_genre_releases(genre, limit=limit)
+
+        logger.info(f"✅ Successfully scraped {len(releases)} top 100 releases for {genre_slug}")
+
+        return jsonify({
+            "success": True,
+            "tracks": releases,
+            "genre": genre,
+            "count": len(releases)
+        })
+
+    except Exception as e:
+        logger.error(f"❌ Error fetching top 100 releases for {genre_slug}: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "tracks": [],
+            "count": 0
+        }), 500
+
+@app.route('/api/beatport/genre/<genre_slug>/<genre_id>/staff-picks', methods=['GET'])
+def get_beatport_genre_staff_picks(genre_slug, genre_id):
+    """Get staff picks for a specific Beatport genre"""
+    try:
+        logger.info(f"⭐ API request for {genre_slug} genre staff picks (ID: {genre_id})")
+
+        # Initialize the Beatport scraper
+        scraper = BeatportUnifiedScraper()
+
+        # Get query parameters
+        limit = int(request.args.get('limit', '50'))
+
+        # Create genre dict for scraper
+        genre = {
+            'name': genre_slug.replace('-', ' ').title(),
+            'slug': genre_slug,
+            'id': genre_id
+        }
+
+        # Scrape staff picks for this genre
+        tracks = scraper.scrape_genre_staff_picks(genre, limit=limit)
+
+        logger.info(f"✅ Successfully scraped {len(tracks)} staff picks for {genre_slug}")
+
+        return jsonify({
+            "success": True,
+            "tracks": tracks,
+            "genre": genre,
+            "count": len(tracks)
+        })
+
+    except Exception as e:
+        logger.error(f"❌ Error fetching staff picks for {genre_slug}: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "tracks": [],
+            "count": 0
+        }), 500
+
+@app.route('/api/beatport/genre/<genre_slug>/<genre_id>/latest-releases', methods=['GET'])
+def get_beatport_genre_latest_releases(genre_slug, genre_id):
+    """Get latest releases for a specific Beatport genre"""
+    try:
+        logger.info(f"🕒 API request for {genre_slug} genre latest releases (ID: {genre_id})")
+
+        # Initialize the Beatport scraper
+        scraper = BeatportUnifiedScraper()
+
+        # Get query parameters
+        limit = int(request.args.get('limit', '50'))
+
+        # Create genre dict for scraper
+        genre = {
+            'name': genre_slug.replace('-', ' ').title(),
+            'slug': genre_slug,
+            'id': genre_id
+        }
+
+        # Scrape latest releases for this genre
+        tracks = scraper.scrape_genre_latest_releases(genre, limit=limit)
+
+        logger.info(f"✅ Successfully scraped {len(tracks)} latest releases for {genre_slug}")
+
+        return jsonify({
+            "success": True,
+            "tracks": tracks,
+            "genre": genre,
+            "count": len(tracks)
+        })
+
+    except Exception as e:
+        logger.error(f"❌ Error fetching latest releases for {genre_slug}: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "tracks": [],
+            "count": 0
+        }), 500
+
+@app.route('/api/beatport/genre/<genre_slug>/<genre_id>/new-charts', methods=['GET'])
+def get_beatport_genre_new_charts(genre_slug, genre_id):
+    """Get new charts for a specific Beatport genre"""
+    try:
+        logger.info(f"📈 API request for {genre_slug} genre new charts (ID: {genre_id})")
+
+        # Initialize the Beatport scraper
+        scraper = BeatportUnifiedScraper()
+
+        # Get query parameters
+        limit = int(request.args.get('limit', '50'))
+
+        # Create genre dict for scraper
+        genre = {
+            'name': genre_slug.replace('-', ' ').title(),
+            'slug': genre_slug,
+            'id': genre_id
+        }
+
+        # Scrape new charts for this genre
+        tracks = scraper.scrape_genre_new_charts(genre, limit=limit)
+
+        logger.info(f"✅ Successfully scraped {len(tracks)} new charts for {genre_slug}")
+
+        return jsonify({
+            "success": True,
+            "tracks": tracks,
+            "genre": genre,
+            "count": len(tracks)
+        })
+
+    except Exception as e:
+        logger.error(f"❌ Error fetching new charts for {genre_slug}: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "tracks": [],
+            "count": 0
+        }), 500
+
+@app.route('/api/beatport/genre/<genre_slug>/<genre_id>/sections', methods=['GET'])
+def get_beatport_genre_sections(genre_slug, genre_id):
+    """Discover all available sections for a specific Beatport genre"""
+    try:
+        logger.info(f"🔍 API request for {genre_slug} genre sections discovery (ID: {genre_id})")
+
+        # Initialize the Beatport scraper
+        scraper = BeatportUnifiedScraper()
+
+        # Create genre dict for scraper
+        genre = {
+            'name': genre_slug.replace('-', ' ').title(),
+            'slug': genre_slug,
+            'id': genre_id
+        }
+
+        # Discover sections for this genre
+        sections = scraper.discover_genre_page_sections(genre)
+
+        logger.info(f"✅ Successfully discovered sections for {genre_slug}")
+
+        return jsonify({
+            "success": True,
+            "sections": sections,
+            "genre": genre
+        })
+
+    except Exception as e:
+        logger.error(f"❌ Error discovering sections for {genre_slug}: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "sections": {}
+        }), 500
+
 @app.route('/api/beatport/top-100', methods=['GET'])
 def get_beatport_top_100():
     """Get Beatport Top 100 tracks"""

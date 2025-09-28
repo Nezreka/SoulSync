@@ -9746,7 +9746,14 @@ function initializeSyncPage() {
     const beatportBackButtons = document.querySelectorAll('.breadcrumb-back');
     beatportBackButtons.forEach(button => {
         button.addEventListener('click', () => {
-            showBeatportMainView();
+            // Handle different back button types
+            if (button.id === 'genre-detail-back') {
+                showBeatportGenresView();
+            } else if (button.id === 'genre-charts-list-back') {
+                showBeatportGenreDetailViewFromBack();
+            } else {
+                showBeatportMainView();
+            }
         });
     });
 
@@ -11345,11 +11352,624 @@ async function handleBeatportChartClick(chartType, chartId, chartName, chartEndp
     }
 }
 
-function handleBeatportGenreClick(genreSlug, genreId) {
-    console.log(`🎵 Beatport genre clicked: ${genreSlug} (${genreId})`);
+function handleBeatportGenreClick(genreSlug, genreId, genreName) {
+    console.log(`🎵 Beatport genre clicked: ${genreName} (${genreSlug}/${genreId}) - SHOWING GENRE DETAIL VIEW`);
+    console.log(`📝 Debug: Parameters received - Slug: ${genreSlug}, ID: ${genreId}, Name: ${genreName}`);
 
-    // Placeholder for Phase 2 - will open discovery modal
-    showToast(`🎵 Genre "${genreSlug}" selected - Discovery modal coming in Phase 2!`, 'info');
+    // Navigate to genre detail view with proper parameters
+    showBeatportGenreDetailView(genreSlug, genreId, genreName);
+}
+
+function showBeatportGenreDetailView(genreSlug, genreId, genreName) {
+    console.log(`🎯 Showing genre detail view for: ${genreName}`);
+    console.log(`📝 Debug: Function called with - Slug: ${genreSlug}, ID: ${genreId}, Name: ${genreName}`);
+
+    // Hide all other beatport views
+    document.querySelectorAll('.beatport-sub-view').forEach(view => {
+        view.classList.remove('active');
+    });
+    const mainView = document.getElementById('beatport-main-view');
+    if (mainView) {
+        mainView.classList.remove('active');
+    }
+
+    // Show genre detail view
+    const genreDetailView = document.getElementById('beatport-genre-detail-view');
+    if (genreDetailView) {
+        genreDetailView.classList.add('active');
+        console.log(`📝 Debug: Genre detail view element found and activated`);
+
+        // Update view content
+        const titleElement = document.getElementById('genre-detail-title');
+        const breadcrumbElement = document.getElementById('genre-detail-breadcrumb');
+
+        console.log(`📝 Debug: Title element found: ${!!titleElement}, Breadcrumb element found: ${!!breadcrumbElement}`);
+
+        if (titleElement) {
+            titleElement.textContent = genreName;
+            console.log(`📝 Debug: Updated title to: ${genreName}`);
+        }
+        if (breadcrumbElement) {
+            breadcrumbElement.textContent = `Browse Charts > Genre Explorer > ${genreName} Charts`;
+            console.log(`📝 Debug: Updated breadcrumb`);
+        }
+
+        // Update chart type titles with genre name
+        const chartTitles = [
+            'genre-top-10-title',
+            'genre-top-100-title',
+            'genre-releases-top-10-title',
+            'genre-releases-top-100-title',
+            'genre-staff-picks-title',
+            'genre-latest-releases-title',
+            'genre-new-charts-title'
+        ];
+
+        chartTitles.forEach(titleId => {
+            const element = document.getElementById(titleId);
+            if (element) {
+                console.log(`📝 Debug: Found chart title element: ${titleId}`);
+            } else {
+                console.log(`📝 Debug: Missing chart title element: ${titleId}`);
+            }
+        });
+
+        document.getElementById('genre-top-10-title').textContent = `Top 10 ${genreName}`;
+        document.getElementById('genre-top-100-title').textContent = `Top 100 ${genreName}`;
+        document.getElementById('genre-releases-top-10-title').textContent = `Top 10 ${genreName} Releases`;
+        document.getElementById('genre-releases-top-100-title').textContent = `Top 100 ${genreName} Releases`;
+        document.getElementById('genre-staff-picks-title').textContent = `${genreName} Staff Picks`;
+        document.getElementById('genre-latest-releases-title').textContent = `Latest ${genreName} Releases`;
+
+        // Load new charts directly (no expansion needed)
+        console.log(`🔄 Auto-loading new charts for ${genreName}...`);
+        loadNewChartsInline(genreSlug, genreId, genreName);
+
+        // Store current genre data for chart type handlers
+        genreDetailView.dataset.genreSlug = genreSlug;
+        genreDetailView.dataset.genreId = genreId;
+        genreDetailView.dataset.genreName = genreName;
+
+        // Add click handlers to chart type cards
+        setupGenreChartTypeHandlers();
+
+        console.log(`✅ Genre detail view shown for ${genreName}`);
+    } else {
+        console.error('❌ Genre detail view element not found');
+    }
+}
+
+function setupGenreChartTypeHandlers() {
+    const chartTypeCards = document.querySelectorAll('#beatport-genre-detail-view .genre-chart-type-card');
+
+    chartTypeCards.forEach(card => {
+        // Remove existing listeners
+        card.replaceWith(card.cloneNode(true));
+    });
+
+    // Re-select after cloning
+    const newChartTypeCards = document.querySelectorAll('#beatport-genre-detail-view .genre-chart-type-card');
+
+    newChartTypeCards.forEach(card => {
+        card.addEventListener('click', () => {
+            const chartType = card.dataset.chartType;
+            const genreDetailView = document.getElementById('beatport-genre-detail-view');
+            const genreSlug = genreDetailView.dataset.genreSlug;
+            const genreId = genreDetailView.dataset.genreId;
+            const genreName = genreDetailView.dataset.genreName;
+
+            // All chart types now go directly to discovery modal
+            handleGenreChartTypeClick(genreSlug, genreId, genreName, chartType);
+        });
+    });
+}
+
+function showBeatportGenresView() {
+    // Hide genre detail view and show genres view
+    document.querySelectorAll('.beatport-sub-view').forEach(view => {
+        view.classList.remove('active');
+    });
+
+    const genresView = document.getElementById('beatport-genres-view');
+    if (genresView) {
+        genresView.classList.add('active');
+    }
+}
+
+async function toggleNewChartsExpansion(genreSlug, genreId, genreName) {
+    console.log(`📈 Toggling new charts expansion for: ${genreName}`);
+
+    const expandedContent = document.getElementById('new-charts-expanded');
+    const expandIndicator = document.getElementById('expand-indicator');
+    const chartsCount = document.getElementById('new-charts-count');
+
+    if (!expandedContent || !expandIndicator) {
+        console.error('❌ New charts expansion elements not found');
+        return;
+    }
+
+    // Check if already expanded
+    const isExpanded = expandedContent.style.display !== 'none';
+
+    if (isExpanded) {
+        // Collapse
+        expandedContent.style.display = 'none';
+        expandIndicator.classList.remove('expanded');
+        console.log('📉 Collapsed new charts section');
+    } else {
+        // Expand and load charts
+        expandedContent.style.display = 'block';
+        expandIndicator.classList.add('expanded');
+
+        // Load charts if not already loaded
+        await loadNewChartsInline(genreSlug, genreId, genreName);
+        console.log('📈 Expanded new charts section');
+    }
+}
+
+async function loadNewChartsInline(genreSlug, genreId, genreName) {
+    const chartsGrid = document.getElementById('new-charts-grid');
+    const loadingInline = document.getElementById('charts-loading-inline');
+
+    if (!chartsGrid || !loadingInline) {
+        console.error('❌ Inline charts elements not found');
+        return;
+    }
+
+    // Show loading state
+    loadingInline.style.display = 'block';
+    chartsGrid.style.display = 'none';
+    chartsGrid.innerHTML = '';
+
+    try {
+        console.log(`🔍 Loading inline charts for ${genreName}...`);
+
+        // Fetch charts from the new-charts endpoint
+        const response = await fetch(`/api/beatport/genre/${genreSlug}/${genreId}/new-charts?limit=20`);
+        if (!response.ok) {
+            throw new Error(`Failed to fetch charts: ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (!data.success || !data.tracks || data.tracks.length === 0) {
+            // Show empty state
+            chartsGrid.innerHTML = `
+                <div class="new-charts-empty">
+                    <h4>No Charts Available</h4>
+                    <p>No curated charts found for ${genreName} at the moment.</p>
+                </div>
+            `;
+        } else {
+            // Populate charts grid
+            const chartsHTML = data.tracks.map((chart, index) => {
+                const chartName = chart.title || 'Untitled Chart';
+                const artistName = chart.artist || 'Various Artists';
+                const chartUrl = chart.url || '';
+
+                return `
+                    <div class="new-chart-item" data-chart-url="${chartUrl}" data-chart-name="${chartName}" data-chart-artist="${artistName}">
+                        <div class="new-chart-header">
+                            <div class="new-chart-icon">📈</div>
+                            <div class="new-chart-title">
+                                <h5>${chartName}</h5>
+                                <p class="new-chart-artist">by ${artistName}</p>
+                            </div>
+                        </div>
+                        <div class="new-chart-description">
+                            Curated ${genreName} chart collection
+                        </div>
+                        <div class="new-chart-footer">
+                            <div class="new-chart-type">Chart</div>
+                            <div class="new-chart-action">Explore →</div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            chartsGrid.innerHTML = chartsHTML;
+
+            // Add click handlers to chart items
+            setupNewChartItemHandlers(genreSlug, genreId, genreName);
+        }
+
+        // Hide loading and show grid
+        loadingInline.style.display = 'none';
+        chartsGrid.style.display = 'grid';
+
+        console.log(`✅ Loaded ${data.tracks?.length || 0} inline charts for ${genreName}`);
+        showToast(`Found ${data.tracks?.length || 0} chart collections`, 'success');
+
+    } catch (error) {
+        console.error(`❌ Error loading inline charts for ${genreName}:`, error);
+
+        // Show error state
+        chartsGrid.innerHTML = `
+            <div class="new-charts-empty">
+                <h4>Error Loading Charts</h4>
+                <p>Unable to load chart collections for ${genreName}.</p>
+            </div>
+        `;
+
+        loadingInline.style.display = 'none';
+        chartsGrid.style.display = 'grid';
+
+        showToast(`Error loading charts: ${error.message}`, 'error');
+    }
+}
+
+function setupNewChartItemHandlers(genreSlug, genreId, genreName) {
+    const chartItems = document.querySelectorAll('#new-charts-grid .new-chart-item');
+
+    chartItems.forEach(item => {
+        item.addEventListener('click', async () => {
+            const chartName = item.dataset.chartName;
+            const chartArtist = item.dataset.chartArtist;
+            const chartUrl = item.dataset.chartUrl;
+
+            console.log(`🎵 Chart clicked: ${chartName} by ${chartArtist}`);
+
+            try {
+                // Create a virtual chart data object
+                const chartHash = `individual_chart_${genreSlug}_${Date.now()}`;
+                const fullChartName = `${chartName} (${genreName})`;
+
+                showToast(`Loading ${chartName}...`, 'info');
+
+                // For demonstration, we'll use the genre tracks as chart content
+                const response = await fetch(`/api/beatport/genre/${genreSlug}/${genreId}/tracks?limit=20`);
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch chart content: ${response.status}`);
+                }
+
+                const data = await response.json();
+                if (!data.success || !data.tracks || data.tracks.length === 0) {
+                    throw new Error(`No tracks found in chart`);
+                }
+
+                // Create chart data object for playlist card
+                const chartData = {
+                    hash: chartHash,
+                    name: fullChartName,
+                    chart_type: 'individual_chart',
+                    track_count: data.tracks.length,
+                    tracks: data.tracks.map(track => ({
+                        name: track.title || 'Unknown Title',
+                        artists: [track.artist || 'Unknown Artist'],
+                        album: fullChartName,
+                        duration_ms: 0,
+                        external_urls: { beatport: track.url || chartUrl },
+                        source: 'beatport'
+                    }))
+                };
+
+                // Add card to container (in background, like YouTube does)
+                console.log(`🃏 Creating Beatport playlist card for: ${fullChartName}`);
+                addBeatportCardToContainer(chartData);
+
+                // Automatically open discovery modal
+                handleBeatportCardClick(chartHash);
+
+                console.log(`✅ Created Beatport card and opened discovery modal for ${fullChartName}`);
+
+            } catch (error) {
+                console.error(`❌ Error loading chart: ${error.message}`);
+                showToast(`Error loading chart: ${error.message}`, 'error');
+            }
+        });
+    });
+}
+
+function showBeatportGenreDetailViewFromBack() {
+    // Show genre detail view (used by charts list back button)
+    document.querySelectorAll('.beatport-sub-view').forEach(view => {
+        view.classList.remove('active');
+    });
+
+    const genreDetailView = document.getElementById('beatport-genre-detail-view');
+    if (genreDetailView) {
+        genreDetailView.classList.add('active');
+    }
+}
+
+async function showBeatportGenreChartsListView(genreSlug, genreId, genreName) {
+    console.log(`📈 Showing charts list for: ${genreName}`);
+
+    // Hide all other beatport views
+    document.querySelectorAll('.beatport-sub-view').forEach(view => {
+        view.classList.remove('active');
+    });
+    const mainView = document.getElementById('beatport-main-view');
+    if (mainView) {
+        mainView.classList.remove('active');
+    }
+
+    // Show charts list view
+    const chartsListView = document.getElementById('beatport-genre-charts-list-view');
+    if (chartsListView) {
+        chartsListView.classList.add('active');
+
+        // Update view content
+        document.getElementById('genre-charts-list-title').textContent = `New ${genreName} Charts`;
+        document.getElementById('genre-charts-list-breadcrumb').textContent = `Browse Charts > Genre Explorer > ${genreName} Charts > New Charts`;
+
+        // Store current genre data for individual chart handlers
+        chartsListView.dataset.genreSlug = genreSlug;
+        chartsListView.dataset.genreId = genreId;
+        chartsListView.dataset.genreName = genreName;
+
+        // Load charts for this genre
+        await loadGenreChartsList(genreSlug, genreId, genreName);
+
+        console.log(`✅ Charts list view shown for ${genreName}`);
+    } else {
+        console.error('❌ Charts list view element not found');
+    }
+}
+
+async function loadGenreChartsList(genreSlug, genreId, genreName) {
+    const chartsGrid = document.getElementById('genre-charts-grid');
+    const loadingPlaceholder = document.getElementById('charts-loading-placeholder');
+
+    if (!chartsGrid || !loadingPlaceholder) {
+        console.error('❌ Charts grid or loading placeholder not found');
+        return;
+    }
+
+    // Show loading state
+    loadingPlaceholder.style.display = 'block';
+    chartsGrid.style.display = 'none';
+    chartsGrid.innerHTML = '';
+
+    try {
+        console.log(`🔍 Loading charts for ${genreName}...`);
+
+        // Fetch charts from the new-charts endpoint
+        const response = await fetch(`/api/beatport/genre/${genreSlug}/${genreId}/new-charts?limit=50`);
+        if (!response.ok) {
+            throw new Error(`Failed to fetch charts: ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (!data.success || !data.tracks || data.tracks.length === 0) {
+            // Show empty state
+            chartsGrid.innerHTML = `
+                <div class="genre-charts-empty">
+                    <h3>No Charts Available</h3>
+                    <p>No curated charts found for ${genreName} at the moment.<br>Check back later for new DJ and artist chart collections.</p>
+                </div>
+            `;
+        } else {
+            // Populate charts grid
+            const chartsHTML = data.tracks.map((chart, index) => {
+                const chartName = chart.title || 'Untitled Chart';
+                const artistName = chart.artist || 'Various Artists';
+                const chartUrl = chart.url || '';
+
+                // Extract chart ID from URL for click handling
+                const chartId = chartUrl.split('/').pop() || `chart_${index}`;
+
+                return `
+                    <div class="genre-chart-item" data-chart-url="${chartUrl}" data-chart-name="${chartName}" data-chart-artist="${artistName}">
+                        <div class="chart-item-header">
+                            <div class="chart-item-icon">📈</div>
+                            <div class="chart-item-title">
+                                <h4>${chartName}</h4>
+                                <p class="chart-item-artist">by ${artistName}</p>
+                            </div>
+                        </div>
+                        <div class="chart-item-description">
+                            Curated chart collection featuring ${genreName} tracks
+                        </div>
+                        <div class="chart-item-footer">
+                            <div class="chart-item-type">Chart</div>
+                            <div class="chart-item-action">Click to explore →</div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            chartsGrid.innerHTML = chartsHTML;
+
+            // Add click handlers to chart items
+            setupGenreChartItemHandlers(genreSlug, genreId, genreName);
+        }
+
+        // Hide loading and show grid
+        loadingPlaceholder.style.display = 'none';
+        chartsGrid.style.display = 'grid';
+
+        console.log(`✅ Loaded ${data.tracks?.length || 0} charts for ${genreName}`);
+        showToast(`Found ${data.tracks?.length || 0} chart collections`, 'success');
+
+    } catch (error) {
+        console.error(`❌ Error loading charts for ${genreName}:`, error);
+
+        // Show error state
+        chartsGrid.innerHTML = `
+            <div class="genre-charts-empty">
+                <h3>Error Loading Charts</h3>
+                <p>Unable to load chart collections for ${genreName}.<br>Please try again later.</p>
+            </div>
+        `;
+
+        loadingPlaceholder.style.display = 'none';
+        chartsGrid.style.display = 'grid';
+
+        showToast(`Error loading charts: ${error.message}`, 'error');
+    }
+}
+
+function setupGenreChartItemHandlers(genreSlug, genreId, genreName) {
+    const chartItems = document.querySelectorAll('#genre-charts-grid .genre-chart-item');
+
+    chartItems.forEach(item => {
+        item.addEventListener('click', async () => {
+            const chartName = item.dataset.chartName;
+            const chartArtist = item.dataset.chartArtist;
+            const chartUrl = item.dataset.chartUrl;
+
+            console.log(`🎵 Chart clicked: ${chartName} by ${chartArtist}`);
+
+            // For now, we'll create a virtual playlist from this chart
+            // This would eventually fetch the actual chart contents from Beatport
+            try {
+                // Create a virtual chart data object
+                const chartHash = `individual_chart_${genreSlug}_${Date.now()}`;
+                const fullChartName = `${chartName} (${genreName})`;
+
+                showToast(`Loading ${chartName}...`, 'info');
+
+                // For demonstration, we'll use the genre tracks as chart content
+                // In a real implementation, this would fetch the specific chart tracks
+                const response = await fetch(`/api/beatport/genre/${genreSlug}/${genreId}/tracks?limit=20`);
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch chart content: ${response.status}`);
+                }
+
+                const data = await response.json();
+                if (!data.success || !data.tracks || data.tracks.length === 0) {
+                    throw new Error(`No tracks found in chart`);
+                }
+
+                // Create chart data object for playlist card
+                const chartData = {
+                    hash: chartHash,
+                    name: fullChartName,
+                    chart_type: 'individual_chart',
+                    track_count: data.tracks.length,
+                    tracks: data.tracks.map(track => ({
+                        name: track.title || 'Unknown Title',
+                        artists: [track.artist || 'Unknown Artist'],
+                        album: fullChartName,
+                        duration_ms: 0,
+                        external_urls: { beatport: track.url || chartUrl },
+                        source: 'beatport'
+                    }))
+                };
+
+                // Add card to container (in background, like YouTube does)
+                console.log(`🃏 Creating Beatport playlist card for: ${fullChartName}`);
+                addBeatportCardToContainer(chartData);
+
+                // Automatically open discovery modal
+                handleBeatportCardClick(chartHash);
+
+                console.log(`✅ Created Beatport card and opened discovery modal for ${fullChartName}`);
+
+            } catch (error) {
+                console.error(`❌ Error loading chart: ${error.message}`);
+                showToast(`Error loading chart: ${error.message}`, 'error');
+            }
+        });
+    });
+}
+
+async function handleGenreChartTypeClick(genreSlug, genreId, genreName, chartType) {
+    console.log(`🎯 Genre chart type clicked: ${chartType} for ${genreName} (${genreSlug}/${genreId})`);
+
+    // Map chart types to API endpoints and create descriptive names
+    const chartTypeMap = {
+        'top-10': {
+            endpoint: `/api/beatport/genre/${genreSlug}/${genreId}/top-10`,
+            name: `Top 10 ${genreName}`,
+            limit: 10
+        },
+        'top-100': {
+            endpoint: `/api/beatport/genre/${genreSlug}/${genreId}/tracks`,
+            name: `Top 100 ${genreName}`,
+            limit: 100
+        },
+        'releases-top-10': {
+            endpoint: `/api/beatport/genre/${genreSlug}/${genreId}/releases-top-10`,
+            name: `Top 10 ${genreName} Releases`,
+            limit: 10
+        },
+        'releases-top-100': {
+            endpoint: `/api/beatport/genre/${genreSlug}/${genreId}/releases-top-100`,
+            name: `Top 100 ${genreName} Releases`,
+            limit: 100
+        },
+        'staff-picks': {
+            endpoint: `/api/beatport/genre/${genreSlug}/${genreId}/staff-picks`,
+            name: `${genreName} Staff Picks`,
+            limit: 50
+        },
+        'latest-releases': {
+            endpoint: `/api/beatport/genre/${genreSlug}/${genreId}/latest-releases`,
+            name: `Latest ${genreName} Releases`,
+            limit: 50
+        },
+        'new-charts': {
+            endpoint: `/api/beatport/genre/${genreSlug}/${genreId}/new-charts`,
+            name: `New ${genreName} Charts`,
+            limit: 50
+        }
+    };
+
+    const chartConfig = chartTypeMap[chartType];
+    if (!chartConfig) {
+        console.error(`❌ Unknown chart type: ${chartType}`);
+        showToast(`Unknown chart type: ${chartType}`, 'error');
+        return;
+    }
+
+    try {
+        // Check if we already have a card for this specific chart type
+        const existingState = Object.values(beatportChartStates).find(state =>
+            state.chart && state.chart.name === chartConfig.name && state.chart.chart_type === `genre_${chartType}`
+        );
+
+        if (existingState) {
+            console.log(`🔄 Found existing Beatport card for ${chartConfig.name}, opening existing modal`);
+            handleBeatportCardClick(existingState.chart.hash);
+            return;
+        }
+
+        // Create a chart hash for state management
+        const chartHash = `genre_${chartType}_${genreSlug}_${genreId}_${Date.now()}`;
+
+        showToast(`Loading ${chartConfig.name}...`, 'info');
+
+        // Fetch tracks from the specific endpoint
+        const response = await fetch(`${chartConfig.endpoint}?limit=${chartConfig.limit}`);
+        if (!response.ok) {
+            throw new Error(`Failed to fetch ${chartConfig.name}: ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (!data.success || !data.tracks || data.tracks.length === 0) {
+            throw new Error(`No tracks found in ${chartConfig.name}`);
+        }
+
+        // Create chart data object for playlist card
+        const chartData = {
+            hash: chartHash,
+            name: chartConfig.name,
+            chart_type: `genre_${chartType}`,
+            track_count: data.tracks.length,
+            tracks: data.tracks.map(track => ({
+                name: track.title || 'Unknown Title',
+                artists: [track.artist || 'Unknown Artist'],
+                album: chartConfig.name,
+                duration_ms: 0,
+                external_urls: { beatport: track.url || '' },
+                source: 'beatport'
+            }))
+        };
+
+        // Add card to container (in background, like YouTube does)
+        console.log(`🃏 Creating Beatport playlist card for: ${chartConfig.name}`);
+        addBeatportCardToContainer(chartData);
+
+        // Automatically open discovery modal (like when you click a YouTube or Tidal card in fresh state)
+        handleBeatportCardClick(chartHash);
+
+        console.log(`✅ Created Beatport card and opened discovery modal for ${chartConfig.name}`);
+
+    } catch (error) {
+        console.error(`❌ Error loading ${chartConfig.name}:`, error);
+        showToast(`Error loading ${chartConfig.name}: ${error.message}`, 'error');
+    }
 }
 
 // ===============================

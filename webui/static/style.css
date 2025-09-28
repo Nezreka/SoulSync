@@ -4863,6 +4863,622 @@ body {
 }
 
 /* ================================= */
+/* BEATPORT GENRE DETAIL VIEW        */
+/* ================================= */
+
+.genre-detail-header {
+    margin-bottom: 30px;
+    padding: 20px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.genre-detail-info h2 {
+    font-size: 32px;
+    font-weight: 700;
+    color: #ffffff;
+    margin: 0 0 8px 0;
+    background: linear-gradient(135deg, #01ff95, #00d4ff);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.genre-detail-info p {
+    font-size: 16px;
+    color: rgba(255, 255, 255, 0.7);
+    margin: 0;
+}
+
+/* Section Styling */
+.genre-main-charts-section,
+.genre-releases-section,
+.genre-editorial-section,
+.genre-new-charts-section {
+    margin-bottom: 40px;
+    padding: 20px;
+    background: linear-gradient(135deg,
+        rgba(20, 20, 20, 0.8) 0%,
+        rgba(15, 15, 15, 0.9) 100%);
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.section-title {
+    font-size: 20px;
+    font-weight: 600;
+    color: #ffffff;
+    margin: 0 0 16px 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.section-description {
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.6);
+    margin: 0 0 20px 0;
+    font-style: italic;
+}
+
+/* Chart Types Grid */
+.genre-chart-types-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+}
+
+/* Chart Type Cards */
+.genre-chart-type-card {
+    background: linear-gradient(135deg,
+        rgba(25, 25, 25, 0.95) 0%,
+        rgba(15, 15, 15, 0.98) 100%);
+    backdrop-filter: blur(20px);
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 20px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.genre-chart-type-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(135deg,
+        rgba(1, 255, 149, 0.1) 0%,
+        transparent 50%);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.genre-chart-type-card:hover {
+    transform: translateY(-3px);
+    border-color: rgba(1, 255, 149, 0.3);
+    box-shadow:
+        0 10px 25px rgba(0, 0, 0, 0.3),
+        0 0 15px rgba(1, 255, 149, 0.2);
+}
+
+.genre-chart-type-card:hover::before {
+    opacity: 1;
+}
+
+.chart-type-icon {
+    font-size: 32px;
+    min-width: 50px;
+    height: 50px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg,
+        rgba(1, 255, 149, 0.2) 0%,
+        rgba(0, 212, 255, 0.2) 100%);
+    border-radius: 12px;
+    border: 1px solid rgba(1, 255, 149, 0.3);
+    position: relative;
+    z-index: 2;
+}
+
+.chart-type-info {
+    flex: 1;
+    position: relative;
+    z-index: 2;
+}
+
+.chart-type-info h3 {
+    font-size: 18px;
+    font-weight: 600;
+    color: #ffffff;
+    margin: 0 0 4px 0;
+}
+
+.chart-type-info p {
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.7);
+    margin: 0 0 8px 0;
+}
+
+.track-count {
+    font-size: 12px;
+    color: rgba(1, 255, 149, 0.8);
+    font-weight: 500;
+    background: rgba(1, 255, 149, 0.1);
+    padding: 4px 8px;
+    border-radius: 6px;
+    display: inline-block;
+}
+
+/* Special Chart Card (New Charts) */
+.genre-new-charts-container {
+    display: flex;
+    justify-content: center;
+}
+
+.genre-chart-type-card.special-chart {
+    background: linear-gradient(135deg,
+        rgba(30, 20, 40, 0.95) 0%,
+        rgba(20, 15, 30, 0.98) 100%);
+    border: 2px solid rgba(138, 43, 226, 0.3);
+    max-width: 400px;
+    position: relative;
+}
+
+.genre-chart-type-card.special-chart::before {
+    background: linear-gradient(135deg,
+        rgba(138, 43, 226, 0.15) 0%,
+        transparent 50%);
+}
+
+.genre-chart-type-card.special-chart:hover {
+    border-color: rgba(138, 43, 226, 0.5);
+    box-shadow:
+        0 12px 30px rgba(0, 0, 0, 0.4),
+        0 0 20px rgba(138, 43, 226, 0.3);
+}
+
+.genre-chart-type-card.special-chart .chart-type-icon {
+    background: linear-gradient(135deg,
+        rgba(138, 43, 226, 0.3) 0%,
+        rgba(75, 0, 130, 0.3) 100%);
+    border-color: rgba(138, 43, 226, 0.4);
+}
+
+.special-badge {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: linear-gradient(135deg, #8a2be2, #4b0082);
+    color: #ffffff;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 4px 8px;
+    border-radius: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.expand-indicator {
+    position: absolute;
+    top: 50%;
+    right: 12px;
+    transform: translateY(-50%);
+    font-size: 16px;
+    color: rgba(138, 43, 226, 0.8);
+    transition: transform 0.3s ease;
+    z-index: 5;
+    background: rgba(0, 0, 0, 0.3);
+    padding: 4px;
+    border-radius: 4px;
+}
+
+.expand-indicator.expanded {
+    transform: translateY(-50%) rotate(180deg);
+}
+
+/* Always Visible New Charts Content */
+.new-charts-content {
+    margin-top: 20px;
+    padding: 20px;
+    background: linear-gradient(135deg,
+        rgba(35, 25, 45, 0.9) 0%,
+        rgba(25, 20, 35, 0.95) 100%);
+    border-radius: 12px;
+    border: 1px solid rgba(138, 43, 226, 0.15);
+}
+
+@keyframes expandDown {
+    from {
+        opacity: 0;
+        max-height: 0;
+        padding-top: 0;
+        padding-bottom: 0;
+    }
+    to {
+        opacity: 1;
+        max-height: 1000px;
+        padding-top: 20px;
+        padding-bottom: 20px;
+    }
+}
+
+.charts-loading-inline {
+    text-align: center;
+    padding: 40px 20px;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.charts-loading-inline .loading-spinner-small {
+    width: 30px;
+    height: 30px;
+    border: 3px solid rgba(138, 43, 226, 0.3);
+    border-top: 3px solid #8a2be2;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 12px auto;
+}
+
+.charts-loading-inline p {
+    font-size: 14px;
+    margin: 0;
+}
+
+.new-charts-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 16px;
+}
+
+.new-chart-item {
+    background: linear-gradient(135deg,
+        rgba(25, 15, 35, 0.95) 0%,
+        rgba(15, 10, 25, 0.98) 100%);
+    backdrop-filter: blur(15px);
+    border-radius: 10px;
+    border: 1px solid rgba(138, 43, 226, 0.2);
+    padding: 16px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.new-chart-item::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(135deg,
+        rgba(138, 43, 226, 0.1) 0%,
+        transparent 50%);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.new-chart-item:hover {
+    transform: translateY(-3px);
+    border-color: rgba(138, 43, 226, 0.4);
+    box-shadow:
+        0 8px 20px rgba(0, 0, 0, 0.3),
+        0 0 15px rgba(138, 43, 226, 0.2);
+}
+
+.new-chart-item:hover::before {
+    opacity: 1;
+}
+
+.new-chart-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+    position: relative;
+    z-index: 2;
+}
+
+.new-chart-icon {
+    width: 32px;
+    height: 32px;
+    background: linear-gradient(135deg,
+        rgba(138, 43, 226, 0.3) 0%,
+        rgba(75, 0, 130, 0.3) 100%);
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    border: 1px solid rgba(138, 43, 226, 0.4);
+}
+
+.new-chart-title {
+    flex: 1;
+}
+
+.new-chart-title h5 {
+    font-size: 14px;
+    font-weight: 600;
+    color: #ffffff;
+    margin: 0 0 2px 0;
+    line-height: 1.3;
+}
+
+.new-chart-artist {
+    font-size: 12px;
+    color: rgba(138, 43, 226, 0.8);
+    margin: 0;
+    font-weight: 500;
+}
+
+.new-chart-description {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.5);
+    margin: 0 0 10px 0;
+    line-height: 1.4;
+    position: relative;
+    z-index: 2;
+}
+
+.new-chart-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: relative;
+    z-index: 2;
+}
+
+.new-chart-type {
+    font-size: 9px;
+    background: rgba(138, 43, 226, 0.2);
+    color: rgba(138, 43, 226, 0.9);
+    padding: 3px 6px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}
+
+.new-chart-action {
+    font-size: 10px;
+    color: rgba(1, 255, 149, 0.8);
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+}
+
+.new-charts-empty {
+    text-align: center;
+    padding: 40px 20px;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.new-charts-empty h4 {
+    font-size: 16px;
+    margin: 0 0 8px 0;
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.new-charts-empty p {
+    font-size: 12px;
+    margin: 0;
+    line-height: 1.4;
+}
+
+/* ================================= */
+/* BEATPORT GENRE CHARTS LIST VIEW   */
+/* ================================= */
+
+.genre-charts-list-header {
+    margin-bottom: 30px;
+    padding: 20px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.genre-charts-list-info h2 {
+    font-size: 28px;
+    font-weight: 700;
+    color: #ffffff;
+    margin: 0 0 8px 0;
+    background: linear-gradient(135deg, #8a2be2, #4b0082);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.genre-charts-list-info p {
+    font-size: 16px;
+    color: rgba(255, 255, 255, 0.7);
+    margin: 0;
+}
+
+.genre-charts-list-container {
+    position: relative;
+    min-height: 400px;
+}
+
+.charts-loading-placeholder {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.charts-loading-placeholder .loading-spinner {
+    width: 40px;
+    height: 40px;
+    border: 4px solid rgba(138, 43, 226, 0.3);
+    border-top: 4px solid #8a2be2;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 16px auto;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.charts-loading-placeholder p {
+    font-size: 16px;
+    margin: 0;
+}
+
+.genre-charts-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 20px;
+    padding: 10px 0;
+}
+
+.genre-chart-item {
+    background: linear-gradient(135deg,
+        rgba(30, 20, 40, 0.95) 0%,
+        rgba(20, 15, 30, 0.98) 100%);
+    backdrop-filter: blur(20px);
+    border-radius: 12px;
+    border: 1px solid rgba(138, 43, 226, 0.2);
+    padding: 20px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.genre-chart-item::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(135deg,
+        rgba(138, 43, 226, 0.1) 0%,
+        transparent 50%);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.genre-chart-item:hover {
+    transform: translateY(-5px);
+    border-color: rgba(138, 43, 226, 0.4);
+    box-shadow:
+        0 15px 30px rgba(0, 0, 0, 0.3),
+        0 0 20px rgba(138, 43, 226, 0.3);
+}
+
+.genre-chart-item:hover::before {
+    opacity: 1;
+}
+
+.chart-item-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+    position: relative;
+    z-index: 2;
+}
+
+.chart-item-icon {
+    width: 40px;
+    height: 40px;
+    background: linear-gradient(135deg,
+        rgba(138, 43, 226, 0.3) 0%,
+        rgba(75, 0, 130, 0.3) 100%);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    border: 1px solid rgba(138, 43, 226, 0.4);
+}
+
+.chart-item-title {
+    flex: 1;
+}
+
+.chart-item-title h4 {
+    font-size: 16px;
+    font-weight: 600;
+    color: #ffffff;
+    margin: 0 0 4px 0;
+    line-height: 1.3;
+}
+
+.chart-item-artist {
+    font-size: 14px;
+    color: rgba(138, 43, 226, 0.8);
+    margin: 0;
+    font-weight: 500;
+}
+
+.chart-item-description {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.6);
+    margin: 0 0 12px 0;
+    line-height: 1.4;
+    position: relative;
+    z-index: 2;
+}
+
+.chart-item-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: relative;
+    z-index: 2;
+}
+
+.chart-item-type {
+    font-size: 11px;
+    background: rgba(138, 43, 226, 0.2);
+    color: rgba(138, 43, 226, 0.9);
+    padding: 4px 8px;
+    border-radius: 6px;
+    text-transform: uppercase;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}
+
+.chart-item-action {
+    font-size: 12px;
+    color: rgba(1, 255, 149, 0.8);
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.genre-charts-empty {
+    text-align: center;
+    padding: 60px 20px;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.genre-charts-empty h3 {
+    font-size: 20px;
+    margin: 0 0 12px 0;
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.genre-charts-empty p {
+    font-size: 14px;
+    margin: 0;
+    line-height: 1.5;
+}
+
+/* ================================= */
 /* RESPONSIVE DESIGN                 */
 /* ================================= */
 
@@ -4870,6 +5486,71 @@ body {
     .beatport-genre-grid {
         grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
         gap: 15px;
+    }
+
+    /* Genre Detail Responsive */
+    .genre-detail-info h2 {
+        font-size: 24px;
+    }
+
+    .genre-chart-types-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+
+    .genre-chart-type-card {
+        padding: 16px;
+        gap: 12px;
+    }
+
+    .chart-type-icon {
+        font-size: 28px;
+        min-width: 40px;
+        height: 40px;
+    }
+
+    .chart-type-info h3 {
+        font-size: 16px;
+    }
+
+    .section-title {
+        font-size: 18px;
+    }
+
+    .genre-main-charts-section,
+    .genre-releases-section,
+    .genre-editorial-section,
+    .genre-new-charts-section {
+        margin-bottom: 24px;
+        padding: 16px;
+    }
+
+    /* Genre Charts List Responsive */
+    .genre-charts-list-info h2 {
+        font-size: 22px;
+    }
+
+    .genre-charts-grid {
+        grid-template-columns: 1fr;
+        gap: 16px;
+    }
+
+    .genre-chart-item {
+        padding: 16px;
+    }
+
+    .chart-item-header {
+        gap: 10px;
+    }
+
+    .chart-item-icon {
+        width: 35px;
+        height: 35px;
+        font-size: 16px;
+    }
+
+    .chart-item-title h4 {
+        font-size: 15px;
     }
 
     .beatport-chart-item {
