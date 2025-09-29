@@ -840,6 +840,38 @@ class BeatportUnifiedScraper:
             print(f"   ❌ Error converting track data: {e}")
             return None
 
+    def extract_individual_tracks_from_release_url(self, release_url: str, source_name: str) -> List[Dict]:
+        """Extract individual tracks from a release URL using JSON method - used for Top 10/100"""
+        try:
+            # Get the release page
+            soup = self.get_page(release_url)
+            if not soup:
+                return []
+
+            # Try JSON extraction method (same as New Releases/Hype Picks)
+            if hasattr(self, 'extract_json_object_from_release_page') and hasattr(self, 'filter_tracks_for_specific_release'):
+                # Use existing JSON extraction methods
+                json_obj = self.extract_json_object_from_release_page(soup)
+                if json_obj:
+                    release_tracks = self.filter_tracks_for_specific_release(json_obj, release_url)
+                    if release_tracks and hasattr(self, 'convert_release_json_to_track_format'):
+                        converted_tracks = []
+                        for i, track_data in enumerate(release_tracks):
+                            track = self.convert_release_json_to_track_format(track_data, release_url, i+1)
+                            if track:
+                                # Update the list_name to reflect the source
+                                track['list_name'] = source_name
+                                converted_tracks.append(track)
+                        return converted_tracks
+
+            # Fallback: try the general track extraction method
+            tracks = self.extract_tracks_from_page(soup, source_name, 50)
+            return tracks
+
+        except Exception as e:
+            print(f"      ❌ Error extracting tracks from {release_url}: {e}")
+            return []
+
     def scrape_hype_top_100(self, limit: int = 100) -> List[Dict]:
         """Scrape Beatport Hype Top 100 - Fixed URL based on parser discovery"""
         print("\n🔥 Scraping Beatport Hype Top 100...")
@@ -948,46 +980,62 @@ class BeatportUnifiedScraper:
         return releases
 
     def scrape_top_100_releases(self, limit: int = 100) -> List[Dict]:
-        """Scrape Beatport Top 100 Releases - Try both track and release approaches"""
+        """Scrape Beatport Top 100 Releases - Extract individual tracks using URL crawling"""
         print("\n📊 Scraping Beatport Top 100 Releases...")
 
-        # Use the correct URL discovered by parser
+        # Step 1: Extract release URLs from Top 100 page
         soup = self.get_page(f"{self.base_url}/top-100-releases")
-        if soup:
-            # First try the same approach as hype-100 (looking for tracks)
-            tracks = self.extract_tracks_from_page(soup, "Top 100 New Releases", limit)
-            if tracks and len(tracks) > 10:
-                print(f"✅ Extracted {len(tracks)} tracks from Top 100 New Releases (track method)")
-                return tracks
-            else:
-                print(f"⚠️ Track method found {len(tracks)} tracks, trying release method...")
-                # Fallback to release extraction
-                releases = self.extract_releases_from_page(soup, "Top 100 New Releases", limit)
-                print(f"✅ Extracted {len(releases)} releases from Top 100 New Releases (release method)")
-                return releases
-        else:
-            print("⚠️ Could not access /top-100-releases, trying homepage Top 10 Releases section...")
-            # Fallback to homepage section
-            soup = self.get_page(self.base_url)
-            if soup:
-                releases_heading = soup.find(['h1', 'h2', 'h3'], string=re.compile(r'Top.*Releases', re.I))
-                if releases_heading:
-                    section_container = releases_heading.find_parent()
-                    if section_container:
-                        content_area = section_container.find_next_sibling()
-                        if content_area:
-                            tracks = self.extract_tracks_from_page(content_area, "Top 100 New Releases", limit)
-                        else:
-                            tracks = self.extract_tracks_from_page(section_container, "Top 100 New Releases", limit)
-                    else:
-                        tracks = []
-                else:
-                    tracks = []
-            else:
-                tracks = []
+        if not soup:
+            print("   ❌ Could not access /top-100-releases page")
+            return []
 
-            print(f"✅ Extracted {len(tracks)} tracks from Top 100 New Releases (fallback)")
-            return tracks
+        # Look for rows with release links (Top 100 uses [class*="row"] elements, not tables)
+        table_rows = soup.select('tr')
+        if not table_rows:
+            # Top 100 page uses row-based layout, not table structure
+            table_rows = soup.select('[class*="row"]')
+
+        print(f"   Found {len(table_rows)} rows on Top 100 page")
+
+        release_urls = []
+        urls_found = 0
+
+        for i, row in enumerate(table_rows):
+            # Look for release link in this row
+            link_elem = row.select_one('a[href*="/release/"]')
+            if link_elem and link_elem.get('href'):
+                release_url = urljoin(self.base_url, link_elem.get('href'))
+                release_urls.append(release_url)
+                urls_found += 1
+                print(f"   {urls_found}. Found Top 100 release URL: {release_url}")
+
+                # Stop when we've found enough URLs
+                if urls_found >= limit:
+                    break
+
+        if not release_urls:
+            print("   ❌ No Top 100 release URLs found")
+            return []
+
+        # Step 2: Crawl each release URL to extract individual tracks
+        all_individual_tracks = []
+        for i, release_url in enumerate(release_urls):
+            print(f"   Processing Top 100 release {i+1}/{len(release_urls)}: {release_url}")
+
+            # Extract individual tracks from this release
+            tracks = self.extract_individual_tracks_from_release_url(release_url, "Top 100 Releases")
+            if tracks:
+                print(f"   ✅ Found {len(tracks)} individual tracks")
+                all_individual_tracks.extend(tracks)
+            else:
+                print(f"   ❌ No tracks found")
+
+            # Add delay between requests to be respectful
+            if i < len(release_urls) - 1:
+                time.sleep(0.5)
+
+        print(f"✅ Extracted {len(all_individual_tracks)} individual tracks from {len(release_urls)} Top 100 releases")
+        return all_individual_tracks
 
     def scrape_dj_charts(self, limit: int = 20) -> List[Dict]:
         """Scrape Beatport DJ Charts from homepage section - Improved reliability"""
@@ -1237,105 +1285,49 @@ class BeatportUnifiedScraper:
             return None
 
     def scrape_top_10_releases_homepage(self, limit: int = 10) -> List[Dict]:
-        """Scrape Top 10 Releases from homepage section - Fixed to improve title extraction"""
+        """Scrape Top 10 Releases from homepage - Extract individual tracks using URL crawling"""
         print("\n🔟 Scraping Top 10 Releases from homepage...")
 
         soup = self.get_page(self.base_url)
         if not soup:
             return []
 
-        # Find Top 10 Releases section using data-testid
+        # Step 1: Extract release URLs from Top 10 section
         release_items = soup.select('[data-testid="top-10-releases-item"]')
         print(f"   Found {len(release_items)} release items in Top 10 Releases section")
 
-        top_releases = []
+        release_urls = []
         for i, item in enumerate(release_items[:limit]):
-            # Extract rank number
-            rank_elem = item.select_one('[data-testid="track-number"]')
-            rank = rank_elem.get_text(strip=True) if rank_elem else str(i + 1)
-
-            # Try to extract better title information
-            title = "Unknown Title"
-
-            # Define badges/labels to filter out when looking for titles
-            badge_keywords = ['EXCLUSIVE', 'HYPE', 'NEW', 'HOT', 'FEATURED', 'STAFF PICK']
-
-            # Method 1: Look for track title specifically
-            track_title_elem = item.select_one('[class*="track-title"], [class*="TrackTitle"], [data-testid*="track-title"]')
-            if track_title_elem:
-                potential_title = track_title_elem.get_text(strip=True)
-                if potential_title.upper() not in badge_keywords:
-                    title = potential_title
-
-            if title == "Unknown Title":
-                # Method 2: Look for release name (fallback)
-                release_name_elem = item.select_one('[class*="ReleaseName"], [class*="release-name"], [class*="release-title"]')
-                if release_name_elem:
-                    potential_title = release_name_elem.get_text(strip=True)
-                    if potential_title.upper() not in badge_keywords:
-                        title = potential_title
-
-            if title == "Unknown Title":
-                # Method 3: Try to get from any link text that's not an artist or label
-                link_elems = item.select('a')
-                for link in link_elems:
-                    link_text = link.get_text(strip=True)
-                    # Skip if it's clearly an artist link, label link, empty, or a badge
-                    if (link_text and
-                        '/artist/' not in link.get('href', '') and
-                        '/label/' not in link.get('href', '') and
-                        link_text.upper() not in badge_keywords):
-                        title = link_text
-                        break
-
-            # Final fallback: if we still have Unknown Title, try any text that's not a badge
-            if title == "Unknown Title":
-                all_text_elems = item.find_all(text=True)
-                for text_elem in all_text_elems:
-                    text = text_elem.strip()
-                    if (text and
-                        len(text) > 3 and  # Must be more than 3 characters
-                        text.upper() not in badge_keywords and
-                        not text.isdigit() and  # Not just a number
-                        '$' not in text):  # Not a price
-                        title = text
-                        break
-
-            # Extract artists (original working method)
-            artist_elems = item.select('[href*="/artist/"]')
-            artists = []
-            for artist_elem in artist_elems:
-                artist_name = artist_elem.get_text(strip=True)
-                if artist_name and artist_name not in artists:
-                    artists.append(artist_name)
-
-            # Extract other data
+            # Extract release URL
             link_elem = item.select_one('a[href*="/release/"]')
-            release_url = urljoin(self.base_url, link_elem.get('href')) if link_elem else ""
+            if link_elem and link_elem.get('href'):
+                release_url = urljoin(self.base_url, link_elem.get('href'))
+                release_urls.append(release_url)
+                print(f"   {i+1}. Found Top 10 release URL: {release_url}")
 
-            label_elem = item.select_one('[href*="/label/"]')
-            label = label_elem.get_text(strip=True) if label_elem else "Unknown Label"
+        if not release_urls:
+            print("   ❌ No Top 10 release URLs found")
+            return []
 
-            img_elem = item.select_one('img')
-            image_url = img_elem.get('src') if img_elem else None
+        # Step 2: Crawl each release URL to extract individual tracks
+        all_individual_tracks = []
+        for i, release_url in enumerate(release_urls):
+            print(f"   Processing Top 10 release {i+1}/{len(release_urls)}: {release_url}")
 
-            # Convert to track format for compatibility
-            track_data = {
-                'position': int(rank) if rank.isdigit() else i + 1,
-                'rank': rank,
-                'artist': ', '.join(artists) if artists else "Unknown Artist",
-                'title': title,
-                'list_name': 'Top 10 Releases',
-                'url': release_url,
-                'label': label,
-                'image_url': image_url,
-                'type': 'release',
-                'top_10': True
-            }
-            top_releases.append(track_data)
+            # Extract individual tracks from this release
+            tracks = self.extract_individual_tracks_from_release_url(release_url, "Top 10 Releases")
+            if tracks:
+                print(f"   ✅ Found {len(tracks)} individual tracks")
+                all_individual_tracks.extend(tracks)
+            else:
+                print(f"   ❌ No tracks found")
 
-        print(f"✅ Extracted {len(top_releases)} releases from Top 10 Releases")
-        return top_releases
+            # Add delay between requests to be respectful
+            if i < len(release_urls) - 1:
+                time.sleep(0.5)
+
+        print(f"✅ Extracted {len(all_individual_tracks)} individual tracks from {len(release_urls)} Top 10 releases")
+        return all_individual_tracks
 
     def scrape_genre_charts(self, genre: Dict, limit: int = 100) -> List[Dict]:
         """Scrape charts for a specific genre (default: top tracks)"""
