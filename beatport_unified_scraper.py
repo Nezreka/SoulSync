@@ -929,40 +929,91 @@ class BeatportUnifiedScraper:
         return charts
 
     def scrape_hype_picks_homepage(self, limit: int = 40) -> List[Dict]:
-        """Scrape Hype Picks from homepage section - NEW"""
+        """Scrape Hype Picks from homepage section - IMPROVED with fallbacks"""
         print("\n🔥 Scraping Hype Picks from homepage...")
 
         soup = self.get_page(self.base_url)
         if not soup:
             return []
 
-        # Find Hype Picks section using data-testid
-        hype_cards = soup.select('[data-testid="hype-picks"]')
-        print(f"   Found {len(hype_cards)} hype cards in Hype Picks section")
-
         hype_releases = []
-        for i, card in enumerate(hype_cards[:limit]):
-            release_data = self.extract_release_data_from_card(card)
-            if release_data:
-                # Ensure it has HYPE badge
-                if 'HYPE' not in release_data.get('badges', []):
-                    release_data['badges'] = release_data.get('badges', []) + ['HYPE']
 
-                # Convert to track format for compatibility
-                track_data = {
-                    'position': i + 1,
-                    'artist': release_data['artist'],
-                    'title': release_data['title'],
-                    'list_name': 'Hype Picks',
-                    'url': release_data['url'],
-                    'label': release_data.get('label', 'Unknown Label'),
-                    'image_url': release_data.get('image_url'),
-                    'price': release_data.get('price'),
-                    'badges': release_data.get('badges', []),
-                    'type': 'release',
-                    'hype': True
-                }
-                hype_releases.append(track_data)
+        # Method 1: Try data-testid="hype-picks"
+        hype_cards = soup.select('[data-testid="hype-picks"]')
+        print(f"   Method 1: Found {len(hype_cards)} cards with data-testid='hype-picks'")
+
+        if hype_cards:
+            for i, card in enumerate(hype_cards[:limit]):
+                release_data = self.extract_release_data_from_card(card)
+                if release_data:
+                    # Convert to track format for compatibility
+                    track_data = {
+                        'position': i + 1,
+                        'artist': release_data['artist'],
+                        'title': release_data['title'],
+                        'list_name': 'Hype Picks',
+                        'url': release_data['url'],
+                        'label': release_data.get('label', 'Unknown Label'),
+                        'image_url': release_data.get('image_url'),
+                        'badges': ['HYPE'],
+                        'type': 'release',
+                        'hype': True
+                    }
+                    hype_releases.append(track_data)
+
+        # Method 2: If no hype-picks cards found, look for HYPE badges
+        if not hype_releases:
+            print("   Method 2: Looking for elements with HYPE badges...")
+            hype_badges = soup.find_all(text=re.compile(r'HYPE', re.I))
+            for badge in hype_badges[:limit]:
+                try:
+                    # Find the parent card/container
+                    card = badge.find_parent(['div', 'article', 'section'])
+                    if card:
+                        release_data = self.extract_release_data_from_card(card)
+                        if release_data and release_data['title'] != "Unknown Release":
+                            track_data = {
+                                'position': len(hype_releases) + 1,
+                                'artist': release_data['artist'],
+                                'title': release_data['title'],
+                                'list_name': 'Hype Picks',
+                                'url': release_data['url'],
+                                'label': release_data.get('label', 'Unknown Label'),
+                                'image_url': release_data.get('image_url'),
+                                'badges': ['HYPE'],
+                                'type': 'release',
+                                'hype': True
+                            }
+                            hype_releases.append(track_data)
+                            if len(hype_releases) >= limit:
+                                break
+                except Exception as e:
+                    continue
+
+        # Method 3: If still no results, look for hype section heading
+        if not hype_releases:
+            print("   Method 3: Looking for 'Hype' section heading...")
+            hype_heading = soup.find(['h1', 'h2', 'h3'], string=re.compile(r'Hype.*Pick', re.I))
+            if hype_heading:
+                section_container = hype_heading.find_parent()
+                if section_container:
+                    cards = section_container.select('[class*="card"], [class*="item"], [class*="release"]')
+                    for i, card in enumerate(cards[:limit]):
+                        release_data = self.extract_release_data_from_card(card)
+                        if release_data:
+                            track_data = {
+                                'position': i + 1,
+                                'artist': release_data['artist'],
+                                'title': release_data['title'],
+                                'list_name': 'Hype Picks',
+                                'url': release_data['url'],
+                                'label': release_data.get('label', 'Unknown Label'),
+                                'image_url': release_data.get('image_url'),
+                                'badges': ['HYPE'],
+                                'type': 'release',
+                                'hype': True
+                            }
+                            hype_releases.append(track_data)
 
         print(f"✅ Extracted {len(hype_releases)} releases from Hype Picks")
         return hype_releases
