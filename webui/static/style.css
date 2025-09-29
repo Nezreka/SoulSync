@@ -4156,7 +4156,7 @@ body {
 
 .sync-content-area {
     display: grid;
-    grid-template-columns: 2fr 1fr; /* 2/3 for main panel, 1/3 for sidebar */
+    grid-template-columns: 2.5fr 0.75fr; /* More space for main panel, smaller sidebar */
     gap: 25px;
     height: calc(100vh - 200px); /* Adjust height to fit within the page */
 }
@@ -4368,7 +4368,7 @@ body {
 
 .beatport-hero {
     position: relative;
-    height: 240px;
+    height: fit-content;
     border-radius: 20px;
     margin-bottom: 40px;
     overflow: hidden;
