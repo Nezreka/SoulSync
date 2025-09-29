@@ -646,9 +646,31 @@ class BeatportUnifiedScraper:
         return tracks
 
     def scrape_new_releases(self, limit: int = 40) -> List[Dict]:
-        """Scrape Beatport New Releases from homepage section - FIXED"""
-        print("\n🆕 Scraping Beatport New Releases...")
+        """Scrape individual tracks from Beatport New Releases using JSON extraction - ENHANCED"""
+        print("\n🆕 Scraping Beatport New Releases (individual tracks)...")
 
+        # Step 1: Get release URLs from homepage cards
+        release_urls = self.extract_new_releases_urls(limit)
+        if not release_urls:
+            return []
+
+        # Step 2: Extract individual tracks from each release
+        all_tracks = []
+        for i, release_url in enumerate(release_urls):
+            print(f"\n📀 Processing release {i+1}/{len(release_urls)}")
+            tracks = self.extract_tracks_from_release_json(release_url)
+            if tracks:
+                all_tracks.extend(tracks)
+
+            # Add small delay between requests to be respectful
+            import time
+            time.sleep(0.5)
+
+        print(f"✅ Extracted {len(all_tracks)} individual tracks from {len(release_urls)} releases")
+        return all_tracks
+
+    def extract_new_releases_urls(self, limit: int) -> List[str]:
+        """Extract release URLs from New Releases cards on homepage"""
         soup = self.get_page(self.base_url)
         if not soup:
             return []
@@ -657,27 +679,166 @@ class BeatportUnifiedScraper:
         release_cards = soup.select('[data-testid="new-releases"]')
         print(f"   Found {len(release_cards)} release cards in New Releases section")
 
-        releases = []
+        release_urls = []
         for i, card in enumerate(release_cards[:limit]):
-            release_data = self.extract_release_data_from_card(card)
-            if release_data:
-                # Convert to track format for compatibility
-                track_data = {
-                    'position': i + 1,
-                    'artist': release_data['artist'],
-                    'title': release_data['title'],
-                    'list_name': 'New Releases',
-                    'url': release_data['url'],
-                    'label': release_data.get('label', 'Unknown Label'),
-                    'image_url': release_data.get('image_url'),
-                    'price': release_data.get('price'),
-                    'badges': release_data.get('badges', []),
-                    'type': 'release'
-                }
-                releases.append(track_data)
+            # Look for artwork anchor link
+            artwork_link = card.select_one('a.artwork')
+            if not artwork_link:
+                # Try other common selectors for release links
+                artwork_link = card.select_one('a[href*="/release/"]')
 
-        print(f"✅ Extracted {len(releases)} releases from New Releases")
-        return releases
+            if artwork_link and artwork_link.get('href'):
+                href = artwork_link.get('href')
+                # Ensure full URL
+                if href.startswith('/'):
+                    href = self.base_url + href
+                release_urls.append(href)
+                print(f"   {i+1}. Found release URL: {href}")
+
+        return release_urls
+
+    def extract_tracks_from_release_json(self, release_url: str) -> List[Dict]:
+        """Extract individual tracks from a release page using JSON data"""
+        print(f"🎵 Extracting tracks from: {release_url}")
+
+        soup = self.get_page(release_url)
+        if not soup:
+            return []
+
+        # Extract JSON object from page
+        json_obj = self.extract_json_object_from_release_page(soup)
+        if not json_obj:
+            print("   ❌ No JSON data found")
+            return []
+
+        # Filter tracks for this specific release
+        release_tracks = self.filter_tracks_for_specific_release(json_obj, release_url)
+        if not release_tracks:
+            print("   ❌ No matching tracks found")
+            return []
+
+        # Convert to our standard format
+        converted_tracks = []
+        for i, track_data in enumerate(release_tracks):
+            track = self.convert_release_json_to_track_format(track_data, release_url, len(converted_tracks) + 1)
+            if track:
+                converted_tracks.append(track)
+
+        print(f"   ✅ Extracted {len(converted_tracks)} tracks")
+        return converted_tracks
+
+    def extract_json_object_from_release_page(self, soup):
+        """Extract the main JSON object from a release page"""
+        script_tags = soup.find_all('script')
+
+        for script in script_tags:
+            if script.string:
+                script_content = script.string.strip()
+
+                # Look for Next.js JSON data
+                if script_content.startswith('{') and any(keyword in script_content for keyword in ['tracks', 'release']):
+                    try:
+                        import json
+                        json_obj = json.loads(script_content)
+                        return json_obj
+                    except json.JSONDecodeError:
+                        continue
+
+        return None
+
+    def filter_tracks_for_specific_release(self, json_obj: Dict, release_url: str) -> List[Dict]:
+        """Filter tracks to only include those from the specific release"""
+        # Extract release ID from URL (e.g., /release/capoeira-feat-jessica-gaspar/5361445)
+        release_parts = release_url.split('/')
+        release_id = release_parts[-1] if release_parts else None
+
+        try:
+            # Navigate to the correct path: props.pageProps.dehydratedState.queries[1].state.data.results
+            queries = json_obj.get('props', {}).get('pageProps', {}).get('dehydratedState', {}).get('queries', [])
+
+            if len(queries) >= 2:
+                results = queries[1].get('state', {}).get('data', {}).get('results', [])
+
+                # Filter tracks that match our release ID
+                matching_tracks = []
+                for track in results:
+                    if isinstance(track, dict):
+                        track_release_id = None
+                        if 'release' in track and isinstance(track['release'], dict):
+                            track_release_id = str(track['release'].get('id', ''))
+
+                        if track_release_id == release_id:
+                            matching_tracks.append(track)
+
+                return matching_tracks
+
+        except Exception as e:
+            print(f"   ❌ Error filtering tracks: {e}")
+
+        return []
+
+    def convert_release_json_to_track_format(self, track_data: Dict, release_url: str, position: int):
+        """Convert JSON track data from release page to our standard track format"""
+        try:
+            if not isinstance(track_data, dict):
+                return None
+
+            # Extract title
+            title = track_data.get('title') or track_data.get('name', 'Unknown Title')
+
+            # Extract artists
+            artist = 'Unknown Artist'
+            if 'artists' in track_data and isinstance(track_data['artists'], list):
+                artist_names = []
+                for artist_obj in track_data['artists']:
+                    if isinstance(artist_obj, dict) and 'name' in artist_obj:
+                        artist_names.append(artist_obj['name'])
+                    elif isinstance(artist_obj, str):
+                        artist_names.append(artist_obj)
+                if artist_names:
+                    artist = ', '.join(artist_names)
+
+            # Extract metadata
+            bpm = track_data.get('bpm')
+            key_data = track_data.get('key')
+            key = key_data.get('name') if isinstance(key_data, dict) else None
+            genre_data = track_data.get('genre')
+            genre = genre_data.get('name') if isinstance(genre_data, dict) else None
+            duration = track_data.get('duration') or track_data.get('length')
+            price = track_data.get('price')
+
+            # Get label from release data
+            label = 'Unknown Label'
+            if 'release' in track_data and isinstance(track_data['release'], dict):
+                release_data = track_data['release']
+                if 'label' in release_data and isinstance(release_data['label'], dict):
+                    label = release_data['label'].get('name', 'Unknown Label')
+
+            # Get track URL if available
+            track_url = release_url  # Default to release URL
+            if 'slug' in track_data and 'id' in track_data:
+                track_url = f"{self.base_url}/track/{track_data['slug']}/{track_data['id']}"
+
+            track = {
+                'position': position,
+                'title': title,
+                'artist': artist,
+                'list_name': 'New Releases',
+                'url': track_url,
+                'label': label,
+                'bpm': bpm,
+                'key': key,
+                'genre': genre,
+                'duration': duration,
+                'price': price,
+                'type': 'track'
+            }
+
+            return track
+
+        except Exception as e:
+            print(f"   ❌ Error converting track data: {e}")
+            return None
 
     def scrape_hype_top_100(self, limit: int = 100) -> List[Dict]:
         """Scrape Beatport Hype Top 100 - Fixed URL based on parser discovery"""
