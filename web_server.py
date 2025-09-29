@@ -9957,37 +9957,112 @@ def _run_tidal_discovery_worker(playlist_id):
 
 
 def _search_spotify_for_tidal_track(tidal_track):
-    """Search Spotify for a Tidal track (simplified version of sync.py logic)"""
+    """Search Spotify for a Tidal track using matching_engine for better accuracy"""
     if not spotify_client or not spotify_client.is_authenticated():
         return None
-        
+
     try:
-        # Construct search query like sync.py does
+        # Get track info
         track_name = tidal_track.name
         artists = tidal_track.artists or []
-        
+
         if not artists:
             return None
-            
-        # Try different search combinations (like sync.py TidalSpotifyDiscoveryWorker)
-        search_queries = [
-            f'track:"{track_name}" artist:"{artists[0]}"',
-            f'"{track_name}" "{artists[0]}"',
-            f'{track_name} {artists[0]}'
-        ]
-        
-        for query in search_queries:
+
+        artist_name = artists[0]  # Use primary artist
+
+        print(f"🔍 Tidal track: '{artist_name}' - '{track_name}'")
+
+        # Use matching engine to generate search queries (with fallback)
+        try:
+            # Create a temporary SpotifyTrack-like object for the matching engine
+            temp_track = type('TempTrack', (), {
+                'name': track_name,
+                'artists': [artist_name],
+                'album': None
+            })()
+            search_queries = matching_engine.generate_download_queries(temp_track)
+            print(f"🔍 Generated {len(search_queries)} search queries for Tidal track")
+        except Exception as e:
+            print(f"⚠️ Matching engine failed for Tidal, falling back to basic queries: {e}")
+            # Fallback to original simple queries
+            search_queries = [
+                f'track:"{track_name}" artist:"{artist_name}"',
+                f'"{track_name}" "{artist_name}"',
+                f'{track_name} {artist_name}'
+            ]
+
+        # Find best match using confidence scoring
+        best_match = None
+        best_confidence = 0.0
+        min_confidence = 0.7  # Higher threshold for Tidal since data is cleaner
+
+        for query_idx, search_query in enumerate(search_queries):
             try:
-                results = spotify_client.search_tracks(query, limit=5)
-                if results and len(results) > 0:
-                    # Return first match (could add matching logic like sync.py)
-                    return results[0]
+                print(f"🔍 Tidal query {query_idx + 1}/{len(search_queries)}: {search_query}")
+                results = spotify_client.search_tracks(search_query, limit=5)
+
+                if not results:
+                    continue
+
+                # Score each result using matching engine
+                for result in results:
+                    try:
+                        # Calculate confidence using matching engine's similarity scoring (with fallback)
+                        try:
+                            artist_confidence = 0.0
+                            if result.artists:
+                                # Get best artist match confidence
+                                for result_artist in result.artists:
+                                    artist_sim = matching_engine.similarity_score(
+                                        matching_engine.normalize_string(artist_name),
+                                        matching_engine.normalize_string(result_artist)
+                                    )
+                                    artist_confidence = max(artist_confidence, artist_sim)
+
+                            # Calculate title confidence
+                            title_confidence = matching_engine.similarity_score(
+                                matching_engine.normalize_string(track_name),
+                                matching_engine.normalize_string(result.name)
+                            )
+
+                            # Combined confidence (equal weighting for Tidal clean data)
+                            combined_confidence = (artist_confidence * 0.5 + title_confidence * 0.5)
+                        except Exception as e:
+                            print(f"⚠️ Matching engine scoring failed for Tidal, using first match: {e}")
+                            # Fallback: just take the first result if matching engine fails
+                            combined_confidence = 1.0  # Set high to accept this match
+                            best_match = result
+                            break
+
+                        print(f"🔍 Tidal candidate: '{result.artists[0]}' - '{result.name}' (confidence: {combined_confidence:.3f})")
+
+                        # Update best match if this is better
+                        if combined_confidence > best_confidence and combined_confidence >= min_confidence:
+                            best_confidence = combined_confidence
+                            best_match = result
+                            print(f"✅ New best Tidal match: {result.artists[0]} - {result.name} (confidence: {combined_confidence:.3f})")
+
+                    except Exception as e:
+                        print(f"❌ Error processing Tidal search result: {e}")
+                        continue
+
+                # If we found a very high confidence match, stop searching
+                if best_confidence >= 0.9:
+                    print(f"🎯 High confidence Tidal match found ({best_confidence:.3f}), stopping search")
+                    break
+
             except Exception as e:
-                print(f"❌ Search error for query '{query}': {e}")
+                print(f"❌ Error in Tidal Spotify search for query '{search_query}': {e}")
                 continue
-                
-        return None
-        
+
+        if best_match:
+            print(f"✅ Final Tidal match: {best_match.artists[0]} - {best_match.name} (confidence: {best_confidence:.3f})")
+        else:
+            print(f"❌ No suitable Tidal match found (best confidence was {best_confidence:.3f}, required {min_confidence:.3f})")
+
+        return best_match
+
     except Exception as e:
         print(f"❌ Error searching Spotify for Tidal track: {e}")
         return None
@@ -10301,45 +10376,122 @@ def _run_youtube_discovery_worker(url_hash):
                 
                 print(f"🔍 Searching Spotify for: '{cleaned_artist}' - '{cleaned_title}'")
                 
-                # Try multiple search strategies
+                # Try multiple search strategies using matching_engine for better accuracy
                 spotify_track = None
+                best_confidence = 0.0
+                min_confidence = 0.6  # Keep same threshold as before
+
+                # Strategy 1: Use matching_engine search queries (with fallback)
+                try:
+                    # Create a temporary SpotifyTrack-like object for the matching engine
+                    temp_track = type('TempTrack', (), {
+                        'name': cleaned_title,
+                        'artists': [cleaned_artist],
+                        'album': None
+                    })()
+                    search_queries = matching_engine.generate_download_queries(temp_track)
+                    print(f"🔍 Generated {len(search_queries)} search queries for YouTube track")
+                except Exception as e:
+                    print(f"⚠️ Matching engine failed for YouTube, falling back to basic query: {e}")
+                    # Fallback to original simple query
+                    search_queries = [f"artist:{cleaned_artist} track:{cleaned_title}"]
+
+                for query_idx, search_query in enumerate(search_queries):
+                    try:
+                        print(f"🔍 YouTube query {query_idx + 1}/{len(search_queries)}: {search_query}")
+                        spotify_results = spotify_client.search_tracks(search_query, limit=5)
+
+                        if not spotify_results:
+                            continue
+
+                        # Score each result using matching engine
+                        for spotify_result in spotify_results:
+                            try:
+                                # Calculate confidence using matching engine's similarity scoring (with fallback)
+                                try:
+                                    artist_confidence = 0.0
+                                    if spotify_result.artists:
+                                        # Get best artist match confidence
+                                        for result_artist in spotify_result.artists:
+                                            artist_sim = matching_engine.similarity_score(
+                                                matching_engine.normalize_string(cleaned_artist),
+                                                matching_engine.normalize_string(result_artist)
+                                            )
+                                            artist_confidence = max(artist_confidence, artist_sim)
+
+                                    # Calculate title confidence
+                                    title_confidence = matching_engine.similarity_score(
+                                        matching_engine.normalize_string(cleaned_title),
+                                        matching_engine.normalize_string(spotify_result.name)
+                                    )
+
+                                    # Combined confidence (70% title, 30% artist - same as original)
+                                    combined_confidence = (title_confidence * 0.7 + artist_confidence * 0.3)
+                                except Exception as e:
+                                    print(f"⚠️ Matching engine scoring failed for YouTube, using basic similarity: {e}")
+                                    # Fallback to original character overlap method
+                                    def _calculate_similarity_fallback(str1, str2):
+                                        if not str1 or not str2:
+                                            return 0
+                                        str1 = str1.lower().strip()
+                                        str2 = str2.lower().strip()
+                                        if str1 == str2:
+                                            return 1.0
+                                        set1 = set(str1.replace(' ', ''))
+                                        set2 = set(str2.replace(' ', ''))
+                                        if not set1 or not set2:
+                                            return 0
+                                        intersection = len(set1.intersection(set2))
+                                        union = len(set1.union(set2))
+                                        return intersection / union if union > 0 else 0
+
+                                    title_score = _calculate_similarity_fallback(cleaned_title, spotify_result.name)
+                                    artist_score = _calculate_similarity_fallback(cleaned_artist, spotify_result.artists[0] if spotify_result.artists else "")
+                                    combined_confidence = (title_score * 0.7) + (artist_score * 0.3)
+
+                                print(f"🔍 YouTube candidate: '{spotify_result.artists[0]}' - '{spotify_result.name}' (confidence: {combined_confidence:.3f})")
+
+                                # Update best match if this is better
+                                if combined_confidence > best_confidence and combined_confidence >= min_confidence:
+                                    best_confidence = combined_confidence
+                                    spotify_track = spotify_result
+                                    print(f"✅ New best YouTube match: {spotify_result.artists[0]} - {spotify_result.name} (confidence: {combined_confidence:.3f})")
+
+                            except Exception as e:
+                                print(f"❌ Error processing YouTube search result: {e}")
+                                continue
+
+                        # If we found a very high confidence match, stop searching
+                        if best_confidence >= 0.9:
+                            print(f"🎯 High confidence YouTube match found ({best_confidence:.3f}), stopping search")
+                            break
+
+                    except Exception as e:
+                        print(f"❌ Error in YouTube search for query '{search_query}': {e}")
+                        continue
+
+                if spotify_track:
+                    print(f"✅ Strategy 1 YouTube match: {spotify_track.artists[0]} - {spotify_track.name} (confidence: {best_confidence:.3f})")
                 
-                # Strategy 1: Standard search
-                query = f"artist:{cleaned_artist} track:{cleaned_title}"
-                spotify_results = spotify_client.search_tracks(query, limit=5)
-                
-                if spotify_results:
-                    # Find best match using similarity
-                    best_match = None
-                    best_score = 0
-                    
-                    for spotify_result in spotify_results:
-                        # Calculate similarity score
-                        title_score = _calculate_similarity(cleaned_title.lower(), spotify_result.name.lower())
-                        artist_score = _calculate_similarity(cleaned_artist.lower(), spotify_result.artists[0].lower())
-                        combined_score = (title_score * 0.7) + (artist_score * 0.3)
-                        
-                        if combined_score > best_score and combined_score > 0.6:
-                            best_match = spotify_result
-                            best_score = combined_score
-                    
-                    spotify_track = best_match
-                
-                # Strategy 2: Swapped search (if first failed)
+                # Strategy 2: Swapped search (if first failed) - keep simple for fallback
                 if not spotify_track:
+                    print("🔄 YouTube Strategy 2: Trying swapped search (artist/title reversed)")
                     query = f"artist:{cleaned_title} track:{cleaned_artist}"
                     spotify_results = spotify_client.search_tracks(query, limit=3)
                     if spotify_results:
                         spotify_track = spotify_results[0]
-                
-                # Strategy 3: Raw data search (if still failed)
+                        print(f"✅ Strategy 2 YouTube match (swapped): {spotify_track.artists[0]} - {spotify_track.name}")
+
+                # Strategy 3: Raw data search (if still failed) - keep simple for fallback
                 if not spotify_track:
                     raw_title = track['raw_title']
                     raw_artist = track['raw_artist']
+                    print(f"🔄 YouTube Strategy 3: Trying raw data search: '{raw_artist} {raw_title}'")
                     query = f"{raw_artist} {raw_title}"
                     spotify_results = spotify_client.search_tracks(query, limit=3)
                     if spotify_results:
                         spotify_track = spotify_results[0]
+                        print(f"✅ Strategy 3 YouTube match (raw): {spotify_track.artists[0]} - {spotify_track.name}")
                 
                 # Create result entry
                 result = {
@@ -12826,55 +12978,98 @@ def _run_beatport_discovery_worker(url_hash):
 
                 print(f"🔍 Searching Spotify for: '{track_artist}' - '{track_title}'")
 
-                # Try multiple search strategies
+                # Use matching engine for sophisticated track matching (like other discovery processes)
                 spotify_track = None
 
-                # Clean track title for search (remove remix info)
-                import re
-                clean_title = re.sub(r'\s*\([^)]*\)', '', track_title).strip()  # Remove (Extended Mix), (Original Mix), etc.
-                clean_title = re.sub(r'\s*\[[^\]]*\]', '', clean_title).strip()  # Remove [brackets]
-
-                # Strategy 1: Simple search with cleaned terms
-                search_query = f"{track_artist} {clean_title}"
-                print(f"🔍 Search query: {search_query}")
-
+                # Generate search queries using matching engine (with fallback)
                 try:
-                    search_results = spotify_client.search_tracks(search_query, limit=10)
-                    print(f"🔍 Search results type: {type(search_results)}, length: {len(search_results) if search_results else 0}")
+                    # Create a temporary SpotifyTrack-like object for the matching engine
+                    temp_track = type('TempTrack', (), {
+                        'name': track_title,
+                        'artists': [track_artist],
+                        'album': None
+                    })()
+                    search_queries = matching_engine.generate_download_queries(temp_track)
+                    print(f"🔍 Generated {len(search_queries)} search queries using matching engine")
+                except Exception as e:
+                    print(f"⚠️ Matching engine failed for Beatport, falling back to basic queries: {e}")
+                    # Fallback to basic search queries
+                    search_queries = [
+                        f"{track_artist} {track_title}",
+                        f'artist:"{track_artist}" track:"{track_title}"',
+                        f'"{track_artist}" "{track_title}"'
+                    ]
 
-                    # Find best match from search_tracks result
-                    if search_results:
+                # Try each search query until we find a good match
+                best_match = None
+                best_confidence = 0.0
+                min_confidence = 0.6  # Minimum confidence threshold for accepting a match
+
+                for query_idx, search_query in enumerate(search_queries):
+                    try:
+                        print(f"🔍 Query {query_idx + 1}/{len(search_queries)}: {search_query}")
+                        search_results = spotify_client.search_tracks(search_query, limit=10)
+
+                        if not search_results:
+                            continue
+
+                        # Use matching engine to find the best match from search results
                         for result in search_results:
                             try:
-                                # Check if artist matches (case insensitive, flexible)
-                                result_artists = [artist.lower() for artist in result.artists]
-                                artist_match = any(track_artist.lower() in artist for artist in result_artists) or any(artist in track_artist.lower() for artist in result_artists)
+                                # Calculate confidence using matching engine's similarity scoring (with fallback)
+                                try:
+                                    artist_confidence = 0.0
+                                    if result.artists:
+                                        # Get best artist match confidence
+                                        result_artist_names = [artist for artist in result.artists]
+                                        for result_artist in result_artist_names:
+                                            artist_sim = matching_engine.similarity_score(
+                                                matching_engine.normalize_string(track_artist),
+                                                matching_engine.normalize_string(result_artist)
+                                            )
+                                            artist_confidence = max(artist_confidence, artist_sim)
 
-                                # Check if title matches (case insensitive, flexible)
-                                title_match = clean_title.lower() in result.name.lower() or result.name.lower() in clean_title.lower()
+                                    # Calculate title confidence
+                                    title_confidence = matching_engine.similarity_score(
+                                        matching_engine.normalize_string(track_title),
+                                        matching_engine.normalize_string(result.name)
+                                    )
 
-                                if artist_match and title_match:
-                                    spotify_track = result
-                                    print(f"✅ Found match: {result.artists[0]} - {result.name}")
-                                    break
+                                    # Combined confidence (weighted toward artist matching for dance music)
+                                    combined_confidence = (artist_confidence * 0.6 + title_confidence * 0.4)
+                                except Exception as e:
+                                    print(f"⚠️ Matching engine scoring failed for Beatport, using basic matching: {e}")
+                                    # Fallback to simple string matching
+                                    artist_match = any(track_artist.lower() in artist.lower() for artist in result.artists) if result.artists else False
+                                    title_match = track_title.lower() in result.name.lower() or result.name.lower() in track_title.lower()
+                                    combined_confidence = 0.8 if (artist_match and title_match) else 0.4 if (artist_match or title_match) else 0.1
+
+                                print(f"🔍 Match candidate: '{result.artists[0]}' - '{result.name}' (confidence: {combined_confidence:.3f})")
+
+                                # Update best match if this is better
+                                if combined_confidence > best_confidence and combined_confidence >= min_confidence:
+                                    best_confidence = combined_confidence
+                                    best_match = result
+                                    print(f"✅ New best match: {result.artists[0]} - {result.name} (confidence: {combined_confidence:.3f})")
+
                             except Exception as e:
                                 print(f"❌ Error processing search result: {e}")
                                 continue
-                except Exception as e:
-                    print(f"❌ Error in Spotify search: {e}")
 
-                # Strategy 2: Try artist-only search if no match
-                if not spotify_track:
-                    print(f"🔍 Trying artist-only search: {track_artist}")
-                    search_results = spotify_client.search_tracks(track_artist, limit=5)
+                        # If we found a very high confidence match, stop searching
+                        if best_confidence >= 0.9:
+                            print(f"🎯 High confidence match found ({best_confidence:.3f}), stopping search")
+                            break
 
-                    if search_results:
-                        for result in search_results:
-                            result_artists = [artist.lower() for artist in result.artists]
-                            if any(track_artist.lower() in artist for artist in result_artists):
-                                print(f"✅ Found by artist: {result.artists[0]} - {result.name}")
-                                spotify_track = result
-                                break
+                    except Exception as e:
+                        print(f"❌ Error in Spotify search for query '{search_query}': {e}")
+                        continue
+
+                spotify_track = best_match
+                if spotify_track:
+                    print(f"✅ Final match selected: {spotify_track.artists[0]} - {spotify_track.name} (confidence: {best_confidence:.3f})")
+                else:
+                    print(f"❌ No suitable match found (best confidence was {best_confidence:.3f}, required {min_confidence:.3f})")
 
                 # Create result entry
                 result_entry = {
