@@ -171,6 +171,17 @@ If accessing SoulSync from a different machine than where it's running:
 **Full Automation**: Hourly retry of failed downloads, metadata enhancement, lyrics, server scanning
 **Activity Feed**: Real-time status and progress tracking
 
+## 🎵 Beatport Integration
+
+Discover the hottest dance music with our fresh Beatport integration. Whether you're following superstar DJs or hunting for underground gems, SoulSync pulls directly from Beatport's extensive catalog.
+
+**Chart Explorer**: Browse featured charts, DJ curated sets, and trending tracks
+**Genre Deep Dive**: Discover new releases and popular tracks by genre
+**One-Click Downloads**: Grab entire charts or individual tracks instantly
+**Premium Discovery**: Access the same charts that DJs use to find their next big tracks
+
+Just hit up the Beatport section in the web UI and start exploring. Perfect for DJs building sets or anyone who wants to stay ahead of the curve on electronic music trends.
+
 ## 📁 File Flow
 
 1. **Search**: Query Soulseek via slskd API
