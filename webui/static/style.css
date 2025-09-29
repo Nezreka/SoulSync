@@ -4897,7 +4897,9 @@ body {
 .homepage-genre-section,
 .homepage-main-charts-section,
 .homepage-releases-section,
-.homepage-hype-section {
+.homepage-hype-section,
+.homepage-dj-charts-section,
+.homepage-featured-charts-section {
     margin-bottom: 40px;
     padding: 20px;
     background: linear-gradient(135deg,

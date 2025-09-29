@@ -11616,7 +11616,7 @@ async function loadDJChartsInline() {
         }
 
         const data = await response.json();
-        if (!data.success || !data.tracks || data.tracks.length === 0) {
+        if (!data.success || !data.charts || data.charts.length === 0) {
             // Show empty state
             chartsGrid.innerHTML = `
                 <div class="new-charts-empty">
@@ -11630,7 +11630,7 @@ async function loadDJChartsInline() {
         }
 
         // Create chart items using New Charts structure
-        const chartsHTML = data.tracks.map(chart => {
+        const chartsHTML = data.charts.map(chart => {
             const chartName = chart.name || chart.title || 'Untitled Chart';
             const artistName = chart.artist || chart.curator || 'Various Artists';
             const chartUrl = chart.url || chart.chart_url || '';
@@ -11664,7 +11664,7 @@ async function loadDJChartsInline() {
         // Setup click handlers for chart items
         setupDJChartItemHandlers();
 
-        console.log(`✅ Loaded ${data.tracks.length} DJ charts`);
+        console.log(`✅ Loaded ${data.charts.length} DJ charts`);
 
     } catch (error) {
         console.error('❌ Error loading DJ charts:', error);
