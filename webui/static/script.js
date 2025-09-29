@@ -12397,6 +12397,7 @@ async function handleGenreChartTypeClick(genreSlug, genreId, genreName, chartTyp
         addBeatportCardToContainer(chartData);
 
         // Automatically open discovery modal (like when you click a YouTube or Tidal card in fresh state)
+        hideLoadingOverlay();
         handleBeatportCardClick(chartHash);
 
         console.log(`✅ Created Beatport card and opened discovery modal for ${chartConfig.name}`);
