@@ -9746,6 +9746,10 @@ function initializeSyncPage() {
     // Setup homepage chart handlers (following genre page pattern to prevent duplicates)
     setupHomepageChartTypeHandlers();
 
+    // Load homepage chart collections automatically
+    loadDJChartsInline();
+    loadFeaturedChartsInline();
+
     // Logic for Beatport breadcrumb back buttons
     const beatportBackButtons = document.querySelectorAll('.breadcrumb-back');
     beatportBackButtons.forEach(button => {
@@ -11586,6 +11590,384 @@ async function loadNewChartsInline(genreSlug, genreId, genreName) {
 
         showToast(`Error loading charts: ${error.message}`, 'error');
     }
+}
+
+async function loadDJChartsInline() {
+    const chartsGrid = document.getElementById('dj-charts-grid');
+    const loadingInline = document.getElementById('dj-charts-loading-inline');
+
+    if (!chartsGrid || !loadingInline) {
+        console.error('❌ DJ charts elements not found');
+        return;
+    }
+
+    // Show loading state
+    loadingInline.style.display = 'block';
+    chartsGrid.style.display = 'none';
+    chartsGrid.innerHTML = '';
+
+    try {
+        console.log('🔍 Loading DJ charts...');
+
+        // Fetch charts from the dj-charts-improved endpoint
+        const response = await fetch('/api/beatport/dj-charts-improved?limit=20');
+        if (!response.ok) {
+            throw new Error(`Failed to fetch DJ charts: ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (!data.success || !data.tracks || data.tracks.length === 0) {
+            // Show empty state
+            chartsGrid.innerHTML = `
+                <div class="new-charts-empty">
+                    <h4>No DJ Charts Available</h4>
+                    <p>No DJ curated charts found at the moment.</p>
+                </div>
+            `;
+            loadingInline.style.display = 'none';
+            chartsGrid.style.display = 'grid';
+            return;
+        }
+
+        // Create chart items using New Charts structure
+        const chartsHTML = data.tracks.map(chart => {
+            const chartName = chart.name || chart.title || 'Untitled Chart';
+            const artistName = chart.artist || chart.curator || 'Various Artists';
+            const chartUrl = chart.url || chart.chart_url || '';
+
+            return `
+                <div class="new-chart-item" data-chart-url="${chartUrl}" data-chart-name="${chartName}" data-chart-artist="${artistName}">
+                    <div class="new-chart-header">
+                        <div class="new-chart-icon">🎧</div>
+                        <div class="new-chart-title">
+                            <h5>${chartName}</h5>
+                            <p class="new-chart-artist">by ${artistName}</p>
+                        </div>
+                    </div>
+                    <div class="new-chart-description">
+                        DJ curated chart collection
+                    </div>
+                    <div class="new-chart-footer">
+                        <div class="new-chart-type">DJ Chart</div>
+                        <div class="new-chart-action">Explore →</div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        chartsGrid.innerHTML = chartsHTML;
+
+        // Hide loading, show content
+        loadingInline.style.display = 'none';
+        chartsGrid.style.display = 'grid';
+
+        // Setup click handlers for chart items
+        setupDJChartItemHandlers();
+
+        console.log(`✅ Loaded ${data.tracks.length} DJ charts`);
+
+    } catch (error) {
+        console.error('❌ Error loading DJ charts:', error);
+
+        // Show error state
+        chartsGrid.innerHTML = `
+            <div class="new-charts-empty">
+                <h4>Error Loading DJ Charts</h4>
+                <p>Unable to load DJ chart collections.</p>
+            </div>
+        `;
+
+        loadingInline.style.display = 'none';
+        chartsGrid.style.display = 'grid';
+
+        showToast(`Error loading DJ charts: ${error.message}`, 'error');
+    }
+}
+
+async function loadFeaturedChartsInline() {
+    const chartsGrid = document.getElementById('featured-charts-grid');
+    const loadingInline = document.getElementById('featured-charts-loading-inline');
+
+    if (!chartsGrid || !loadingInline) {
+        console.error('❌ Featured charts elements not found');
+        return;
+    }
+
+    // Show loading state
+    loadingInline.style.display = 'block';
+    chartsGrid.style.display = 'none';
+    chartsGrid.innerHTML = '';
+
+    try {
+        console.log('🔍 Loading Featured charts...');
+
+        // Fetch charts from the homepage/featured-charts endpoint
+        const response = await fetch('/api/beatport/homepage/featured-charts?limit=20');
+        if (!response.ok) {
+            throw new Error(`Failed to fetch Featured charts: ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (!data.success || !data.tracks || data.tracks.length === 0) {
+            // Show empty state
+            chartsGrid.innerHTML = `
+                <div class="new-charts-empty">
+                    <h4>No Featured Charts Available</h4>
+                    <p>No featured curated charts found at the moment.</p>
+                </div>
+            `;
+            loadingInline.style.display = 'none';
+            chartsGrid.style.display = 'grid';
+            return;
+        }
+
+        // Create chart items using New Charts structure
+        const chartsHTML = data.tracks.map(chart => {
+            const chartName = chart.name || chart.title || 'Untitled Chart';
+            const artistName = chart.artist || chart.curator || 'Various Artists';
+            const chartUrl = chart.url || chart.chart_url || '';
+
+            return `
+                <div class="new-chart-item" data-chart-url="${chartUrl}" data-chart-name="${chartName}" data-chart-artist="${artistName}">
+                    <div class="new-chart-header">
+                        <div class="new-chart-icon">⭐</div>
+                        <div class="new-chart-title">
+                            <h5>${chartName}</h5>
+                            <p class="new-chart-artist">by ${artistName}</p>
+                        </div>
+                    </div>
+                    <div class="new-chart-description">
+                        Editor curated chart collection
+                    </div>
+                    <div class="new-chart-footer">
+                        <div class="new-chart-type">Featured Chart</div>
+                        <div class="new-chart-action">Explore →</div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        chartsGrid.innerHTML = chartsHTML;
+
+        // Hide loading, show content
+        loadingInline.style.display = 'none';
+        chartsGrid.style.display = 'grid';
+
+        // Setup click handlers for chart items
+        setupFeaturedChartItemHandlers();
+
+        console.log(`✅ Loaded ${data.tracks.length} Featured charts`);
+
+    } catch (error) {
+        console.error('❌ Error loading Featured charts:', error);
+
+        // Show error state
+        chartsGrid.innerHTML = `
+            <div class="new-charts-empty">
+                <h4>Error Loading Featured Charts</h4>
+                <p>Unable to load featured chart collections.</p>
+            </div>
+        `;
+
+        loadingInline.style.display = 'none';
+        chartsGrid.style.display = 'grid';
+
+        showToast(`Error loading Featured charts: ${error.message}`, 'error');
+    }
+}
+
+function setupDJChartItemHandlers() {
+    const chartItems = document.querySelectorAll('#dj-charts-grid .new-chart-item');
+
+    chartItems.forEach(item => {
+        item.addEventListener('click', async () => {
+            const chartName = item.dataset.chartName;
+            const chartUrl = item.dataset.chartUrl;
+
+            console.log(`🎧 DJ Chart clicked: ${chartName}`);
+
+            // Check if state already exists by name and type (follow same pattern as homepage Beatport cards)
+            const existingState = Object.values(beatportChartStates).find(state =>
+                state.chart && state.chart.name === chartName && state.chart.chart_type === 'dj-chart'
+            );
+
+            if (existingState) {
+                console.log(`🔄 Found existing DJ chart state for ${chartName}, opening existing modal`);
+                handleBeatportCardClick(existingState.chart.hash);
+                return;
+            }
+
+            try {
+                showToast(`Loading ${chartName}...`, 'info');
+
+                // Extract tracks from the DJ chart
+                const response = await fetch('/api/beatport/chart/extract', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        chart_url: chartUrl,
+                        chart_name: chartName,
+                        limit: 100
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Failed to extract chart tracks: ${response.status}`);
+                }
+
+                const data = await response.json();
+                if (data.success && data.tracks && data.tracks.length > 0) {
+                    console.log(`✅ Extracted ${data.tracks.length} tracks from DJ chart: ${chartName}`);
+
+                    // Generate a unique hash for state management (following homepage pattern)
+                    const chartHash = `dj_chart_${Date.now()}`;
+
+                    // Create chart data in the format expected by the state system
+                    const chartData = {
+                        hash: chartHash,
+                        name: chartName,
+                        chart_type: 'dj-chart',
+                        track_count: data.tracks.length,
+                        tracks: data.tracks.map(track => ({
+                            name: track.title || 'Unknown Title',
+                            artists: [track.artist || 'Unknown Artist'],
+                            album: chartName,
+                            duration_ms: 0,
+                            external_urls: { spotify: null },
+                            preview_url: null,
+                            popularity: 0,
+                            explicit: false,
+                            track_number: track.position || 1,
+                            disc_number: 1,
+                            id: `dj_chart_${chartHash}_${track.position || Math.random()}`,
+                            uri: null,
+                            type: 'track',
+                            is_local: false,
+                            source: 'beatport_dj_chart'
+                        }))
+                    };
+
+                    // Create state in beatportChartStates (follow same pattern as other Beatport cards)
+                    beatportChartStates[chartHash] = {
+                        chart: chartData,
+                        phase: 'fresh',
+                        cardElement: null, // Will be set when actual card is created
+                        discovery_results: [],
+                        discoveryProgress: 0
+                    };
+
+                    // Use the same click handler as other Beatport cards
+                    handleBeatportCardClick(chartHash);
+
+                } else {
+                    throw new Error('No tracks found in chart');
+                }
+
+            } catch (error) {
+                console.error('❌ Error extracting DJ chart tracks:', error);
+                showToast(`Error loading chart: ${error.message}`, 'error');
+            }
+        });
+    });
+}
+
+function setupFeaturedChartItemHandlers() {
+    const chartItems = document.querySelectorAll('#featured-charts-grid .new-chart-item');
+
+    chartItems.forEach(item => {
+        item.addEventListener('click', async () => {
+            const chartName = item.dataset.chartName;
+            const chartUrl = item.dataset.chartUrl;
+
+            console.log(`⭐ Featured Chart clicked: ${chartName}`);
+
+            // Check if state already exists by name and type (follow same pattern as homepage Beatport cards)
+            const existingState = Object.values(beatportChartStates).find(state =>
+                state.chart && state.chart.name === chartName && state.chart.chart_type === 'featured-chart'
+            );
+
+            if (existingState) {
+                console.log(`🔄 Found existing Featured chart state for ${chartName}, opening existing modal`);
+                handleBeatportCardClick(existingState.chart.hash);
+                return;
+            }
+
+            try {
+                showToast(`Loading ${chartName}...`, 'info');
+
+                // Extract tracks from the Featured chart
+                const response = await fetch('/api/beatport/chart/extract', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        chart_url: chartUrl,
+                        chart_name: chartName,
+                        limit: 100
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Failed to extract chart tracks: ${response.status}`);
+                }
+
+                const data = await response.json();
+                if (data.success && data.tracks && data.tracks.length > 0) {
+                    console.log(`✅ Extracted ${data.tracks.length} tracks from Featured chart: ${chartName}`);
+
+                    // Generate a unique hash for state management (following homepage pattern)
+                    const chartHash = `featured_chart_${Date.now()}`;
+
+                    // Create chart data in the format expected by the state system
+                    const chartData = {
+                        hash: chartHash,
+                        name: chartName,
+                        chart_type: 'featured-chart',
+                        track_count: data.tracks.length,
+                        tracks: data.tracks.map(track => ({
+                            name: track.title || 'Unknown Title',
+                            artists: [track.artist || 'Unknown Artist'],
+                            album: chartName,
+                            duration_ms: 0,
+                            external_urls: { spotify: null },
+                            preview_url: null,
+                            popularity: 0,
+                            explicit: false,
+                            track_number: track.position || 1,
+                            disc_number: 1,
+                            id: `featured_chart_${chartHash}_${track.position || Math.random()}`,
+                            uri: null,
+                            type: 'track',
+                            is_local: false,
+                            source: 'beatport_featured_chart'
+                        }))
+                    };
+
+                    // Create state in beatportChartStates (follow same pattern as other Beatport cards)
+                    beatportChartStates[chartHash] = {
+                        chart: chartData,
+                        phase: 'fresh',
+                        cardElement: null, // Will be set when actual card is created
+                        discovery_results: [],
+                        discoveryProgress: 0
+                    };
+
+                    // Use the same click handler as other Beatport cards
+                    handleBeatportCardClick(chartHash);
+
+                } else {
+                    throw new Error('No tracks found in chart');
+                }
+
+            } catch (error) {
+                console.error('❌ Error extracting Featured chart tracks:', error);
+                showToast(`Error loading chart: ${error.message}`, 'error');
+            }
+        });
+    });
 }
 
 function setupNewChartItemHandlers(genreSlug, genreId, genreName) {
