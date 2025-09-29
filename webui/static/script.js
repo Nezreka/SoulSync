@@ -10409,7 +10409,7 @@ async function handleHomepageChartTypeClick(chartType, chartEndpoint, chartName)
             limit: 100
         },
         'releases-top-10': {
-            endpoint: `/api/beatport/homepage/releases-top-10`,  // Placeholder for future
+            endpoint: `/api/beatport/homepage/top-10-releases`,  // Working route
             name: `Top 10 Releases`,
             limit: 10
         },
@@ -10419,7 +10419,7 @@ async function handleHomepageChartTypeClick(chartType, chartEndpoint, chartName)
             limit: 100
         },
         'latest-releases': {
-            endpoint: `/api/beatport/homepage/latest-releases`,  // Placeholder for future
+            endpoint: `/api/beatport/homepage/new-releases`,  // Use new-releases as fallback for now
             name: `Latest Releases`,
             limit: 50
         },

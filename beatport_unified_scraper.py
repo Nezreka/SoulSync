@@ -968,7 +968,7 @@ class BeatportUnifiedScraper:
         return hype_releases
 
     def scrape_top_10_releases_homepage(self, limit: int = 10) -> List[Dict]:
-        """Scrape Top 10 Releases from homepage section - NEW"""
+        """Scrape Top 10 Releases from homepage section - Fixed to improve title extraction"""
         print("\n🔟 Scraping Top 10 Releases from homepage...")
 
         soup = self.get_page(self.base_url)
@@ -985,25 +985,85 @@ class BeatportUnifiedScraper:
             rank_elem = item.select_one('[data-testid="track-number"]')
             rank = rank_elem.get_text(strip=True) if rank_elem else str(i + 1)
 
-            # Extract release data
-            release_data = self.extract_release_data_from_card(item)
-            if release_data:
-                # Convert to track format for compatibility
-                track_data = {
-                    'position': int(rank) if rank.isdigit() else i + 1,
-                    'rank': rank,
-                    'artist': release_data['artist'],
-                    'title': release_data['title'],
-                    'list_name': 'Top 10 Releases',
-                    'url': release_data['url'],
-                    'label': release_data.get('label', 'Unknown Label'),
-                    'image_url': release_data.get('image_url'),
-                    'price': release_data.get('price'),
-                    'badges': release_data.get('badges', []),
-                    'type': 'release',
-                    'top_10': True
-                }
-                top_releases.append(track_data)
+            # Try to extract better title information
+            title = "Unknown Title"
+
+            # Define badges/labels to filter out when looking for titles
+            badge_keywords = ['EXCLUSIVE', 'HYPE', 'NEW', 'HOT', 'FEATURED', 'STAFF PICK']
+
+            # Method 1: Look for track title specifically
+            track_title_elem = item.select_one('[class*="track-title"], [class*="TrackTitle"], [data-testid*="track-title"]')
+            if track_title_elem:
+                potential_title = track_title_elem.get_text(strip=True)
+                if potential_title.upper() not in badge_keywords:
+                    title = potential_title
+
+            if title == "Unknown Title":
+                # Method 2: Look for release name (fallback)
+                release_name_elem = item.select_one('[class*="ReleaseName"], [class*="release-name"], [class*="release-title"]')
+                if release_name_elem:
+                    potential_title = release_name_elem.get_text(strip=True)
+                    if potential_title.upper() not in badge_keywords:
+                        title = potential_title
+
+            if title == "Unknown Title":
+                # Method 3: Try to get from any link text that's not an artist or label
+                link_elems = item.select('a')
+                for link in link_elems:
+                    link_text = link.get_text(strip=True)
+                    # Skip if it's clearly an artist link, label link, empty, or a badge
+                    if (link_text and
+                        '/artist/' not in link.get('href', '') and
+                        '/label/' not in link.get('href', '') and
+                        link_text.upper() not in badge_keywords):
+                        title = link_text
+                        break
+
+            # Final fallback: if we still have Unknown Title, try any text that's not a badge
+            if title == "Unknown Title":
+                all_text_elems = item.find_all(text=True)
+                for text_elem in all_text_elems:
+                    text = text_elem.strip()
+                    if (text and
+                        len(text) > 3 and  # Must be more than 3 characters
+                        text.upper() not in badge_keywords and
+                        not text.isdigit() and  # Not just a number
+                        '$' not in text):  # Not a price
+                        title = text
+                        break
+
+            # Extract artists (original working method)
+            artist_elems = item.select('[href*="/artist/"]')
+            artists = []
+            for artist_elem in artist_elems:
+                artist_name = artist_elem.get_text(strip=True)
+                if artist_name and artist_name not in artists:
+                    artists.append(artist_name)
+
+            # Extract other data
+            link_elem = item.select_one('a[href*="/release/"]')
+            release_url = urljoin(self.base_url, link_elem.get('href')) if link_elem else ""
+
+            label_elem = item.select_one('[href*="/label/"]')
+            label = label_elem.get_text(strip=True) if label_elem else "Unknown Label"
+
+            img_elem = item.select_one('img')
+            image_url = img_elem.get('src') if img_elem else None
+
+            # Convert to track format for compatibility
+            track_data = {
+                'position': int(rank) if rank.isdigit() else i + 1,
+                'rank': rank,
+                'artist': ', '.join(artists) if artists else "Unknown Artist",
+                'title': title,
+                'list_name': 'Top 10 Releases',
+                'url': release_url,
+                'label': label,
+                'image_url': image_url,
+                'type': 'release',
+                'top_10': True
+            }
+            top_releases.append(track_data)
 
         print(f"✅ Extracted {len(top_releases)} releases from Top 10 Releases")
         return top_releases
