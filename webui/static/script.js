@@ -11799,6 +11799,7 @@ function setupDJChartItemHandlers() {
 
             try {
                 showToast(`Loading ${chartName}...`, 'info');
+                showLoadingOverlay(`Loading ${chartName}...`);
 
                 // Extract tracks from the DJ chart
                 const response = await fetch('/api/beatport/chart/extract', {
@@ -11859,6 +11860,7 @@ function setupDJChartItemHandlers() {
                     };
 
                     // Use the same click handler as other Beatport cards
+                    hideLoadingOverlay();
                     handleBeatportCardClick(chartHash);
 
                 } else {
@@ -11867,6 +11869,7 @@ function setupDJChartItemHandlers() {
 
             } catch (error) {
                 console.error('❌ Error extracting DJ chart tracks:', error);
+                hideLoadingOverlay();
                 showToast(`Error loading chart: ${error.message}`, 'error');
             }
         });
@@ -11896,6 +11899,7 @@ function setupFeaturedChartItemHandlers() {
 
             try {
                 showToast(`Loading ${chartName}...`, 'info');
+                showLoadingOverlay(`Loading ${chartName}...`);
 
                 // Extract tracks from the Featured chart
                 const response = await fetch('/api/beatport/chart/extract', {
@@ -11956,6 +11960,7 @@ function setupFeaturedChartItemHandlers() {
                     };
 
                     // Use the same click handler as other Beatport cards
+                    hideLoadingOverlay();
                     handleBeatportCardClick(chartHash);
 
                 } else {
@@ -11964,6 +11969,7 @@ function setupFeaturedChartItemHandlers() {
 
             } catch (error) {
                 console.error('❌ Error extracting Featured chart tracks:', error);
+                hideLoadingOverlay();
                 showToast(`Error loading chart: ${error.message}`, 'error');
             }
         });
@@ -11997,6 +12003,7 @@ function setupNewChartItemHandlers(genreSlug, genreId, genreName) {
 
             try {
                 showToast(`Loading ${chartName}...`, 'info');
+                showLoadingOverlay(`Loading ${chartName}...`);
 
                 // Use the new chart extraction endpoint with the actual chart URL
                 const response = await fetch('/api/beatport/chart/extract', {
@@ -12043,12 +12050,14 @@ function setupNewChartItemHandlers(genreSlug, genreId, genreName) {
                 addBeatportCardToContainer(chartData);
 
                 // Automatically open discovery modal
+                hideLoadingOverlay();
                 handleBeatportCardClick(chartHash);
 
                 console.log(`✅ Created Beatport card and opened discovery modal for ${fullChartName}`);
 
             } catch (error) {
                 console.error(`❌ Error loading chart: ${error.message}`);
+                hideLoadingOverlay();
                 showToast(`Error loading chart: ${error.message}`, 'error');
             }
         });
@@ -12213,6 +12222,7 @@ function setupGenreChartItemHandlers(genreSlug, genreId, genreName) {
                 const fullChartName = `${chartName} (${genreName})`;
 
                 showToast(`Loading ${chartName}...`, 'info');
+                showLoadingOverlay(`Loading ${chartName}...`);
 
                 // Use the new chart extraction endpoint with the actual chart URL
                 const response = await fetch('/api/beatport/chart/extract', {
@@ -12256,12 +12266,14 @@ function setupGenreChartItemHandlers(genreSlug, genreId, genreName) {
                 addBeatportCardToContainer(chartData);
 
                 // Automatically open discovery modal
+                hideLoadingOverlay();
                 handleBeatportCardClick(chartHash);
 
                 console.log(`✅ Created Beatport card and opened discovery modal for ${fullChartName}`);
 
             } catch (error) {
                 console.error(`❌ Error loading chart: ${error.message}`);
+                hideLoadingOverlay();
                 showToast(`Error loading chart: ${error.message}`, 'error');
             }
         });
