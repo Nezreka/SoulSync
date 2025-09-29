@@ -4893,7 +4893,11 @@ body {
 .genre-main-charts-section,
 .genre-releases-section,
 .genre-editorial-section,
-.genre-new-charts-section {
+.genre-new-charts-section,
+.homepage-genre-section,
+.homepage-main-charts-section,
+.homepage-releases-section,
+.homepage-hype-section {
     margin-bottom: 40px;
     padding: 20px;
     background: linear-gradient(135deg,
@@ -5063,6 +5067,52 @@ body {
     border-radius: 6px;
     text-transform: uppercase;
     letter-spacing: 0.5px;
+}
+
+/* Empty Section Placeholder */
+.empty-section-placeholder {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    padding: 40px 20px;
+    background: linear-gradient(135deg,
+        rgba(30, 30, 30, 0.5) 0%,
+        rgba(20, 20, 20, 0.7) 100%);
+    border-radius: 12px;
+    border: 2px dashed rgba(255, 255, 255, 0.15);
+    text-align: center;
+    opacity: 0.8;
+    transition: all 0.3s ease;
+    min-height: 120px;
+    justify-content: center;
+}
+
+.empty-section-placeholder:hover {
+    opacity: 1;
+    border-color: rgba(255, 255, 255, 0.25);
+    background: linear-gradient(135deg,
+        rgba(35, 35, 35, 0.6) 0%,
+        rgba(25, 25, 25, 0.8) 100%);
+}
+
+.empty-section-icon {
+    font-size: 48px;
+    opacity: 0.6;
+    filter: grayscale(1);
+}
+
+.empty-section-text h4 {
+    font-size: 18px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.8);
+    margin: 0 0 8px 0;
+}
+
+.empty-section-text p {
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.5);
+    margin: 0;
+    font-style: italic;
 }
 
 .expand-indicator {
@@ -5520,7 +5570,11 @@ body {
     .genre-main-charts-section,
     .genre-releases-section,
     .genre-editorial-section,
-    .genre-new-charts-section {
+    .genre-new-charts-section,
+    .homepage-genre-section,
+    .homepage-main-charts-section,
+    .homepage-releases-section,
+    .homepage-hype-section {
         margin-bottom: 24px;
         padding: 16px;
     }
