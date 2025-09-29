@@ -1090,94 +1090,151 @@ class BeatportUnifiedScraper:
         return charts
 
     def scrape_hype_picks_homepage(self, limit: int = 40) -> List[Dict]:
-        """Scrape Hype Picks from homepage section - IMPROVED with fallbacks"""
-        print("\n🔥 Scraping Hype Picks from homepage...")
+        """Scrape individual tracks from Beatport Hype Picks using JSON extraction - ENHANCED"""
+        print("\n🔥 Scraping Beatport Hype Picks (individual tracks)...")
 
+        # Step 1: Get release URLs from homepage cards
+        release_urls = self.extract_hype_picks_urls(limit)
+        if not release_urls:
+            return []
+
+        # Step 2: Extract individual tracks from each release
+        all_tracks = []
+        for i, release_url in enumerate(release_urls):
+            print(f"\n📀 Processing release {i+1}/{len(release_urls)}")
+            tracks = self.extract_tracks_from_hype_picks_release_json(release_url)
+            if tracks:
+                all_tracks.extend(tracks)
+
+            # Add small delay between requests to be respectful
+            import time
+            time.sleep(0.5)
+
+        print(f"✅ Extracted {len(all_tracks)} individual tracks from {len(release_urls)} hype picks releases")
+        return all_tracks
+
+    def extract_hype_picks_urls(self, limit: int) -> List[str]:
+        """Extract release URLs from Hype Picks cards on homepage"""
         soup = self.get_page(self.base_url)
         if not soup:
             return []
 
-        hype_releases = []
-
-        # Method 1: Try data-testid="hype-picks"
+        # Find Hype Picks section using data-testid
         hype_cards = soup.select('[data-testid="hype-picks"]')
-        print(f"   Method 1: Found {len(hype_cards)} cards with data-testid='hype-picks'")
+        print(f"   Found {len(hype_cards)} hype picks cards in section")
 
-        if hype_cards:
-            for i, card in enumerate(hype_cards[:limit]):
-                release_data = self.extract_release_data_from_card(card)
-                if release_data:
-                    # Convert to track format for compatibility
-                    track_data = {
-                        'position': i + 1,
-                        'artist': release_data['artist'],
-                        'title': release_data['title'],
-                        'list_name': 'Hype Picks',
-                        'url': release_data['url'],
-                        'label': release_data.get('label', 'Unknown Label'),
-                        'image_url': release_data.get('image_url'),
-                        'badges': ['HYPE'],
-                        'type': 'release',
-                        'hype': True
-                    }
-                    hype_releases.append(track_data)
+        release_urls = []
+        for i, card in enumerate(hype_cards[:limit]):
+            # Look for artwork anchor link
+            artwork_link = card.select_one('a.artwork')
+            if not artwork_link:
+                # Try other common selectors for release links
+                artwork_link = card.select_one('a[href*="/release/"]')
 
-        # Method 2: If no hype-picks cards found, look for HYPE badges
-        if not hype_releases:
-            print("   Method 2: Looking for elements with HYPE badges...")
-            hype_badges = soup.find_all(text=re.compile(r'HYPE', re.I))
-            for badge in hype_badges[:limit]:
-                try:
-                    # Find the parent card/container
-                    card = badge.find_parent(['div', 'article', 'section'])
-                    if card:
-                        release_data = self.extract_release_data_from_card(card)
-                        if release_data and release_data['title'] != "Unknown Release":
-                            track_data = {
-                                'position': len(hype_releases) + 1,
-                                'artist': release_data['artist'],
-                                'title': release_data['title'],
-                                'list_name': 'Hype Picks',
-                                'url': release_data['url'],
-                                'label': release_data.get('label', 'Unknown Label'),
-                                'image_url': release_data.get('image_url'),
-                                'badges': ['HYPE'],
-                                'type': 'release',
-                                'hype': True
-                            }
-                            hype_releases.append(track_data)
-                            if len(hype_releases) >= limit:
-                                break
-                except Exception as e:
-                    continue
+            if artwork_link and artwork_link.get('href'):
+                href = artwork_link.get('href')
+                # Ensure full URL
+                if href.startswith('/'):
+                    href = self.base_url + href
+                release_urls.append(href)
+                print(f"   {i+1}. Found release URL: {href}")
 
-        # Method 3: If still no results, look for hype section heading
-        if not hype_releases:
-            print("   Method 3: Looking for 'Hype' section heading...")
-            hype_heading = soup.find(['h1', 'h2', 'h3'], string=re.compile(r'Hype.*Pick', re.I))
-            if hype_heading:
-                section_container = hype_heading.find_parent()
-                if section_container:
-                    cards = section_container.select('[class*="card"], [class*="item"], [class*="release"]')
-                    for i, card in enumerate(cards[:limit]):
-                        release_data = self.extract_release_data_from_card(card)
-                        if release_data:
-                            track_data = {
-                                'position': i + 1,
-                                'artist': release_data['artist'],
-                                'title': release_data['title'],
-                                'list_name': 'Hype Picks',
-                                'url': release_data['url'],
-                                'label': release_data.get('label', 'Unknown Label'),
-                                'image_url': release_data.get('image_url'),
-                                'badges': ['HYPE'],
-                                'type': 'release',
-                                'hype': True
-                            }
-                            hype_releases.append(track_data)
+        return release_urls
 
-        print(f"✅ Extracted {len(hype_releases)} releases from Hype Picks")
-        return hype_releases
+    def extract_tracks_from_hype_picks_release_json(self, release_url: str) -> List[Dict]:
+        """Extract individual tracks from a hype picks release page using JSON data"""
+        print(f"🎵 Extracting tracks from: {release_url}")
+
+        soup = self.get_page(release_url)
+        if not soup:
+            return []
+
+        # Extract JSON object from page (same method as New Releases)
+        json_obj = self.extract_json_object_from_release_page(soup)
+        if not json_obj:
+            print("   ❌ No JSON data found")
+            return []
+
+        # Filter tracks for this specific release (same method as New Releases)
+        release_tracks = self.filter_tracks_for_specific_release(json_obj, release_url)
+        if not release_tracks:
+            print("   ❌ No matching tracks found")
+            return []
+
+        # Convert to our standard format (with Hype Picks branding)
+        converted_tracks = []
+        for i, track_data in enumerate(release_tracks):
+            track = self.convert_hype_picks_json_to_track_format(track_data, release_url, len(converted_tracks) + 1)
+            if track:
+                converted_tracks.append(track)
+
+        print(f"   ✅ Extracted {len(converted_tracks)} tracks")
+        return converted_tracks
+
+    def convert_hype_picks_json_to_track_format(self, track_data: Dict, release_url: str, position: int):
+        """Convert JSON track data from hype picks release page to our standard track format"""
+        try:
+            if not isinstance(track_data, dict):
+                return None
+
+            # Extract title
+            title = track_data.get('title') or track_data.get('name', 'Unknown Title')
+
+            # Extract artists
+            artist = 'Unknown Artist'
+            if 'artists' in track_data and isinstance(track_data['artists'], list):
+                artist_names = []
+                for artist_obj in track_data['artists']:
+                    if isinstance(artist_obj, dict) and 'name' in artist_obj:
+                        artist_names.append(artist_obj['name'])
+                    elif isinstance(artist_obj, str):
+                        artist_names.append(artist_obj)
+                if artist_names:
+                    artist = ', '.join(artist_names)
+
+            # Extract metadata
+            bpm = track_data.get('bpm')
+            key_data = track_data.get('key')
+            key = key_data.get('name') if isinstance(key_data, dict) else None
+            genre_data = track_data.get('genre')
+            genre = genre_data.get('name') if isinstance(genre_data, dict) else None
+            duration = track_data.get('duration') or track_data.get('length')
+            price = track_data.get('price')
+
+            # Get label from release data
+            label = 'Unknown Label'
+            if 'release' in track_data and isinstance(track_data['release'], dict):
+                release_data = track_data['release']
+                if 'label' in release_data and isinstance(release_data['label'], dict):
+                    label = release_data['label'].get('name', 'Unknown Label')
+
+            # Get track URL if available
+            track_url = release_url  # Default to release URL
+            if 'slug' in track_data and 'id' in track_data:
+                track_url = f"{self.base_url}/track/{track_data['slug']}/{track_data['id']}"
+
+            track = {
+                'position': position,
+                'title': title,
+                'artist': artist,
+                'list_name': 'Hype Picks',
+                'url': track_url,
+                'label': label,
+                'bpm': bpm,
+                'key': key,
+                'genre': genre,
+                'duration': duration,
+                'price': price,
+                'badges': ['HYPE'],  # Keep the HYPE badge
+                'type': 'track',
+                'hype': True  # Maintain hype flag
+            }
+
+            return track
+
+        except Exception as e:
+            print(f"   ❌ Error converting track data: {e}")
+            return None
 
     def scrape_top_10_releases_homepage(self, limit: int = 10) -> List[Dict]:
         """Scrape Top 10 Releases from homepage section - Fixed to improve title extraction"""
