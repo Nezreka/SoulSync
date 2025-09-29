@@ -10467,6 +10467,7 @@ async function handleHomepageChartTypeClick(chartType, chartEndpoint, chartName)
         const chartHash = `homepage_${chartType}_${Date.now()}`;
 
         showToast(`Loading ${chartConfig.name}...`, 'info');
+        showLoadingOverlay(`Loading ${chartConfig.name}...`);
 
         // Fetch tracks from the specific endpoint (following genre page pattern)
         const response = await fetch(`${chartConfig.endpoint}?limit=${chartConfig.limit}`);
@@ -10500,12 +10501,14 @@ async function handleHomepageChartTypeClick(chartType, chartEndpoint, chartName)
         addBeatportCardToContainer(chartData);
 
         // Automatically open discovery modal (like when you click a YouTube or Tidal card in fresh state - following genre page pattern)
+        hideLoadingOverlay();
         handleBeatportCardClick(chartHash);
 
         console.log(`✅ Created Beatport card and opened discovery modal for ${chartConfig.name}`);
 
     } catch (error) {
         console.error(`❌ Error loading ${chartConfig.name}:`, error);
+        hideLoadingOverlay();
         showToast(`Error loading ${chartConfig.name}: ${error.message}`, 'error');
     }
 }
@@ -12360,6 +12363,7 @@ async function handleGenreChartTypeClick(genreSlug, genreId, genreName, chartTyp
         const chartHash = `genre_${chartType}_${genreSlug}_${genreId}_${Date.now()}`;
 
         showToast(`Loading ${chartConfig.name}...`, 'info');
+        showLoadingOverlay(`Loading ${chartConfig.name}...`);
 
         // Fetch tracks from the specific endpoint
         const response = await fetch(`${chartConfig.endpoint}?limit=${chartConfig.limit}`);
@@ -12399,6 +12403,7 @@ async function handleGenreChartTypeClick(genreSlug, genreId, genreName, chartTyp
 
     } catch (error) {
         console.error(`❌ Error loading ${chartConfig.name}:`, error);
+        hideLoadingOverlay();
         showToast(`Error loading ${chartConfig.name}: ${error.message}`, 'error');
     }
 }
