@@ -4464,8 +4464,8 @@ body {
     margin-top: 12px;
 }
 
-.stat-item {
-    /* Premium badge styling matching modal detail badges */
+.beatport-hero .stat-item {
+    /* Premium badge styling matching modal detail badges - scoped to Beatport hero only */
     background: rgba(1, 255, 149, 0.15);
     color: #01FF95;
     font-size: 14px;
@@ -4484,7 +4484,7 @@ body {
     transition: all 0.3s ease;
 }
 
-.stat-item:hover {
+.beatport-hero .stat-item:hover {
     background: rgba(1, 255, 149, 0.2);
     border-color: rgba(1, 255, 149, 0.4);
     transform: translateY(-2px) scale(1.05);
