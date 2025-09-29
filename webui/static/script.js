@@ -9733,14 +9733,18 @@ function initializeSyncPage() {
         });
     });
 
-    // Logic for Beatport category cards
-    const beatportCategoryCards = document.querySelectorAll('.beatport-category-card');
-    beatportCategoryCards.forEach(card => {
-        card.addEventListener('click', () => {
-            const category = card.dataset.category;
-            handleBeatportCategoryClick(category);
+    // Logic for Homepage Genre Explorer card
+    const genreExplorerCard = document.querySelector('[data-action="show-genres"]');
+    if (genreExplorerCard) {
+        genreExplorerCard.addEventListener('click', () => {
+            console.log('🎵 Genre Explorer card clicked');
+            showBeatportSubView('genres');
+            loadBeatportGenres();
         });
-    });
+    }
+
+    // Setup homepage chart handlers (following genre page pattern to prevent duplicates)
+    setupHomepageChartTypeHandlers();
 
     // Logic for Beatport breadcrumb back buttons
     const beatportBackButtons = document.querySelectorAll('.breadcrumb-back');
@@ -10188,18 +10192,11 @@ async function clearBeatportPlaylists() {
 function handleBeatportCategoryClick(category) {
     console.log(`🎵 Beatport category clicked: ${category}`);
 
-    // Show the appropriate sub-view based on category
+    // Only handle genres category now - homepage has direct chart buttons
     switch(category) {
-        case 'top-charts':
-            showBeatportSubView('top-charts');
-            loadBeatportTopCharts(); // Load top charts dynamically
-            break;
         case 'genres':
             showBeatportSubView('genres');
             loadBeatportGenres(); // Load genres dynamically
-            break;
-        case 'staff-picks':
-            showBeatportSubView('staff-picks');
             break;
         default:
             showToast(`Unknown category: ${category}`, 'error');
@@ -10369,158 +10366,147 @@ async function loadGenreImagesProgressively(genres) {
     console.log(`✅ Progressive image loading complete: ${imagesLoaded}/${genres.length} images loaded`);
 }
 
-async function loadBeatportTopCharts() {
-    console.log('🔥 Loading Beatport top charts dynamically...');
+function setupHomepageChartTypeHandlers() {
+    console.log('🔧 Setting up homepage chart type handlers...');
 
-    const chartList = document.querySelector('#beatport-top-charts-view .beatport-chart-list');
-    if (!chartList) {
-        console.error('❌ Could not find chart list element');
+    // Select all homepage chart type cards (following genre page pattern)
+    const chartTypeCards = document.querySelectorAll('.homepage-main-charts-section .genre-chart-type-card[data-chart-type], .homepage-releases-section .genre-chart-type-card[data-chart-type], .homepage-hype-section .genre-chart-type-card[data-chart-type]');
+
+    chartTypeCards.forEach(card => {
+        // Remove existing listeners by cloning (following genre page pattern)
+        card.replaceWith(card.cloneNode(true));
+    });
+
+    // Re-select after cloning to ensure clean event listeners (following genre page pattern)
+    const newChartTypeCards = document.querySelectorAll('.homepage-main-charts-section .genre-chart-type-card[data-chart-type], .homepage-releases-section .genre-chart-type-card[data-chart-type], .homepage-hype-section .genre-chart-type-card[data-chart-type]');
+
+    newChartTypeCards.forEach(card => {
+        card.addEventListener('click', () => {
+            const chartType = card.dataset.chartType;
+            const chartEndpoint = card.dataset.chartEndpoint;
+            const chartName = card.querySelector('.chart-type-info h3').textContent;
+            console.log(`🔥 Homepage chart clicked: ${chartName} (${chartType})`);
+            handleHomepageChartTypeClick(chartType, chartEndpoint, chartName);
+        });
+    });
+
+    console.log(`✅ Setup ${newChartTypeCards.length} homepage chart handlers`);
+}
+
+async function handleHomepageChartTypeClick(chartType, chartEndpoint, chartName) {
+    console.log(`🔥 Homepage chart type clicked: ${chartType} (${chartName})`);
+
+    // Map chart types to API endpoints and create descriptive names (following genre page pattern)
+    const chartTypeMap = {
+        'top-10': {
+            endpoint: `/api/beatport/top-100`,  // Use top-100 endpoint and limit to 10
+            name: `Beatport Top 10`,
+            limit: 10
+        },
+        'top-100': {
+            endpoint: `/api/beatport/top-100`,
+            name: `Beatport Top 100`,
+            limit: 100
+        },
+        'releases-top-10': {
+            endpoint: `/api/beatport/homepage/releases-top-10`,  // Placeholder for future
+            name: `Top 10 Releases`,
+            limit: 10
+        },
+        'releases-top-100': {
+            endpoint: `/api/beatport/top-100-releases`,
+            name: `Top 100 Releases`,
+            limit: 100
+        },
+        'latest-releases': {
+            endpoint: `/api/beatport/homepage/latest-releases`,  // Placeholder for future
+            name: `Latest Releases`,
+            limit: 50
+        },
+        'hype-top-10': {
+            endpoint: `/api/beatport/hype-top-100`,  // Use hype-100 endpoint and limit to 10
+            name: `Hype Top 10`,
+            limit: 10
+        },
+        'hype-top-100': {
+            endpoint: `/api/beatport/hype-top-100`,
+            name: `Hype Top 100`,
+            limit: 100
+        },
+        'hype-picks': {
+            endpoint: `/api/beatport/homepage/hype-picks`,  // Placeholder for future
+            name: `Hype Picks`,
+            limit: 50
+        }
+    };
+
+    const chartConfig = chartTypeMap[chartType];
+    if (!chartConfig) {
+        console.error(`❌ Unknown homepage chart type: ${chartType}`);
+        showToast(`Unknown chart type: ${chartType}`, 'error');
         return;
     }
 
-    // Show loading state
-    chartList.innerHTML = `
-        <div class="chart-loading-placeholder">
-            <div class="loading-spinner"></div>
-            <p>🔥 Discovering current Beatport top charts...</p>
-        </div>
-    `;
-
     try {
-        // Define the top charts we want to show (based on our working endpoints)
-        const topCharts = [
-            {
-                id: 'beatport-top-100',
-                name: 'Beatport Top 100',
-                description: 'The hottest electronic tracks right now',
-                icon: '🏆',
-                endpoint: '/api/beatport/top-100',
-                trackCount: '100 tracks'
-            },
-            {
-                id: 'top-100-releases',
-                name: 'Top 100 New Releases',
-                description: 'Newest and most popular releases on Beatport',
-                icon: '📀',
-                endpoint: '/api/beatport/top-100-releases',
-                trackCount: '100 tracks'
-            },
-            {
-                id: 'hype-top-100',
-                name: 'Hype Top 100',
-                description: 'Trending tracks gaining momentum',
-                icon: '🚀',
-                endpoint: '/api/beatport/hype-top-100',
-                trackCount: '100 tracks'
-            }
-        ];
-
-        // Generate chart cards dynamically
-        const chartCardsHTML = topCharts.map(chart => `
-            <div class="beatport-chart-item"
-                 data-chart-type="${chart.id}"
-                 data-chart-id="${chart.id}"
-                 data-chart-name="${chart.name}"
-                 data-chart-endpoint="${chart.endpoint}">
-                <div class="chart-icon">${chart.icon}</div>
-                <div class="chart-info">
-                    <h3>${chart.name}</h3>
-                    <p>${chart.description}</p>
-                    <span class="track-count">${chart.trackCount}</span>
-                </div>
-            </div>
-        `).join('');
-
-        chartList.innerHTML = chartCardsHTML;
-
-        // Add click handlers to dynamically created chart items
-        const chartItems = chartList.querySelectorAll('.beatport-chart-item');
-        chartItems.forEach(item => {
-            item.addEventListener('click', () => {
-                const chartType = item.dataset.chartType;
-                const chartId = item.dataset.chartId;
-                const chartName = item.dataset.chartName;
-                const chartEndpoint = item.dataset.chartEndpoint;
-                handleBeatportTopChartClick(chartType, chartId, chartName, chartEndpoint);
-            });
-        });
-
-        console.log(`✅ Loaded ${topCharts.length} Beatport top charts dynamically`);
-        showToast(`Loaded ${topCharts.length} top charts`, 'success');
-
-    } catch (error) {
-        console.error('❌ Error loading Beatport top charts:', error);
-        chartList.innerHTML = `
-            <div class="chart-error-placeholder">
-                <p>❌ Failed to load top charts: ${error.message}</p>
-                <button onclick="loadBeatportTopCharts()" class="refresh-charts-btn">🔄 Retry</button>
-            </div>
-        `;
-        showToast(`Error loading Beatport top charts: ${error.message}`, 'error');
-    }
-}
-
-async function handleBeatportTopChartClick(chartType, chartId, chartName, chartEndpoint) {
-    console.log(`🔥 Beatport top chart clicked: ${chartName} - CREATING PLAYLIST CARD`);
-
-    try {
-        // Check if we already have a card for this chart
+        // Check if we already have a card for this specific chart type (following genre page pattern)
         const existingState = Object.values(beatportChartStates).find(state =>
-            state.chart && state.chart.name === chartName && state.chart.chart_type === chartType
+            state.chart && state.chart.name === chartConfig.name && state.chart.chart_type === `homepage_${chartType}`
         );
 
         if (existingState) {
-            console.log(`🔄 Found existing Beatport card for ${chartName}, opening existing modal`);
+            console.log(`🔄 Found existing Beatport card for ${chartConfig.name}, opening existing modal`);
             handleBeatportCardClick(existingState.chart.hash);
             return;
         }
 
-        // First, create a chart hash for state management
-        const chartHash = `${chartType}_${chartId}_${Date.now()}`;
+        // Create a chart hash for state management (following genre page pattern)
+        const chartHash = `homepage_${chartType}_${Date.now()}`;
 
-        showToast(`Loading ${chartName}...`, 'info');
+        showToast(`Loading ${chartConfig.name}...`, 'info');
 
-        // Fetch tracks from the chart endpoint
-        const response = await fetch(`${chartEndpoint}?limit=100`);
+        // Fetch tracks from the specific endpoint (following genre page pattern)
+        const response = await fetch(`${chartConfig.endpoint}?limit=${chartConfig.limit}`);
         if (!response.ok) {
-            throw new Error(`Failed to fetch ${chartName}: ${response.status}`);
+            throw new Error(`Failed to fetch ${chartConfig.name}: ${response.status}`);
         }
 
         const data = await response.json();
         if (!data.success || !data.tracks || data.tracks.length === 0) {
-            throw new Error(`No tracks found in ${chartName}`);
+            throw new Error(`No tracks found in ${chartConfig.name}`);
         }
 
-        // Create chart data object for playlist card
+        // Create chart data object for playlist card (following genre page pattern)
         const chartData = {
             hash: chartHash,
-            name: chartName,
-            chart_type: chartType,
+            name: chartConfig.name,
+            chart_type: `homepage_${chartType}`,
             track_count: data.tracks.length,
             tracks: data.tracks.map(track => ({
                 name: track.title || 'Unknown Title',
                 artists: [track.artist || 'Unknown Artist'],
-                album: chartName,
+                album: chartConfig.name,
                 duration_ms: 0,
                 external_urls: { beatport: track.url || '' },
                 source: 'beatport'
             }))
         };
 
-        // Add card to container (in background, like YouTube does)
-        console.log(`🃏 Creating Beatport playlist card for: ${chartName}`);
+        // Add card to container (in background, like YouTube does - following genre page pattern)
+        console.log(`🃏 Creating Beatport playlist card for: ${chartConfig.name}`);
         addBeatportCardToContainer(chartData);
 
-        // Automatically open discovery modal (like when you click a YouTube or Tidal card in fresh state)
+        // Automatically open discovery modal (like when you click a YouTube or Tidal card in fresh state - following genre page pattern)
         handleBeatportCardClick(chartHash);
 
-        console.log(`✅ Created Beatport card and opened discovery modal for ${chartName}`);
+        console.log(`✅ Created Beatport card and opened discovery modal for ${chartConfig.name}`);
 
     } catch (error) {
-        console.error(`❌ Error loading ${chartName}:`, error);
-        showToast(`Error loading ${chartName}: ${error.message}`, 'error');
+        console.error(`❌ Error loading ${chartConfig.name}:`, error);
+        showToast(`Error loading ${chartConfig.name}: ${error.message}`, 'error');
     }
 }
+
+
 
 async function openBeatportDiscoveryModal(chartHash, chartData) {
     console.log(`🎵 Opening Beatport discovery modal (reusing YouTube modal): ${chartData.name}`);
