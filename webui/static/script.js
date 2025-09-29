@@ -10434,7 +10434,7 @@ async function handleHomepageChartTypeClick(chartType, chartEndpoint, chartName)
             limit: 100
         },
         'hype-picks': {
-            endpoint: `/api/beatport/homepage/hype-picks`,  // Placeholder for future
+            endpoint: `/api/beatport/homepage/hype-picks`,  // Working route
             name: `Hype Picks`,
             limit: 50
         }
