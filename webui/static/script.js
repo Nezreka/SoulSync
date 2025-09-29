@@ -11982,11 +11982,20 @@ function setupNewChartItemHandlers(genreSlug, genreId, genreName) {
             console.log(`🎵 Chart clicked: ${chartName} by ${chartArtist}`);
             console.log(`🔗 Chart URL: ${chartUrl}`);
 
-            try {
-                // Create a virtual chart data object
-                const chartHash = `individual_chart_${genreSlug}_${Date.now()}`;
-                const fullChartName = `${chartName} (${genreName})`;
+            const fullChartName = `${chartName} (${genreName})`;
 
+            // Check if state already exists by name and type (follow same pattern as homepage Beatport cards)
+            const existingState = Object.values(beatportChartStates).find(state =>
+                state.chart && state.chart.name === fullChartName && state.chart.chart_type === 'individual_chart'
+            );
+
+            if (existingState) {
+                console.log(`🔄 Found existing individual chart state for ${fullChartName}, opening existing modal`);
+                handleBeatportCardClick(existingState.chart.hash);
+                return;
+            }
+
+            try {
                 showToast(`Loading ${chartName}...`, 'info');
 
                 // Use the new chart extraction endpoint with the actual chart URL
@@ -12009,6 +12018,9 @@ function setupNewChartItemHandlers(genreSlug, genreId, genreName) {
                 if (!data.success || !data.tracks || data.tracks.length === 0) {
                     throw new Error(`No tracks found in chart`);
                 }
+
+                // Generate a unique hash for state management (following homepage pattern)
+                const chartHash = `individual_chart_${Date.now()}`;
 
                 // Create chart data object for playlist card
                 const chartData = {
