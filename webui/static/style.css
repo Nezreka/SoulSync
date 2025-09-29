@@ -4459,18 +4459,28 @@ body {
 }
 
 .beatport-category-card {
+    /* Premium glassmorphic foundation matching add-to-wishlist modal */
     background: linear-gradient(135deg,
-        rgba(25, 25, 25, 0.95) 0%,
-        rgba(15, 15, 15, 0.98) 100%);
-    backdrop-filter: blur(20px);
-    border-radius: 16px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-top: 1px solid rgba(255, 255, 255, 0.12);
-    padding: 25px;
+        rgba(26, 26, 26, 0.95) 0%,
+        rgba(18, 18, 18, 0.98) 100%);
+    backdrop-filter: blur(20px) saturate(1.2);
+
+    /* Enhanced borders matching modal */
+    border-radius: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-top: 1px solid rgba(255, 255, 255, 0.18);
+
+    padding: 28px;
     cursor: pointer;
-    transition: all 0.3s ease;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
     overflow: hidden;
+
+    /* Premium shadow effect matching modal */
+    box-shadow:
+        0 20px 60px rgba(0, 0, 0, 0.5),
+        0 8px 32px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
 .beatport-category-card::before {
@@ -4488,11 +4498,22 @@ body {
 }
 
 .beatport-category-card:hover {
-    transform: translateY(-5px);
-    border-color: rgba(1, 255, 149, 0.3);
+    /* Enhanced glassmorphic hover state matching modal patterns */
+    background: linear-gradient(135deg,
+        rgba(30, 30, 30, 0.98) 0%,
+        rgba(22, 22, 22, 1.0) 100%);
+    backdrop-filter: blur(24px) saturate(1.3);
+
+    transform: translateY(-6px) scale(1.02);
+    border-color: rgba(1, 255, 149, 0.4);
+    border-top-color: rgba(1, 255, 149, 0.6);
+
+    /* Premium enhanced shadow matching modal hover */
     box-shadow:
-        0 20px 40px rgba(0, 0, 0, 0.4),
-        0 0 30px rgba(1, 255, 149, 0.2);
+        0 32px 80px rgba(0, 0, 0, 0.6),
+        0 16px 48px rgba(0, 0, 0, 0.4),
+        0 0 40px rgba(1, 255, 149, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.15);
 }
 
 .beatport-category-card:hover::before {
@@ -4566,36 +4587,66 @@ body {
 .beatport-breadcrumb {
     display: flex;
     align-items: center;
-    gap: 15px;
-    margin-bottom: 25px;
-    padding: 15px 20px;
-    background: rgba(25, 25, 25, 0.6);
-    border-radius: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    gap: 20px;
+    margin-bottom: 30px;
+    padding: 20px 24px;
+
+    /* Premium glassmorphic foundation matching modal header */
+    background: linear-gradient(135deg,
+        rgba(26, 26, 26, 0.95) 0%,
+        rgba(18, 18, 18, 0.98) 100%);
+    backdrop-filter: blur(20px) saturate(1.2);
+
+    /* Enhanced borders matching modal */
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-top: 1px solid rgba(255, 255, 255, 0.18);
+
+    /* Premium shadow effect matching modal sections */
+    box-shadow:
+        0 8px 24px rgba(0, 0, 0, 0.4),
+        0 4px 12px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
 .breadcrumb-back {
+    /* Premium button matching modal action buttons */
     background: linear-gradient(135deg, #01FF95 0%, #00E085 100%);
-    border: none;
-    border-radius: 8px;
-    color: #000;
-    font-size: 13px;
-    font-weight: 600;
-    padding: 8px 16px;
+    border: 1px solid rgba(1, 255, 149, 0.3);
+    border-radius: 12px;
+    color: #000000;
+    font-size: 14px;
+    font-weight: 700;
+    padding: 12px 20px;
     cursor: pointer;
-    transition: all 0.3s ease;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
     white-space: nowrap;
+
+    /* Premium shadow matching modal buttons */
+    box-shadow:
+        0 4px 16px rgba(1, 255, 149, 0.3),
+        0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
 .breadcrumb-back:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 5px 15px rgba(1, 255, 149, 0.3);
+    /* Enhanced hover state matching modal button hover */
+    background: linear-gradient(135deg, #00E085 0%, #01FF95 100%);
+    transform: translateY(-3px) scale(1.05);
+    border-color: rgba(1, 255, 149, 0.5);
+
+    /* Premium enhanced shadow matching modal hover */
+    box-shadow:
+        0 8px 24px rgba(1, 255, 149, 0.4),
+        0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
 .breadcrumb-path {
-    color: #888;
-    font-size: 14px;
+    /* Enhanced text styling matching modal metadata */
+    color: #e0e0e0;
+    font-size: 16px;
     font-weight: 500;
+    opacity: 0.9;
+    letter-spacing: 0.3px;
 }
 
 /* ================================= */
@@ -4609,21 +4660,31 @@ body {
 }
 
 .beatport-chart-item {
+    /* Premium glassmorphic foundation matching modal hero sections */
     background: linear-gradient(135deg,
-        rgba(25, 25, 25, 0.95) 0%,
-        rgba(15, 15, 15, 0.98) 100%);
-    backdrop-filter: blur(20px);
-    border-radius: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-top: 1px solid rgba(255, 255, 255, 0.12);
-    padding: 20px;
+        rgba(26, 26, 26, 0.95) 0%,
+        rgba(18, 18, 18, 0.98) 100%);
+    backdrop-filter: blur(20px) saturate(1.2);
+
+    /* Enhanced borders matching modal */
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-top: 1px solid rgba(255, 255, 255, 0.18);
+
+    padding: 24px;
     cursor: pointer;
-    transition: all 0.3s ease;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
     display: flex;
     align-items: center;
-    gap: 20px;
+    gap: 24px;
     position: relative;
     overflow: hidden;
+
+    /* Premium shadow effect matching modal cards */
+    box-shadow:
+        0 8px 24px rgba(0, 0, 0, 0.4),
+        0 4px 12px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
 .beatport-chart-item::before {
@@ -4641,11 +4702,22 @@ body {
 }
 
 .beatport-chart-item:hover {
-    transform: translateY(-3px);
-    border-color: rgba(1, 255, 149, 0.3);
+    /* Enhanced glassmorphic hover state matching modal hero hover */
+    background: linear-gradient(135deg,
+        rgba(30, 30, 30, 0.98) 0%,
+        rgba(22, 22, 22, 1.0) 100%);
+    backdrop-filter: blur(24px) saturate(1.3);
+
+    transform: translateY(-4px) scale(1.02);
+    border-color: rgba(1, 255, 149, 0.4);
+    border-top-color: rgba(1, 255, 149, 0.6);
+
+    /* Premium enhanced shadow matching modal hover */
     box-shadow:
-        0 15px 30px rgba(0, 0, 0, 0.3),
-        0 0 20px rgba(1, 255, 149, 0.2);
+        0 20px 48px rgba(0, 0, 0, 0.5),
+        0 8px 24px rgba(0, 0, 0, 0.4),
+        0 0 32px rgba(1, 255, 149, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.15);
 }
 
 .beatport-chart-item:hover::before {
@@ -4901,12 +4973,24 @@ body {
 .homepage-dj-charts-section,
 .homepage-featured-charts-section {
     margin-bottom: 40px;
-    padding: 20px;
+    padding: 28px;
+
+    /* Premium glassmorphic foundation matching modal design */
     background: linear-gradient(135deg,
-        rgba(20, 20, 20, 0.8) 0%,
-        rgba(15, 15, 15, 0.9) 100%);
-    border-radius: 16px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
+        rgba(20, 20, 20, 0.95) 0%,
+        rgba(12, 12, 12, 0.98) 100%);
+    backdrop-filter: blur(20px) saturate(1.2);
+
+    /* Enhanced borders */
+    border-radius: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-top: 1px solid rgba(255, 255, 255, 0.18);
+
+    /* Premium shadow effect matching modal */
+    box-shadow:
+        0 20px 60px rgba(0, 0, 0, 0.5),
+        0 8px 32px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
 .section-title {
@@ -4935,20 +5019,31 @@ body {
 
 /* Chart Type Cards */
 .genre-chart-type-card {
+    /* Premium glassmorphic foundation matching modal section design */
     background: linear-gradient(135deg,
-        rgba(25, 25, 25, 0.95) 0%,
-        rgba(15, 15, 15, 0.98) 100%);
-    backdrop-filter: blur(20px);
-    border-radius: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    padding: 20px;
+        rgba(26, 26, 26, 0.95) 0%,
+        rgba(18, 18, 18, 0.98) 100%);
+    backdrop-filter: blur(20px) saturate(1.2);
+
+    /* Enhanced borders matching modal */
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-top: 1px solid rgba(255, 255, 255, 0.18);
+
+    padding: 24px;
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: 20px;
     cursor: pointer;
-    transition: all 0.3s ease;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
     overflow: hidden;
+
+    /* Premium shadow effect matching modal sections */
+    box-shadow:
+        0 8px 24px rgba(0, 0, 0, 0.4),
+        0 4px 12px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
 .genre-chart-type-card::before {
@@ -4966,11 +5061,22 @@ body {
 }
 
 .genre-chart-type-card:hover {
-    transform: translateY(-3px);
-    border-color: rgba(1, 255, 149, 0.3);
+    /* Enhanced glassmorphic hover state matching modal section hover */
+    background: linear-gradient(135deg,
+        rgba(30, 30, 30, 0.98) 0%,
+        rgba(22, 22, 22, 1.0) 100%);
+    backdrop-filter: blur(24px) saturate(1.3);
+
+    transform: translateY(-4px) scale(1.02);
+    border-color: rgba(1, 255, 149, 0.4);
+    border-top-color: rgba(1, 255, 149, 0.6);
+
+    /* Premium enhanced shadow matching modal hover */
     box-shadow:
-        0 10px 25px rgba(0, 0, 0, 0.3),
-        0 0 15px rgba(1, 255, 149, 0.2);
+        0 20px 48px rgba(0, 0, 0, 0.5),
+        0 8px 24px rgba(0, 0, 0, 0.4),
+        0 0 32px rgba(1, 255, 149, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.15);
 }
 
 .genre-chart-type-card:hover::before {
@@ -5191,17 +5297,28 @@ body {
 }
 
 .new-chart-item {
+    /* Premium glassmorphic foundation matching modal card design */
     background: linear-gradient(135deg,
-        rgba(25, 15, 35, 0.95) 0%,
-        rgba(15, 10, 25, 0.98) 100%);
-    backdrop-filter: blur(15px);
-    border-radius: 10px;
-    border: 1px solid rgba(138, 43, 226, 0.2);
-    padding: 16px;
+        rgba(26, 26, 26, 0.95) 0%,
+        rgba(18, 18, 18, 0.98) 100%);
+    backdrop-filter: blur(20px) saturate(1.2);
+
+    /* Enhanced borders matching modal */
+    border-radius: 16px;
+    border: 1px solid rgba(138, 43, 226, 0.3);
+    border-top: 1px solid rgba(138, 43, 226, 0.4);
+
+    padding: 20px;
     cursor: pointer;
-    transition: all 0.3s ease;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
     overflow: hidden;
+
+    /* Premium shadow effect matching modal cards */
+    box-shadow:
+        0 8px 24px rgba(138, 43, 226, 0.2),
+        0 4px 12px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
 .new-chart-item::before {
@@ -5219,11 +5336,22 @@ body {
 }
 
 .new-chart-item:hover {
-    transform: translateY(-3px);
-    border-color: rgba(138, 43, 226, 0.4);
+    /* Enhanced glassmorphic hover state matching modal card hover */
+    background: linear-gradient(135deg,
+        rgba(30, 30, 30, 0.98) 0%,
+        rgba(22, 22, 22, 1.0) 100%);
+    backdrop-filter: blur(24px) saturate(1.3);
+
+    transform: translateY(-4px) scale(1.02);
+    border-color: rgba(138, 43, 226, 0.5);
+    border-top-color: rgba(138, 43, 226, 0.7);
+
+    /* Premium enhanced shadow matching modal hover */
     box-shadow:
-        0 8px 20px rgba(0, 0, 0, 0.3),
-        0 0 15px rgba(138, 43, 226, 0.2);
+        0 16px 40px rgba(138, 43, 226, 0.3),
+        0 8px 24px rgba(0, 0, 0, 0.4),
+        0 0 32px rgba(138, 43, 226, 0.25),
+        inset 0 1px 0 rgba(255, 255, 255, 0.15);
 }
 
 .new-chart-item:hover::before {
@@ -5396,17 +5524,28 @@ body {
 }
 
 .genre-chart-item {
+    /* Premium glassmorphic foundation matching modal card design */
     background: linear-gradient(135deg,
-        rgba(30, 20, 40, 0.95) 0%,
-        rgba(20, 15, 30, 0.98) 100%);
-    backdrop-filter: blur(20px);
-    border-radius: 12px;
-    border: 1px solid rgba(138, 43, 226, 0.2);
-    padding: 20px;
+        rgba(26, 26, 26, 0.95) 0%,
+        rgba(18, 18, 18, 0.98) 100%);
+    backdrop-filter: blur(20px) saturate(1.2);
+
+    /* Enhanced borders matching modal */
+    border-radius: 16px;
+    border: 1px solid rgba(138, 43, 226, 0.3);
+    border-top: 1px solid rgba(138, 43, 226, 0.4);
+
+    padding: 24px;
     cursor: pointer;
-    transition: all 0.3s ease;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
     overflow: hidden;
+
+    /* Premium shadow effect matching modal cards */
+    box-shadow:
+        0 8px 24px rgba(138, 43, 226, 0.2),
+        0 4px 12px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
 .genre-chart-item::before {
@@ -5424,11 +5563,22 @@ body {
 }
 
 .genre-chart-item:hover {
-    transform: translateY(-5px);
-    border-color: rgba(138, 43, 226, 0.4);
+    /* Enhanced glassmorphic hover state matching modal card hover */
+    background: linear-gradient(135deg,
+        rgba(30, 30, 30, 0.98) 0%,
+        rgba(22, 22, 22, 1.0) 100%);
+    backdrop-filter: blur(24px) saturate(1.3);
+
+    transform: translateY(-6px) scale(1.02);
+    border-color: rgba(138, 43, 226, 0.5);
+    border-top-color: rgba(138, 43, 226, 0.7);
+
+    /* Premium enhanced shadow matching modal hover */
     box-shadow:
-        0 15px 30px rgba(0, 0, 0, 0.3),
-        0 0 20px rgba(138, 43, 226, 0.3);
+        0 20px 48px rgba(138, 43, 226, 0.3),
+        0 8px 24px rgba(0, 0, 0, 0.4),
+        0 0 40px rgba(138, 43, 226, 0.25),
+        inset 0 1px 0 rgba(255, 255, 255, 0.15);
 }
 
 .genre-chart-item:hover::before {
