@@ -19885,7 +19885,7 @@ function populateBeatportTop10Releases(releases) {
 
     releases.forEach((release, index) => {
         releasesHtml += `
-            <div class="beatport-releases-top10-card" data-url="${release.url || '#'}">
+            <div class="beatport-releases-top10-card" data-url="${release.url || '#'}" data-bg-image="${release.image_url || ''}">
                 <div class="beatport-releases-top10-card-rank">${release.rank || index + 1}</div>
                 <div class="beatport-releases-top10-card-artwork">
                     ${release.image_url ?
@@ -19904,6 +19904,19 @@ function populateBeatportTop10Releases(releases) {
 
     releasesHtml += '</div>';
     container.innerHTML = releasesHtml;
+
+    // Set background images for cards
+    const cards = container.querySelectorAll('.beatport-releases-top10-card[data-bg-image]');
+    cards.forEach(card => {
+        const bgImage = card.getAttribute('data-bg-image');
+        if (bgImage) {
+            // Transform image URL from 95x95 to 500x500 for higher quality background
+            const highResImage = bgImage.replace('/image_size/95x95/', '/image_size/500x500/');
+            card.style.backgroundImage = `linear-gradient(rgba(0,0,0,0.7), rgba(0,0,0,0.8)), url('${highResImage}')`;
+            card.style.backgroundSize = 'cover';
+            card.style.backgroundPosition = 'center';
+        }
+    });
 }
 
 /**
