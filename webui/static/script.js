@@ -9735,6 +9735,7 @@ function initializeSyncPage() {
             if (tabId === 'rebuild') {
                 initializeBeatportRebuildSlider();
                 initializeBeatportReleasesSlider();
+                initializeBeatportChartsSlider();
             }
         });
     });
@@ -18364,8 +18365,6 @@ function setupBeatportSliderFunctionality() {
     // Set up indicators
     setupBeatportRebuildSliderIndicators();
 
-    // Set up slide click handlers
-    setupBeatportRebuildSlideClickHandlers();
 
     // Start auto-play
     startBeatportRebuildSliderAutoPlay();
@@ -18496,43 +18495,6 @@ function setupBeatportRebuildSliderHoverPause() {
     }
 }
 
-/**
- * Set up click handlers for slides to open Beatport URLs
- */
-function setupBeatportRebuildSlideClickHandlers() {
-    const slides = document.querySelectorAll('.beatport-rebuild-slide');
-
-    slides.forEach((slide, index) => {
-        slide.addEventListener('click', (e) => {
-            e.preventDefault();
-
-            const url = slide.dataset.url;
-            if (url && url !== '#') {
-                console.log(`🎵 Opening Beatport track: ${url}`);
-                window.open(url, '_blank');
-            } else {
-                console.log(`ℹ️ No URL available for slide ${index + 1}`);
-            }
-        });
-
-        // Add cursor pointer style for clickable slides
-        if (slide.dataset.url && slide.dataset.url !== '#') {
-            slide.style.cursor = 'pointer';
-
-            // Add hover effect
-            slide.addEventListener('mouseenter', () => {
-                slide.style.transform = 'scale(1.02)';
-                slide.style.transition = 'transform 0.3s ease';
-            });
-
-            slide.addEventListener('mouseleave', () => {
-                slide.style.transform = 'scale(1)';
-            });
-        }
-    });
-
-    console.log(`🔗 Set up click handlers for ${slides.length} slides`);
-}
 
 /**
  * Clean up beatport rebuild slider when switching away
@@ -18658,7 +18620,7 @@ function populateBeatportReleasesSlider(releases) {
             if (i < slideReleases.length) {
                 const release = slideReleases[i];
                 gridHtml += `
-                    <div class="beatport-release-card" data-url="${release.url}" onclick="window.open('${release.url}', '_blank')" style="--card-bg-image: url('${release.image_url}')">
+                    <div class="beatport-release-card" data-url="${release.url}" style="--card-bg-image: url('${release.image_url}')">
                         <div class="beatport-release-card-content">
                             <div class="beatport-release-artwork">
                                 ${release.image_url ? `<img src="${release.image_url}" alt="${release.title}" loading="lazy">` : ''}
@@ -18864,5 +18826,285 @@ function cleanupBeatportReleasesSlider() {
     if (beatportReleasesSliderState.autoPlayInterval) {
         clearInterval(beatportReleasesSliderState.autoPlayInterval);
         beatportReleasesSliderState.autoPlayInterval = null;
+    }
+}
+
+// ===================================
+// BEATPORT FEATURED CHARTS SLIDER
+// ===================================
+
+// State management for featured charts slider (copied from releases slider)
+let beatportChartsSliderState = {
+    currentSlide: 0,
+    totalSlides: 0,
+    autoPlayInterval: null,
+    autoPlayDelay: 10000,  // Slightly longer auto-play for charts
+    isInitialized: false
+};
+
+/**
+ * Initialize the beatport featured charts slider functionality (based on releases slider)
+ */
+function initializeBeatportChartsSlider() {
+    console.log('🔥 Initializing beatport featured charts slider...');
+
+    const slider = document.getElementById('beatport-charts-slider');
+    if (!slider) {
+        console.warn('Beatport charts slider not found');
+        return;
+    }
+
+    // Prevent double initialization
+    if (slider.dataset.initialized === 'true') {
+        console.log('Charts slider already initialized');
+        return;
+    }
+
+    const sliderTrack = document.getElementById('beatport-charts-slider-track');
+    const indicatorsContainer = document.getElementById('beatport-charts-slider-indicators');
+
+    if (!sliderTrack || !indicatorsContainer) {
+        console.warn('Charts slider elements not found');
+        return;
+    }
+
+    // Load data and initialize
+    loadBeatportFeaturedCharts().then(success => {
+        if (success) {
+            setupBeatportChartsSliderNavigation();
+            setupBeatportChartsSliderIndicators();
+            setupBeatportChartsSliderHoverPause();
+            startBeatportChartsSliderAutoPlay();
+            slider.dataset.initialized = 'true';
+            beatportChartsSliderState.isInitialized = true;
+            console.log('✅ Featured charts slider initialized successfully');
+        }
+    });
+}
+
+/**
+ * Load featured charts data from API
+ */
+async function loadBeatportFeaturedCharts() {
+    try {
+        console.log('📊 Loading featured charts data...');
+        const response = await fetch('/api/beatport/featured-charts');
+        const data = await response.json();
+
+        if (data.success && data.charts && data.charts.length > 0) {
+            console.log(`📈 Loaded ${data.charts.length} featured charts`);
+            createBeatportChartsSlides(data.charts);
+            return true;
+        } else {
+            console.warn('No featured charts data available');
+            return false;
+        }
+    } catch (error) {
+        console.error('❌ Error loading featured charts:', error);
+        return false;
+    }
+}
+
+/**
+ * Create chart slides with grid layout (copied from releases slider)
+ */
+function createBeatportChartsSlides(charts) {
+    const sliderTrack = document.getElementById('beatport-charts-slider-track');
+    const indicatorsContainer = document.getElementById('beatport-charts-slider-indicators');
+
+    if (!sliderTrack || !indicatorsContainer) {
+        console.error('Charts slider elements not found');
+        return;
+    }
+
+    const cardsPerSlide = 10; // 5x2 grid
+    const totalSlides = Math.ceil(charts.length / cardsPerSlide);
+
+    // Clear existing content
+    sliderTrack.innerHTML = '';
+    indicatorsContainer.innerHTML = '';
+
+    // Update state
+    beatportChartsSliderState.totalSlides = totalSlides;
+    beatportChartsSliderState.currentSlide = 0;
+
+    console.log(`🎯 Creating ${totalSlides} chart slides with ${cardsPerSlide} cards each`);
+
+    // Generate slides HTML
+    for (let slideIndex = 0; slideIndex < totalSlides; slideIndex++) {
+        const startIndex = slideIndex * cardsPerSlide;
+        const endIndex = Math.min(startIndex + cardsPerSlide, charts.length);
+        const slideCharts = charts.slice(startIndex, endIndex);
+
+        // Create grid HTML for this slide
+        const gridHtml = slideCharts.map(chart => {
+            const bgImageStyle = chart.image ? `--chart-bg-image: url('${chart.image}')` : '';
+            return `
+                <div class="beatport-chart-card" style="${bgImageStyle}" data-url="${chart.url || ''}">
+                    <div class="beatport-chart-card-content">
+                        <div class="beatport-chart-name">${chart.name || 'Unknown Chart'}</div>
+                        <div class="beatport-chart-creator">${chart.creator || 'Unknown Creator'}</div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        // Create slide HTML
+        const slideHtml = `
+            <div class="beatport-charts-slide ${slideIndex === 0 ? 'active' : ''}">
+                <div class="beatport-charts-grid">
+                    ${gridHtml}
+                </div>
+            </div>
+        `;
+
+        sliderTrack.innerHTML += slideHtml;
+
+        // Create indicator
+        const indicatorHtml = `<button class="beatport-charts-indicator ${slideIndex === 0 ? 'active' : ''}" data-slide="${slideIndex}"></button>`;
+        indicatorsContainer.innerHTML += indicatorHtml;
+    }
+
+    console.log(`✅ Created ${totalSlides} chart slides`);
+}
+
+/**
+ * Set up navigation functionality (copied from releases slider with button cloning)
+ */
+function setupBeatportChartsSliderNavigation() {
+    const prevBtn = document.getElementById('beatport-charts-prev-btn');
+    const nextBtn = document.getElementById('beatport-charts-next-btn');
+
+    if (prevBtn) {
+        // Clone button to remove all existing event listeners
+        const newPrevBtn = prevBtn.cloneNode(true);
+        prevBtn.parentNode.replaceChild(newPrevBtn, prevBtn);
+
+        newPrevBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('Previous charts button clicked, current slide:', beatportChartsSliderState.currentSlide);
+            goToBeatportChartsSlide(beatportChartsSliderState.currentSlide - 1);
+            resetBeatportChartsSliderAutoPlay();
+        });
+    }
+
+    if (nextBtn) {
+        // Clone button to remove all existing event listeners
+        const newNextBtn = nextBtn.cloneNode(true);
+        nextBtn.parentNode.replaceChild(newNextBtn, nextBtn);
+
+        newNextBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('Next charts button clicked, current slide:', beatportChartsSliderState.currentSlide);
+            goToBeatportChartsSlide(beatportChartsSliderState.currentSlide + 1);
+            resetBeatportChartsSliderAutoPlay();
+        });
+    }
+}
+
+/**
+ * Set up indicator functionality (copied from releases slider)
+ */
+function setupBeatportChartsSliderIndicators() {
+    const indicators = document.querySelectorAll('.beatport-charts-indicator');
+
+    indicators.forEach((indicator, index) => {
+        indicator.addEventListener('click', () => {
+            goToBeatportChartsSlide(index);
+            resetBeatportChartsSliderAutoPlay();
+        });
+    });
+}
+
+/**
+ * Navigate to a specific slide (copied from releases slider)
+ */
+function goToBeatportChartsSlide(slideIndex) {
+    console.log('goToBeatportChartsSlide called with:', slideIndex, 'current:', beatportChartsSliderState.currentSlide);
+
+    // Wrap around if out of bounds
+    if (slideIndex < 0) {
+        slideIndex = beatportChartsSliderState.totalSlides - 1;
+    } else if (slideIndex >= beatportChartsSliderState.totalSlides) {
+        slideIndex = 0;
+    }
+
+    console.log('After wrapping, slideIndex:', slideIndex);
+
+    // Update current slide
+    beatportChartsSliderState.currentSlide = slideIndex;
+
+    // Update slide visibility
+    const slides = document.querySelectorAll('.beatport-charts-slide');
+    slides.forEach((slide, index) => {
+        slide.classList.remove('active', 'prev', 'next');
+
+        if (index === slideIndex) {
+            slide.classList.add('active');
+        } else if (index < slideIndex) {
+            slide.classList.add('prev');
+        } else {
+            slide.classList.add('next');
+        }
+    });
+
+    // Update indicators
+    const indicators = document.querySelectorAll('.beatport-charts-indicator');
+    indicators.forEach((indicator, index) => {
+        indicator.classList.toggle('active', index === slideIndex);
+    });
+
+    console.log('Charts slide updated to:', beatportChartsSliderState.currentSlide);
+}
+
+/**
+ * Start auto-play functionality (copied from releases slider)
+ */
+function startBeatportChartsSliderAutoPlay() {
+    if (beatportChartsSliderState.autoPlayInterval) {
+        clearInterval(beatportChartsSliderState.autoPlayInterval);
+    }
+
+    beatportChartsSliderState.autoPlayInterval = setInterval(() => {
+        goToBeatportChartsSlide(beatportChartsSliderState.currentSlide + 1);
+    }, beatportChartsSliderState.autoPlayDelay);
+}
+
+/**
+ * Reset auto-play timer (copied from releases slider)
+ */
+function resetBeatportChartsSliderAutoPlay() {
+    startBeatportChartsSliderAutoPlay();
+}
+
+/**
+ * Set up hover pause functionality (copied from releases slider)
+ */
+function setupBeatportChartsSliderHoverPause() {
+    const sliderContainer = document.querySelector('.beatport-charts-slider-container');
+
+    if (sliderContainer) {
+        sliderContainer.addEventListener('mouseenter', () => {
+            if (beatportChartsSliderState.autoPlayInterval) {
+                clearInterval(beatportChartsSliderState.autoPlayInterval);
+                beatportChartsSliderState.autoPlayInterval = null;
+            }
+        });
+
+        sliderContainer.addEventListener('mouseleave', () => {
+            startBeatportChartsSliderAutoPlay();
+        });
+    }
+}
+
+/**
+ * Clean up charts slider when switching away (copied from releases slider)
+ */
+function cleanupBeatportChartsSlider() {
+    if (beatportChartsSliderState.autoPlayInterval) {
+        clearInterval(beatportChartsSliderState.autoPlayInterval);
+        beatportChartsSliderState.autoPlayInterval = null;
     }
 }
