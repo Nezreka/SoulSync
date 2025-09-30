@@ -389,6 +389,9 @@
                                 <button class="beatport-tab-button" data-beatport-tab="playlists">
                                     <span class="tab-icon playlist-icon"></span> My Playlists
                                 </button>
+                                <button class="beatport-tab-button" data-beatport-tab="rebuild">
+                                    <span class="tab-icon rebuild-icon"></span> Rebuild
+                                </button>
                             </div>
 
                             <!-- Browse Charts Tab Content -->
@@ -773,6 +776,67 @@
                                 </div>
                                 <div class="playlist-scroll-container" id="beatport-playlist-container">
                                     <div class="playlist-placeholder">Your created Beatport playlists will appear here.</div>
+                                </div>
+                            </div>
+
+                            <!-- Rebuild Tab Content -->
+                            <div class="beatport-tab-content" id="beatport-rebuild-content">
+                                <div class="beatport-rebuild-slider-container">
+                                    <div class="beatport-rebuild-slider" id="beatport-rebuild-slider">
+                                        <div class="beatport-rebuild-slider-track" id="beatport-rebuild-slider-track">
+                                            <!-- Loading placeholder -->
+                                            <div class="beatport-rebuild-loading">
+                                                <div class="beatport-rebuild-loading-content">
+                                                    <h2>🎯 Loading Fresh Beatport Tracks...</h2>
+                                                    <p>Fetching the latest music from Beatport</p>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <!-- Slider Navigation -->
+                                        <div class="beatport-rebuild-slider-nav">
+                                            <button class="beatport-rebuild-nav-btn beatport-rebuild-prev-btn" id="beatport-rebuild-prev-btn">‹</button>
+                                            <button class="beatport-rebuild-nav-btn beatport-rebuild-next-btn" id="beatport-rebuild-next-btn">›</button>
+                                        </div>
+
+                                        <!-- Slider Indicators -->
+                                        <div class="beatport-rebuild-slider-indicators">
+                                            <!-- Indicators will be dynamically generated -->
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- New Releases Grid Slideshow Section -->
+                                <div class="beatport-releases-section">
+                                    <div class="beatport-releases-header">
+                                        <h2 class="beatport-releases-title">🆕 New Releases</h2>
+                                        <p class="beatport-releases-subtitle">Latest albums and EPs from Beatport</p>
+                                    </div>
+
+                                    <div class="beatport-releases-slider-container">
+                                        <div class="beatport-releases-slider" id="beatport-releases-slider">
+                                            <div class="beatport-releases-slider-track" id="beatport-releases-slider-track">
+                                                <!-- Loading placeholder -->
+                                                <div class="beatport-releases-loading">
+                                                    <div class="beatport-releases-loading-content">
+                                                        <h3>📀 Loading New Releases...</h3>
+                                                        <p>Fetching the latest albums and EPs</p>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <!-- Slider Navigation -->
+                                            <div class="beatport-releases-slider-nav">
+                                                <button class="beatport-releases-nav-btn beatport-releases-prev-btn" id="beatport-releases-prev-btn">‹</button>
+                                                <button class="beatport-releases-nav-btn beatport-releases-next-btn" id="beatport-releases-next-btn">›</button>
+                                            </div>
+
+                                            <!-- Slider Indicators -->
+                                            <div class="beatport-releases-slider-indicators" id="beatport-releases-slider-indicators">
+                                                <!-- Indicators will be dynamically generated -->
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>

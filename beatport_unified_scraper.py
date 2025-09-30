@@ -1284,6 +1284,470 @@ class BeatportUnifiedScraper:
             print(f"   ❌ Error converting track data: {e}")
             return None
 
+    def scrape_new_on_beatport_hero(self, limit: int = 10) -> List[Dict]:
+        """Scrape the 'New on Beatport' hero slideshow from homepage"""
+        print("\n🎯 Scraping 'New on Beatport' hero slideshow...")
+
+        soup = self.get_page(self.base_url)
+        if not soup:
+            return []
+
+        tracks = []
+
+        # Method 1: Look for the specific wrapper class you mentioned
+        hero_wrapper = soup.find('div', class_='Homepage-style__NewOnBeatportWrapper-sc-deeb4244-2 iyIchZ')
+        if hero_wrapper:
+            print("   ✅ Found Homepage NewOnBeatportWrapper")
+            tracks.extend(self._extract_from_hero_wrapper(hero_wrapper, limit))
+
+        # Method 2: Look for carousel with aria attributes you mentioned
+        if len(tracks) < 5:  # Only try if we don't have enough tracks
+            carousel = soup.find('div', {'aria-roledescription': 'carousel', 'aria-label': 'Carousel'})
+            if carousel:
+                print("   ✅ Found carousel with aria-roledescription and aria-label")
+                additional_tracks = self._extract_from_carousel(carousel, limit)
+                # Merge without duplicates
+                existing_urls = {track.get('url') for track in tracks}
+                for track in additional_tracks:
+                    if track.get('url') not in existing_urls:
+                        tracks.append(track)
+
+        # Method 3: Look for individual slide items more broadly
+        if len(tracks) < 5:
+            print("   🔍 Looking for individual carousel items...")
+            carousel_items = soup.find_all(['div', 'article'], class_=re.compile(r'carousel.*item|item.*carousel|slide', re.I))
+            print(f"   Found {len(carousel_items)} potential carousel items")
+
+            for i, item in enumerate(carousel_items[:limit * 2]):  # Check more items
+                track_data = self._extract_track_from_slide(item, f"Carousel Item {i+1}")
+                if track_data and track_data.get('url'):
+                    # Check for duplicate URLs
+                    existing_urls = {track.get('url') for track in tracks}
+                    if track_data['url'] not in existing_urls:
+                        tracks.append(track_data)
+
+        print(f"   📊 Extracted {len(tracks)} tracks from New on Beatport hero")
+        return tracks[:limit]
+
+    def _extract_from_hero_wrapper(self, wrapper, limit: int) -> List[Dict]:
+        """Extract tracks from the specific NewOnBeatportWrapper"""
+        tracks = []
+
+        # Method 1: Look for all release/track links within the wrapper
+        release_links = wrapper.find_all('a', href=re.compile(r'/release/|/track/'))
+
+        seen_urls = set()
+        for i, link in enumerate(release_links):
+            href = link.get('href')
+            if href and href not in seen_urls:
+                seen_urls.add(href)
+
+                # Find the parent container that likely contains all track info
+                parent = link.find_parent(['div', 'article', 'section'])
+                if parent:
+                    track_data = self._extract_track_from_slide(parent, f"Hero Release {i+1}")
+                    if track_data:
+                        tracks.append(track_data)
+
+        # Method 2: If not enough tracks, try broader slide detection
+        if len(tracks) < 5:
+            slides = wrapper.find_all(['div', 'article', 'section'], class_=re.compile(r'slide|item|card', re.I))
+
+            for i, slide in enumerate(slides[:limit]):
+                track_data = self._extract_track_from_slide(slide, f"Hero Slide {i+1}")
+                if track_data:
+                    # Check for duplicates by URL
+                    url = track_data.get('url')
+                    if url and url not in seen_urls:
+                        seen_urls.add(url)
+                        tracks.append(track_data)
+
+        # Method 3: If still not enough, try finding all elements with images
+        if len(tracks) < 5:
+            image_containers = wrapper.find_all(['div', 'figure'], recursive=True)
+
+            for i, container in enumerate(image_containers):
+                if container.find('img') and container.find('a'):
+                    track_data = self._extract_track_from_slide(container, f"Hero Image {i+1}")
+                    if track_data:
+                        url = track_data.get('url')
+                        if url and url not in seen_urls:
+                            seen_urls.add(url)
+                            tracks.append(track_data)
+                            if len(tracks) >= limit:
+                                break
+
+        return tracks
+
+    def _extract_from_carousel(self, carousel, limit: int) -> List[Dict]:
+        """Extract tracks from carousel element"""
+        tracks = []
+
+        # Look for individual slides within carousel
+        slides = carousel.find_all(['div', 'article', 'li'], class_=re.compile(r'slide|item|card', re.I))
+
+        if not slides:
+            # Try alternative selectors
+            slides = carousel.find_all(['div', 'article'], recursive=True)
+            slides = [s for s in slides if s.find('a') or s.find('img') or 'track' in str(s.get('class', '')).lower()]
+
+        for i, slide in enumerate(slides[:limit]):
+            track_data = self._extract_track_from_slide(slide, f"Carousel Slide {i+1}")
+            if track_data:
+                tracks.append(track_data)
+
+        return tracks
+
+    def _extract_from_hero_element(self, element, limit: int) -> List[Dict]:
+        """Extract tracks from general hero element"""
+        tracks = []
+
+        # Look for any trackable items
+        items = element.find_all(['div', 'article', 'a'], recursive=True)
+        track_items = []
+
+        for item in items:
+            # Filter for elements likely to contain track info
+            if (item.find('img') or
+                'track' in str(item.get('class', '')).lower() or
+                'release' in str(item.get('class', '')).lower() or
+                item.get('href', '').count('/') > 2):
+                track_items.append(item)
+
+        for i, item in enumerate(track_items[:limit]):
+            track_data = self._extract_track_from_slide(item, f"Hero Item {i+1}")
+            if track_data:
+                tracks.append(track_data)
+
+        return tracks
+
+    def _extract_track_from_slide(self, slide, context: str) -> Optional[Dict]:
+        """Extract track information from a slide/item element"""
+        try:
+            track_data = {}
+
+            # Extract image
+            img = slide.find('img')
+            if img:
+                track_data['image_url'] = img.get('src') or img.get('data-src')
+                track_data['alt_text'] = img.get('alt', '')
+
+            # Extract link URL
+            link = slide.find('a')
+            if link:
+                href = link.get('href')
+                if href:
+                    track_data['url'] = urljoin(self.base_url, href)
+
+            # Enhanced title/track name extraction
+            title_selectors = [
+                'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+                '[class*="title"]', '[class*="name"]', '[class*="track"]',
+                '[data-testid*="title"]', '[data-testid*="name"]',
+                # Beatport-specific selectors
+                '[class*="TrackTitle"]', '[class*="ReleaseTitle"]',
+                '[class*="Title"]', 'span:contains(".")'
+            ]
+
+            for selector in title_selectors:
+                title_elem = slide.select_one(selector)
+                if title_elem and title_elem.get_text(strip=True):
+                    title_text = title_elem.get_text(strip=True)
+                    # Filter out common non-title text
+                    if title_text not in ['New on Beatport', 'Previous slide', 'Next slide', 'EXCLUSIVE', 'HYPE']:
+                        track_data['title'] = title_text
+                        break
+
+            # Enhanced artist extraction
+            artist_selectors = [
+                '[class*="artist"]', '[class*="by"]', '[class*="author"]',
+                '[data-testid*="artist"]', '[data-testid*="by"]',
+                # Beatport-specific selectors
+                '[class*="Artist"]', '[class*="Label"]'
+            ]
+
+            for selector in artist_selectors:
+                artist_elem = slide.select_one(selector)
+                if artist_elem and artist_elem.get_text(strip=True):
+                    track_data['artist'] = artist_elem.get_text(strip=True)
+                    break
+
+            # Extract any text content for analysis
+            all_text = slide.get_text(strip=True)
+            if all_text:
+                track_data['raw_text'] = all_text[:400]  # More chars for analysis
+
+            # Try to parse title and artist from raw text if not found
+            if not track_data.get('title') or not track_data.get('artist'):
+                parsed_data = self._parse_title_artist_from_raw_text(all_text)
+                if parsed_data.get('title') and not track_data.get('title'):
+                    track_data['title'] = parsed_data['title']
+                if parsed_data.get('artist') and not track_data.get('artist'):
+                    track_data['artist'] = parsed_data['artist']
+
+            # FALLBACK: Extract title from URL slug if still no title/artist found
+            if (not track_data.get('title') or not track_data.get('artist')) and track_data.get('url'):
+                url_data = self._extract_title_artist_from_url(track_data['url'])
+                if url_data.get('title') and not track_data.get('title'):
+                    track_data['title'] = url_data['title']
+                if url_data.get('artist') and not track_data.get('artist'):
+                    track_data['artist'] = url_data.get('artist', 'Various Artists')
+
+            # Apply final cleaning to all extracted data
+            if track_data.get('title'):
+                track_data['title'] = self._clean_title(track_data['title'])
+            if track_data.get('artist'):
+                track_data['artist'] = self._clean_artist(track_data['artist'])
+
+            # Extract all class names for debugging
+            classes = slide.get('class', [])
+            if classes:
+                track_data['element_classes'] = ' '.join(classes)
+
+            # Only return if we found at least some useful data
+            if track_data.get('title') or track_data.get('artist') or track_data.get('url') or track_data.get('image_url'):
+                track_data['source'] = f"New on Beatport Hero - {context}"
+                track_data['scraped_at'] = time.time()
+                print(f"   ✅ {context}: {track_data.get('title', 'No title')} - {track_data.get('artist', 'No artist')}")
+                return track_data
+            else:
+                print(f"   ❌ {context}: No usable data found")
+                return None
+
+        except Exception as e:
+            print(f"   ❌ Error extracting from {context}: {e}")
+            return None
+
+    def _extract_title_artist_from_url(self, url: str) -> Dict[str, str]:
+        """Extract title and artist from Beatport URL slug as fallback"""
+        result = {}
+
+        try:
+            # Extract the slug from URL like: https://beatport.com/release/gods-window-pt-1/5291662
+            if '/release/' in url:
+                parts = url.split('/release/')
+                if len(parts) > 1:
+                    slug_part = parts[1].split('/')[0]  # Get "gods-window-pt-1"
+
+                    # Convert slug to title (replace hyphens with spaces, title case)
+                    title = slug_part.replace('-', ' ').title()
+
+                    # Clean up common patterns
+                    title = title.replace(' Pt ', ' Pt. ')
+                    title = title.replace(' Ep', ' EP')
+                    title = title.replace(' Feat ', ' feat. ')
+                    title = title.replace(' Vs ', ' vs. ')
+                    title = title.replace(' Remix', ' Remix')
+
+                    result['title'] = title
+
+            elif '/track/' in url:
+                parts = url.split('/track/')
+                if len(parts) > 1:
+                    slug_part = parts[1].split('/')[0]
+                    title = slug_part.replace('-', ' ').title()
+                    result['title'] = title
+
+        except Exception as e:
+            pass  # Silently handle URL extraction errors
+
+        return result
+
+    def _parse_title_artist_from_raw_text(self, raw_text: str) -> Dict[str, str]:
+        """Parse title and artist from raw text using patterns"""
+        result = {}
+
+        if not raw_text:
+            return result
+
+        # Remove common Beatport UI elements
+        text = raw_text.replace('New on Beatport', '').replace('Previous slide', '').replace('Next slide', '')
+        text = text.replace('EXCLUSIVE', '').replace('HYPE', '').replace('PlayAdd to queueAdd to playlist', '')
+
+        # Pattern 1: Look for track title followed by artist names (common Beatport pattern)
+        # Example: "Gods window, Pt. 1Thakzin,Thandazo,Xelimpilo"
+        lines = [line.strip() for line in text.split('\n') if line.strip()]
+
+        for i, line in enumerate(lines):
+            # Look for lines that might contain title and artists
+            if len(line) > 5 and '$' not in line and 'Music' in line:
+                # This might be a title line
+                # Check if the next part contains artist names
+                words = line.split()
+                for j in range(1, len(words)):
+                    potential_title = ' '.join(words[:j])
+                    potential_artists = ' '.join(words[j:])
+
+                    # Check if we have a reasonable title and artist split
+                    if (len(potential_title) > 2 and len(potential_artists) > 2 and
+                        ',' in potential_artists):  # Artists often comma-separated
+                        result['title'] = potential_title
+                        result['artist'] = potential_artists.split(',')[0]  # First artist
+                        break
+
+                if result.get('title'):
+                    break
+
+        # Pattern 2: Look for specific patterns in the text
+        patterns = [
+            # Pattern: "Title"Artist1,Artist2 (with capital letter start for artist)
+            r'([A-Za-z\'\s\(\)][^,]{2,40})([A-Z][a-z][^,]{2,}(?:,[A-Z][^,]+)*)',
+            # Pattern: Look for quoted titles
+            r'"([^"]+)"([^$]+)',
+            r"'([^']+)'([^$]+)",
+            # Pattern: Title followed by artist names (looser)
+            r'([A-Za-z\'\s\(\)][^,]{2,25})\s+([A-Z][a-z][A-Za-z\s]{2,25})',
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, text)
+            if match and not result.get('title'):
+                potential_title = match.group(1).strip()
+                potential_artist = match.group(2).strip()
+
+                # Additional validation
+                if (len(potential_title) > 2 and len(potential_artist) > 2 and
+                    not potential_title.endswith('Music') and
+                    not potential_artist.startswith('$')):
+                    result['title'] = potential_title
+                    result['artist'] = potential_artist.split(',')[0]  # First artist
+                    break
+
+        # Pattern 3: Handle concatenated cases like "Come to MeDarius Syrossian"
+        if not result.get('title') and not result.get('artist'):
+            # Look for cases where title+artist are concatenated
+            concatenated_pattern = r'([A-Za-z\'\s\(\)][^A-Z]{3,25})([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)'
+            match = re.search(concatenated_pattern, text)
+            if match:
+                potential_title = match.group(1).strip()
+                potential_artist = match.group(2).strip()
+
+                # Make sure it looks reasonable
+                if (len(potential_title) > 2 and len(potential_artist) > 2 and
+                    ' ' in potential_artist and  # Artist should have space (first + last name)
+                    not potential_title.endswith('Music')):
+                    result['title'] = potential_title
+                    result['artist'] = potential_artist
+
+        # Clean up results
+        if result.get('title'):
+            # Clean title - preserve common music characters
+            title = result['title']
+            title = re.sub(r'[^\w\s\(\)\-\.\'\&]', ' ', title)
+            title = re.sub(r'\s+', ' ', title).strip()
+            result['title'] = title
+
+        if result.get('artist'):
+            # Clean artist - handle multiple artists and remove label names
+            artist = result['artist']
+
+            # Remove common label/publisher suffixes
+            label_patterns = [
+                r'\s*Music\s*$', r'\s*Records?\s*$', r'\s*Recordings?\s*$',
+                r'\s*Entertainment\s*$', r'\s*Productions?\s*$',
+                r'\s*Label\s*$', r'elrow\s*Music\s*$',
+                r'Happy\s*Techno\s*Music\s*$', r'In\s*It\s*Together\s*Records?\s*$'
+            ]
+
+            for pattern in label_patterns:
+                artist = re.sub(pattern, '', artist, flags=re.IGNORECASE)
+
+            # Take only the first artist if comma-separated
+            if ',' in artist:
+                artist = artist.split(',')[0].strip()
+
+            # Clean special characters but preserve common artist name characters
+            artist = re.sub(r'[^\w\s\-\.\'\&]', ' ', artist)
+            artist = re.sub(r'\s+', ' ', artist).strip()
+
+            # Remove trailing/leading words that don't look like artist names
+            words = artist.split()
+            cleaned_words = []
+            for word in words:
+                # Skip words that are clearly not part of artist names
+                if word.lower() not in ['music', 'records', 'record', 'entertainment',
+                                      'productions', 'production', 'label', 'remix',
+                                      'featuring', 'feat', 'ft']:
+                    cleaned_words.append(word)
+                else:
+                    break  # Stop at first label-like word
+
+            if cleaned_words:
+                result['artist'] = ' '.join(cleaned_words)
+            else:
+                result['artist'] = artist  # Fallback to original if all words filtered
+
+        return result
+
+    def _clean_title(self, title: str) -> str:
+        """Clean and standardize track title"""
+        if not title:
+            return title
+
+        # Remove common suffixes that get attached
+        title = re.sub(r'(Darius\s+Syrossian.*|Happy\s+Techno.*|Ron\s*$)', '', title, flags=re.IGNORECASE)
+
+        # Clean title - preserve common music characters
+        title = re.sub(r'[^\w\s\(\)\-\.\'\&]', ' ', title)
+        title = re.sub(r'\s+', ' ', title).strip()
+
+        # Remove trailing words that don't belong in titles
+        words = title.split()
+        cleaned_words = []
+        for word in words:
+            # Stop at artist names or label words
+            if (word[0].isupper() and len(word) > 2 and
+                word.lower() not in ['the', 'of', 'and', 'in', 'on', 'at', 'to', 'for', 'pt']):
+                # This might be an artist name starting
+                break
+            cleaned_words.append(word)
+
+        if cleaned_words:
+            return ' '.join(cleaned_words)
+        return title
+
+    def _clean_artist(self, artist: str) -> str:
+        """Clean and standardize artist name"""
+        if not artist:
+            return artist
+
+        # Remove common label/publisher suffixes
+        label_patterns = [
+            r'\s*Music\s*$', r'\s*Records?\s*$', r'\s*Recordings?\s*$',
+            r'\s*Entertainment\s*$', r'\s*Productions?\s*$',
+            r'\s*Label\s*$', r'elrow\s*Music\s*$',
+            r'Happy\s*Techno\s*Music\s*$', r'In\s*It\s*Together\s*Records?\s*$',
+            r'Musicelrow\s*Music\s*$', r'Freenzy\s*Musicelrow\s*Music\s*$'
+        ]
+
+        for pattern in label_patterns:
+            artist = re.sub(pattern, '', artist, flags=re.IGNORECASE)
+
+        # Take only the first artist if comma-separated
+        if ',' in artist:
+            artist = artist.split(',')[0].strip()
+
+        # Clean special characters but preserve common artist name characters
+        artist = re.sub(r'[^\w\s\-\.\'\&]', ' ', artist)
+        artist = re.sub(r'\s+', ' ', artist).strip()
+
+        # Remove trailing/leading words that don't look like artist names
+        words = artist.split()
+        cleaned_words = []
+        for word in words:
+            # Skip words that are clearly not part of artist names
+            if word.lower() not in ['music', 'records', 'record', 'entertainment',
+                                  'productions', 'production', 'label', 'remix',
+                                  'featuring', 'feat', 'ft', 'musicelrow', 'elrow',
+                                  'freenzy', 'happy', 'techno']:
+                cleaned_words.append(word)
+            else:
+                break  # Stop at first label-like word
+
+        if cleaned_words:
+            return ' '.join(cleaned_words)
+        return artist
+
     def scrape_top_10_releases_homepage(self, limit: int = 10) -> List[Dict]:
         """Scrape Top 10 Releases from homepage - Extract individual tracks using URL crawling"""
         print("\n🔟 Scraping Top 10 Releases from homepage...")
@@ -2597,7 +3061,19 @@ def main():
 
     scraper = BeatportUnifiedScraper()
 
-    # Test improved chart sections first
+    # Test New on Beatport Hero first
+    print("\n🎯 NEW ON BEATPORT HERO TEST")
+    hero_tracks = scraper.scrape_new_on_beatport_hero(limit=10)
+    if hero_tracks:
+        print(f"✅ Successfully extracted {len(hero_tracks)} tracks from hero slideshow")
+        for i, track in enumerate(hero_tracks[:3]):  # Show first 3
+            print(f"   {i+1}. {track.get('title', 'No title')} - {track.get('artist', 'No artist')}")
+            print(f"      URL: {track.get('url', 'No URL')}")
+            print(f"      Classes: {track.get('element_classes', 'No classes')}")
+    else:
+        print("❌ No tracks found in hero slideshow")
+
+    # Test improved chart sections
     print("\n🆕 IMPROVED CHART SECTIONS TEST")
     improved_results = test_improved_chart_sections()
 

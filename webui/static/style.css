@@ -4158,7 +4158,7 @@ body {
     display: grid;
     grid-template-columns: 2.5fr 0.75fr; /* More space for main panel, smaller sidebar */
     gap: 25px;
-    height: calc(100vh - 200px); /* Adjust height to fit within the page */
+    min-height: calc(100vh - 200px); /* Minimum height, but allow expansion */
 }
 
 .sync-main-panel, .sync-sidebar {
@@ -4169,8 +4169,16 @@ body {
     padding: 20px;
     display: flex;
     flex-direction: column;
-    overflow: hidden;
     box-shadow: 0 15px 35px rgba(0,0,0,0.5);
+}
+
+.sync-main-panel {
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+.sync-sidebar {
+    overflow: hidden;
 }
 
 /* Tab System */
@@ -4351,15 +4359,319 @@ body {
     background-image: url('data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23000000"><path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"/></svg>');
 }
 
+.rebuild-icon {
+    background-image: url('data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23888888"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>');
+}
+
+.beatport-tab-button.active .rebuild-icon {
+    background-image: url('data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23000000"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>');
+}
+
 .beatport-tab-content {
     display: none;
-    height: 100%;
-    overflow: hidden;
+    overflow-y: auto;
+    overflow-x: hidden;
+    flex: 1;
 }
 
 .beatport-tab-content.active {
     display: flex;
     flex-direction: column;
+}
+
+/* ================================= */
+/* BEATPORT REBUILD TAB STYLES */
+/* ================================= */
+
+/* Beatport Rebuild Slider Container */
+.beatport-rebuild-slider-container {
+    flex: 1;
+    padding: 30px;
+
+}
+
+/* Loading State */
+.beatport-rebuild-loading {
+    width: 100%;
+    height: 400px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg,
+        rgba(20, 20, 20, 0.95) 0%,
+        rgba(12, 12, 12, 0.98) 100%);
+    border-radius: 20px;
+    text-align: center;
+}
+
+.beatport-rebuild-loading-content h2 {
+    color: #01FF95;
+    font-size: 24px;
+    margin-bottom: 10px;
+    animation: pulse 2s ease-in-out infinite;
+}
+
+.beatport-rebuild-loading-content p {
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 16px;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+.beatport-rebuild-slider {
+    position: relative;
+    width: 100%;
+    height: 400px;
+    border-radius: 20px;
+    overflow: hidden;
+    box-shadow:
+        0 20px 60px rgba(0, 0, 0, 0.4),
+        0 8px 32px rgba(0, 0, 0, 0.3),
+        0 0 40px rgba(1, 255, 149, 0.1);
+    background: linear-gradient(135deg,
+        rgba(20, 20, 20, 0.95) 0%,
+        rgba(12, 12, 12, 0.98) 100%);
+}
+
+.beatport-rebuild-slider-track {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    transition: transform 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+/* Individual Slides */
+.beatport-rebuild-slide {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    transform: translateX(100px);
+    transition: all 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.beatport-rebuild-slide.active {
+    opacity: 1;
+    transform: translateX(0);
+}
+
+.beatport-rebuild-slide.prev {
+    transform: translateX(-100px);
+}
+
+.beatport-rebuild-slide.next {
+    transform: translateX(100px);
+}
+
+/* Slide Background */
+.beatport-rebuild-slide-background {
+    opacity: .6;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(45deg,
+        rgba(1, 255, 149, 0.1) 0%,
+        rgba(0, 224, 133, 0.08) 25%,
+        rgba(29, 185, 84, 0.06) 50%,
+        rgba(0, 185, 112, 0.04) 75%,
+        rgba(1, 255, 149, 0.02) 100%);
+    z-index: 1;
+}
+
+/* Dynamic background images from Beatport */
+.beatport-rebuild-slide[data-image]::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-image: var(--slide-bg-image);
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    opacity: 0.3;
+    z-index: 0;
+}
+
+.beatport-rebuild-slide-gradient {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background:
+        radial-gradient(circle at 30% 40%, rgba(1, 255, 149, 0.15) 0%, transparent 50%),
+        radial-gradient(circle at 70% 60%, rgba(0, 224, 133, 0.1) 0%, transparent 50%),
+        linear-gradient(135deg,
+            rgba(20, 20, 20, 0.8) 0%,
+            rgba(12, 12, 12, 0.9) 100%);
+}
+
+/* Slide Content */
+.beatport-rebuild-slide-content {
+    position: relative;
+    z-index: 2;
+    text-align: center;
+    padding: 40px;
+    max-width: 600px;
+}
+
+.beatport-rebuild-track-info {
+    margin-bottom: 25px;
+}
+
+.beatport-rebuild-track-title {
+    font-size: 36px;
+    font-weight: 800;
+    color: #01FF95;
+    margin: 0 0 12px 0;
+    letter-spacing: -1px;
+    text-shadow: 0 2px 20px rgba(1, 255, 149, 0.3);
+    line-height: 1.2;
+}
+
+.beatport-rebuild-artist-name {
+    font-size: 24px;
+    font-weight: 600;
+    color: #ffffff;
+    margin: 0 0 8px 0;
+    letter-spacing: -0.5px;
+}
+
+.beatport-rebuild-album-name {
+    font-size: 18px;
+    font-weight: 400;
+    color: rgba(255, 255, 255, 0.8);
+    margin: 0;
+    font-style: italic;
+}
+
+.beatport-rebuild-track-meta {
+    display: flex;
+    gap: 20px;
+    justify-content: center;
+    align-items: center;
+}
+
+.beatport-rebuild-genre,
+.beatport-rebuild-year {
+    padding: 8px 16px;
+    background: rgba(1, 255, 149, 0.15);
+    border: 1px solid rgba(1, 255, 149, 0.3);
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #01FF95;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* Navigation Buttons */
+.beatport-rebuild-slider-nav {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 3;
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    padding: 0 25px;
+    pointer-events: none;
+}
+
+.beatport-rebuild-nav-btn {
+    width: 50px;
+    height: 50px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(1, 255, 149, 0.2);
+    backdrop-filter: blur(10px);
+    color: #01FF95;
+    font-size: 24px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    pointer-events: all;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.beatport-rebuild-nav-btn:hover {
+    background: rgba(1, 255, 149, 0.3);
+    transform: scale(1.1);
+    box-shadow: 0 6px 25px rgba(1, 255, 149, 0.4);
+}
+
+.beatport-rebuild-nav-btn:active {
+    transform: scale(0.95);
+}
+
+/* Slider Indicators */
+.beatport-rebuild-slider-indicators {
+    position: absolute;
+    bottom: 25px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 3;
+    display: flex;
+    gap: 12px;
+}
+
+.beatport-rebuild-indicator {
+    width: 12px;
+    height: 12px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.3);
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.beatport-rebuild-indicator.active {
+    background: #01FF95;
+    box-shadow: 0 0 15px rgba(1, 255, 149, 0.6);
+    transform: scale(1.2);
+}
+
+.beatport-rebuild-indicator:hover:not(.active) {
+    background: rgba(1, 255, 149, 0.6);
+    transform: scale(1.1);
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .beatport-rebuild-slider {
+        height: 320px;
+    }
+
+    .beatport-rebuild-track-title {
+        font-size: 28px;
+    }
+
+    .beatport-rebuild-artist-name {
+        font-size: 20px;
+    }
+
+    .beatport-rebuild-album-name {
+        font-size: 16px;
+    }
+
+    .beatport-rebuild-slide-content {
+        padding: 30px 20px;
+    }
 }
 
 /* ================================= */
@@ -11712,5 +12024,398 @@ body {
 
     .wishlist-modal-btn {
         width: 100%;
+    }
+}
+
+/* ================================
+   BEATPORT NEW RELEASES SECTION
+   ================================ */
+
+.beatport-releases-section {
+    margin-top: 40px;
+    padding: 0 20px;
+}
+
+.beatport-releases-header {
+    text-align: center;
+    margin-bottom: 30px;
+}
+
+.beatport-releases-title {
+    font-size: 32px;
+    font-weight: bold;
+    background: linear-gradient(135deg, #1db954, #1ed760, #00d4aa);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 8px;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.beatport-releases-subtitle {
+    font-size: 16px;
+    color: rgba(255, 255, 255, 0.7);
+    margin: 0;
+}
+
+.beatport-releases-slider-container {
+    position: relative;
+    background: linear-gradient(135deg,
+        rgba(18, 18, 18, 0.95),
+        rgba(30, 30, 30, 0.9));
+    border-radius: 20px;
+    padding: 30px;
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow:
+        0 20px 40px rgba(0, 0, 0, 0.5),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.beatport-releases-slider {
+    position: relative;
+    border-radius: 16px;
+}
+
+.beatport-releases-slider-track {
+    position: relative;
+    height: 425px;
+}
+
+.beatport-releases-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 400px;
+    background: linear-gradient(135deg,
+        rgba(29, 185, 84, 0.1),
+        rgba(30, 215, 96, 0.05));
+    border-radius: 16px;
+    border: 2px dashed rgba(29, 185, 84, 0.3);
+}
+
+.beatport-releases-loading-content {
+    text-align: center;
+}
+
+.beatport-releases-loading-content h3 {
+    font-size: 24px;
+    color: #1db954;
+    margin-bottom: 8px;
+    font-weight: 600;
+}
+
+.beatport-releases-loading-content p {
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 14px;
+    margin: 0;
+}
+
+/* Individual Slide (contains 10 cards in 5x2 grid) */
+.beatport-releases-slide {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    transition: all 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    transform: translateX(100px);
+}
+
+.beatport-releases-slide.active {
+    opacity: 1;
+    z-index: 10;
+    transform: translateX(0);
+}
+
+.beatport-releases-slide.prev {
+    transform: translateX(-100px);
+}
+
+.beatport-releases-slide.next {
+    transform: translateX(100px);
+}
+
+.beatport-releases-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    grid-template-rows: repeat(2, 1fr);
+    gap: 20px;
+    padding: 20px;
+    background: linear-gradient(135deg,
+        rgba(16, 16, 16, 0.6),
+        rgba(24, 24, 24, 0.4));
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    justify-items: center;
+    align-items: center;
+    margin: 0 auto;
+}
+
+/* Release Card Styling */
+.beatport-release-card {
+    background: linear-gradient(145deg,
+        rgba(40, 40, 40, 0.9),
+        rgba(28, 28, 28, 0.95));
+    border-radius: 12px;
+    padding: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    position: relative;
+    overflow: hidden;
+    backdrop-filter: blur(10px);
+    box-shadow:
+        0 4px 16px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    width: 100%;
+    height: 160px;
+    min-height: 160px;
+    max-height: 160px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+}
+
+.beatport-release-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: var(--card-bg-image, none);
+    background-size: cover;
+    background-position: center;
+    opacity: 0.15;
+    border-radius: 12px;
+    z-index: 0;
+}
+
+.beatport-release-card:hover {
+    transform: translateY(-2px) scale(1.05);
+    background: linear-gradient(145deg,
+        rgba(29, 185, 84, 0.15),
+        rgba(40, 40, 40, 0.95));
+    border-color: rgba(29, 185, 84, 0.4);
+    box-shadow:
+        0 8px 24px rgba(0, 0, 0, 0.4),
+        0 0 16px rgba(29, 185, 84, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.15);
+    z-index: 10;
+}
+
+.beatport-release-card-content {
+    position: relative;
+    z-index: 1;
+    text-align: center;
+}
+
+.beatport-release-artwork {
+    width: 80px;
+    height: 80px;
+    border-radius: 8px;
+    margin: 0 auto 12px auto;
+    background: linear-gradient(135deg, #333, #555);
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    overflow: hidden;
+    position: relative;
+}
+
+.beatport-release-artwork img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: transform 0.3s ease;
+}
+
+.beatport-release-card:hover .beatport-release-artwork img {
+    transform: scale(1.1);
+}
+
+.beatport-release-info {
+    text-align: center;
+}
+
+.beatport-release-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #ffffff;
+    margin-bottom: 4px;
+    line-height: 1.2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.beatport-release-artist {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.7);
+    margin-bottom: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.beatport-release-label {
+    font-size: 10px;
+    color: rgba(29, 185, 84, 0.8);
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Placeholder Card Styling */
+.beatport-release-placeholder {
+    opacity: 0.3;
+    cursor: default;
+    pointer-events: none;
+}
+
+.beatport-release-placeholder .placeholder-icon {
+    font-size: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.beatport-release-placeholder:hover {
+    transform: none;
+    background: linear-gradient(145deg,
+        rgba(40, 40, 40, 0.9),
+        rgba(28, 28, 28, 0.95));
+}
+
+/* Navigation Buttons */
+.beatport-releases-slider-nav {
+    position: absolute;
+    top: 50%;
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    transform: translateY(-50%);
+    pointer-events: none;
+    z-index: 10;
+}
+
+.beatport-releases-nav-btn {
+    pointer-events: all;
+    background: linear-gradient(135deg,
+        rgba(29, 185, 84, 0.9),
+        rgba(30, 215, 96, 0.8));
+    border: none;
+    border-radius: 50%;
+    width: 50px;
+    height: 50px;
+    color: white;
+    font-size: 24px;
+    font-weight: bold;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(10px);
+    box-shadow: 0 6px 20px rgba(29, 185, 84, 0.4);
+    transition: all 0.3s ease;
+    border: 2px solid rgba(255, 255, 255, 0.2);
+}
+
+.beatport-releases-nav-btn:hover {
+    transform: scale(1.1);
+    background: linear-gradient(135deg,
+        rgba(29, 185, 84, 1),
+        rgba(30, 215, 96, 0.9));
+    box-shadow: 0 8px 25px rgba(29, 185, 84, 0.6);
+}
+
+.beatport-releases-prev-btn {
+    margin-left: -25px;
+}
+
+.beatport-releases-next-btn {
+    margin-right: -25px;
+}
+
+/* Slider Indicators */
+.beatport-releases-slider-indicators {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    margin-top: 25px;
+}
+
+.beatport-releases-indicator {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.3);
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.beatport-releases-indicator.active {
+    background: linear-gradient(135deg, #1db954, #1ed760);
+    border-color: rgba(29, 185, 84, 0.6);
+    box-shadow: 0 0 15px rgba(29, 185, 84, 0.5);
+    transform: scale(1.2);
+}
+
+.beatport-releases-indicator:hover {
+    background: rgba(255, 255, 255, 0.5);
+    transform: scale(1.1);
+}
+
+/* Responsive Design */
+@media (max-width: 1400px) {
+    .beatport-releases-grid {
+        grid-template-columns: repeat(4, 1fr);
+        grid-template-rows: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 1200px) {
+    .beatport-releases-grid {
+        grid-template-columns: repeat(3, 1fr);
+        grid-template-rows: repeat(2, 1fr);
+        gap: 16px;
+    }
+
+    .beatport-release-artwork {
+        width: 70px;
+        height: 70px;
+    }
+}
+
+@media (max-width: 900px) {
+    .beatport-releases-grid {
+        grid-template-columns: repeat(2, 1fr);
+        grid-template-rows: repeat(3, 1fr);
+        gap: 14px;
+    }
+
+    .beatport-releases-slider-container {
+        padding: 20px;
+    }
+}
+
+@media (max-width: 600px) {
+    .beatport-releases-grid {
+        grid-template-columns: 1fr;
+        grid-template-rows: repeat(5, 1fr);
+        gap: 12px;
+    }
+
+    .beatport-releases-section {
+        padding: 0 15px;
+    }
+
+    .beatport-releases-title {
+        font-size: 24px;
     }
 }
