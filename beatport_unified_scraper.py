@@ -1403,6 +1403,263 @@ class BeatportUnifiedScraper:
             print(f"Error extracting track data: {e}")
             return None
 
+    def scrape_homepage_top10_releases(self) -> List[Dict]:
+        """Scrape Top 10 Releases from homepage - FIXED VERSION"""
+        print("\n💿 FIXED: Scraping Top 10 Releases from homepage...")
+
+        soup = self.get_page(self.base_url)
+        if not soup:
+            print("   ❌ Could not get homepage")
+            return []
+
+        # Extract Top 10 Releases items - EXACT same as test script
+        top10_releases_items = soup.select('[data-testid="top-10-releases-item"]')
+        print(f"   FOUND {len(top10_releases_items)} Top 10 Releases items")
+
+        if len(top10_releases_items) == 0:
+            print("   ❌ No items found - trying alternatives")
+            return []
+
+        releases = []
+        for i, item in enumerate(top10_releases_items, 1):
+            try:
+                # Use the SAME function name as the test script
+                release_data = self.extract_release_from_item_FIXED(item, i)
+                if release_data:
+                    releases.append(release_data)
+                    print(f"   ✅ {i}. {release_data['artist']} - {release_data['title']}")
+                else:
+                    print(f"   ❌ {i}. No data extracted")
+            except Exception as e:
+                print(f"   ❌ Error extracting release {i}: {e}")
+
+        print(f"✅ FINAL: Extracted {len(releases)} Top 10 Releases")
+        return releases
+
+    def extract_release_from_item_FIXED(self, item, rank):
+        """Extract release data from a list item - EXACT COPY FROM WORKING TEST SCRIPT"""
+        try:
+            # Get the release URL
+            link_elem = item.select_one('a[href*="/release/"]')
+            release_url = ""
+            if link_elem and link_elem.get('href'):
+                release_url = f"https://www.beatport.com{link_elem.get('href')}"
+
+            # Extract release title
+            title = "Unknown Title"
+            # Try multiple selectors for title
+            title_selectors = [
+                '[class*="ItemName"]',
+                '[class*="ReleaseName"]',
+                '[class*="release-name"]',
+                '[class*="TrackName"]',
+                '[class*="track-name"]',
+                'a[href*="/release/"]',
+                'h3', 'h4', 'h5',
+                '[class*="title"]',
+                '[class*="Title"]'
+            ]
+
+            for selector in title_selectors:
+                title_elem = item.select_one(selector)
+                if title_elem:
+                    title = title_elem.get_text(strip=True)
+                    if title and title != "Unknown Title" and len(title) > 2:
+                        break
+
+            # Extract artist name - try multiple approaches
+            artist = "Unknown Artist"
+            artist_selectors = [
+                '[class*="Artists"]',
+                '[class*="artist"]',
+                '[class*="Artist"]',
+                '[class*="ItemArtist"]',
+                'a[href*="/artist/"]',
+                '[class*="by"]',
+                '[class*="By"]'
+            ]
+
+            for selector in artist_selectors:
+                artist_elem = item.select_one(selector)
+                if artist_elem:
+                    artist = artist_elem.get_text(strip=True)
+                    if artist and artist != "Unknown Artist" and len(artist) > 1:
+                        break
+
+            # Extract label name - try multiple approaches
+            label = "Unknown Label"
+            label_selectors = [
+                '[class*="Label"]',
+                '[class*="label"]',
+                '[class*="ItemLabel"]',
+                'a[href*="/label/"]',
+                '[class*="imprint"]',
+                '[class*="Imprint"]'
+            ]
+
+            for selector in label_selectors:
+                label_elem = item.select_one(selector)
+                if label_elem:
+                    label = label_elem.get_text(strip=True)
+                    if label and label != "Unknown Label" and len(label) > 2:
+                        break
+
+            # Extract image URL - this is important for releases
+            image_url = ""
+            image_selectors = [
+                'img[src]',
+                'img[data-src]',
+                'img[data-lazy]',
+                '[style*="background-image"]',
+                'picture img',
+                '.artwork img',
+                '[class*="artwork"] img',
+                '[class*="Artwork"] img',
+                '[class*="image"] img',
+                '[class*="Image"] img'
+            ]
+
+            for selector in image_selectors:
+                img_elem = item.select_one(selector)
+                if img_elem:
+                    # Try different image source attributes
+                    img_src = (img_elem.get('src') or
+                              img_elem.get('data-src') or
+                              img_elem.get('data-lazy') or
+                              img_elem.get('data-original'))
+
+                    if img_src and img_src.startswith(('http', '//')):
+                        image_url = img_src
+                        break
+                    elif img_src and img_src.startswith('/'):
+                        image_url = f"https://www.beatport.com{img_src}"
+                        break
+
+            return {
+                "rank": rank,
+                "title": title,
+                "artist": artist,
+                "label": label,
+                "url": release_url,
+                "image_url": image_url,
+                "list_name": "Top 10 Releases"
+            }
+
+        except Exception as e:
+            print(f"Error extracting release data: {e}")
+            return None
+
+    def extract_release_from_top10_item(self, item, rank):
+        """Extract release data from a top 10 releases item"""
+        try:
+            # Get the release URL
+            link_elem = item.select_one('a[href*="/release/"]')
+            release_url = ""
+            if link_elem and link_elem.get('href'):
+                release_url = f"https://www.beatport.com{link_elem.get('href')}"
+
+            # Extract release title
+            title = "Unknown Title"
+            title_selectors = [
+                '[class*="ItemName"]',
+                '[class*="ReleaseName"]',
+                '[class*="release-name"]',
+                '[class*="TrackName"]',
+                '[class*="track-name"]',
+                'a[href*="/release/"]',
+                'h3', 'h4', 'h5',
+                '[class*="title"]',
+                '[class*="Title"]'
+            ]
+
+            for selector in title_selectors:
+                title_elem = item.select_one(selector)
+                if title_elem:
+                    title = title_elem.get_text(strip=True)
+                    if title and title != "Unknown Title" and len(title) > 2:
+                        break
+
+            # Extract artist name
+            artist = "Unknown Artist"
+            artist_selectors = [
+                '[class*="Artists"]',
+                '[class*="artist"]',
+                '[class*="Artist"]',
+                '[class*="ItemArtist"]',
+                'a[href*="/artist/"]',
+                '[class*="by"]',
+                '[class*="By"]'
+            ]
+
+            for selector in artist_selectors:
+                artist_elem = item.select_one(selector)
+                if artist_elem:
+                    artist = artist_elem.get_text(strip=True)
+                    if artist and artist != "Unknown Artist" and len(artist) > 1:
+                        break
+
+            # Extract label name
+            label = "Unknown Label"
+            label_selectors = [
+                '[class*="Label"]',
+                '[class*="label"]',
+                '[class*="ItemLabel"]',
+                'a[href*="/label/"]',
+                '[class*="imprint"]',
+                '[class*="Imprint"]'
+            ]
+
+            for selector in label_selectors:
+                label_elem = item.select_one(selector)
+                if label_elem:
+                    label = label_elem.get_text(strip=True)
+                    if label and label != "Unknown Label" and len(label) > 2:
+                        break
+
+            # Extract image URL - important for releases
+            image_url = ""
+            image_selectors = [
+                'img[src]',
+                'img[data-src]',
+                'img[data-lazy]',
+                '[style*="background-image"]',
+                'picture img',
+                '.artwork img',
+                '[class*="artwork"] img',
+                '[class*="Artwork"] img',
+                '[class*="image"] img',
+                '[class*="Image"] img'
+            ]
+
+            for selector in image_selectors:
+                img_elem = item.select_one(selector)
+                if img_elem:
+                    img_src = (img_elem.get('src') or
+                              img_elem.get('data-src') or
+                              img_elem.get('data-lazy') or
+                              img_elem.get('data-original'))
+
+                    if img_src and img_src.startswith(('http', '//')):
+                        image_url = img_src
+                        break
+                    elif img_src and img_src.startswith('/'):
+                        image_url = f"https://www.beatport.com{img_src}"
+                        break
+
+            return {
+                "rank": rank,
+                "title": title,
+                "artist": artist,
+                "label": label,
+                "url": release_url,
+                "image_url": image_url,
+                "list_name": "Top 10 Releases"
+            }
+
+        except Exception as e:
+            print(f"Error extracting release data: {e}")
+            return None
+
     def scrape_new_on_beatport_hero(self, limit: int = 10) -> List[Dict]:
         """Scrape the 'New on Beatport' hero slideshow from homepage"""
         print("\n🎯 Scraping 'New on Beatport' hero slideshow...")

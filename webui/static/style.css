@@ -12506,6 +12506,384 @@ body {
     }
 }
 
+/* =======================================
+   BEATPORT TOP 10 RELEASES SECTION
+   ======================================= */
+
+.beatport-releases-top10-section {
+    margin-top: 40px;
+    padding: 0 30px;
+    margin-bottom: 40px;
+}
+
+.beatport-releases-top10-header {
+    text-align: center;
+    margin-bottom: 40px;
+}
+
+.beatport-releases-top10-title {
+    font-size: 36px;
+    font-weight: 700;
+    color: #ffffff;
+    margin-bottom: 8px;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+.beatport-releases-top10-subtitle {
+    font-size: 16px;
+    color: rgba(255, 255, 255, 0.7);
+    margin: 0;
+}
+
+/* Single column container for releases */
+.beatport-releases-top10-container {
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+/* List styling with unique design */
+.beatport-releases-top10-list {
+    background: linear-gradient(135deg,
+        rgba(20, 20, 20, 0.95),
+        rgba(35, 35, 35, 0.9));
+    border-radius: 24px;
+    padding: 40px;
+    backdrop-filter: blur(25px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow:
+        0 25px 50px rgba(0, 0, 0, 0.6),
+        0 0 25px rgba(138, 43, 226, 0.1),
+        inset 0 1px 0 rgba(255, 255, 255, 0.15);
+    border-left: 4px solid #8a2be2;
+    overflow: hidden;
+}
+
+/* Track containers with grid layout for releases */
+.beatport-releases-top10-tracks {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 20px;
+}
+
+/* Individual release cards - unique design with images */
+.beatport-releases-top10-card {
+    display: flex;
+    align-items: center;
+    background: linear-gradient(135deg,
+        rgba(30, 30, 30, 0.9),
+        rgba(45, 45, 45, 0.85));
+    border-radius: 20px;
+    padding: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(15px);
+    transition: all 0.5s cubic-bezier(0.23, 1, 0.32, 1);
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3);
+    min-height: 120px;
+    max-height: 120px;
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+}
+
+/* Hover animations for release cards */
+.beatport-releases-top10-card:hover {
+    background: linear-gradient(135deg,
+        rgba(138, 43, 226, 0.15),
+        rgba(45, 45, 45, 0.95));
+    border-color: rgba(138, 43, 226, 0.4);
+    transform: translateY(-5px) scale(1.02);
+    box-shadow:
+        0 20px 40px rgba(0, 0, 0, 0.6),
+        0 0 30px rgba(138, 43, 226, 0.25);
+}
+
+/* Release rank number */
+.beatport-releases-top10-card-rank {
+    font-size: 24px;
+    font-weight: 900;
+    color: #8a2be2;
+    min-width: 40px;
+    text-align: center;
+    margin-right: 20px;
+    text-shadow: 0 3px 8px rgba(138, 43, 226, 0.4);
+    background: linear-gradient(135deg, rgba(138, 43, 226, 0.15), rgba(138, 43, 226, 0.08));
+    border-radius: 16px;
+    padding: 12px 0;
+    border: 2px solid rgba(138, 43, 226, 0.3);
+    backdrop-filter: blur(10px);
+}
+
+/* Release artwork - larger since these have images */
+.beatport-releases-top10-card-artwork {
+    width: 80px;
+    height: 80px;
+    border-radius: 16px;
+    margin-right: 20px;
+    overflow: hidden;
+    position: relative;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5);
+    border: 3px solid rgba(255, 255, 255, 0.15);
+    backdrop-filter: blur(5px);
+}
+
+.beatport-releases-top10-card-artwork img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: transform 0.5s ease;
+}
+
+.beatport-releases-top10-card:hover .beatport-releases-top10-card-artwork img {
+    transform: scale(1.2) rotate(2deg);
+}
+
+/* Artwork placeholder for releases */
+.beatport-releases-top10-card-placeholder {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 28px;
+    background: linear-gradient(135deg, rgba(138, 43, 226, 0.2), rgba(80, 80, 80, 0.8));
+    color: rgba(255, 255, 255, 0.6);
+}
+
+/* Release info */
+.beatport-releases-top10-card-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    overflow: hidden;
+    width: 100%;
+}
+
+.beatport-releases-top10-card-title {
+    font-size: 18px;
+    font-weight: 800;
+    color: #ffffff;
+    line-height: 1.3;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.9);
+    max-width: 100%;
+    width: 100%;
+}
+
+.beatport-releases-top10-card-artist {
+    font-size: 15px;
+    color: rgba(255, 255, 255, 0.9);
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+    width: 100%;
+}
+
+.beatport-releases-top10-card-label {
+    font-size: 13px;
+    color: rgba(138, 43, 226, 0.95);
+    font-weight: 700;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    max-width: 100%;
+    width: 100%;
+}
+
+/* Loading states for releases */
+.beatport-releases-top10-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 200px;
+    background: linear-gradient(135deg,
+        rgba(20, 20, 20, 0.7),
+        rgba(30, 30, 30, 0.5));
+    border-radius: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.beatport-releases-top10-loading-content {
+    text-align: center;
+}
+
+.beatport-releases-top10-loading-content h4 {
+    font-size: 20px;
+    color: #ffffff;
+    margin-bottom: 10px;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+}
+
+.beatport-releases-top10-loading-content p {
+    font-size: 15px;
+    color: rgba(255, 255, 255, 0.7);
+    margin: 0;
+}
+
+/* Error states for releases */
+.beatport-releases-top10-error {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 200px;
+    background: linear-gradient(135deg,
+        rgba(255, 51, 51, 0.12),
+        rgba(45, 45, 45, 0.9));
+    border-radius: 20px;
+    border: 1px solid rgba(255, 51, 51, 0.25);
+    text-align: center;
+    padding: 40px;
+}
+
+.beatport-releases-top10-error h3 {
+    color: #ff3366;
+    font-size: 20px;
+    margin-bottom: 10px;
+}
+
+.beatport-releases-top10-error p {
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 15px;
+    margin: 0;
+}
+
+/* Responsive Design for Top 10 Releases */
+@media (max-width: 1300px) {
+    .beatport-releases-top10-card-title {
+        font-size: 16px;
+    }
+
+    .beatport-releases-top10-card-artist {
+        font-size: 14px;
+    }
+
+    .beatport-releases-top10-card-label {
+        font-size: 12px;
+    }
+
+    .beatport-releases-top10-card-rank {
+        font-size: 20px;
+    }
+}
+
+@media (max-width: 1200px) {
+    .beatport-releases-top10-tracks {
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 16px;
+    }
+
+    .beatport-releases-top10-list {
+        padding: 30px;
+    }
+
+    .beatport-releases-top10-card {
+        min-height: 110px;
+        max-height: 110px;
+        padding: 16px;
+    }
+
+    .beatport-releases-top10-card-artwork {
+        width: 70px;
+        height: 70px;
+    }
+}
+
+@media (max-width: 900px) {
+    .beatport-releases-top10-tracks {
+        grid-template-columns: 1fr;
+        gap: 14px;
+    }
+
+    .beatport-releases-top10-section {
+        padding: 0 20px;
+    }
+
+    .beatport-releases-top10-title {
+        font-size: 28px;
+    }
+
+    .beatport-releases-top10-card {
+        min-height: 100px;
+        max-height: 100px;
+        padding: 14px;
+    }
+
+    .beatport-releases-top10-card-artwork {
+        width: 60px;
+        height: 60px;
+        margin-right: 16px;
+    }
+
+    .beatport-releases-top10-card-rank {
+        font-size: 18px;
+        min-width: 35px;
+        margin-right: 16px;
+        padding: 8px 0;
+    }
+}
+
+@media (max-width: 600px) {
+    .beatport-releases-top10-section {
+        padding: 0 15px;
+        margin-top: 30px;
+        margin-bottom: 30px;
+    }
+
+    .beatport-releases-top10-header {
+        margin-bottom: 30px;
+    }
+
+    .beatport-releases-top10-list {
+        padding: 20px;
+    }
+
+    .beatport-releases-top10-title {
+        font-size: 24px;
+    }
+
+    .beatport-releases-top10-card {
+        min-height: 90px;
+        max-height: 90px;
+        padding: 12px;
+    }
+
+    .beatport-releases-top10-card-artwork {
+        width: 50px;
+        height: 50px;
+        margin-right: 12px;
+    }
+
+    .beatport-releases-top10-card-rank {
+        font-size: 16px;
+        min-width: 30px;
+        margin-right: 12px;
+        padding: 6px 0;
+    }
+
+    .beatport-releases-top10-card-title {
+        font-size: 14px;
+    }
+
+    .beatport-releases-top10-card-artist {
+        font-size: 12px;
+    }
+
+    .beatport-releases-top10-card-label {
+        font-size: 10px;
+    }
+}
+
 /* ================================
    BEATPORT NEW RELEASES SECTION
    ================================ */
@@ -13863,6 +14241,7 @@ body {
 }
 
 .beatport-dj-creator {
+    display: none;
     font-size: 16px;
     color: rgba(255, 255, 255, 0.9);
     font-weight: 500;
