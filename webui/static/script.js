@@ -9736,6 +9736,7 @@ function initializeSyncPage() {
                 initializeBeatportRebuildSlider();
                 initializeBeatportReleasesSlider();
                 initializeBeatportChartsSlider();
+                initializeBeatportDJSlider();
             }
         });
     });
@@ -19106,5 +19107,285 @@ function cleanupBeatportChartsSlider() {
     if (beatportChartsSliderState.autoPlayInterval) {
         clearInterval(beatportChartsSliderState.autoPlayInterval);
         beatportChartsSliderState.autoPlayInterval = null;
+    }
+}
+
+// ===================================
+// BEATPORT DJ CHARTS SLIDER
+// ===================================
+
+// State management for DJ charts slider (3 cards per slide)
+let beatportDJSliderState = {
+    currentSlide: 0,
+    totalSlides: 0,
+    autoPlayInterval: null,
+    autoPlayDelay: 12000,  // Longer auto-play for DJ charts
+    isInitialized: false
+};
+
+/**
+ * Initialize the beatport DJ charts slider functionality (based on charts slider)
+ */
+function initializeBeatportDJSlider() {
+    console.log('🎧 Initializing beatport DJ charts slider...');
+
+    const slider = document.getElementById('beatport-dj-slider');
+    if (!slider) {
+        console.warn('Beatport DJ slider not found');
+        return;
+    }
+
+    // Prevent double initialization
+    if (slider.dataset.initialized === 'true') {
+        console.log('DJ slider already initialized');
+        return;
+    }
+
+    const sliderTrack = document.getElementById('beatport-dj-slider-track');
+    const indicatorsContainer = document.getElementById('beatport-dj-slider-indicators');
+
+    if (!sliderTrack || !indicatorsContainer) {
+        console.warn('DJ slider elements not found');
+        return;
+    }
+
+    // Load data and initialize
+    loadBeatportDJCharts().then(success => {
+        if (success) {
+            setupBeatportDJSliderNavigation();
+            setupBeatportDJSliderIndicators();
+            setupBeatportDJSliderHoverPause();
+            startBeatportDJSliderAutoPlay();
+            slider.dataset.initialized = 'true';
+            beatportDJSliderState.isInitialized = true;
+            console.log('✅ DJ charts slider initialized successfully');
+        }
+    });
+}
+
+/**
+ * Load DJ charts data from API
+ */
+async function loadBeatportDJCharts() {
+    try {
+        console.log('🎧 Loading DJ charts data...');
+        const response = await fetch('/api/beatport/dj-charts');
+        const data = await response.json();
+
+        if (data.success && data.charts && data.charts.length > 0) {
+            console.log(`📈 Loaded ${data.charts.length} DJ charts`);
+            createBeatportDJSlides(data.charts);
+            return true;
+        } else {
+            console.warn('No DJ charts data available');
+            return false;
+        }
+    } catch (error) {
+        console.error('❌ Error loading DJ charts:', error);
+        return false;
+    }
+}
+
+/**
+ * Create DJ chart slides with 3 cards per slide layout
+ */
+function createBeatportDJSlides(charts) {
+    const sliderTrack = document.getElementById('beatport-dj-slider-track');
+    const indicatorsContainer = document.getElementById('beatport-dj-slider-indicators');
+
+    if (!sliderTrack || !indicatorsContainer) {
+        console.error('DJ slider elements not found');
+        return;
+    }
+
+    const cardsPerSlide = 3; // 3 cards per slide for DJ charts
+    const totalSlides = Math.ceil(charts.length / cardsPerSlide);
+
+    // Clear existing content
+    sliderTrack.innerHTML = '';
+    indicatorsContainer.innerHTML = '';
+
+    // Update state
+    beatportDJSliderState.totalSlides = totalSlides;
+    beatportDJSliderState.currentSlide = 0;
+
+    console.log(`🎯 Creating ${totalSlides} DJ chart slides with ${cardsPerSlide} cards each`);
+
+    // Generate slides HTML
+    for (let slideIndex = 0; slideIndex < totalSlides; slideIndex++) {
+        const startIndex = slideIndex * cardsPerSlide;
+        const endIndex = Math.min(startIndex + cardsPerSlide, charts.length);
+        const slideCharts = charts.slice(startIndex, endIndex);
+
+        // Create grid HTML for this slide
+        const gridHtml = slideCharts.map(chart => {
+            const bgImageStyle = chart.image ? `--dj-bg-image: url('${chart.image}')` : '';
+            return `
+                <div class="beatport-dj-card" style="${bgImageStyle}" data-url="${chart.url || ''}">
+                    <div class="beatport-dj-card-content">
+                        <div class="beatport-dj-name">${chart.name || 'Unknown Chart'}</div>
+                        <div class="beatport-dj-creator">${chart.creator || 'Unknown Creator'}</div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        // Create slide HTML
+        const slideHtml = `
+            <div class="beatport-dj-slide ${slideIndex === 0 ? 'active' : ''}">
+                <div class="beatport-dj-grid">
+                    ${gridHtml}
+                </div>
+            </div>
+        `;
+
+        sliderTrack.innerHTML += slideHtml;
+
+        // Create indicator
+        const indicatorHtml = `<button class="beatport-dj-indicator ${slideIndex === 0 ? 'active' : ''}" data-slide="${slideIndex}"></button>`;
+        indicatorsContainer.innerHTML += indicatorHtml;
+    }
+
+    console.log(`✅ Created ${totalSlides} DJ chart slides`);
+}
+
+/**
+ * Set up navigation functionality (copied from charts slider with button cloning)
+ */
+function setupBeatportDJSliderNavigation() {
+    const prevBtn = document.getElementById('beatport-dj-prev-btn');
+    const nextBtn = document.getElementById('beatport-dj-next-btn');
+
+    if (prevBtn) {
+        // Clone button to remove all existing event listeners
+        const newPrevBtn = prevBtn.cloneNode(true);
+        prevBtn.parentNode.replaceChild(newPrevBtn, prevBtn);
+
+        newPrevBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('Previous DJ button clicked, current slide:', beatportDJSliderState.currentSlide);
+            goToBeatportDJSlide(beatportDJSliderState.currentSlide - 1);
+            resetBeatportDJSliderAutoPlay();
+        });
+    }
+
+    if (nextBtn) {
+        // Clone button to remove all existing event listeners
+        const newNextBtn = nextBtn.cloneNode(true);
+        nextBtn.parentNode.replaceChild(newNextBtn, nextBtn);
+
+        newNextBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('Next DJ button clicked, current slide:', beatportDJSliderState.currentSlide);
+            goToBeatportDJSlide(beatportDJSliderState.currentSlide + 1);
+            resetBeatportDJSliderAutoPlay();
+        });
+    }
+}
+
+/**
+ * Set up indicator functionality (copied from charts slider)
+ */
+function setupBeatportDJSliderIndicators() {
+    const indicators = document.querySelectorAll('.beatport-dj-indicator');
+
+    indicators.forEach((indicator, index) => {
+        indicator.addEventListener('click', () => {
+            goToBeatportDJSlide(index);
+            resetBeatportDJSliderAutoPlay();
+        });
+    });
+}
+
+/**
+ * Navigate to a specific slide (copied from charts slider)
+ */
+function goToBeatportDJSlide(slideIndex) {
+    console.log('goToBeatportDJSlide called with:', slideIndex, 'current:', beatportDJSliderState.currentSlide);
+
+    // Wrap around if out of bounds
+    if (slideIndex < 0) {
+        slideIndex = beatportDJSliderState.totalSlides - 1;
+    } else if (slideIndex >= beatportDJSliderState.totalSlides) {
+        slideIndex = 0;
+    }
+
+    console.log('After wrapping, slideIndex:', slideIndex);
+
+    // Update current slide
+    beatportDJSliderState.currentSlide = slideIndex;
+
+    // Update slide visibility
+    const slides = document.querySelectorAll('.beatport-dj-slide');
+    slides.forEach((slide, index) => {
+        slide.classList.remove('active', 'prev', 'next');
+
+        if (index === slideIndex) {
+            slide.classList.add('active');
+        } else if (index < slideIndex) {
+            slide.classList.add('prev');
+        } else {
+            slide.classList.add('next');
+        }
+    });
+
+    // Update indicators
+    const indicators = document.querySelectorAll('.beatport-dj-indicator');
+    indicators.forEach((indicator, index) => {
+        indicator.classList.toggle('active', index === slideIndex);
+    });
+
+    console.log('DJ slide updated to:', beatportDJSliderState.currentSlide);
+}
+
+/**
+ * Start auto-play functionality (copied from charts slider)
+ */
+function startBeatportDJSliderAutoPlay() {
+    if (beatportDJSliderState.autoPlayInterval) {
+        clearInterval(beatportDJSliderState.autoPlayInterval);
+    }
+
+    beatportDJSliderState.autoPlayInterval = setInterval(() => {
+        goToBeatportDJSlide(beatportDJSliderState.currentSlide + 1);
+    }, beatportDJSliderState.autoPlayDelay);
+}
+
+/**
+ * Reset auto-play timer (copied from charts slider)
+ */
+function resetBeatportDJSliderAutoPlay() {
+    startBeatportDJSliderAutoPlay();
+}
+
+/**
+ * Set up hover pause functionality (copied from charts slider)
+ */
+function setupBeatportDJSliderHoverPause() {
+    const sliderContainer = document.querySelector('.beatport-dj-slider-container');
+
+    if (sliderContainer) {
+        sliderContainer.addEventListener('mouseenter', () => {
+            if (beatportDJSliderState.autoPlayInterval) {
+                clearInterval(beatportDJSliderState.autoPlayInterval);
+                beatportDJSliderState.autoPlayInterval = null;
+            }
+        });
+
+        sliderContainer.addEventListener('mouseleave', () => {
+            startBeatportDJSliderAutoPlay();
+        });
+    }
+}
+
+/**
+ * Clean up DJ slider when switching away (copied from charts slider)
+ */
+function cleanupBeatportDJSlider() {
+    if (beatportDJSliderState.autoPlayInterval) {
+        clearInterval(beatportDJSliderState.autoPlayInterval);
+        beatportDJSliderState.autoPlayInterval = null;
     }
 }

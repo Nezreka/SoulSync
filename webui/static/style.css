@@ -12793,3 +12793,369 @@ body {
         font-size: 24px;
     }
 }
+
+/* ==================== DJ CHARTS SLIDER STYLES ==================== */
+
+/* DJ Section */
+.beatport-dj-section {
+    margin-top: 40px;
+    padding: 0 30px;
+}
+
+.beatport-dj-header {
+    text-align: center;
+    margin-bottom: 30px;
+}
+
+.beatport-dj-title {
+    font-size: 32px;
+    font-weight: 700;
+    color: #ffffff;
+    margin-bottom: 8px;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+.beatport-dj-subtitle {
+    font-size: 16px;
+    color: rgba(255, 255, 255, 0.8);
+    margin: 0;
+}
+
+/* DJ Slider Container */
+.beatport-dj-slider-container {
+    position: relative;
+    background: linear-gradient(135deg,
+        rgba(147, 51, 234, 0.1),
+        rgba(79, 70, 229, 0.05));
+    border-radius: 20px;
+    border: 1px solid rgba(147, 51, 234, 0.2);
+    backdrop-filter: blur(15px);
+    min-height: 300px;
+    padding: 30px;
+}
+
+.beatport-dj-slider {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    border-radius: 16px;
+}
+
+.beatport-dj-slider-track {
+    position: relative;
+    height: 300px;
+}
+
+.beatport-dj-slide {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    transition: all 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    transform: translateX(100px);
+}
+
+.beatport-dj-slide.active {
+    opacity: 1;
+    z-index: 10;
+    transform: translateX(0);
+}
+
+.beatport-dj-slide.prev {
+    opacity: 0;
+    transform: translateX(-100px);
+}
+
+.beatport-dj-slide.next {
+    opacity: 0;
+    transform: translateX(100px);
+}
+
+/* DJ Cards Layout - 3 cards per slide */
+.beatport-dj-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 25px;
+    padding: 20px;
+    background: linear-gradient(135deg,
+        rgba(16, 16, 16, 0.6),
+        rgba(24, 24, 24, 0.4));
+    border-radius: 16px;
+    border: 1px solid rgba(147, 51, 234, 0.15);
+    justify-items: center;
+    align-items: center;
+    margin: 0 auto;
+}
+
+/* DJ Chart Card Styling - Unique vertical design */
+.beatport-dj-card {
+    position: relative;
+    width: 100%;
+    height: 220px;
+    min-height: 220px;
+    max-height: 220px;
+    border-radius: 20px;
+    cursor: pointer;
+    transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    overflow: hidden;
+    background: linear-gradient(135deg,
+        rgba(147, 51, 234, 0.8),
+        rgba(79, 70, 229, 0.6));
+    box-shadow:
+        0 8px 32px rgba(0, 0, 0, 0.4),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.beatport-dj-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: var(--dj-bg-image, linear-gradient(135deg, #9333ea, #4f46e5));
+    background-size: cover;
+    background-position: center;
+    border-radius: 20px;
+    z-index: 1;
+}
+
+.beatport-dj-card::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(
+        180deg,
+        rgba(147, 51, 234, 0.3) 0%,
+        rgba(0, 0, 0, 0.4) 50%,
+        rgba(0, 0, 0, 0.8) 100%
+    );
+    border-radius: 20px;
+    z-index: 2;
+}
+
+.beatport-dj-card:hover {
+    transform: translateY(-15px) scale(1.1);
+    box-shadow:
+        0 30px 60px rgba(0, 0, 0, 0.8),
+        0 0 50px rgba(147, 51, 234, 0.6),
+        inset 0 1px 0 rgba(255, 255, 255, 0.3);
+    z-index: 25;
+}
+
+.beatport-dj-card:hover::after {
+    background: linear-gradient(
+        180deg,
+        rgba(147, 51, 234, 0.4) 0%,
+        rgba(0, 0, 0, 0.2) 50%,
+        rgba(0, 0, 0, 0.6) 100%
+    );
+}
+
+.beatport-dj-card:hover .beatport-dj-name {
+    color: rgba(147, 51, 234, 0.95);
+    text-shadow: 0 2px 15px rgba(0, 0, 0, 0.9);
+    transform: translateY(-3px);
+}
+
+.beatport-dj-card:hover .beatport-dj-creator {
+    color: #ffffff;
+    text-shadow: 0 1px 10px rgba(0, 0, 0, 0.9);
+    transform: translateY(-2px);
+}
+
+.beatport-dj-card-content {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 25px;
+    z-index: 3;
+    text-align: center;
+}
+
+.beatport-dj-name {
+    font-size: 20px;
+    font-weight: 700;
+    color: #ffffff;
+    margin-bottom: 10px;
+    line-height: 1.2;
+    text-shadow: 0 2px 10px rgba(0, 0, 0, 0.8);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+.beatport-dj-creator {
+    font-size: 16px;
+    color: rgba(255, 255, 255, 0.9);
+    font-weight: 500;
+    text-shadow: 0 1px 6px rgba(0, 0, 0, 0.8);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+/* DJ Loading State */
+.beatport-dj-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 300px;
+    background: linear-gradient(135deg,
+        rgba(147, 51, 234, 0.1),
+        rgba(16, 16, 16, 0.8));
+    border-radius: 16px;
+    border: 1px solid rgba(147, 51, 234, 0.2);
+}
+
+.beatport-dj-loading-content {
+    text-align: center;
+    color: #ffffff;
+}
+
+.beatport-dj-loading-content h3 {
+    font-size: 24px;
+    margin-bottom: 8px;
+    color: rgba(147, 51, 234, 0.9);
+}
+
+.beatport-dj-loading-content p {
+    font-size: 16px;
+    color: rgba(255, 255, 255, 0.7);
+    margin: 0;
+}
+
+/* DJ Navigation */
+.beatport-dj-slider-nav {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    transform: translateY(-50%);
+    display: flex;
+    justify-content: space-between;
+    padding: 0 20px;
+    pointer-events: none;
+    z-index: 100;
+}
+
+.beatport-dj-nav-btn {
+    background: linear-gradient(135deg,
+        rgba(147, 51, 234, 0.9),
+        rgba(79, 70, 229, 0.8));
+    border: none;
+    color: #ffffff;
+    font-size: 24px;
+    font-weight: 600;
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    backdrop-filter: blur(10px);
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    box-shadow:
+        0 4px 16px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    pointer-events: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.beatport-dj-nav-btn:hover {
+    background: linear-gradient(135deg,
+        rgba(147, 51, 234, 1),
+        rgba(79, 70, 229, 0.9));
+    transform: scale(1.1);
+    box-shadow:
+        0 8px 24px rgba(0, 0, 0, 0.4),
+        0 0 20px rgba(147, 51, 234, 0.5),
+        inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+.beatport-dj-nav-btn:active {
+    transform: scale(0.95);
+}
+
+/* DJ Indicators */
+.beatport-dj-slider-indicators {
+    position: absolute;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 8px;
+    z-index: 10;
+}
+
+.beatport-dj-indicator {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.4);
+    border: none;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.beatport-dj-indicator.active {
+    background: rgba(147, 51, 234, 0.9);
+    transform: scale(1.2);
+    box-shadow: 0 0 10px rgba(147, 51, 234, 0.5);
+}
+
+.beatport-dj-indicator:hover {
+    background: rgba(255, 255, 255, 0.6);
+    transform: scale(1.1);
+}
+
+/* DJ Responsive Design */
+@media (max-width: 1200px) {
+    .beatport-dj-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 20px;
+    }
+
+    .beatport-dj-card {
+        height: 200px;
+        min-height: 200px;
+        max-height: 200px;
+    }
+}
+
+@media (max-width: 900px) {
+    .beatport-dj-grid {
+        grid-template-columns: 1fr;
+        gap: 16px;
+    }
+
+    .beatport-dj-slider-container {
+        padding: 20px;
+    }
+
+    .beatport-dj-card {
+        height: 180px;
+        min-height: 180px;
+        max-height: 180px;
+    }
+}
+
+@media (max-width: 600px) {
+    .beatport-dj-section {
+        padding: 0 15px;
+    }
+
+    .beatport-dj-title {
+        font-size: 24px;
+    }
+}

@@ -2342,6 +2342,129 @@ def get_beatport_featured_charts():
             'charts': []
         }), 500
 
+
+@app.route('/api/beatport/dj-charts')
+def get_beatport_dj_charts():
+    """Get DJ charts from Beatport for the DJ charts slider using Carousel approach"""
+    try:
+        logger.info("🎧 Fetching Beatport DJ charts...")
+
+        # Initialize scraper
+        scraper = BeatportUnifiedScraper()
+
+        # Get page and extract charts
+        soup = scraper.get_page(scraper.base_url)
+        if not soup:
+            raise Exception("Could not fetch Beatport homepage")
+
+        # Find all Carousel containers
+        carousels = soup.select('[class*="Carousel-style__Wrapper"]')
+        dj_container = None
+
+        logger.info(f"🔍 Checking {len(carousels)} Carousel containers for DJ charts...")
+
+        # Based on test results, DJ charts are in the second carousel (index 1) with ~9 chart links
+        for i, container in enumerate(carousels):
+            chart_links = container.select('a[href*="/chart/"]')
+            logger.info(f"📋 Carousel {i+1}: {len(chart_links)} chart links")
+
+            # DJ charts container typically has 8-12 chart links (not 99+ like featured charts)
+            if 5 <= len(chart_links) <= 15:
+                dj_container = container
+                logger.info(f"🔥 FOUND DJ CHARTS: Carousel {i+1} with {len(chart_links)} charts")
+                break
+
+        if not dj_container:
+            logger.warning("❌ No DJ Charts Carousel container found")
+            return jsonify({
+                'success': False,
+                'error': 'DJ Charts section not found',
+                'charts': []
+            })
+
+        # Extract charts from the container using chart links
+        charts = []
+        chart_links = dj_container.select('a[href*="/chart/"]')
+
+        logger.info(f"📊 Found {len(chart_links)} DJ chart links")
+
+        for i, link in enumerate(chart_links):
+            chart_data = {}
+
+            # Extract chart name from link text or nearby elements
+            name_elem = link.select_one('h3, h4, h5, h6, [class*="title"], [class*="Title"], [class*="name"], [class*="Name"]')
+            if name_elem:
+                name_text = name_elem.get_text(strip=True)
+            else:
+                name_text = link.get_text(strip=True)
+
+            if name_text and len(name_text) > 2:
+                chart_data['name'] = name_text
+
+                # Extract creator - for DJ charts, the chart name might be the artist name
+                creator = name_text  # Use chart name as creator for DJ charts
+
+                # Look for additional creator info in parent elements
+                parent = link.parent
+                if parent:
+                    creator_selectors = [
+                        '[class*="artist"]', '[class*="Artist"]',
+                        '[class*="creator"]', '[class*="Creator"]',
+                        '[class*="author"]', '[class*="Author"]'
+                    ]
+
+                    for selector in creator_selectors:
+                        creator_elem = parent.select_one(selector)
+                        if creator_elem:
+                            creator_text = creator_elem.get_text(strip=True)
+                            if creator_text and len(creator_text) > 1 and creator_text != name_text:
+                                creator = creator_text
+                                break
+
+                chart_data['creator'] = creator
+
+                # Extract URL
+                href = link.get('href', '')
+                if href:
+                    if href.startswith('/'):
+                        chart_data['url'] = f"https://www.beatport.com{href}"
+                    else:
+                        chart_data['url'] = href
+
+                # Extract image
+                img_elem = link.select_one('img') or (link.parent.select_one('img') if link.parent else None)
+                if img_elem:
+                    src = img_elem.get('src', '') or img_elem.get('data-src', '')
+                    if src:
+                        if src.startswith('//'):
+                            src = f"https:{src}"
+                        elif src.startswith('/'):
+                            src = f"https://www.beatport.com{src}"
+                        chart_data['image'] = src
+
+                # Only add if we have meaningful data
+                if 'name' in chart_data and 'url' in chart_data:
+                    charts.append(chart_data)
+                    logger.info(f"✅ DJ Chart {len(charts)}: {chart_data['name']} by {chart_data['creator']}")
+
+        logger.info(f"📊 Successfully extracted {len(charts)} DJ charts")
+
+        return jsonify({
+            'success': True,
+            'charts': charts,
+            'count': len(charts),
+            'slides': max(1, (len(charts) + 2) // 3),  # 3 cards per slide
+            'timestamp': datetime.now().isoformat()
+        })
+
+    except Exception as e:
+        logger.error(f"❌ Error fetching DJ charts: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'charts': []
+        }), 500
+
 # --- Placeholder API Endpoints for Other Pages ---
 
 @app.route('/api/activity')
