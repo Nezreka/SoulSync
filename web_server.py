@@ -13,6 +13,7 @@ import glob
 import uuid
 import re
 from pathlib import Path
+from urllib.parse import urljoin
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Flask, render_template, request, jsonify, redirect, send_file, Response
@@ -1990,6 +1991,224 @@ def tidal_callback():
         print(f"🔴 Error during Tidal token exchange: {e}")
         return f"<h1>❌ An Error Occurred</h1><p>An unexpected error occurred during the authentication process: {e}</p>", 500
 
+
+# --- Beatport Data API ---
+
+@app.route('/api/beatport/hero-tracks')
+def get_beatport_hero_tracks():
+    """Get fresh tracks from Beatport hero slideshow for the rebuild slider"""
+    try:
+        logger.info("🎯 Fetching Beatport hero tracks...")
+
+        # Initialize scraper
+        scraper = BeatportUnifiedScraper()
+
+        # Get tracks from hero slideshow (increased limit to capture all slides)
+        tracks = scraper.scrape_new_on_beatport_hero(limit=15)
+
+        # SMART FILTERING - Remove duplicates and invalid tracks
+        valid_tracks = []
+        seen_urls = set()
+
+        logger.info(f"🔍 Processing {len(tracks)} raw tracks from scraper (SMART FILTERING)...")
+
+        for i, track in enumerate(tracks):
+            logger.info(f"   Track {i+1}: {track.get('title', 'NO_TITLE')} - {track.get('artist', 'NO_ARTIST')}")
+            logger.info(f"      URL: {track.get('url', 'NO_URL')}")
+            logger.info(f"      Image: {'YES' if track.get('image_url') else 'NO'}")
+
+            # Extract and clean basic data
+            title = track.get('title', '').strip()
+            artist = track.get('artist', '').strip()
+            url = track.get('url', '').strip()
+            image_url = track.get('image_url', '').strip()
+
+            # Validation filters
+            is_valid = True
+            skip_reasons = []
+
+            # Filter 1: Must have title (artist can be fallback)
+            if not title or title in ['No title', 'MISSING', 'Unknown Title']:
+                is_valid = False
+                skip_reasons.append("Missing/invalid title")
+
+            # If no artist, use fallback based on URL or default
+            if not artist or artist in ['No artist', 'MISSING', 'Unknown Artist', 'NO_ARTIST']:
+                if url and '/release/' in url:
+                    artist = 'Various Artists'  # Release pages often have multiple artists
+                else:
+                    artist = 'Unknown Artist'
+
+            # Filter 2: Must have valid URL and image
+            if not url or not image_url:
+                is_valid = False
+                skip_reasons.append("Missing URL or image")
+
+            # Filter 3: URL must be a track/release page (not promotional pages)
+            if url and not any(pattern in url for pattern in ['/release/', '/track/']):
+                is_valid = False
+                skip_reasons.append("URL is not a track/release page")
+
+            # Filter 4: Deduplication by URL (most reliable method)
+            if url in seen_urls:
+                is_valid = False
+                skip_reasons.append("Duplicate URL")
+
+            if not is_valid:
+                logger.info(f"      ❌ Track {i+1} filtered out: {', '.join(skip_reasons)}")
+                continue
+
+            # Mark URL as seen for deduplication
+            seen_urls.add(url)
+
+            # Clean up title
+            title = title.replace(" t ", "'t ").replace("(Extended)DJ", "(Extended)")
+
+            # Clean up artist names
+            if 'SyrossianHappy' in artist:
+                artist = 'Darius Syrossian'
+            if 'Carroll,' in artist:
+                artist = 'Ron Carroll'
+            if artist.endswith('DJ') and ' ' not in artist[-4:]:
+                artist = artist[:-2].strip()
+
+            # Create clean track data
+            track_data = {
+                'title': title,
+                'artist': artist,
+                'url': url,
+                'image_url': image_url,
+                'genre': 'Electronic',  # Default genre
+                'year': datetime.now().year
+            }
+
+            # Determine genre based on artist
+            genre_mapping = {
+                'thakzin': 'Afro House',
+                'yaya': 'Tech House',
+                'darius syrossian': 'Techno',
+                'ron carroll': 'House',
+                'dj minx': 'House',
+                'durante': 'Progressive House'
+            }
+
+            for artist_key, mapped_genre in genre_mapping.items():
+                if artist_key in artist.lower():
+                    track_data['genre'] = mapped_genre
+                    break
+
+            valid_tracks.append(track_data)
+            logger.info(f"      ✅ Track {i+1} added: {title} - {artist}")
+
+        logger.info(f"✅ Retrieved {len(valid_tracks)} valid unique Beatport tracks (SMART FILTERING)")
+
+        return jsonify({
+            'success': True,
+            'tracks': valid_tracks,
+            'count': len(valid_tracks),
+            'timestamp': datetime.now().isoformat()
+        })
+
+    except Exception as e:
+        logger.error(f"❌ Error fetching Beatport tracks: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'tracks': []
+        }), 500
+
+@app.route('/api/beatport/new-releases')
+def get_beatport_new_releases():
+    """Get new releases from Beatport for the rebuild slider grid"""
+    try:
+        logger.info("🆕 Fetching Beatport new releases...")
+
+        # Initialize scraper
+        scraper = BeatportUnifiedScraper()
+
+        # Get page and extract releases
+        soup = scraper.get_page(scraper.base_url)
+        if not soup:
+            raise Exception("Could not fetch Beatport homepage")
+
+        # Extract release cards using the working CSS selector
+        release_cards = soup.select('.ReleaseCard-style__Wrapper-sc-7c61989b-12.duhBUN')
+        releases = []
+
+        logger.info(f"🔍 Found {len(release_cards)} release cards")
+
+        for i, card in enumerate(release_cards[:100]):  # Limit to 100 for 10 slides
+            release_data = {}
+
+            # Extract title
+            title_elem = card.select_one('[class*="title"], [class*="Title"], h1, h2, h3, h4, h5, h6')
+            if title_elem:
+                title_text = title_elem.get_text(strip=True)
+                if title_text and len(title_text) > 2 and title_text not in ['New Releases', 'Buy', 'Play']:
+                    release_data['title'] = title_text
+
+            # Extract artist
+            artist_elem = card.select_one('[class*="artist"], [class*="Artist"], a[href*="/artist/"]')
+            if artist_elem:
+                artist_text = artist_elem.get_text(strip=True)
+                if artist_text and len(artist_text) > 1:
+                    release_data['artist'] = artist_text
+
+            # Extract label
+            label_elem = card.select_one('[class*="label"], [class*="Label"], a[href*="/label/"]')
+            if label_elem:
+                label_text = label_elem.get_text(strip=True)
+                if label_text and len(label_text) > 1:
+                    release_data['label'] = label_text
+
+            # Extract URL
+            url_link = card.select_one('a[href*="/release/"]')
+            if url_link:
+                href = url_link.get('href')
+                if href:
+                    release_data['url'] = urljoin(scraper.base_url, href)
+
+            # Extract image
+            img = card.select_one('img')
+            if img:
+                src = img.get('src') or img.get('data-src') or img.get('data-lazy-src')
+                if src:
+                    release_data['image_url'] = src
+
+            # URL fallback for title
+            if not release_data.get('title') and release_data.get('url'):
+                url_parts = release_data['url'].split('/release/')
+                if len(url_parts) > 1:
+                    slug = url_parts[1].split('/')[0]
+                    release_data['title'] = slug.replace('-', ' ').title()
+
+            # Only add if we have essential data
+            if release_data.get('title') and release_data.get('url'):
+                # Add fallbacks for missing data
+                if not release_data.get('artist'):
+                    release_data['artist'] = 'Various Artists'
+                if not release_data.get('label'):
+                    release_data['label'] = 'Unknown Label'
+
+                releases.append(release_data)
+
+        logger.info(f"✅ Successfully extracted {len(releases)} new releases")
+
+        return jsonify({
+            'success': True,
+            'releases': releases,
+            'count': len(releases),
+            'slides': (len(releases) + 9) // 10,  # Calculate number of slides needed
+            'timestamp': datetime.now().isoformat()
+        })
+
+    except Exception as e:
+        logger.error(f"❌ Error fetching new releases: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'releases': []
+        }), 500
 
 # --- Placeholder API Endpoints for Other Pages ---
 
