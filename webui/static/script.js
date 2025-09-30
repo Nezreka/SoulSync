@@ -9735,6 +9735,7 @@ function initializeSyncPage() {
             if (tabId === 'rebuild') {
                 initializeBeatportRebuildSlider();
                 initializeBeatportReleasesSlider();
+                initializeBeatportHypePicksSlider();
                 initializeBeatportChartsSlider();
                 initializeBeatportDJSlider();
             }
@@ -18827,6 +18828,335 @@ function cleanupBeatportReleasesSlider() {
     if (beatportReleasesSliderState.autoPlayInterval) {
         clearInterval(beatportReleasesSliderState.autoPlayInterval);
         beatportReleasesSliderState.autoPlayInterval = null;
+    }
+}
+
+// ===================================
+// BEATPORT HYPE PICKS SLIDER
+// ===================================
+
+// Hype Picks Slider State
+let beatportHypePicksSliderState = {
+    currentSlide: 0,
+    totalSlides: 0,
+    autoPlayInterval: null,
+    autoPlayDelay: 4000,
+    isInitialized: false
+};
+
+/**
+ * Initialize the beatport hype picks slider functionality (based on releases slider)
+ */
+function initializeBeatportHypePicksSlider() {
+    console.log('🔥 Initializing beatport hype picks slider...');
+
+    const slider = document.getElementById('beatport-hype-picks-slider');
+    if (!slider) {
+        console.warn('Beatport hype picks slider not found');
+        return;
+    }
+
+    // Check if already initialized
+    if (beatportHypePicksSliderState.isInitialized) {
+        console.log('Beatport hype picks slider already initialized, skipping...');
+        startBeatportHypePicksSliderAutoPlay(); // Just restart autoplay
+        return;
+    }
+
+    // Mark as initialized
+    beatportHypePicksSliderState.isInitialized = true;
+
+    // Reset state
+    beatportHypePicksSliderState.currentSlide = 0;
+    beatportHypePicksSliderState.totalSlides = 0;
+
+    // Load data and initialize
+    loadBeatportHypePicks().then(success => {
+        if (success) {
+            setupBeatportHypePicksSliderNavigation();
+            setupBeatportHypePicksSliderIndicators();
+            setupBeatportHypePicksSliderHoverPause();
+            startBeatportHypePicksSliderAutoPlay();
+        }
+    });
+
+    console.log('✅ Beatport hype picks slider initialized successfully');
+}
+
+/**
+ * Load hype picks data from API
+ */
+async function loadBeatportHypePicks() {
+    try {
+        console.log('🔥 Fetching hype picks data...');
+
+        const response = await fetch('/api/beatport/hype-picks');
+        const data = await response.json();
+
+        if (data.success && data.releases && data.releases.length > 0) {
+            console.log(`🔥 Loaded ${data.releases.length} hype picks releases`);
+            populateBeatportHypePicksSlider(data.releases);
+            return true;
+        } else {
+            console.error('Failed to load hype picks:', data.error || 'No hype picks found');
+            showBeatportHypePicksError(data.error || 'No hype picks available');
+            return false;
+        }
+    } catch (error) {
+        console.error('Error loading hype picks:', error);
+        showBeatportHypePicksError('Failed to load hype picks');
+        return false;
+    }
+}
+
+/**
+ * Populate the hype picks slider with data (based on releases slider)
+ */
+function populateBeatportHypePicksSlider(releases) {
+    const sliderTrack = document.getElementById('beatport-hype-picks-slider-track');
+    const indicatorsContainer = document.getElementById('beatport-hype-picks-slider-indicators');
+
+    if (!sliderTrack || !indicatorsContainer) return;
+
+    // Clear existing content
+    sliderTrack.innerHTML = '';
+    indicatorsContainer.innerHTML = '';
+
+    // Group releases into slides (10 releases per slide in 5x2 grid)
+    const releasesPerSlide = 10;
+    const slides = [];
+    for (let i = 0; i < releases.length; i += releasesPerSlide) {
+        slides.push(releases.slice(i, i + releasesPerSlide));
+    }
+
+    console.log(`🔥 Hype Picks: Got ${releases.length} releases, creating ${slides.length} slides`);
+    beatportHypePicksSliderState.totalSlides = slides.length;
+    beatportHypePicksSliderState.currentSlide = 0;
+
+    // Create slides
+    slides.forEach((slideReleases, slideIndex) => {
+        const slideHtml = `
+            <div class="beatport-hype-picks-slide ${slideIndex === 0 ? 'active' : ''}"
+                 data-slide="${slideIndex}">
+                <div class="beatport-hype-picks-grid">
+                    ${slideReleases.map(release => createBeatportHypePickCard(release)).join('')}
+                    ${slideReleases.length < releasesPerSlide ?
+                        Array(releasesPerSlide - slideReleases.length).fill(0).map(() =>
+                            `<div class="beatport-hype-pick-card beatport-hype-pick-placeholder">
+                                <div class="placeholder-icon">🔥</div>
+                            </div>`
+                        ).join('') : ''
+                    }
+                </div>
+            </div>
+        `;
+        sliderTrack.insertAdjacentHTML('beforeend', slideHtml);
+        console.log(`🔥 Created slide ${slideIndex + 1}/${slides.length} with ${slideReleases.length} releases`);
+
+        // Create indicator
+        const indicatorHtml = `<button class="beatport-hype-picks-indicator ${slideIndex === 0 ? 'active' : ''}" data-slide="${slideIndex}"></button>`;
+        indicatorsContainer.insertAdjacentHTML('beforeend', indicatorHtml);
+    });
+
+    // Add click handlers to track cards
+    setupBeatportHypePickCardHandlers();
+}
+
+/**
+ * Create a hype pick card HTML (for release cards, same as new releases)
+ */
+function createBeatportHypePickCard(release) {
+    const artworkUrl = release.image_url || '';
+    const bgStyle = artworkUrl ? `style="--card-bg-image: url('${artworkUrl}')"` : '';
+
+    return `
+        <div class="beatport-hype-pick-card" data-url="${release.url || ''}" ${bgStyle}>
+            <div class="beatport-hype-pick-card-content">
+                <div class="beatport-hype-pick-artwork">
+                    ${artworkUrl ? `<img src="${artworkUrl}" alt="${release.title || 'Release'}" loading="lazy">` : ''}
+                </div>
+                <div class="beatport-hype-pick-info">
+                    <div class="beatport-hype-pick-title">${release.title || 'Unknown Title'}</div>
+                    <div class="beatport-hype-pick-artist">${release.artist || 'Unknown Artist'}</div>
+                    <div class="beatport-hype-pick-label">${release.label || 'Hype Pick'}</div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * Setup navigation for hype picks slider (same pattern as releases)
+ */
+function setupBeatportHypePicksSliderNavigation() {
+    const prevBtn = document.getElementById('beatport-hype-picks-prev-btn');
+    const nextBtn = document.getElementById('beatport-hype-picks-next-btn');
+
+    if (prevBtn) {
+        // Clone button to remove all existing event listeners
+        const newPrevBtn = prevBtn.cloneNode(true);
+        prevBtn.parentNode.replaceChild(newPrevBtn, prevBtn);
+
+        newPrevBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('Previous hype picks button clicked, current slide:', beatportHypePicksSliderState.currentSlide);
+            goToBeatportHypePicksSlide(beatportHypePicksSliderState.currentSlide - 1);
+            resetBeatportHypePicksSliderAutoPlay();
+        });
+    }
+
+    if (nextBtn) {
+        // Clone button to remove all existing event listeners
+        const newNextBtn = nextBtn.cloneNode(true);
+        nextBtn.parentNode.replaceChild(newNextBtn, nextBtn);
+
+        newNextBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('Next hype picks button clicked, current slide:', beatportHypePicksSliderState.currentSlide);
+            goToBeatportHypePicksSlide(beatportHypePicksSliderState.currentSlide + 1);
+            resetBeatportHypePicksSliderAutoPlay();
+        });
+    }
+}
+
+/**
+ * Setup indicators for hype picks slider
+ */
+function setupBeatportHypePicksSliderIndicators() {
+    const indicators = document.querySelectorAll('.beatport-hype-picks-indicator');
+
+    indicators.forEach((indicator, index) => {
+        indicator.addEventListener('click', () => {
+            goToBeatportHypePicksSlide(index);
+            resetBeatportHypePicksSliderAutoPlay();
+        });
+    });
+}
+
+/**
+ * Navigate to specific slide
+ */
+function goToBeatportHypePicksSlide(slideIndex) {
+    console.log('goToBeatportHypePicksSlide called with:', slideIndex, 'current:', beatportHypePicksSliderState.currentSlide);
+
+    // Handle wrap around
+    if (slideIndex < 0) {
+        slideIndex = beatportHypePicksSliderState.totalSlides - 1;
+    } else if (slideIndex >= beatportHypePicksSliderState.totalSlides) {
+        slideIndex = 0;
+    }
+
+    // Update current slide
+    beatportHypePicksSliderState.currentSlide = slideIndex;
+
+    // Update slides
+    const slides = document.querySelectorAll('.beatport-hype-picks-slide');
+    slides.forEach((slide, index) => {
+        slide.classList.remove('active', 'prev', 'next');
+        if (index === slideIndex) {
+            slide.classList.add('active');
+        } else if (index < slideIndex) {
+            slide.classList.add('prev');
+        } else {
+            slide.classList.add('next');
+        }
+    });
+
+    // Update indicators
+    const indicators = document.querySelectorAll('.beatport-hype-picks-indicator');
+    indicators.forEach((indicator, index) => {
+        indicator.classList.toggle('active', index === slideIndex);
+    });
+
+    console.log('Slide updated to:', beatportHypePicksSliderState.currentSlide);
+}
+
+/**
+ * Start auto-play for hype picks slider
+ */
+function startBeatportHypePicksSliderAutoPlay() {
+    if (beatportHypePicksSliderState.autoPlayInterval) {
+        clearInterval(beatportHypePicksSliderState.autoPlayInterval);
+    }
+
+    beatportHypePicksSliderState.autoPlayInterval = setInterval(() => {
+        goToBeatportHypePicksSlide(beatportHypePicksSliderState.currentSlide + 1);
+    }, beatportHypePicksSliderState.autoPlayDelay);
+
+    console.log('🔥 Hype picks slider autoplay started');
+}
+
+/**
+ * Reset auto-play for hype picks slider
+ */
+function resetBeatportHypePicksSliderAutoPlay() {
+    startBeatportHypePicksSliderAutoPlay();
+}
+
+/**
+ * Setup hover pause for hype picks slider
+ */
+function setupBeatportHypePicksSliderHoverPause() {
+    const sliderContainer = document.querySelector('.beatport-hype-picks-slider-container');
+    if (sliderContainer) {
+        sliderContainer.addEventListener('mouseenter', () => {
+            if (beatportHypePicksSliderState.autoPlayInterval) {
+                clearInterval(beatportHypePicksSliderState.autoPlayInterval);
+            }
+        });
+
+        sliderContainer.addEventListener('mouseleave', () => {
+            startBeatportHypePicksSliderAutoPlay();
+        });
+    }
+}
+
+/**
+ * Setup click handlers for hype pick cards
+ */
+function setupBeatportHypePickCardHandlers() {
+    const cards = document.querySelectorAll('.beatport-hype-pick-card:not(.beatport-hype-pick-placeholder)');
+
+    cards.forEach(card => {
+        card.addEventListener('click', () => {
+            const releaseUrl = card.dataset.releaseUrl;
+
+            if (releaseUrl) {
+                console.log('🔥 Clicked hype pick release:', releaseUrl);
+                // You can add release handling logic here
+                // For now, just log the click
+                showToast('🔥 Hype pick release clicked!', 'info');
+            }
+        });
+    });
+}
+
+/**
+ * Show error state for hype picks slider
+ */
+function showBeatportHypePicksError(errorMessage) {
+    const sliderTrack = document.getElementById('beatport-hype-picks-slider-track');
+    if (sliderTrack) {
+        sliderTrack.innerHTML = `
+        <div class="beatport-hype-picks-loading">
+            <div class="beatport-hype-picks-loading-content">
+                <h3>❌ Error Loading Hype Picks</h3>
+                <p>${errorMessage}</p>
+            </div>
+        </div>
+        `;
+    }
+}
+
+/**
+ * Clean up hype picks slider when switching away
+ */
+function cleanupBeatportHypePicksSlider() {
+    if (beatportHypePicksSliderState.autoPlayInterval) {
+        clearInterval(beatportHypePicksSliderState.autoPlayInterval);
+        beatportHypePicksSliderState.autoPlayInterval = null;
     }
 }
 

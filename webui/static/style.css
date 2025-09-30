@@ -12421,6 +12421,397 @@ body {
     }
 }
 
+/* ==================== HYPE PICKS SLIDER STYLES ==================== */
+
+.beatport-hype-picks-section {
+    margin-top: 40px;
+    padding: 0 20px;
+}
+
+.beatport-hype-picks-header {
+    text-align: center;
+    margin-bottom: 30px;
+}
+
+.beatport-hype-picks-title {
+    font-size: 32px;
+    font-weight: bold;
+    background: linear-gradient(135deg, #ff6b6b, #ff8787, #ffa8a8);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 8px;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.beatport-hype-picks-subtitle {
+    font-size: 16px;
+    color: rgba(255, 255, 255, 0.7);
+    margin: 0;
+}
+
+.beatport-hype-picks-slider-container {
+    position: relative;
+    background: linear-gradient(135deg,
+        rgba(18, 18, 18, 0.95),
+        rgba(30, 30, 30, 0.9));
+    border-radius: 20px;
+    padding: 30px;
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow:
+        0 20px 40px rgba(0, 0, 0, 0.5),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.beatport-hype-picks-slider {
+    position: relative;
+    border-radius: 16px;
+}
+
+.beatport-hype-picks-slider-track {
+    position: relative;
+    height: 425px;
+}
+
+.beatport-hype-picks-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 400px;
+    background: linear-gradient(135deg,
+        rgba(255, 107, 107, 0.1),
+        rgba(255, 135, 135, 0.05));
+    border-radius: 16px;
+    border: 2px dashed rgba(255, 107, 107, 0.3);
+}
+
+.beatport-hype-picks-loading-content {
+    text-align: center;
+}
+
+.beatport-hype-picks-loading-content h3 {
+    font-size: 24px;
+    color: #ff6b6b;
+    margin-bottom: 8px;
+    font-weight: 600;
+}
+
+.beatport-hype-picks-loading-content p {
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 14px;
+    margin: 0;
+}
+
+/* Individual Slide (contains 10 cards in 5x2 grid) */
+.beatport-hype-picks-slide {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    transition: all 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    transform: translateX(100px);
+}
+
+.beatport-hype-picks-slide.active {
+    opacity: 1;
+    z-index: 10;
+    transform: translateX(0);
+}
+
+.beatport-hype-picks-slide.prev {
+    transform: translateX(-100px);
+}
+
+.beatport-hype-picks-slide.next {
+    transform: translateX(100px);
+}
+
+.beatport-hype-picks-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    grid-template-rows: repeat(2, 1fr);
+    gap: 20px;
+    padding: 20px;
+    background: linear-gradient(135deg,
+        rgba(16, 16, 16, 0.6),
+        rgba(24, 24, 24, 0.4));
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    justify-items: center;
+    align-items: center;
+    margin: 0 auto;
+}
+
+/* Hype Pick Card Styling */
+.beatport-hype-pick-card {
+    background: linear-gradient(145deg,
+        rgba(40, 40, 40, 0.9),
+        rgba(28, 28, 28, 0.95));
+    border-radius: 12px;
+    padding: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    position: relative;
+    overflow: hidden;
+    backdrop-filter: blur(10px);
+    box-shadow:
+        0 4px 16px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    width: 100%;
+    height: 160px;
+    min-height: 160px;
+    max-height: 160px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+}
+
+.beatport-hype-pick-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: var(--card-bg-image, none);
+    background-size: cover;
+    background-position: center;
+    opacity: 0.15;
+    border-radius: 12px;
+    z-index: 0;
+}
+
+.beatport-hype-pick-card:hover {
+    transform: translateY(-2px) scale(1.05);
+    background: linear-gradient(145deg,
+        rgba(255, 107, 107, 0.15),
+        rgba(40, 40, 40, 0.95));
+    border-color: rgba(255, 107, 107, 0.4);
+    box-shadow:
+        0 8px 24px rgba(0, 0, 0, 0.4),
+        0 0 16px rgba(255, 107, 107, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.15);
+    z-index: 10;
+}
+
+.beatport-hype-pick-card-content {
+    position: relative;
+    z-index: 1;
+    text-align: center;
+}
+
+.beatport-hype-pick-artwork {
+    width: 80px;
+    height: 80px;
+    border-radius: 8px;
+    margin: 0 auto 12px auto;
+    background: linear-gradient(135deg, #333, #555);
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    overflow: hidden;
+    position: relative;
+}
+
+.beatport-hype-pick-artwork img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: transform 0.3s ease;
+}
+
+.beatport-hype-pick-card:hover .beatport-hype-pick-artwork img {
+    transform: scale(1.1);
+}
+
+.beatport-hype-pick-info {
+    text-align: center;
+}
+
+.beatport-hype-pick-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #ffffff;
+    margin-bottom: 4px;
+    line-height: 1.2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.beatport-hype-pick-artist {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.7);
+    margin-bottom: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.beatport-hype-pick-label {
+    font-size: 10px;
+    color: rgba(255, 107, 107, 0.8);
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Placeholder Card Styling */
+.beatport-hype-pick-placeholder {
+    opacity: 0.3;
+    cursor: default;
+    pointer-events: none;
+}
+
+.beatport-hype-pick-placeholder .placeholder-icon {
+    font-size: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.beatport-hype-pick-placeholder:hover {
+    transform: none;
+    background: linear-gradient(145deg,
+        rgba(40, 40, 40, 0.9),
+        rgba(28, 28, 28, 0.95));
+}
+
+/* Navigation Buttons */
+.beatport-hype-picks-slider-nav {
+    position: absolute;
+    top: 50%;
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    transform: translateY(-50%);
+    pointer-events: none;
+    z-index: 10;
+}
+
+.beatport-hype-picks-nav-btn {
+    pointer-events: all;
+    background: linear-gradient(135deg,
+        rgba(255, 107, 107, 0.9),
+        rgba(255, 135, 135, 0.8));
+    border: none;
+    border-radius: 50%;
+    width: 50px;
+    height: 50px;
+    color: white;
+    font-size: 24px;
+    font-weight: bold;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(10px);
+    box-shadow: 0 6px 20px rgba(255, 107, 107, 0.4);
+    transition: all 0.3s ease;
+    border: 2px solid rgba(255, 255, 255, 0.2);
+}
+
+.beatport-hype-picks-nav-btn:hover {
+    transform: scale(1.1);
+    background: linear-gradient(135deg,
+        rgba(255, 107, 107, 1),
+        rgba(255, 135, 135, 0.9));
+    box-shadow: 0 8px 25px rgba(255, 107, 107, 0.6);
+}
+
+.beatport-hype-picks-prev-btn {
+    margin-left: -25px;
+}
+
+.beatport-hype-picks-next-btn {
+    margin-right: -25px;
+}
+
+/* Slider Indicators */
+.beatport-hype-picks-slider-indicators {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    margin-top: 25px;
+}
+
+.beatport-hype-picks-indicator {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.3);
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.beatport-hype-picks-indicator.active {
+    background: linear-gradient(135deg, #ff6b6b, #ff8787);
+    border-color: rgba(255, 107, 107, 0.6);
+    box-shadow: 0 0 15px rgba(255, 107, 107, 0.5);
+    transform: scale(1.2);
+}
+
+.beatport-hype-picks-indicator:hover {
+    background: rgba(255, 255, 255, 0.5);
+    transform: scale(1.1);
+}
+
+/* Responsive Design */
+@media (max-width: 1400px) {
+    .beatport-hype-picks-grid {
+        grid-template-columns: repeat(4, 1fr);
+        grid-template-rows: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 1200px) {
+    .beatport-hype-picks-grid {
+        grid-template-columns: repeat(3, 1fr);
+        grid-template-rows: repeat(2, 1fr);
+        gap: 16px;
+    }
+
+    .beatport-hype-pick-artwork {
+        width: 70px;
+        height: 70px;
+    }
+}
+
+@media (max-width: 900px) {
+    .beatport-hype-picks-grid {
+        grid-template-columns: repeat(2, 1fr);
+        grid-template-rows: repeat(3, 1fr);
+        gap: 14px;
+    }
+
+    .beatport-hype-picks-slider-container {
+        padding: 20px;
+    }
+}
+
+@media (max-width: 600px) {
+    .beatport-hype-picks-grid {
+        grid-template-columns: 1fr;
+        grid-template-rows: repeat(5, 1fr);
+        gap: 12px;
+    }
+
+    .beatport-hype-picks-section {
+        padding: 0 15px;
+    }
+
+    .beatport-hype-picks-title {
+        font-size: 24px;
+    }
+}
+
 /* ==================== FEATURED CHARTS SLIDER STYLES ==================== */
 
 /* Charts Section */
