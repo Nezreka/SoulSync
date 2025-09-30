@@ -12095,9 +12095,8 @@ body {
     width: 100%;
     min-width: 0; /* Allow shrinking */
     overflow: hidden; /* Prevent content overflow */
-    transition: box-shadow 0.6s ease-in-out,
-                background 0.6s ease-in-out,
-                border-left-color 0.6s ease-in-out;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                filter 0.5s cubic-bezier(0.4, 0, 0.2, 1);
     cursor: pointer;
 }
 
@@ -12120,27 +12119,23 @@ body {
 
 /* Hover Effects for Top 10 Lists */
 .beatport-top10-list:hover {
-    border-left-color: #00ff88;
-    box-shadow:
-        0 20px 40px rgba(0, 0, 0, 0.5),
-        0 0 40px rgba(0, 255, 136, 0.4),
-        0 0 80px rgba(0, 255, 136, 0.2),
-        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    filter: drop-shadow(0 0 4px rgba(0, 255, 136, 0.3))
+            drop-shadow(0 0 8px rgba(0, 255, 136, 0.2))
+            drop-shadow(0 0 16px rgba(0, 255, 136, 0.1));
+    border-left-color: rgba(0, 255, 136, 0.6);
     background: linear-gradient(135deg,
-        rgba(0, 255, 136, 0.1),
+        rgba(0, 255, 136, 0.04),
         rgba(18, 18, 18, 0.95),
         rgba(30, 30, 30, 0.9));
 }
 
 .beatport-hype10-list:hover {
-    border-left-color: #ff3366;
-    box-shadow:
-        0 20px 40px rgba(0, 0, 0, 0.5),
-        0 0 40px rgba(255, 51, 102, 0.4),
-        0 0 80px rgba(255, 51, 102, 0.2),
-        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    filter: drop-shadow(0 0 4px rgba(255, 51, 102, 0.3))
+            drop-shadow(0 0 8px rgba(255, 51, 102, 0.2))
+            drop-shadow(0 0 16px rgba(255, 51, 102, 0.1));
+    border-left-color: rgba(255, 51, 102, 0.6);
     background: linear-gradient(135deg,
-        rgba(255, 51, 102, 0.1),
+        rgba(255, 51, 102, 0.04),
         rgba(18, 18, 18, 0.95),
         rgba(30, 30, 30, 0.9));
 }
