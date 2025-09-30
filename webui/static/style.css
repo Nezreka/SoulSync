@@ -4158,7 +4158,8 @@ body {
     display: grid;
     grid-template-columns: 2.5fr 0.75fr; /* More space for main panel, smaller sidebar */
     gap: 25px;
-    min-height: calc(100vh - 200px); /* Minimum height, but allow expansion */
+    /* min-height: calc(90vh - 200px);  Minimum height, but allow expansion */
+    height: 95%;
 }
 
 .sync-main-panel, .sync-sidebar {
@@ -12416,6 +12417,379 @@ body {
     }
 
     .beatport-releases-title {
+        font-size: 24px;
+    }
+}
+
+/* ==================== FEATURED CHARTS SLIDER STYLES ==================== */
+
+/* Charts Section */
+.beatport-charts-section {
+    margin-top: 40px;
+    padding: 0 30px;
+}
+
+.beatport-charts-header {
+    text-align: center;
+    margin-bottom: 30px;
+}
+
+.beatport-charts-title {
+    font-size: 32px;
+    font-weight: 700;
+    color: #ffffff;
+    margin-bottom: 8px;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+.beatport-charts-subtitle {
+    font-size: 16px;
+    color: rgba(255, 255, 255, 0.8);
+    margin: 0;
+}
+
+/* Charts Slider Container */
+.beatport-charts-slider-container {
+    position: relative;
+    background: linear-gradient(135deg,
+        rgba(16, 16, 16, 0.4),
+        rgba(24, 24, 24, 0.2));
+    border-radius: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    backdrop-filter: blur(15px);
+    min-height: 600px;
+    padding: 30px;
+}
+
+.beatport-charts-slider {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    border-radius: 16px;
+}
+
+.beatport-charts-slider-track {
+    position: relative;
+    height: 550px;
+}
+
+.beatport-charts-slide {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    transition: all 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    transform: translateX(100px);
+}
+
+.beatport-charts-slide.active {
+    opacity: 1;
+    transform: translateX(0);
+    z-index: 10;
+}
+
+.beatport-charts-slide.prev {
+    opacity: 0;
+    transform: translateX(-100px);
+}
+
+.beatport-charts-slide.next {
+    opacity: 0;
+    transform: translateX(100px);
+}
+
+/* Charts Grid */
+.beatport-charts-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    grid-template-rows: repeat(2, 1fr);
+    gap: 20px;
+    padding: 20px;
+    background: linear-gradient(135deg,
+        rgba(16, 16, 16, 0.6),
+        rgba(24, 24, 24, 0.4));
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    justify-items: center;
+    align-items: center;
+    margin: 0 auto;
+}
+
+/* Chart Card Styling - Large Background Photo Design */
+.beatport-chart-card {
+    position: relative;
+    width: 100%;
+    height: 200px;
+    min-height: 200px;
+    max-height: 200px;
+    border-radius: 16px;
+    cursor: pointer;
+    transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    overflow: hidden;
+    box-shadow:
+        0 8px 32px rgba(0, 0, 0, 0.4),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.beatport-chart-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: var(--chart-bg-image, linear-gradient(135deg, #1db954, #191414));
+    background-size: cover;
+    background-position: center;
+    border-radius: 16px;
+    z-index: 1;
+}
+
+.beatport-chart-card::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(
+        135deg,
+        rgba(0, 0, 0, 0.2) 0%,
+        rgba(0, 0, 0, 0.4) 50%,
+        rgba(0, 0, 0, 0.7) 100%
+    );
+    border-radius: 16px;
+    z-index: 2;
+}
+
+.beatport-chart-card:hover {
+    transform: translateY(-12px) scale(1.08);
+    box-shadow:
+        0 25px 50px rgba(0, 0, 0, 0.7),
+        0 0 40px rgba(29, 185, 84, 0.5),
+        inset 0 1px 0 rgba(255, 255, 255, 0.3);
+    z-index: 20;
+}
+
+.beatport-chart-card:hover::after {
+    background: linear-gradient(
+        135deg,
+        rgba(29, 185, 84, 0.2) 0%,
+        rgba(0, 0, 0, 0.2) 50%,
+        rgba(0, 0, 0, 0.5) 100%
+    );
+}
+
+.beatport-chart-card:hover .beatport-chart-name {
+    color: rgba(29, 185, 84, 0.95);
+    text-shadow: 0 2px 12px rgba(0, 0, 0, 0.9);
+    transform: translateY(-2px);
+}
+
+.beatport-chart-card:hover .beatport-chart-creator {
+    color: #ffffff;
+    text-shadow: 0 1px 8px rgba(0, 0, 0, 0.9);
+    transform: translateY(-1px);
+}
+
+.beatport-chart-card-content {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 20px;
+    z-index: 3;
+    text-align: left;
+}
+
+.beatport-chart-name {
+    font-size: 18px;
+    font-weight: 700;
+    color: #ffffff;
+    margin-bottom: 8px;
+    line-height: 1.2;
+    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+.beatport-chart-creator {
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.9);
+    font-weight: 500;
+    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+/* Charts Loading State */
+.beatport-charts-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 500px;
+    background: linear-gradient(135deg,
+        rgba(29, 185, 84, 0.1),
+        rgba(16, 16, 16, 0.8));
+    border-radius: 16px;
+    border: 1px solid rgba(29, 185, 84, 0.2);
+}
+
+.beatport-charts-loading-content {
+    text-align: center;
+    color: #ffffff;
+}
+
+.beatport-charts-loading-content h3 {
+    font-size: 24px;
+    margin-bottom: 8px;
+    color: rgba(29, 185, 84, 0.9);
+}
+
+.beatport-charts-loading-content p {
+    font-size: 16px;
+    color: rgba(255, 255, 255, 0.7);
+    margin: 0;
+}
+
+/* Charts Navigation */
+.beatport-charts-slider-nav {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    transform: translateY(-50%);
+    display: flex;
+    justify-content: space-between;
+    padding: 0 20px;
+    pointer-events: none;
+    z-index: 100;
+}
+
+.beatport-charts-nav-btn {
+    background: linear-gradient(135deg,
+        rgba(29, 185, 84, 0.9),
+        rgba(29, 185, 84, 0.7));
+    border: none;
+    color: #ffffff;
+    font-size: 24px;
+    font-weight: 600;
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    backdrop-filter: blur(10px);
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    box-shadow:
+        0 4px 16px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    pointer-events: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.beatport-charts-nav-btn:hover {
+    background: linear-gradient(135deg,
+        rgba(29, 185, 84, 1),
+        rgba(24, 160, 72, 0.9));
+    transform: scale(1.1);
+    box-shadow:
+        0 8px 24px rgba(0, 0, 0, 0.4),
+        0 0 20px rgba(29, 185, 84, 0.5),
+        inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+.beatport-charts-nav-btn:active {
+    transform: scale(0.95);
+}
+
+/* Charts Indicators */
+.beatport-charts-slider-indicators {
+    position: absolute;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 12px;
+    z-index: 10;
+}
+
+.beatport-charts-indicator {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.4);
+    border: none;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.beatport-charts-indicator.active {
+    background: rgba(29, 185, 84, 0.9);
+    transform: scale(1.2);
+    box-shadow: 0 0 10px rgba(29, 185, 84, 0.5);
+}
+
+.beatport-charts-indicator:hover {
+    background: rgba(255, 255, 255, 0.6);
+    transform: scale(1.1);
+}
+
+/* Charts Responsive Design */
+@media (max-width: 1400px) {
+    .beatport-charts-grid {
+        grid-template-columns: repeat(4, 1fr);
+        grid-template-rows: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 1200px) {
+    .beatport-charts-grid {
+        grid-template-columns: repeat(3, 1fr);
+        grid-template-rows: repeat(2, 1fr);
+        gap: 16px;
+    }
+
+    .beatport-chart-card {
+        height: 180px;
+        min-height: 180px;
+        max-height: 180px;
+    }
+}
+
+@media (max-width: 900px) {
+    .beatport-charts-grid {
+        grid-template-columns: repeat(2, 1fr);
+        grid-template-rows: repeat(3, 1fr);
+        gap: 14px;
+    }
+
+    .beatport-charts-slider-container {
+        padding: 20px;
+    }
+}
+
+@media (max-width: 600px) {
+    .beatport-charts-grid {
+        grid-template-columns: 1fr;
+        grid-template-rows: repeat(5, 1fr);
+        gap: 12px;
+    }
+
+    .beatport-charts-section {
+        padding: 0 15px;
+    }
+
+    .beatport-charts-title {
         font-size: 24px;
     }
 }

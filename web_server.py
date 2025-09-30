@@ -2210,6 +2210,138 @@ def get_beatport_new_releases():
             'releases': []
         }), 500
 
+
+@app.route('/api/beatport/featured-charts')
+def get_beatport_featured_charts():
+    """Get featured charts from Beatport for the charts slider grid using GridSlider approach"""
+    try:
+        logger.info("🔥 Fetching Beatport featured charts...")
+
+        # Initialize scraper
+        scraper = BeatportUnifiedScraper()
+
+        # Get page and extract charts
+        soup = scraper.get_page(scraper.base_url)
+        if not soup:
+            raise Exception("Could not fetch Beatport homepage")
+
+        # Find Featured Charts GridSlider container (like New Releases)
+        gridsliders = soup.select('[class*="GridSlider-style__Wrapper"]')
+        featured_container = None
+
+        logger.info(f"🔍 Checking {len(gridsliders)} GridSlider containers for featured charts...")
+
+        for container in gridsliders:
+            h2 = container.select_one('h2')
+            if h2:
+                title = h2.get_text(strip=True).lower()
+                logger.info(f"📋 Found section: '{h2.get_text(strip=True)}'")
+
+                if 'featured' in title and 'chart' in title:
+                    featured_container = container
+                    logger.info(f"🔥 FOUND FEATURED CHARTS: '{h2.get_text(strip=True)}'")
+                    break
+
+        if not featured_container:
+            logger.warning("❌ No Featured Charts GridSlider container found")
+            return jsonify({
+                'success': False,
+                'error': 'Featured Charts section not found',
+                'charts': []
+            })
+
+        # Extract charts from the container using chart links
+        charts = []
+        chart_links = featured_container.select('a[href*="/chart/"]')
+
+        logger.info(f"📊 Found {len(chart_links)} chart links in Featured Charts section")
+
+        for i, link in enumerate(chart_links[:100]):  # Limit to 100 for 10 slides
+            chart_data = {}
+
+            # Extract chart name from link text or nearby elements
+            name_elem = link.select_one('h3, h4, h5, h6, [class*="title"], [class*="Title"], [class*="name"], [class*="Name"]')
+            if name_elem:
+                name_text = name_elem.get_text(strip=True)
+            else:
+                name_text = link.get_text(strip=True)
+
+            if name_text and len(name_text) > 2 and name_text.lower() not in ['featured charts', 'buy', 'play']:
+                chart_data['name'] = name_text
+
+                # Extract creator using the specific CSS class pattern from chart cards
+                creator = 'Beatport'  # Default
+
+                # Look for the ChartCard Name class that contains the creator
+                creator_elem = link.select_one('[class*="ChartCard-style__Name"]')
+                if creator_elem:
+                    creator_text = creator_elem.get_text(strip=True)
+                    if creator_text and len(creator_text) > 1 and creator_text.lower() not in ['by', 'chart', 'featured', 'beatport']:
+                        creator = creator_text
+                    elif creator_text.lower() == 'beatport':
+                        creator = 'Beatport'
+                else:
+                    # Fallback: look for other creator indicators
+                    parent = link.parent
+                    if parent:
+                        fallback_selectors = [
+                            '[class*="artist"]', '[class*="Artist"]',
+                            '[class*="creator"]', '[class*="Creator"]',
+                            '[class*="author"]', '[class*="Author"]'
+                        ]
+
+                        for selector in fallback_selectors:
+                            fallback_elem = parent.select_one(selector)
+                            if fallback_elem:
+                                fallback_text = fallback_elem.get_text(strip=True)
+                                if fallback_text and len(fallback_text) > 1 and fallback_text.lower() not in ['by', 'chart', 'featured']:
+                                    creator = fallback_text
+                                    break
+
+                chart_data['creator'] = creator
+
+                # Extract URL
+                href = link.get('href', '')
+                if href:
+                    if href.startswith('/'):
+                        chart_data['url'] = f"https://www.beatport.com{href}"
+                    else:
+                        chart_data['url'] = href
+
+                # Extract image
+                img_elem = link.select_one('img') or (link.parent.select_one('img') if link.parent else None)
+                if img_elem:
+                    src = img_elem.get('src', '') or img_elem.get('data-src', '')
+                    if src:
+                        if src.startswith('//'):
+                            src = f"https:{src}"
+                        elif src.startswith('/'):
+                            src = f"https://www.beatport.com{src}"
+                        chart_data['image'] = src
+
+                # Only add if we have meaningful data
+                if 'name' in chart_data and 'url' in chart_data:
+                    charts.append(chart_data)
+                    logger.info(f"✅ Chart {len(charts)}: {chart_data['name']} by {chart_data['creator']}")
+
+        logger.info(f"📊 Successfully extracted {len(charts)} featured charts")
+
+        return jsonify({
+            'success': True,
+            'charts': charts,
+            'count': len(charts),
+            'slides': (len(charts) + 9) // 10,  # Calculate number of slides needed
+            'timestamp': datetime.now().isoformat()
+        })
+
+    except Exception as e:
+        logger.error(f"❌ Error fetching featured charts: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'charts': []
+        }), 500
+
 # --- Placeholder API Endpoints for Other Pages ---
 
 @app.route('/api/activity')
