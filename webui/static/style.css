@@ -12537,7 +12537,7 @@ body {
 
 /* Single column container for releases */
 .beatport-releases-top10-container {
-    max-width: 1200px;
+    max-width: 1500px;
     margin: 0 auto;
 }
 
@@ -12561,7 +12561,7 @@ body {
 /* Track containers with grid layout for releases */
 .beatport-releases-top10-tracks {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(40%, 1fr));
     gap: 20px;
 }
 
@@ -12689,7 +12689,7 @@ body {
 
 .beatport-releases-top10-card-label {
     font-size: 13px;
-    color: rgba(138, 43, 226, 0.95);
+    color: white;
     font-weight: 700;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -12698,7 +12698,14 @@ body {
     letter-spacing: 0.8px;
     max-width: 100%;
     width: 100%;
+    transition: .5s;
 }
+
+.beatport-releases-top10-card:hover .beatport-releases-top10-card-label{
+    color: rgba(138, 43, 226, 0.95);
+    transition: .5s;
+}
+
 
 /* Loading states for releases */
 .beatport-releases-top10-loading {
