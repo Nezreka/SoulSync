@@ -13321,6 +13321,102 @@ def get_beatport_dj_charts_improved():
             "count": 0
         }), 500
 
+
+@app.route('/api/beatport/hype-picks')
+def get_beatport_hype_picks():
+    """Get Beatport Hype Picks for the rebuild slider grid (EXACT same pattern as new-releases)"""
+    try:
+        logger.info("🔥 Fetching Beatport hype picks...")
+
+        # Initialize scraper
+        scraper = BeatportUnifiedScraper()
+
+        # Get page and extract releases
+        soup = scraper.get_page(scraper.base_url)
+        if not soup:
+            raise Exception("Could not fetch Beatport homepage")
+
+        # Extract hype pick cards using data-testid selector (equivalent to new-releases CSS selector)
+        hype_pick_cards = soup.select('[data-testid="hype-picks"]')
+        releases = []
+
+        logger.info(f"🔍 Found {len(hype_pick_cards)} hype pick cards")
+
+        for i, card in enumerate(hype_pick_cards[:100]):  # Limit to 100 for 10 slides (same as new-releases)
+            release_data = {}
+
+            # Extract title (exact same logic as new-releases)
+            title_elem = card.select_one('[class*="title"], [class*="Title"], h1, h2, h3, h4, h5, h6')
+            if title_elem:
+                title_text = title_elem.get_text(strip=True)
+                if title_text and len(title_text) > 2 and title_text not in ['Hype Picks', 'Buy', 'Play']:
+                    release_data['title'] = title_text
+
+            # Extract artist (exact same logic as new-releases)
+            artist_elem = card.select_one('[class*="artist"], [class*="Artist"], a[href*="/artist/"]')
+            if artist_elem:
+                artist_text = artist_elem.get_text(strip=True)
+                if artist_text and len(artist_text) > 1:
+                    release_data['artist'] = artist_text
+
+            # Extract label (exact same logic as new-releases)
+            label_elem = card.select_one('[class*="label"], [class*="Label"], a[href*="/label/"]')
+            if label_elem:
+                label_text = label_elem.get_text(strip=True)
+                if label_text and len(label_text) > 1:
+                    release_data['label'] = label_text
+
+            # Extract URL (exact same logic as new-releases)
+            url_link = card.select_one('a[href*="/release/"]')
+            if url_link:
+                href = url_link.get('href')
+                if href:
+                    release_data['url'] = urljoin(scraper.base_url, href)
+
+            # Extract image (exact same logic as new-releases)
+            img = card.select_one('img')
+            if img:
+                src = img.get('src') or img.get('data-src') or img.get('data-lazy-src')
+                if src:
+                    release_data['image_url'] = src
+
+            # URL fallback for title (exact same logic as new-releases)
+            if not release_data.get('title') and release_data.get('url'):
+                url_parts = release_data['url'].split('/release/')
+                if len(url_parts) > 1:
+                    slug = url_parts[1].split('/')[0]
+                    release_data['title'] = slug.replace('-', ' ').title()
+
+            # Only add if we have essential data (exact same logic as new-releases)
+            if release_data.get('title') and release_data.get('url'):
+                # Add fallbacks for missing data (exact same logic as new-releases)
+                if not release_data.get('artist'):
+                    release_data['artist'] = 'Various Artists'
+                if not release_data.get('label'):
+                    release_data['label'] = 'Unknown Label'
+
+                releases.append(release_data)
+
+        logger.info(f"✅ Successfully extracted {len(releases)} hype picks")
+
+        return jsonify({
+            'success': True,
+            'releases': releases,
+            'count': len(releases),
+            'slides': (len(releases) + 9) // 10,  # Calculate number of slides needed (same as new-releases)
+            'timestamp': datetime.now().isoformat()
+        })
+
+    except Exception as e:
+        logger.error(f"❌ Error getting Beatport hype picks: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'releases': [],
+            'count': 0
+        }), 500
+
+
 @app.route('/api/beatport/discovery/start/<url_hash>', methods=['POST'])
 def start_beatport_discovery(url_hash):
     """Start Spotify discovery for Beatport chart tracks"""
