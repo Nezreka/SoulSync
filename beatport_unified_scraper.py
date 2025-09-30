@@ -1446,43 +1446,81 @@ class BeatportUnifiedScraper:
 
         return tracks
 
-    def scrape_genre_hype_picks(self, genre: Dict, limit: int = 50) -> List[Dict]:
-        """Scrape hype picks for a specific genre - FIXED VERSION"""
-        tracks = []
+    def scrape_genre_hype_picks(self, genre: Dict, limit: int = 100) -> List[Dict]:
+        """Scrape individual tracks from Genre Hype Picks using JSON extraction - ENHANCED (same pattern as Latest Releases)"""
+        print(f"\n🔥 Scraping {genre['name']} Hype Picks (individual tracks)...")
 
-        # Try multiple hype-related URLs
-        hype_urls_to_try = [
-            f"{self.base_url}/genre/{genre['slug']}/{genre['id']}/hype-100",
-            f"{self.base_url}/genre/{genre['slug']}/{genre['id']}/hype",
-            f"{self.base_url}/genre/{genre['slug']}/{genre['id']}/hype-10",
-            f"{self.base_url}/genre/{genre['slug']}/{genre['id']}"  # Main page as fallback
-        ]
+        # Step 1: Get release URLs from genre Hype Picks carousel (same logic as Latest Releases)
+        release_urls = self.extract_genre_hype_picks_urls(genre, limit)
+        if not release_urls:
+            return []
 
-        for hype_url in hype_urls_to_try:
-            print(f"   🔥 Trying hype URL: {hype_url}")
-            soup = self.get_page(hype_url)
-            if soup:
-                # First try direct track extraction
-                tracks = self.extract_tracks_from_page(soup, f"{genre['name']} Hype Picks", limit)
+        # Step 2: Extract individual tracks from each release (same method as Latest Releases)
+        all_tracks = []
+        for i, release_url in enumerate(release_urls):
+            print(f"\n🔥 Processing {genre['name']} hype pick {i+1}/{len(release_urls)}")
+            tracks = self.extract_tracks_from_release_json(release_url)
+            if tracks:
+                # Update list_name to match genre context
+                for track in tracks:
+                    track['list_name'] = f"Genre {genre['name']} Hype Picks"
+                all_tracks.extend(tracks)
 
-                if len(tracks) >= 10:  # Good result
-                    print(f"   ✅ Found {len(tracks)} hype tracks from {hype_url}")
-                    break
-                elif len(tracks) > 0:
-                    print(f"   ⚠️ Only found {len(tracks)} hype tracks, trying next URL...")
-                else:
-                    print(f"   ❌ No hype tracks found at {hype_url}")
+            # Add small delay between requests to be respectful (same as Latest Releases)
+            import time
+            time.sleep(0.5)
 
-                    # If main page, try to find hype section
-                    if hype_url.endswith(genre['id']):
-                        print(f"   🔍 Searching for hype section on main genre page...")
-                        hype_section_tracks = self.find_hype_section_on_genre_page(soup, genre, limit)
-                        if hype_section_tracks:
-                            tracks = hype_section_tracks
-                            print(f"   ✅ Found {len(tracks)} tracks in hype section")
-                            break
+        print(f"✅ Extracted {len(all_tracks)} individual tracks from {len(release_urls)} {genre['name']} hype picks")
+        return all_tracks
 
-        return tracks[:limit]
+    def extract_genre_hype_picks_urls(self, genre: Dict, limit: int) -> List[str]:
+        """Extract release URLs from Hype Picks carousel on genre page (same pattern as Latest Releases)"""
+        genre_url = f"{self.base_url}/genre/{genre['slug']}/{genre['id']}"
+        soup = self.get_page(genre_url)
+        if not soup:
+            return []
+
+        # Find Hype Picks GridSlider container (equivalent to Latest Releases approach)
+        gridsliders = soup.select('[class*="GridSlider-style__Wrapper"]')
+        hype_container = None
+
+        for container in gridsliders:
+            h2 = container.select_one('h2')
+            if h2 and 'hype' in h2.get_text().lower() and 'pick' in h2.get_text().lower():
+                hype_container = container
+                print(f"   Found Hype Picks section: '{h2.get_text().strip()}'")
+                break
+
+        if not hype_container:
+            print(f"   ❌ Could not find Hype Picks section for {genre['name']}")
+            return []
+
+        # Extract release URLs from ALL releases in Hype Picks section (same as Latest Releases)
+        release_links = hype_container.select('a[href*="/release/"]')
+        print(f"   Found {len(release_links)} release links in Hype Picks section")
+
+        release_urls = []
+        seen_urls = set()
+
+        # Process ALL links but stop when we reach the limit of unique URLs (same as Latest Releases)
+        for i, link in enumerate(release_links):
+            href = link.get('href')
+            if href:
+                # Ensure full URL (same as Latest Releases)
+                if href.startswith('/'):
+                    href = self.base_url + href
+
+                # Avoid duplicates (same as Latest Releases logic)
+                if href not in seen_urls:
+                    release_urls.append(href)
+                    seen_urls.add(href)
+                    print(f"   {len(release_urls)}. Found hype pick URL: {href}")
+
+                    # Stop when we reach the desired number of unique releases
+                    if len(release_urls) >= limit:
+                        break
+
+        return release_urls
 
     def find_hype_section_on_genre_page(self, soup, genre: Dict, limit: int) -> List[Dict]:
         """Find and extract tracks from hype section on main genre page"""
@@ -1911,72 +1949,81 @@ class BeatportUnifiedScraper:
 
         return tracks
 
-    def scrape_genre_staff_picks(self, genre: Dict, limit: int = 50) -> List[Dict]:
-        """Scrape staff picks for a specific genre - FIXED VERSION"""
-        genre_url = f"{self.base_url}/genre/{genre['slug']}/{genre['id']}"
+    def scrape_genre_staff_picks(self, genre: Dict, limit: int = 100) -> List[Dict]:
+        """Scrape individual tracks from Genre Staff Picks using JSON extraction - ENHANCED (same pattern as Latest Releases)"""
+        print(f"\n📝 Scraping {genre['name']} Staff Picks (individual tracks)...")
 
+        # Step 1: Get release URLs from genre Staff Picks carousel (same logic as Latest Releases)
+        release_urls = self.extract_genre_staff_picks_urls(genre, limit)
+        if not release_urls:
+            return []
+
+        # Step 2: Extract individual tracks from each release (same method as Latest Releases)
+        all_tracks = []
+        for i, release_url in enumerate(release_urls):
+            print(f"\n📝 Processing {genre['name']} staff pick {i+1}/{len(release_urls)}")
+            tracks = self.extract_tracks_from_release_json(release_url)
+            if tracks:
+                # Update list_name to match genre context
+                for track in tracks:
+                    track['list_name'] = f"Genre {genre['name']} Staff Picks"
+                all_tracks.extend(tracks)
+
+            # Add small delay between requests to be respectful (same as Latest Releases)
+            import time
+            time.sleep(0.5)
+
+        print(f"✅ Extracted {len(all_tracks)} individual tracks from {len(release_urls)} {genre['name']} staff picks")
+        return all_tracks
+
+    def extract_genre_staff_picks_urls(self, genre: Dict, limit: int) -> List[str]:
+        """Extract release URLs from Staff Picks carousel on genre page (same pattern as Latest Releases)"""
+        genre_url = f"{self.base_url}/genre/{genre['slug']}/{genre['id']}"
         soup = self.get_page(genre_url)
         if not soup:
             return []
 
-        tracks = []
+        # Find Staff Picks GridSlider container (equivalent to Latest Releases approach)
+        gridsliders = soup.select('[class*="GridSlider-style__Wrapper"]')
+        staff_container = None
 
-        # Method 1: Look for editorial/staff pick sections directly
-        editorial_sections = [
-            'staff pick', 'editorial', 'featured', 'editor pick',
-            'beatport picks', 'weekend pick', 'best new', 'exclusives'
-        ]
+        for container in gridsliders:
+            h2 = container.select_one('h2')
+            if h2 and 'staff' in h2.get_text().lower() and 'pick' in h2.get_text().lower():
+                staff_container = container
+                print(f"   Found Staff Picks section: '{h2.get_text().strip()}'")
+                break
 
-        for section_name in editorial_sections:
-            section_heading = soup.find(['h1', 'h2', 'h3', 'h4'],
-                string=re.compile(rf'{section_name}', re.I))
+        if not staff_container:
+            print(f"   ❌ Could not find Staff Picks section for {genre['name']}")
+            return []
 
-            if section_heading:
-                print(f"   📝 Found staff picks section: {section_heading.get_text(strip=True)}")
-                section_container = section_heading.find_parent()
-                if section_container:
-                    content_area = section_container.find_next_sibling()
-                    if content_area:
-                        section_tracks = self.extract_tracks_from_page(
-                            content_area, f"{genre['name']} Staff Picks", limit
-                        )
-                        if section_tracks:
-                            tracks.extend(section_tracks)
-                            break  # Found staff picks, stop looking
+        # Extract release URLs from ALL releases in Staff Picks section (same as Latest Releases)
+        release_links = staff_container.select('a[href*="/release/"]')
+        print(f"   Found {len(release_links)} release links in Staff Picks section")
 
-        # Method 2: If no direct sections found, look for editorial chart collections
-        if not tracks:
-            print(f"   🔍 No direct staff picks section found, checking editorial charts...")
+        release_urls = []
+        seen_urls = set()
 
-            chart_links = soup.find_all('a', href=re.compile(r'/chart/'))
-            editorial_charts = []
+        # Process ALL links but stop when we reach the limit of unique URLs (same as Latest Releases)
+        for i, link in enumerate(release_links):
+            href = link.get('href')
+            if href:
+                # Ensure full URL (same as Latest Releases)
+                if href.startswith('/'):
+                    href = self.base_url + href
 
-            for chart_link in chart_links[:10]:  # Limit to first 10 charts
-                chart_name = chart_link.get_text(strip=True)
-                chart_href = chart_link.get('href', '')
+                # Avoid duplicates (same as Latest Releases logic)
+                if href not in seen_urls:
+                    release_urls.append(href)
+                    seen_urls.add(href)
+                    print(f"   {len(release_urls)}. Found staff pick URL: {href}")
 
-                # Filter for editorial-style chart names
-                if any(keyword in chart_name.lower() for keyword in
-                      ['best new', 'weekend pick', 'editor', 'staff', 'beatport picks', 'exclusive']):
-                    editorial_charts.append((chart_name, chart_href))
+                    # Stop when we reach the desired number of unique releases
+                    if len(release_urls) >= limit:
+                        break
 
-            print(f"   📊 Found {len(editorial_charts)} editorial charts")
-
-            # Extract tracks from editorial charts
-            for chart_name, chart_href in editorial_charts[:3]:  # Limit to 3 charts
-                if len(tracks) >= limit:
-                    break
-
-                print(f"   📊 Processing editorial chart: {chart_name}")
-                chart_url = urljoin(self.base_url, chart_href)
-                remaining_limit = limit - len(tracks)
-                chart_tracks = self.extract_tracks_from_chart(chart_url, chart_name, remaining_limit)
-
-                if chart_tracks:
-                    tracks.extend(chart_tracks)
-                    print(f"   ✅ Added {len(chart_tracks)} tracks from {chart_name}")
-
-        return tracks[:limit]
+        return release_urls
 
     def scrape_genre_latest_releases(self, genre: Dict, limit: int = 100) -> List[Dict]:
         """Scrape individual tracks from Genre Latest Releases using JSON extraction - ENHANCED (same pattern as homepage)"""
