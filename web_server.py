@@ -253,6 +253,114 @@ def get_cached_transfer_data():
     
     return live_transfers_lookup
 
+# --- Beatport Data Cache ---
+# Cache Beatport scraping data to reduce load times and avoid hammering Beatport.com
+beatport_data_cache = {
+    'homepage': {
+        'hero_tracks': {'data': None, 'timestamp': 0, 'ttl': 3600},       # 1 hour
+        'top_10_lists': {'data': None, 'timestamp': 0, 'ttl': 3600},      # 1 hour
+        'top_10_releases': {'data': None, 'timestamp': 0, 'ttl': 3600},   # 1 hour
+        'new_releases': {'data': None, 'timestamp': 0, 'ttl': 3600},      # 1 hour
+        'hype_picks': {'data': None, 'timestamp': 0, 'ttl': 3600},        # 1 hour
+        'featured_charts': {'data': None, 'timestamp': 0, 'ttl': 3600},   # 1 hour
+        'dj_charts': {'data': None, 'timestamp': 0, 'ttl': 3600}          # 1 hour
+    },
+    'genre': {
+        # Future expansion for genre-specific caching
+        # 'house': {'top_10': {...}, 'releases': {...}},
+        # 'techno': {'top_10': {...}, 'releases': {...}}
+    },
+    'cache_lock': threading.Lock()
+}
+
+def get_cached_beatport_data(section_type, data_key, genre_slug=None):
+    """
+    Get Beatport data from cache if valid, otherwise return None.
+
+    Args:
+        section_type: 'homepage' or 'genre'
+        data_key: specific data type (e.g., 'hero_tracks', 'top_10_lists')
+        genre_slug: only used for genre section_type
+
+    Returns:
+        Cached data if valid, None if cache miss or expired
+    """
+    current_time = time.time()
+
+    with beatport_data_cache['cache_lock']:
+        try:
+            if section_type == 'homepage':
+                cache_entry = beatport_data_cache['homepage'].get(data_key)
+            elif section_type == 'genre' and genre_slug:
+                cache_entry = beatport_data_cache['genre'].get(genre_slug, {}).get(data_key)
+            else:
+                return None
+
+            if not cache_entry:
+                return None
+
+            # Check if cache is still valid
+            age = current_time - cache_entry['timestamp']
+            if age < cache_entry['ttl'] and cache_entry['data'] is not None:
+                print(f"🎯 Cache HIT for {section_type}/{data_key} (age: {age:.1f}s)")
+                return cache_entry['data']
+            else:
+                print(f"⏰ Cache MISS for {section_type}/{data_key} (age: {age:.1f}s, ttl: {cache_entry['ttl']}s)")
+                return None
+
+        except Exception as e:
+            print(f"⚠️ Cache lookup error for {section_type}/{data_key}: {e}")
+            return None
+
+def set_cached_beatport_data(section_type, data_key, data, genre_slug=None):
+    """
+    Store Beatport data in cache with current timestamp.
+
+    Args:
+        section_type: 'homepage' or 'genre'
+        data_key: specific data type (e.g., 'hero_tracks', 'top_10_lists')
+        data: the data to cache
+        genre_slug: only used for genre section_type
+    """
+    current_time = time.time()
+
+    with beatport_data_cache['cache_lock']:
+        try:
+            if section_type == 'homepage':
+                if data_key in beatport_data_cache['homepage']:
+                    beatport_data_cache['homepage'][data_key]['data'] = data
+                    beatport_data_cache['homepage'][data_key]['timestamp'] = current_time
+                    print(f"💾 Cached {section_type}/{data_key} (ttl: {beatport_data_cache['homepage'][data_key]['ttl']}s)")
+            elif section_type == 'genre' and genre_slug:
+                # Initialize genre cache if not exists
+                if genre_slug not in beatport_data_cache['genre']:
+                    beatport_data_cache['genre'][genre_slug] = {}
+
+                # For genre caching, we need to define TTL structure (for future use)
+                if data_key not in beatport_data_cache['genre'][genre_slug]:
+                    beatport_data_cache['genre'][genre_slug][data_key] = {
+                        'data': None, 'timestamp': 0, 'ttl': 600  # Default 10 minutes
+                    }
+
+                beatport_data_cache['genre'][genre_slug][data_key]['data'] = data
+                beatport_data_cache['genre'][genre_slug][data_key]['timestamp'] = current_time
+                print(f"💾 Cached {section_type}/{genre_slug}/{data_key}")
+
+        except Exception as e:
+            print(f"⚠️ Cache storage error for {section_type}/{data_key}: {e}")
+
+def add_cache_headers(response, cache_duration=300):
+    """
+    Add HTTP cache control headers to responses for browser-side caching.
+
+    Args:
+        response: Flask response object
+        cache_duration: Cache duration in seconds (default: 5 minutes)
+    """
+    response.headers['Cache-Control'] = f'public, max-age={cache_duration}'
+    response.headers['Pragma'] = 'cache'
+    return response
+
 # --- Background Download Monitoring (GUI Parity) ---
 class WebUIDownloadMonitor:
     """
@@ -2000,6 +2108,16 @@ def get_beatport_hero_tracks():
     try:
         logger.info("🎯 Fetching Beatport hero tracks...")
 
+        # Check cache first
+        cached_data = get_cached_beatport_data('homepage', 'hero_tracks')
+        if cached_data:
+            logger.info("🎯 Returning cached hero tracks data")
+            response = jsonify(cached_data)
+            return add_cache_headers(response, 3600)  # 1 hour
+
+        # Cache miss - scrape fresh data
+        logger.info("🔄 Cache miss - scraping fresh hero tracks data...")
+
         # Initialize scraper
         scraper = BeatportUnifiedScraper()
 
@@ -2102,12 +2220,19 @@ def get_beatport_hero_tracks():
 
         logger.info(f"✅ Retrieved {len(valid_tracks)} valid unique Beatport tracks (SMART FILTERING)")
 
-        return jsonify({
+        # Prepare response data
+        response_data = {
             'success': True,
             'tracks': valid_tracks,
             'count': len(valid_tracks),
             'timestamp': datetime.now().isoformat()
-        })
+        }
+
+        # Cache the successful response
+        set_cached_beatport_data('homepage', 'hero_tracks', response_data)
+
+        response = jsonify(response_data)
+        return add_cache_headers(response, 3600)  # 1 hour
 
     except Exception as e:
         logger.error(f"❌ Error fetching Beatport tracks: {str(e)}")
@@ -2122,6 +2247,16 @@ def get_beatport_new_releases():
     """Get new releases from Beatport for the rebuild slider grid"""
     try:
         logger.info("🆕 Fetching Beatport new releases...")
+
+        # Check cache first
+        cached_data = get_cached_beatport_data('homepage', 'new_releases')
+        if cached_data:
+            logger.info("🆕 Returning cached new releases data")
+            response = jsonify(cached_data)
+            return add_cache_headers(response, 3600)  # 1 hour
+
+        # Cache miss - scrape fresh data
+        logger.info("🔄 Cache miss - scraping fresh new releases data...")
 
         # Initialize scraper
         scraper = BeatportUnifiedScraper()
@@ -2194,13 +2329,20 @@ def get_beatport_new_releases():
 
         logger.info(f"✅ Successfully extracted {len(releases)} new releases")
 
-        return jsonify({
+        # Prepare response data
+        response_data = {
             'success': True,
             'releases': releases,
             'count': len(releases),
             'slides': (len(releases) + 9) // 10,  # Calculate number of slides needed
             'timestamp': datetime.now().isoformat()
-        })
+        }
+
+        # Cache the successful response
+        set_cached_beatport_data('homepage', 'new_releases', response_data)
+
+        response = jsonify(response_data)
+        return add_cache_headers(response, 3600)  # 1 hour
 
     except Exception as e:
         logger.error(f"❌ Error fetching new releases: {str(e)}")
@@ -2216,6 +2358,16 @@ def get_beatport_featured_charts():
     """Get featured charts from Beatport for the charts slider grid using GridSlider approach"""
     try:
         logger.info("🔥 Fetching Beatport featured charts...")
+
+        # Check cache first
+        cached_data = get_cached_beatport_data('homepage', 'featured_charts')
+        if cached_data:
+            logger.info("🔥 Returning cached featured charts data")
+            response = jsonify(cached_data)
+            return add_cache_headers(response, 3600)  # 1 hour
+
+        # Cache miss - scrape fresh data
+        logger.info("🔄 Cache miss - scraping fresh featured charts data...")
 
         # Initialize scraper
         scraper = BeatportUnifiedScraper()
@@ -2326,13 +2478,20 @@ def get_beatport_featured_charts():
 
         logger.info(f"📊 Successfully extracted {len(charts)} featured charts")
 
-        return jsonify({
+        # Prepare response data
+        response_data = {
             'success': True,
             'charts': charts,
             'count': len(charts),
             'slides': (len(charts) + 9) // 10,  # Calculate number of slides needed
             'timestamp': datetime.now().isoformat()
-        })
+        }
+
+        # Cache the successful response
+        set_cached_beatport_data('homepage', 'featured_charts', response_data)
+
+        response = jsonify(response_data)
+        return add_cache_headers(response, 3600)  # 1 hour
 
     except Exception as e:
         logger.error(f"❌ Error fetching featured charts: {str(e)}")
@@ -2348,6 +2507,16 @@ def get_beatport_dj_charts():
     """Get DJ charts from Beatport for the DJ charts slider using Carousel approach"""
     try:
         logger.info("🎧 Fetching Beatport DJ charts...")
+
+        # Check cache first
+        cached_data = get_cached_beatport_data('homepage', 'dj_charts')
+        if cached_data:
+            logger.info("🎧 Returning cached DJ charts data")
+            response = jsonify(cached_data)
+            return add_cache_headers(response, 3600)  # 1 hour
+
+        # Cache miss - scrape fresh data
+        logger.info("🔄 Cache miss - scraping fresh DJ charts data...")
 
         # Initialize scraper
         scraper = BeatportUnifiedScraper()
@@ -2449,13 +2618,20 @@ def get_beatport_dj_charts():
 
         logger.info(f"📊 Successfully extracted {len(charts)} DJ charts")
 
-        return jsonify({
+        # Prepare response data
+        response_data = {
             'success': True,
             'charts': charts,
             'count': len(charts),
             'slides': max(1, (len(charts) + 2) // 3),  # 3 cards per slide
             'timestamp': datetime.now().isoformat()
-        })
+        }
+
+        # Cache the successful response
+        set_cached_beatport_data('homepage', 'dj_charts', response_data)
+
+        response = jsonify(response_data)
+        return add_cache_headers(response, 3600)  # 1 hour
 
     except Exception as e:
         logger.error(f"❌ Error fetching DJ charts: {str(e)}")
@@ -13234,6 +13410,16 @@ def get_beatport_homepage_top10_lists():
     try:
         logger.info("🏆 API request for Beatport homepage Top 10 Lists")
 
+        # Check cache first
+        cached_data = get_cached_beatport_data('homepage', 'top_10_lists')
+        if cached_data:
+            logger.info("🏆 Returning cached top 10 lists data")
+            response = jsonify(cached_data)
+            return add_cache_headers(response, 3600)  # 1 hour
+
+        # Cache miss - scrape fresh data
+        logger.info("🔄 Cache miss - scraping fresh top 10 lists data...")
+
         # Initialize the Beatport scraper
         scraper = BeatportUnifiedScraper()
 
@@ -13242,14 +13428,21 @@ def get_beatport_homepage_top10_lists():
 
         logger.info(f"✅ Successfully extracted Beatport Top 10: {len(top10_lists['beatport_top10'])}, Hype Top 10: {len(top10_lists['hype_top10'])}")
 
-        return jsonify({
+        # Prepare response data
+        response_data = {
             "success": True,
             "beatport_top10": top10_lists["beatport_top10"],
             "hype_top10": top10_lists["hype_top10"],
             "beatport_count": len(top10_lists["beatport_top10"]),
             "hype_count": len(top10_lists["hype_top10"]),
             "source": "beatport_homepage_top10_lists"
-        })
+        }
+
+        # Cache the successful response
+        set_cached_beatport_data('homepage', 'top_10_lists', response_data)
+
+        response = jsonify(response_data)
+        return add_cache_headers(response, 3600)  # 1 hour
 
     except Exception as e:
         logger.error(f"❌ Error getting Beatport homepage top 10 lists: {e}")
@@ -13268,6 +13461,16 @@ def get_beatport_homepage_top10_releases_cards():
     try:
         logger.info("💿 API request for Beatport homepage Top 10 Releases CARDS")
 
+        # Check cache first
+        cached_data = get_cached_beatport_data('homepage', 'top_10_releases')
+        if cached_data:
+            logger.info("💿 Returning cached top 10 releases data")
+            response = jsonify(cached_data)
+            return add_cache_headers(response, 3600)  # 1 hour
+
+        # Cache miss - scrape fresh data
+        logger.info("🔄 Cache miss - scraping fresh top 10 releases data...")
+
         # Initialize the Beatport scraper
         scraper = BeatportUnifiedScraper()
 
@@ -13282,12 +13485,19 @@ def get_beatport_homepage_top10_releases_cards():
         else:
             logger.warning("❌ No releases found by scraper")
 
-        return jsonify({
+        # Prepare response data
+        response_data = {
             "success": True,
             "releases": top10_releases,
             "releases_count": len(top10_releases),
             "source": "beatport_homepage_top10_releases_cards"
-        })
+        }
+
+        # Cache the successful response
+        set_cached_beatport_data('homepage', 'top_10_releases', response_data)
+
+        response = jsonify(response_data)
+        return add_cache_headers(response, 3600)  # 1 hour
 
     except Exception as e:
         logger.error(f"❌ Error getting Beatport homepage Top 10 Releases cards: {e}")
@@ -13400,6 +13610,16 @@ def get_beatport_hype_picks():
     try:
         logger.info("🔥 Fetching Beatport hype picks...")
 
+        # Check cache first
+        cached_data = get_cached_beatport_data('homepage', 'hype_picks')
+        if cached_data:
+            logger.info("🔥 Returning cached hype picks data")
+            response = jsonify(cached_data)
+            return add_cache_headers(response, 3600)  # 1 hour
+
+        # Cache miss - scrape fresh data
+        logger.info("🔄 Cache miss - scraping fresh hype picks data...")
+
         # Initialize scraper
         scraper = BeatportUnifiedScraper()
 
@@ -13471,13 +13691,20 @@ def get_beatport_hype_picks():
 
         logger.info(f"✅ Successfully extracted {len(releases)} hype picks")
 
-        return jsonify({
+        # Prepare response data
+        response_data = {
             'success': True,
             'releases': releases,
             'count': len(releases),
             'slides': (len(releases) + 9) // 10,  # Calculate number of slides needed (same as new-releases)
             'timestamp': datetime.now().isoformat()
-        })
+        }
+
+        # Cache the successful response
+        set_cached_beatport_data('homepage', 'hype_picks', response_data)
+
+        response = jsonify(response_data)
+        return add_cache_headers(response, 3600)  # 1 hour
 
     except Exception as e:
         logger.error(f"❌ Error getting Beatport hype picks: {e}")
