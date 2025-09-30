@@ -4162,6 +4162,18 @@ body {
     height: 95%;
 }
 
+/* Hide sidebar on laptop and smaller screens */
+@media (max-width: 1300px) {
+    .sync-content-area {
+        grid-template-columns: 1fr; /* Single column - main panel takes full width */
+        gap: 0;
+    }
+
+    .sync-sidebar {
+        display: none !important; /* Hide sidebar completely - use !important to override other rules */
+    }
+}
+
 .sync-main-panel, .sync-sidebar {
     background: linear-gradient(135deg, rgba(26, 26, 26, 0.95), rgba(18, 18, 18, 0.98));
     backdrop-filter: blur(10px);
