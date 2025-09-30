@@ -14463,3 +14463,150 @@ body {
         font-size: 24px;
     }
 }
+
+/* ======================================
+   BEATPORT NAVIGATION BUTTONS SECTION
+   ====================================== */
+
+.beatport-nav-buttons-section {
+    padding: 30px 20px;
+    margin-bottom: 20px;
+}
+
+.beatport-nav-buttons-container {
+    display: flex;
+    gap: 20px;
+    justify-content: center;
+    align-items: center;
+    max-width: 900px;
+    margin: 0 auto;
+}
+
+.beatport-nav-button {
+    flex: 1;
+    max-width: 280px;
+    min-height: 70px;
+    padding: 16px 24px;
+    border: none;
+    border-radius: 12px;
+    background: linear-gradient(135deg,
+        rgba(1, 255, 149, 0.1) 0%,
+        rgba(0, 224, 133, 0.08) 100%);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 20, 147, 0.4);
+    color: #ffffff;
+    font-family: inherit;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    position: relative;
+    overflow: hidden;
+}
+
+.beatport-nav-button::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg,
+        transparent,
+        rgba(1, 255, 149, 0.1),
+        transparent);
+    transition: left 0.5s ease;
+}
+
+.beatport-nav-button:hover {
+    background: linear-gradient(135deg,
+        rgba(1, 255, 149, 0.2) 0%,
+        rgba(0, 224, 133, 0.15) 100%);
+    border-color: rgba(255, 20, 147, 0.6);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(138, 43, 226, 0.3);
+    color: #01FF95;
+}
+
+.beatport-nav-button:hover::before {
+    left: 100%;
+}
+
+.beatport-nav-button:active {
+    transform: translateY(0);
+    transition: transform 0.1s ease;
+}
+
+.beatport-nav-icon {
+    width: 20px;
+    height: 20px;
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: center;
+    flex-shrink: 0;
+    transition: all 0.3s ease;
+}
+
+.beatport-nav-text {
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+/* Icons for navigation buttons */
+.genre-icon {
+    background-image: url('data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23ffffff"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>');
+}
+
+.top100-icon {
+    background-image: url('data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23ffffff"><path d="M16 6l2.29 2.29-4.88 4.88-4-4L2 16.59 3.41 18l6-6 4 4 6.3-6.29L22 12V6z"/></svg>');
+}
+
+.hype-icon {
+    background-image: url('data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23ffffff"><path d="M13.5.67s.74 2.65.74 4.8c0 2.06-1.35 3.73-3.41 3.73-2.07 0-3.63-1.67-3.63-3.73l.03-.36C5.21 7.51 4 10.62 4 14c0 4.42 3.58 8 8 8s8-3.58 8-8C20 8.61 17.41 3.8 13.5.67zM11.71 19c-1.78 0-3.22-1.4-3.22-3.14 0-1.62 1.05-2.76 2.81-3.12 1.77-.36 3.6-1.21 4.62-2.58.39 1.29.59 2.65.59 4.04 0 2.65-2.15 4.8-4.8 4.8z"/></svg>');
+}
+
+.beatport-nav-button:hover .genre-icon {
+    background-image: url('data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%2301FF95"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>');
+}
+
+.beatport-nav-button:hover .top100-icon {
+    background-image: url('data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%2301FF95"><path d="M16 6l2.29 2.29-4.88 4.88-4-4L2 16.59 3.41 18l6-6 4 4 6.3-6.29L22 12V6z"/></svg>');
+}
+
+.beatport-nav-button:hover .hype-icon {
+    background-image: url('data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%2301FF95"><path d="M13.5.67s.74 2.65.74 4.8c0 2.06-1.35 3.73-3.41 3.73-2.07 0-3.63-1.67-3.63-3.73l.03-.36C5.21 7.51 4 10.62 4 14c0 4.42 3.58 8 8 8s8-3.58 8-8C20 8.61 17.41 3.8 13.5.67zM11.71 19c-1.78 0-3.22-1.4-3.22-3.14 0-1.62 1.05-2.76 2.81-3.12 1.77-.36 3.6-1.21 4.62-2.58.39 1.29.59 2.65.59 4.04 0 2.65-2.15 4.8-4.8 4.8z"/></svg>');
+}
+
+/* Responsive design for navigation buttons */
+@media (max-width: 768px) {
+    .beatport-nav-buttons-container {
+        flex-direction: column;
+        gap: 15px;
+    }
+
+    .beatport-nav-button {
+        max-width: none;
+        width: 100%;
+    }
+}
+
+@media (max-width: 600px) {
+    .beatport-nav-buttons-section {
+        padding: 20px 15px;
+    }
+
+    .beatport-nav-button {
+        min-height: 60px;
+        padding: 12px 20px;
+        font-size: 14px;
+    }
+
+    .beatport-nav-icon {
+        width: 18px;
+        height: 18px;
+    }
+}
