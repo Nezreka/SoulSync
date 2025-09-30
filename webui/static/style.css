@@ -12040,6 +12040,472 @@ body {
     }
 }
 
+/* =======================================
+   BEATPORT TOP 10 LISTS SECTION
+   ======================================= */
+
+.beatport-top10-section {
+    margin-top: 40px;
+    padding: 0 30px;
+    margin-bottom: 40px;
+}
+
+.beatport-top10-header {
+    text-align: center;
+    margin-bottom: 40px;
+}
+
+.beatport-top10-title {
+    font-size: 36px;
+    font-weight: 700;
+    color: #ffffff;
+    margin-bottom: 8px;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+.beatport-top10-subtitle {
+    font-size: 16px;
+    color: rgba(255, 255, 255, 0.7);
+    margin: 0;
+}
+
+/* Two-column container for both lists */
+.beatport-top10-container {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 40px;
+    max-width: 1400px;
+    margin: 0 auto;
+    overflow: hidden; /* Prevent overflow */
+}
+
+/* Individual list styling */
+.beatport-top10-list, .beatport-hype10-list {
+    background: linear-gradient(135deg,
+        rgba(18, 18, 18, 0.95),
+        rgba(30, 30, 30, 0.9));
+    border-radius: 20px;
+    padding: 30px;
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow:
+        0 20px 40px rgba(0, 0, 0, 0.5),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    width: 100%;
+    min-width: 0; /* Allow shrinking */
+    overflow: hidden; /* Prevent content overflow */
+}
+
+/* Color-coded themes */
+.beatport-top10-list {
+    border-left: 4px solid #00ff88;
+    box-shadow:
+        0 20px 40px rgba(0, 0, 0, 0.5),
+        0 0 20px rgba(0, 255, 136, 0.15),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.beatport-hype10-list {
+    border-left: 4px solid #ff3366;
+    box-shadow:
+        0 20px 40px rgba(0, 0, 0, 0.5),
+        0 0 20px rgba(255, 51, 102, 0.15),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+/* List headers */
+.beatport-top10-list-header, .beatport-hype10-list-header {
+    text-align: center;
+    margin-bottom: 25px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.beatport-top10-list-title, .beatport-hype10-list-title {
+    font-size: 24px;
+    font-weight: 600;
+    color: #ffffff;
+    margin-bottom: 5px;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+.beatport-top10-list-subtitle, .beatport-hype10-list-subtitle {
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.6);
+    margin: 0;
+}
+
+/* Track containers */
+.beatport-top10-tracks, .beatport-hype10-tracks {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+/* Individual track cards - CORRECTED CLASS NAMES */
+.beatport-top10-card, .beatport-hype10-card {
+    display: flex;
+    align-items: center;
+    background: linear-gradient(135deg,
+        rgba(25, 25, 25, 0.9),
+        rgba(35, 35, 35, 0.8));
+    border-radius: 16px;
+    padding: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(10px);
+    transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+    width: 100%;
+    min-width: 0; /* Allow shrinking */
+    box-sizing: border-box;
+    min-height: 80px; /* Consistent height */
+    max-height: 80px; /* Prevent expansion */
+}
+
+/* Hover animations for cards */
+.beatport-top10-card:hover {
+    background: linear-gradient(135deg,
+        rgba(0, 255, 136, 0.12),
+        rgba(35, 35, 35, 0.95));
+    border-color: rgba(0, 255, 136, 0.3);
+    transform: translateY(-3px);
+    box-shadow:
+        0 12px 32px rgba(0, 0, 0, 0.5),
+        0 0 20px rgba(0, 255, 136, 0.2);
+}
+
+.beatport-hype10-card:hover {
+    background: linear-gradient(135deg,
+        rgba(255, 51, 102, 0.12),
+        rgba(35, 35, 35, 0.95));
+    border-color: rgba(255, 51, 102, 0.3);
+    transform: translateY(-3px);
+    box-shadow:
+        0 12px 32px rgba(0, 0, 0, 0.5),
+        0 0 20px rgba(255, 51, 102, 0.2);
+}
+
+/* Track rank number */
+.beatport-top10-card-rank {
+    font-size: 20px;
+    font-weight: 800;
+    color: #00ff88;
+    min-width: 35px;
+    text-align: center;
+    margin-right: 16px;
+    text-shadow: 0 2px 6px rgba(0, 255, 136, 0.3);
+    background: linear-gradient(135deg, rgba(0, 255, 136, 0.1), rgba(0, 255, 136, 0.05));
+    border-radius: 12px;
+    padding: 8px 0;
+    border: 1px solid rgba(0, 255, 136, 0.2);
+}
+
+.beatport-hype10-card-rank {
+    font-size: 20px;
+    font-weight: 800;
+    color: #ff3366;
+    min-width: 35px;
+    text-align: center;
+    margin-right: 16px;
+    text-shadow: 0 2px 6px rgba(255, 51, 102, 0.3);
+    background: linear-gradient(135deg, rgba(255, 51, 102, 0.1), rgba(255, 51, 102, 0.05));
+    border-radius: 12px;
+    padding: 8px 0;
+    border: 1px solid rgba(255, 51, 102, 0.2);
+}
+
+/* Track artwork */
+.beatport-top10-card-artwork, .beatport-hype10-card-artwork {
+    width: 56px;
+    height: 56px;
+    border-radius: 12px;
+    margin-right: 16px;
+    overflow: hidden;
+    position: relative;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
+    border: 2px solid rgba(255, 255, 255, 0.1);
+}
+
+.beatport-top10-card-artwork img, .beatport-hype10-card-artwork img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: transform 0.4s ease;
+}
+
+.beatport-top10-card:hover .beatport-top10-card-artwork img,
+.beatport-hype10-card:hover .beatport-hype10-card-artwork img {
+    transform: scale(1.15);
+}
+
+/* Artwork placeholder */
+.beatport-top10-card-placeholder, .beatport-hype10-card-placeholder {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    background: linear-gradient(135deg, rgba(40, 40, 40, 0.8), rgba(60, 60, 60, 0.6));
+    color: rgba(255, 255, 255, 0.4);
+}
+
+/* Track info */
+.beatport-top10-card-info, .beatport-hype10-card-info {
+    flex: 1;
+    min-width: 0; /* Critical for text truncation */
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    overflow: hidden; /* Prevent text overflow */
+    width: 100%;
+}
+
+.beatport-top10-card-title, .beatport-hype10-card-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: #ffffff;
+    line-height: 1.2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+    max-width: 100%;
+    width: 100%;
+}
+
+.beatport-top10-card-artist, .beatport-hype10-card-artist {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.8);
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+    width: 100%;
+}
+
+.beatport-top10-card-label {
+    font-size: 11px;
+    color: rgba(0, 255, 136, 0.9);
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    max-width: 100%;
+    width: 100%;
+}
+
+.beatport-hype10-card-label {
+    font-size: 11px;
+    color: rgba(255, 51, 102, 0.9);
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    max-width: 100%;
+    width: 100%;
+}
+
+/* Error states */
+.beatport-top10-error {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 200px;
+    background: linear-gradient(135deg,
+        rgba(255, 51, 51, 0.1),
+        rgba(40, 40, 40, 0.8));
+    border-radius: 16px;
+    border: 1px solid rgba(255, 51, 51, 0.2);
+    text-align: center;
+    padding: 30px;
+}
+
+.beatport-top10-error h3 {
+    color: #ff3366;
+    font-size: 18px;
+    margin-bottom: 8px;
+}
+
+.beatport-top10-error p {
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 14px;
+    margin: 0;
+}
+
+/* Loading states */
+.beatport-top10-loading, .beatport-hype10-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 300px;
+    background: linear-gradient(135deg,
+        rgba(16, 16, 16, 0.6),
+        rgba(24, 24, 24, 0.4));
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.beatport-top10-loading-content, .beatport-hype10-loading-content {
+    text-align: center;
+}
+
+.beatport-top10-loading-content h4, .beatport-hype10-loading-content h4 {
+    font-size: 18px;
+    color: #ffffff;
+    margin-bottom: 8px;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+}
+
+.beatport-top10-loading-content p, .beatport-hype10-loading-content p {
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.6);
+    margin: 0;
+}
+
+/* Top 10 Lists Responsive Design */
+@media (max-width: 1300px) {
+    .beatport-top10-card-title, .beatport-hype10-card-title {
+        font-size: 14px;
+    }
+
+    .beatport-top10-card-artist, .beatport-hype10-card-artist {
+        font-size: 12px;
+    }
+
+    .beatport-top10-card-label, .beatport-hype10-card-label {
+        font-size: 10px;
+    }
+
+    .beatport-top10-card-rank, .beatport-hype10-card-rank {
+        font-size: 18px;
+    }
+}
+
+@media (max-width: 1200px) {
+    .beatport-top10-container {
+        gap: 30px;
+        max-width: 1200px;
+    }
+
+    .beatport-top10-list, .beatport-hype10-list {
+        padding: 25px;
+        max-width: 100%;
+    }
+
+    .beatport-top10-card, .beatport-hype10-card {
+        min-height: 75px;
+        max-height: 75px;
+    }
+
+    .beatport-top10-card-artwork, .beatport-hype10-card-artwork {
+        width: 48px;
+        height: 48px;
+    }
+}
+
+@media (max-width: 900px) {
+    .beatport-top10-container {
+        grid-template-columns: 1fr;
+        gap: 25px;
+    }
+
+    .beatport-top10-section {
+        padding: 0 20px;
+    }
+
+    .beatport-top10-title {
+        font-size: 28px;
+    }
+
+    .beatport-top10-list-title, .beatport-hype10-list-title {
+        font-size: 20px;
+    }
+
+    .beatport-top10-card, .beatport-hype10-card {
+        padding: 12px;
+        min-height: 70px;
+        max-height: 70px;
+    }
+
+    .beatport-top10-card-artwork, .beatport-hype10-card-artwork {
+        width: 42px;
+        height: 42px;
+        margin-right: 12px;
+    }
+
+    .beatport-top10-card-rank, .beatport-hype10-card-rank {
+        font-size: 16px;
+        min-width: 30px;
+        margin-right: 12px;
+        padding: 6px 0;
+    }
+
+}
+
+@media (max-width: 600px) {
+    .beatport-top10-section {
+        padding: 0 15px;
+        margin-top: 30px;
+        margin-bottom: 30px;
+    }
+
+    .beatport-top10-header {
+        margin-bottom: 30px;
+    }
+
+    .beatport-top10-title {
+        font-size: 24px;
+    }
+
+    .beatport-top10-list, .beatport-hype10-list {
+        padding: 20px;
+    }
+
+    .beatport-top10-list-title, .beatport-hype10-list-title {
+        font-size: 18px;
+    }
+
+    .beatport-top10-card, .beatport-hype10-card {
+        padding: 10px;
+        min-height: 65px;
+        max-height: 65px;
+    }
+
+    .beatport-top10-card-artwork, .beatport-hype10-card-artwork {
+        width: 38px;
+        height: 38px;
+        margin-right: 10px;
+    }
+
+    .beatport-top10-card-rank, .beatport-hype10-card-rank {
+        font-size: 14px;
+        min-width: 26px;
+        padding: 4px 0;
+        margin-right: 10px;
+    }
+
+    .beatport-top10-card-title, .beatport-hype10-card-title {
+        font-size: 13px;
+    }
+
+    .beatport-top10-card-artist, .beatport-hype10-card-artist {
+        font-size: 11px;
+    }
+
+    .beatport-top10-card-label, .beatport-hype10-card-label {
+        font-size: 9px;
+    }
+}
+
 /* ================================
    BEATPORT NEW RELEASES SECTION
    ================================ */

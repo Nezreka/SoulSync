@@ -9734,6 +9734,7 @@ function initializeSyncPage() {
             // Initialize rebuild slider if rebuild tab is selected
             if (tabId === 'rebuild') {
                 initializeBeatportRebuildSlider();
+                loadBeatportTop10Lists();
                 initializeBeatportReleasesSlider();
                 initializeBeatportHypePicksSlider();
                 initializeBeatportChartsSlider();
@@ -19718,4 +19719,128 @@ function cleanupBeatportDJSlider() {
         clearInterval(beatportDJSliderState.autoPlayInterval);
         beatportDJSliderState.autoPlayInterval = null;
     }
+}
+
+/**
+ * Load top 10 lists data from API and populate both lists
+ */
+async function loadBeatportTop10Lists() {
+    try {
+        console.log('🏆 Loading top 10 lists data...');
+        const response = await fetch('/api/beatport/homepage/top-10-lists');
+        const data = await response.json();
+
+        if (data.success) {
+            console.log(`🎵 Loaded ${data.beatport_count} Beatport Top 10 + ${data.hype_count} Hype Top 10 tracks`);
+
+            // Populate both lists
+            populateBeatportTop10List(data.beatport_top10);
+            populateHypeTop10List(data.hype_top10);
+            return true;
+        } else {
+            console.error('Failed to load top 10 lists:', data.error);
+            showTop10ListsError(data.error || 'No data available');
+            return false;
+        }
+    } catch (error) {
+        console.error('Error loading top 10 lists:', error);
+        showTop10ListsError('Failed to load top 10 lists');
+        return false;
+    }
+}
+
+/**
+ * Populate Beatport Top 10 list with data
+ */
+function populateBeatportTop10List(tracks) {
+    const container = document.getElementById('beatport-top10-list');
+    if (!container || !tracks || tracks.length === 0) return;
+
+    // Generate HTML for the tracks
+    let tracksHtml = `
+        <div class="beatport-top10-list-header">
+            <h3 class="beatport-top10-list-title">🎵 Beatport Top 10</h3>
+            <p class="beatport-top10-list-subtitle">Most popular tracks on Beatport</p>
+        </div>
+        <div class="beatport-top10-tracks">
+    `;
+
+    tracks.forEach((track, index) => {
+        tracksHtml += `
+            <div class="beatport-top10-card" data-url="${track.url || '#'}">
+                <div class="beatport-top10-card-rank">${track.rank || index + 1}</div>
+                <div class="beatport-top10-card-artwork">
+                    ${track.artwork_url ?
+                        `<img src="${track.artwork_url}" alt="${track.title}" loading="lazy">` :
+                        '<div class="beatport-top10-card-placeholder">🎵</div>'
+                    }
+                </div>
+                <div class="beatport-top10-card-info">
+                    <h4 class="beatport-top10-card-title">${track.title || 'Unknown Title'}</h4>
+                    <p class="beatport-top10-card-artist">${track.artist || 'Unknown Artist'}</p>
+                    <p class="beatport-top10-card-label">${track.label || 'Unknown Label'}</p>
+                </div>
+            </div>
+        `;
+    });
+
+    tracksHtml += '</div>';
+    container.innerHTML = tracksHtml;
+}
+
+/**
+ * Populate Hype Top 10 list with data
+ */
+function populateHypeTop10List(tracks) {
+    const container = document.getElementById('beatport-hype10-list');
+    if (!container || !tracks || tracks.length === 0) return;
+
+    // Generate HTML for the tracks
+    let tracksHtml = `
+        <div class="beatport-hype10-list-header">
+            <h3 class="beatport-hype10-list-title">🔥 Hype Top 10</h3>
+            <p class="beatport-hype10-list-subtitle">Editor's trending picks</p>
+        </div>
+        <div class="beatport-hype10-tracks">
+    `;
+
+    tracks.forEach((track, index) => {
+        tracksHtml += `
+            <div class="beatport-hype10-card" data-url="${track.url || '#'}">
+                <div class="beatport-hype10-card-rank">${track.rank || index + 1}</div>
+                <div class="beatport-hype10-card-artwork">
+                    ${track.artwork_url ?
+                        `<img src="${track.artwork_url}" alt="${track.title}" loading="lazy">` :
+                        '<div class="beatport-hype10-card-placeholder">🔥</div>'
+                    }
+                </div>
+                <div class="beatport-hype10-card-info">
+                    <h4 class="beatport-hype10-card-title">${track.title || 'Unknown Title'}</h4>
+                    <p class="beatport-hype10-card-artist">${track.artist || 'Unknown Artist'}</p>
+                    <p class="beatport-hype10-card-label">${track.label || 'Unknown Label'}</p>
+                </div>
+            </div>
+        `;
+    });
+
+    tracksHtml += '</div>';
+    container.innerHTML = tracksHtml;
+}
+
+/**
+ * Show error message for top 10 lists
+ */
+function showTop10ListsError(errorMessage) {
+    const beatportContainer = document.getElementById('beatport-top10-list');
+    const hypeContainer = document.getElementById('beatport-hype10-list');
+
+    const errorHtml = `
+        <div class="beatport-top10-error">
+            <h3>❌ Error Loading Data</h3>
+            <p>${errorMessage}</p>
+        </div>
+    `;
+
+    if (beatportContainer) beatportContainer.innerHTML = errorHtml;
+    if (hypeContainer) hypeContainer.innerHTML = errorHtml;
 }

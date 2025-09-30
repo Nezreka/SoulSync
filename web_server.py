@@ -13228,6 +13228,40 @@ def get_beatport_homepage_top_10_releases():
             "track_count": 0
         }), 500
 
+@app.route('/api/beatport/homepage/top-10-lists', methods=['GET'])
+def get_beatport_homepage_top10_lists():
+    """Get Beatport Top 10 Lists from homepage - both Beatport Top 10 and Hype Top 10"""
+    try:
+        logger.info("🏆 API request for Beatport homepage Top 10 Lists")
+
+        # Initialize the Beatport scraper
+        scraper = BeatportUnifiedScraper()
+
+        # Get top 10 lists from homepage
+        top10_lists = scraper.scrape_homepage_top10_lists()
+
+        logger.info(f"✅ Successfully extracted Beatport Top 10: {len(top10_lists['beatport_top10'])}, Hype Top 10: {len(top10_lists['hype_top10'])}")
+
+        return jsonify({
+            "success": True,
+            "beatport_top10": top10_lists["beatport_top10"],
+            "hype_top10": top10_lists["hype_top10"],
+            "beatport_count": len(top10_lists["beatport_top10"]),
+            "hype_count": len(top10_lists["hype_top10"]),
+            "source": "beatport_homepage_top10_lists"
+        })
+
+    except Exception as e:
+        logger.error(f"❌ Error getting Beatport homepage top 10 lists: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "beatport_top10": [],
+            "hype_top10": [],
+            "beatport_count": 0,
+            "hype_count": 0
+        }), 500
+
 @app.route('/api/beatport/homepage/featured-charts', methods=['GET'])
 def get_beatport_homepage_featured_charts():
     """Get Beatport Featured Charts from homepage section"""
