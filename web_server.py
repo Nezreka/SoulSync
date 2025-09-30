@@ -13262,6 +13262,44 @@ def get_beatport_homepage_top10_lists():
             "hype_count": 0
         }), 500
 
+@app.route('/api/beatport/homepage/top-10-releases-cards', methods=['GET'])
+def get_beatport_homepage_top10_releases_cards():
+    """Get Beatport Top 10 Releases CARDS from homepage (not individual tracks)"""
+    try:
+        logger.info("💿 API request for Beatport homepage Top 10 Releases CARDS")
+
+        # Initialize the Beatport scraper
+        scraper = BeatportUnifiedScraper()
+
+        # Get top 10 releases from homepage
+        top10_releases = scraper.scrape_homepage_top10_releases()
+
+        logger.info(f"✅ API extracted {len(top10_releases)} Top 10 Release Cards")
+
+        # Debug: Log first release if any
+        if top10_releases:
+            logger.info(f"First release: {top10_releases[0].get('title', 'No title')} by {top10_releases[0].get('artist', 'No artist')}")
+        else:
+            logger.warning("❌ No releases found by scraper")
+
+        return jsonify({
+            "success": True,
+            "releases": top10_releases,
+            "releases_count": len(top10_releases),
+            "source": "beatport_homepage_top10_releases_cards"
+        })
+
+    except Exception as e:
+        logger.error(f"❌ Error getting Beatport homepage Top 10 Releases cards: {e}")
+        import traceback
+        logger.error(f"Full traceback: {traceback.format_exc()}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "releases": [],
+            "releases_count": 0
+        }), 500
+
 @app.route('/api/beatport/homepage/featured-charts', methods=['GET'])
 def get_beatport_homepage_featured_charts():
     """Get Beatport Featured Charts from homepage section"""

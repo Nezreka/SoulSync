@@ -9735,6 +9735,7 @@ function initializeSyncPage() {
             if (tabId === 'rebuild') {
                 initializeBeatportRebuildSlider();
                 loadBeatportTop10Lists();
+                loadBeatportTop10Releases();
                 initializeBeatportReleasesSlider();
                 initializeBeatportHypePicksSlider();
                 initializeBeatportChartsSlider();
@@ -19843,4 +19844,80 @@ function showTop10ListsError(errorMessage) {
 
     if (beatportContainer) beatportContainer.innerHTML = errorHtml;
     if (hypeContainer) hypeContainer.innerHTML = errorHtml;
+}
+
+/**
+ * Load top 10 releases data from API and populate the list
+ */
+async function loadBeatportTop10Releases() {
+    try {
+        console.log('💿 Loading top 10 releases data...');
+        const response = await fetch('/api/beatport/homepage/top-10-releases-cards');
+        const data = await response.json();
+
+        if (data.success) {
+            console.log(`💿 Loaded ${data.releases_count} Top 10 Releases`);
+            populateBeatportTop10Releases(data.releases);
+            return true;
+        } else {
+            console.error('Failed to load top 10 releases:', data.error);
+            showTop10ReleasesError(data.error || 'No data available');
+            return false;
+        }
+    } catch (error) {
+        console.error('Error loading top 10 releases:', error);
+        showTop10ReleasesError('Failed to load top 10 releases');
+        return false;
+    }
+}
+
+/**
+ * Populate Top 10 Releases list with data
+ */
+function populateBeatportTop10Releases(releases) {
+    const container = document.getElementById('beatport-releases-top10-list');
+    if (!container || !releases || releases.length === 0) return;
+
+    // Generate HTML for the releases
+    let releasesHtml = `
+        <div class="beatport-releases-top10-tracks">
+    `;
+
+    releases.forEach((release, index) => {
+        releasesHtml += `
+            <div class="beatport-releases-top10-card" data-url="${release.url || '#'}">
+                <div class="beatport-releases-top10-card-rank">${release.rank || index + 1}</div>
+                <div class="beatport-releases-top10-card-artwork">
+                    ${release.image_url ?
+                        `<img src="${release.image_url}" alt="${release.title}" loading="lazy">` :
+                        '<div class="beatport-releases-top10-card-placeholder">💿</div>'
+                    }
+                </div>
+                <div class="beatport-releases-top10-card-info">
+                    <h4 class="beatport-releases-top10-card-title">${release.title || 'Unknown Title'}</h4>
+                    <p class="beatport-releases-top10-card-artist">${release.artist || 'Unknown Artist'}</p>
+                    <p class="beatport-releases-top10-card-label">${release.label || 'Unknown Label'}</p>
+                </div>
+            </div>
+        `;
+    });
+
+    releasesHtml += '</div>';
+    container.innerHTML = releasesHtml;
+}
+
+/**
+ * Show error message for top 10 releases
+ */
+function showTop10ReleasesError(errorMessage) {
+    const container = document.getElementById('beatport-releases-top10-list');
+
+    const errorHtml = `
+        <div class="beatport-releases-top10-error">
+            <h3>❌ Error Loading Releases</h3>
+            <p>${errorMessage}</p>
+        </div>
+    `;
+
+    if (container) container.innerHTML = errorHtml;
 }
