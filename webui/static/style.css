@@ -12253,7 +12253,7 @@ body {
 }
 
 .beatport-release-title {
-    font-size: 13px;
+    font-size: 11px;
     font-weight: 600;
     color: #ffffff;
     margin-bottom: 4px;
@@ -12385,7 +12385,7 @@ body {
 }
 
 /* Responsive Design */
-@media (max-width: 1400px) {
+@media (max-width: 1100px) {
     .beatport-releases-grid {
         grid-template-columns: repeat(4, 1fr);
         grid-template-rows: repeat(2, 1fr);
@@ -12644,7 +12644,7 @@ body {
 }
 
 .beatport-hype-pick-title {
-    font-size: 13px;
+    font-size: 11px;
     font-weight: 600;
     color: #ffffff;
     margin-bottom: 4px;
@@ -12776,7 +12776,7 @@ body {
 }
 
 /* Responsive Design */
-@media (max-width: 1400px) {
+@media (max-width: 1100px) {
     .beatport-hype-picks-grid {
         grid-template-columns: repeat(4, 1fr);
         grid-template-rows: repeat(2, 1fr);
@@ -13009,7 +13009,7 @@ body {
 }
 
 .beatport-chart-name {
-    font-size: 18px;
+    font-size: 15px;
     font-weight: 700;
     color: #ffffff;
     margin-bottom: 8px;
@@ -13022,7 +13022,7 @@ body {
 }
 
 .beatport-chart-creator {
-    font-size: 14px;
+    font-size: 12px;
     color: rgba(255, 255, 255, 0.9);
     font-weight: 500;
     text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
@@ -13148,7 +13148,7 @@ body {
 }
 
 /* Charts Responsive Design */
-@media (max-width: 1400px) {
+@media (max-width: 1100px) {
     .beatport-charts-grid {
         grid-template-columns: repeat(4, 1fr);
         grid-template-rows: repeat(2, 1fr);
