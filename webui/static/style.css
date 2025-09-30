@@ -13523,6 +13523,28 @@ body {
 }
 
 /* DJ Responsive Design */
+/* Larger screens: make DJ cards taller */
+@media (min-width: 1300px) {
+    .beatport-dj-card {
+        height: 330px;
+        min-height: 330px;
+        max-height: 330px;
+    }
+
+    .beatport-dj-grid {
+        align-items: stretch; /* Allow cards to use full height instead of centering */
+        min-height: 370px; /* Accommodate taller cards + padding + gap */
+    }
+
+    .beatport-dj-slider {
+        min-height: 410px; /* Ensure slider container is tall enough */
+    }
+
+    .beatport-dj-slider-track {
+        height: 410px; /* Increase to accommodate taller grid */
+    }
+}
+
 @media (max-width: 1200px) {
     .beatport-dj-grid {
         grid-template-columns: repeat(2, 1fr);
