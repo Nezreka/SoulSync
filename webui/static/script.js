@@ -19055,6 +19055,20 @@ function populateBeatportReleasesSlider(releases) {
     }
 
     console.log(`✅ Created ${totalSlides} slides for releases slider`);
+
+    // Add click handlers for individual release discovery (matching Top 10 Releases pattern)
+    const releaseCards = sliderTrack.querySelectorAll('.beatport-release-card[data-url]:not(.beatport-release-placeholder)');
+    releaseCards.forEach((card) => {
+        const releaseUrl = card.getAttribute('data-url');
+        if (releaseUrl && releaseUrl !== '#') {
+            // Find the corresponding release data
+            const releaseData = releases.find(release => release.url === releaseUrl);
+            if (releaseData) {
+                card.addEventListener('click', () => handleBeatportReleaseCardClick(card, releaseData));
+                card.style.cursor = 'pointer';
+            }
+        }
+    });
 }
 
 /**
@@ -19504,16 +19518,25 @@ function setupBeatportHypePickCardHandlers() {
     const cards = document.querySelectorAll('.beatport-hype-pick-card:not(.beatport-hype-pick-placeholder)');
 
     cards.forEach(card => {
-        card.addEventListener('click', () => {
-            const releaseUrl = card.dataset.releaseUrl;
+        const releaseUrl = card.getAttribute('data-url');
+        if (releaseUrl && releaseUrl !== '#' && releaseUrl !== '') {
+            // Extract release data from the card elements
+            const titleElement = card.querySelector('.beatport-hype-pick-title');
+            const artistElement = card.querySelector('.beatport-hype-pick-artist');
+            const labelElement = card.querySelector('.beatport-hype-pick-label');
+            const imageElement = card.querySelector('.beatport-hype-pick-artwork img');
 
-            if (releaseUrl) {
-                console.log('🔥 Clicked hype pick release:', releaseUrl);
-                // You can add release handling logic here
-                // For now, just log the click
-                showToast('🔥 Hype pick release clicked!', 'info');
-            }
-        });
+            const releaseData = {
+                url: releaseUrl,
+                title: titleElement ? titleElement.textContent.trim() : 'Unknown Title',
+                artist: artistElement ? artistElement.textContent.trim() : 'Unknown Artist',
+                label: labelElement ? labelElement.textContent.trim() : 'Unknown Label',
+                image_url: imageElement ? imageElement.src : ''
+            };
+
+            card.addEventListener('click', () => handleBeatportReleaseCardClick(card, releaseData));
+            card.style.cursor = 'pointer';
+        }
     });
 }
 
@@ -19681,6 +19704,20 @@ function createBeatportChartsSlides(charts) {
     }
 
     console.log(`✅ Created ${totalSlides} chart slides`);
+
+    // Add click handlers for individual chart discovery (matching chart pattern)
+    const chartCards = sliderTrack.querySelectorAll('.beatport-chart-card[data-url]');
+    chartCards.forEach((card) => {
+        const chartUrl = card.getAttribute('data-url');
+        if (chartUrl && chartUrl !== '') {
+            // Find the corresponding chart data
+            const chartData = charts.find(chart => chart.url === chartUrl);
+            if (chartData) {
+                card.addEventListener('click', () => handleBeatportChartCardClick(card, chartData));
+                card.style.cursor = 'pointer';
+            }
+        }
+    });
 }
 
 /**
@@ -19961,6 +19998,20 @@ function createBeatportDJSlides(charts) {
     }
 
     console.log(`✅ Created ${totalSlides} DJ chart slides`);
+
+    // Add click handlers for individual DJ chart discovery (matching chart pattern)
+    const djChartCards = sliderTrack.querySelectorAll('.beatport-dj-card[data-url]');
+    djChartCards.forEach((card) => {
+        const chartUrl = card.getAttribute('data-url');
+        if (chartUrl && chartUrl !== '') {
+            // Find the corresponding chart data
+            const chartData = charts.find(chart => chart.url === chartUrl);
+            if (chartData) {
+                card.addEventListener('click', () => handleBeatportDJChartCardClick(card, chartData));
+                card.style.cursor = 'pointer';
+            }
+        }
+    });
 }
 
 /**
@@ -20438,5 +20489,187 @@ async function handleBeatportReleaseCardClick(cardElement, release) {
         console.error(`❌ Error handling release click for ${release.title}:`, error);
         hideLoadingOverlay();
         showToast(`Error loading ${release.title}: ${error.message}`, 'error');
+    }
+}
+
+/**
+ * Handle click on individual chart card - create discovery process for chart tracks
+ */
+async function handleBeatportChartCardClick(cardElement, chart) {
+    console.log(`📊 Individual chart card clicked: ${chart.name} by ${chart.creator}`);
+
+    if (!chart.url || chart.url === '') {
+        showToast('No chart URL available', 'error');
+        return;
+    }
+
+    try {
+        // Create unique identifiers for this chart
+        const chartHash = `chart_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const chartName = `${chart.name} - ${chart.creator}`;
+
+        showToast(`Loading ${chart.name}...`, 'info');
+        showLoadingOverlay(`Getting tracks from ${chart.name}...`);
+
+        // Check if we already have a card for this chart
+        const existingState = Object.values(beatportChartStates).find(state =>
+            state.chart &&
+            state.chart.name === chartName &&
+            state.chart.chart_type === 'individual_chart'
+        );
+
+        if (existingState) {
+            console.log(`🔄 Found existing card for ${chart.name}, opening existing modal`);
+            hideLoadingOverlay();
+            handleBeatportCardClick(existingState.chart.hash);
+            return;
+        }
+
+        // Get track data from this chart URL (charts contain multiple tracks)
+        console.log(`📊 Fetching tracks from chart: ${chart.url}`);
+        const response = await fetch('/api/beatport/chart/extract', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                chart_url: chart.url,
+                chart_name: `Featured Chart: ${chart.name}`,
+                limit: 100
+            })
+        });
+
+        const data = await response.json();
+
+        if (!data.success || !data.tracks || data.tracks.length === 0) {
+            throw new Error('No tracks found in this chart');
+        }
+
+        console.log(`✅ Successfully fetched ${data.tracks.length} tracks from ${chart.name}`);
+
+        // Transform to standard chart format (following the exact pattern)
+        const chartData = {
+            hash: chartHash,
+            name: chartName,
+            chart_type: 'individual_chart',
+            track_count: data.tracks.length,
+            tracks: data.tracks.map(track => ({
+                name: cleanTrackText(track.title || 'Unknown Title'),
+                artists: [cleanTrackText(track.artist || 'Unknown Artist')],
+                album: chartName,
+                duration_ms: 0,
+                external_urls: { beatport: track.url || '' },
+                source: 'beatport',
+                // Include chart metadata
+                chart_name: chart.name,
+                chart_creator: chart.creator,
+                chart_image: chart.image
+            }))
+        };
+
+        // Create Beatport playlist card (following the exact pattern)
+        addBeatportCardToContainer(chartData);
+
+        // Automatically open discovery modal (following the exact pattern)
+        hideLoadingOverlay();
+        handleBeatportCardClick(chartHash);
+
+        console.log(`✅ Created individual chart card and opened discovery modal for ${chart.name}`);
+
+    } catch (error) {
+        console.error(`❌ Error handling chart click for ${chart.name}:`, error);
+        hideLoadingOverlay();
+        showToast(`Error loading ${chart.name}: ${error.message}`, 'error');
+    }
+}
+
+/**
+ * Handle click on individual DJ chart card - create discovery process for DJ chart tracks
+ */
+async function handleBeatportDJChartCardClick(cardElement, chart) {
+    console.log(`🎧 Individual DJ chart card clicked: ${chart.name} by ${chart.creator}`);
+
+    if (!chart.url || chart.url === '') {
+        showToast('No DJ chart URL available', 'error');
+        return;
+    }
+
+    try {
+        // Create unique identifiers for this DJ chart
+        const chartHash = `dj_chart_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const chartName = `${chart.name} - ${chart.creator}`;
+
+        showToast(`Loading ${chart.name}...`, 'info');
+        showLoadingOverlay(`Getting tracks from ${chart.name}...`);
+
+        // Check if we already have a card for this DJ chart
+        const existingState = Object.values(beatportChartStates).find(state =>
+            state.chart &&
+            state.chart.name === chartName &&
+            state.chart.chart_type === 'individual_dj_chart'
+        );
+
+        if (existingState) {
+            console.log(`🔄 Found existing card for ${chart.name}, opening existing modal`);
+            hideLoadingOverlay();
+            handleBeatportCardClick(existingState.chart.hash);
+            return;
+        }
+
+        // Get track data from this DJ chart URL
+        console.log(`🎧 Fetching tracks from DJ chart: ${chart.url}`);
+        const response = await fetch('/api/beatport/chart/extract', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                chart_url: chart.url,
+                chart_name: `DJ Chart: ${chart.name}`,
+                limit: 100
+            })
+        });
+
+        const data = await response.json();
+
+        if (!data.success || !data.tracks || data.tracks.length === 0) {
+            throw new Error('No tracks found in this DJ chart');
+        }
+
+        console.log(`✅ Successfully fetched ${data.tracks.length} tracks from ${chart.name}`);
+
+        // Transform to standard chart format (following the exact pattern)
+        const chartData = {
+            hash: chartHash,
+            name: chartName,
+            chart_type: 'individual_dj_chart',
+            track_count: data.tracks.length,
+            tracks: data.tracks.map(track => ({
+                name: cleanTrackText(track.title || 'Unknown Title'),
+                artists: [cleanTrackText(track.artist || 'Unknown Artist')],
+                album: chartName,
+                duration_ms: 0,
+                external_urls: { beatport: track.url || '' },
+                source: 'beatport',
+                // Include DJ chart metadata
+                chart_name: chart.name,
+                chart_creator: chart.creator,
+                chart_image: chart.image
+            }))
+        };
+
+        // Create Beatport playlist card (following the exact pattern)
+        addBeatportCardToContainer(chartData);
+
+        // Automatically open discovery modal (following the exact pattern)
+        hideLoadingOverlay();
+        handleBeatportCardClick(chartHash);
+
+        console.log(`✅ Created individual DJ chart card and opened discovery modal for ${chart.name}`);
+
+    } catch (error) {
+        console.error(`❌ Error handling DJ chart click for ${chart.name}:`, error);
+        hideLoadingOverlay();
+        showToast(`Error loading ${chart.name}: ${error.message}`, 'error');
     }
 }
