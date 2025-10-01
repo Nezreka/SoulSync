@@ -3499,6 +3499,122 @@ class BeatportUnifiedScraper:
 
         return sections
 
+    def scrape_genre_hero_slider(self, genre_slug: str, genre_id: str) -> List[Dict]:
+        """Scrape hero slider data from a genre page"""
+        print(f"\n🎠 Scraping hero slider for {genre_slug}...")
+
+        genre_url = f"{self.base_url}/genre/{genre_slug}/{genre_id}"
+        soup = self.get_page(genre_url)
+        if not soup:
+            return []
+
+        # Find the main section container
+        main_section = soup.find('div', class_=re.compile(r'Genre-style__MainSection'))
+        if not main_section:
+            print(f"   ⚠️ Main section not found for {genre_slug}")
+            return []
+
+        # Find the hero slider
+        hero_slider = main_section.find('div', class_='hero-slider')
+        if not hero_slider:
+            print(f"   ⚠️ Hero slider not found for {genre_slug}")
+            return []
+
+        # Extract all hero releases
+        hero_releases = hero_slider.find_all(class_='hero-release')
+        print(f"   🎯 Found {len(hero_releases)} hero releases")
+
+        releases_data = []
+        for i, release in enumerate(hero_releases):
+            try:
+                release_data = self.extract_hero_release_data(release)
+                if release_data and release_data.get('url'):
+                    releases_data.append(release_data)
+                    print(f"   ✅ Extracted: {release_data.get('title', 'Unknown')} by {release_data.get('artists_string', 'Unknown')}")
+                else:
+                    print(f"   ⚠️ Skipped release {i+1} - incomplete data")
+            except Exception as e:
+                print(f"   ❌ Error extracting release {i+1}: {e}")
+
+        print(f"   📊 Successfully extracted {len(releases_data)} hero releases")
+        return releases_data
+
+    def extract_hero_release_data(self, release_element) -> Dict:
+        """Extract structured data from a hero release element"""
+        data = {
+            'type': 'hero_release',
+            'source': 'genre_hero_slider'
+        }
+
+        try:
+            # Extract release URL and ID
+            link_elem = release_element.select_one('a.artwork')
+            if link_elem:
+                href = link_elem.get('href', '')
+                data['url'] = href
+                data['beatport_url'] = urljoin(self.base_url, href)
+
+                # Extract release ID from URL (/release/name/12345)
+                url_parts = href.strip('/').split('/')
+                if len(url_parts) >= 3 and url_parts[0] == 'release':
+                    data['release_id'] = url_parts[2]
+                    data['release_slug'] = url_parts[1]
+
+            # Extract release title
+            title_elem = release_element.select_one('.HeroRelease-style__ReleaseName-sc-aeec852a-3')
+            if title_elem:
+                data['title'] = self.clean_text(title_elem.get_text(strip=True))
+
+            # Extract image
+            img_elem = release_element.select_one('img')
+            if img_elem:
+                data['image_url'] = img_elem.get('src', '') or img_elem.get('data-src', '')
+                data['alt_text'] = img_elem.get('alt', '')
+
+            # Extract artists
+            artists_container = release_element.select_one('.HeroRelease-style__Artists-sc-aeec852a-1')
+            if artists_container:
+                artist_links = artists_container.find_all('a')
+                artists = []
+                for artist_link in artist_links:
+                    artist_name = self.clean_text(artist_link.get_text(strip=True))
+                    artist_url = artist_link.get('href', '')
+                    if artist_name:
+                        artists.append({
+                            'name': artist_name,
+                            'url': artist_url,
+                            'beatport_url': urljoin(self.base_url, artist_url) if artist_url else None
+                        })
+
+                data['artists'] = artists
+                data['artists_string'] = ', '.join([a['name'] for a in artists])
+
+            # Extract label
+            label_elem = release_element.select_one('.HeroRelease-style__Label-sc-aeec852a-0')
+            if label_elem:
+                label_link = label_elem.find('a')
+                if label_link:
+                    data['label'] = self.clean_text(label_link.get_text(strip=True))
+                    data['label_url'] = label_link.get('href', '')
+                    data['label_beatport_url'] = urljoin(self.base_url, data['label_url']) if data['label_url'] else None
+
+            # Extract any badges (like EXCLUSIVE)
+            badges_elem = release_element.select_one('.HeroRelease-style__Badges-sc-aeec852a-8')
+            if badges_elem:
+                badge_text = self.clean_text(badges_elem.get_text(strip=True))
+                if badge_text:
+                    data['badges'] = [badge_text]
+
+            # Add metadata
+            data['scraped_at'] = time.time()
+            data['element_classes'] = release_element.get('class', [])
+
+            return data
+
+        except Exception as e:
+            print(f"⚠️ Error extracting hero release data: {e}")
+            return {}
+
     def scrape_all_genres(self, tracks_per_genre: int = 100, max_workers: int = 5, include_images: bool = False) -> Dict[str, List[Dict]]:
         """Scrape all genres in parallel"""
         # Discover genres dynamically if not already done
