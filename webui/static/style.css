@@ -4478,6 +4478,7 @@ body {
 
 .beatport-rebuild-slide.active {
     opacity: 1;
+    z-index: 10;
     transform: translateX(0);
 }
 
@@ -4600,7 +4601,7 @@ body {
     position: absolute;
     top: 50%;
     transform: translateY(-50%);
-    z-index: 3;
+    z-index: 100;
     width: 100%;
     display: flex;
     justify-content: space-between;
@@ -4643,7 +4644,7 @@ body {
     bottom: 25px;
     left: 50%;
     transform: translateX(-50%);
-    z-index: 3;
+    z-index: 100;
     display: flex;
     gap: 12px;
 }
