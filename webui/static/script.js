@@ -290,6 +290,19 @@ document.addEventListener('DOMContentLoaded', function() {
     initializeSyncPage();
     initializeWatchlist();
 
+    // Initialize Beatport rebuild slider if it's the active tab by default
+    const activeRebuildTab = document.querySelector('.beatport-tab-button.active[data-beatport-tab="rebuild"]');
+    if (activeRebuildTab) {
+        console.log('🔄 Initializing default active rebuild tab...');
+        initializeBeatportRebuildSlider();
+        loadBeatportTop10Lists();
+        loadBeatportTop10Releases();
+        initializeBeatportReleasesSlider();
+        initializeBeatportHypePicksSlider();
+        initializeBeatportChartsSlider();
+        initializeBeatportDJSlider();
+    }
+
     
     // Start global service status polling for sidebar (works on all pages)
     fetchAndUpdateServiceStatus();
@@ -9785,9 +9798,9 @@ function initializeSyncPage() {
     // Setup homepage chart handlers (following genre page pattern to prevent duplicates)
     setupHomepageChartTypeHandlers();
 
-    // Load homepage chart collections automatically
-    loadDJChartsInline();
-    loadFeaturedChartsInline();
+    // Load homepage chart collections automatically (disabled since Browse Charts tab is hidden)
+    // loadDJChartsInline();
+    // loadFeaturedChartsInline();
 
     // Logic for Beatport breadcrumb back buttons
     const beatportBackButtons = document.querySelectorAll('.breadcrumb-back');
