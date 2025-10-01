@@ -1933,6 +1933,37 @@
         </div>
     </div>
 
+    <!-- Genre Browser Modal -->
+    <div class="genre-browser-modal-overlay" id="genre-browser-modal">
+        <div class="genre-browser-modal-container">
+            <div class="genre-browser-modal-header">
+                <h2 class="genre-browser-modal-title">🎵 Browse by Genre</h2>
+                <button class="genre-browser-modal-close" id="genre-browser-modal-close">
+                    <span class="genre-browser-close-icon">×</span>
+                </button>
+            </div>
+
+            <div class="genre-browser-modal-content">
+                <div class="genre-browser-search-section">
+                    <div class="genre-browser-search-container">
+                        <input type="text" class="genre-browser-search-input" placeholder="Search genres..." id="genre-browser-search">
+                        <span class="genre-browser-search-icon">🔍</span>
+                    </div>
+                </div>
+
+                <div class="genre-browser-genres-section">
+                    <div class="genre-browser-genres-grid" id="genre-browser-genres-grid">
+                        <!-- Loading placeholder -->
+                        <div class="genre-browser-loading-container">
+                            <div class="genre-browser-loading-spinner"></div>
+                            <p class="genre-browser-loading-text">🔍 Discovering current Beatport genres...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
 </html>

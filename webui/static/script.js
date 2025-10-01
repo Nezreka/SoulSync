@@ -20815,3 +20815,413 @@ async function handleHypeTop100Click() {
         showToast(`Error loading Hype Top 100: ${error.message}`, 'error');
     }
 }
+
+// ================================= //
+// GENRE BROWSER MODAL FUNCTIONS    //
+// ================================= //
+
+// Cache for genre browser data to avoid re-loading
+let genreBrowserCache = {
+    genres: null,
+    imagesLoaded: false,
+    lastLoaded: null,
+    imageLoadingActive: false,
+    imageWorkers: null
+};
+
+function initializeGenreBrowserModal() {
+    console.log('🎵 Initializing Genre Browser Modal...');
+
+    // Browse by Genre button click handler
+    const browseByGenreBtn = document.getElementById('browse-by-genre-btn');
+    if (browseByGenreBtn) {
+        browseByGenreBtn.addEventListener('click', () => {
+            console.log('🎵 Browse by Genre button clicked');
+            openGenreBrowserModal();
+        });
+    }
+
+    // Modal close button handler
+    const modalCloseBtn = document.getElementById('genre-browser-modal-close');
+    if (modalCloseBtn) {
+        modalCloseBtn.addEventListener('click', closeGenreBrowserModal);
+    }
+
+    // Click outside modal to close
+    const modalOverlay = document.getElementById('genre-browser-modal');
+    if (modalOverlay) {
+        modalOverlay.addEventListener('click', (e) => {
+            if (e.target === modalOverlay) {
+                closeGenreBrowserModal();
+            }
+        });
+    }
+
+    // Search functionality
+    const searchInput = document.getElementById('genre-browser-search');
+    if (searchInput) {
+        searchInput.addEventListener('input', (e) => {
+            filterGenreBrowserCards(e.target.value);
+        });
+    }
+
+    // ESC key to close modal
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && isGenreBrowserModalOpen()) {
+            closeGenreBrowserModal();
+        }
+    });
+
+    console.log('✅ Genre Browser Modal initialized');
+}
+
+function openGenreBrowserModal() {
+    console.log('🎵 Opening Genre Browser Modal...');
+
+    const modal = document.getElementById('genre-browser-modal');
+    if (modal) {
+        modal.classList.add('active');
+        document.body.style.overflow = 'hidden'; // Prevent background scrolling
+
+        // Check cache before loading genres
+        if (genreBrowserCache.genres && genreBrowserCache.genres.length > 0) {
+            console.log('💾 Using cached genres data');
+            displayCachedGenres();
+        } else {
+            console.log('🔄 No cached data, loading genres...');
+            loadGenreBrowserGenres();
+        }
+
+        console.log('✅ Genre Browser Modal opened');
+    }
+}
+
+function closeGenreBrowserModal() {
+    console.log('🎵 Closing Genre Browser Modal...');
+
+    const modal = document.getElementById('genre-browser-modal');
+    if (modal) {
+        modal.classList.remove('active');
+        document.body.style.overflow = ''; // Restore scrolling
+
+        // Clear search input but keep the genre data cached
+        const searchInput = document.getElementById('genre-browser-search');
+        if (searchInput) {
+            searchInput.value = '';
+            // Also reset the display filter to show all genres
+            filterGenreBrowserCards('');
+        }
+
+        // Pause image loading workers if they're running
+        if (genreBrowserCache.imageLoadingActive) {
+            console.log('⏸️ Pausing image loading workers...');
+            genreBrowserCache.imageLoadingActive = false;
+        }
+
+        console.log('✅ Genre Browser Modal closed (data preserved in cache)');
+    }
+}
+
+function isGenreBrowserModalOpen() {
+    const modal = document.getElementById('genre-browser-modal');
+    return modal && modal.classList.contains('active');
+}
+
+async function loadGenreBrowserGenres() {
+    console.log('🔍 Loading genres for Genre Browser Modal...');
+
+    const genresGrid = document.getElementById('genre-browser-genres-grid');
+    if (!genresGrid) {
+        console.error('❌ Genre browser grid not found');
+        return;
+    }
+
+    // Show loading state
+    genresGrid.innerHTML = `
+        <div class="genre-browser-loading-container">
+            <div class="genre-browser-loading-spinner"></div>
+            <p class="genre-browser-loading-text">🔍 Discovering current Beatport genres...</p>
+        </div>
+    `;
+
+    try {
+        // First, fetch genres quickly without images
+        console.log('🚀 Fetching genres without images for fast loading...');
+        const fastResponse = await fetch('/api/beatport/genres');
+        if (!fastResponse.ok) {
+            throw new Error(`API returned ${fastResponse.status}: ${fastResponse.statusText}`);
+        }
+
+        const fastData = await fastResponse.json();
+        const genres = fastData.genres || [];
+
+        if (genres.length === 0) {
+            genresGrid.innerHTML = `
+                <div class="genre-browser-loading-container">
+                    <p style="color: rgba(255, 255, 255, 0.7);">⚠️ No genres available</p>
+                    <button onclick="loadGenreBrowserGenres()" style="margin-top: 10px; padding: 10px 20px; border: 1px solid rgba(255, 255, 255, 0.3); background: rgba(20, 20, 20, 0.8); color: white; border-radius: 8px; cursor: pointer;">🔄 Retry</button>
+                </div>
+            `;
+            return;
+        }
+
+        // Filter out unwanted genres (section titles, etc.)
+        const filteredGenres = genres.filter(genre => {
+            const name = genre.name.toLowerCase().trim();
+            const unwantedGenres = [
+                'open format',
+                'electronic',
+                'genres',
+                'browse',
+                'charts',
+                'new releases',
+                'trending',
+                'featured',
+                'popular'
+            ];
+
+            const isUnwanted = unwantedGenres.includes(name);
+            if (isUnwanted) {
+                console.log(`🚫 Filtered out unwanted genre: "${genre.name}"`);
+            }
+            return !isUnwanted;
+        });
+
+        console.log(`📋 Filtered genres: ${genres.length} → ${filteredGenres.length} (removed ${genres.length - filteredGenres.length} unwanted)`);
+
+        // Generate genre cards dynamically (without images first)
+        const genreCardsHTML = filteredGenres.map(genre => `
+            <div class="genre-browser-card genre-browser-card-fallback"
+                 data-genre-slug="${genre.slug}"
+                 data-genre-id="${genre.id}"
+                 data-genre-name="${genre.name}"
+                 data-url="${genre.url}">
+                <div class="genre-browser-card-image">🎵</div>
+                <div class="genre-browser-card-content">
+                    <h3 class="genre-browser-card-title">${genre.name}</h3>
+                    <p class="genre-browser-card-subtitle">Top 10 & Top 100 Charts</p>
+                </div>
+            </div>
+        `).join('');
+
+        genresGrid.innerHTML = genreCardsHTML;
+
+        // Cache the filtered genres data
+        genreBrowserCache.genres = filteredGenres;
+        genreBrowserCache.lastLoaded = new Date();
+        genreBrowserCache.imagesLoaded = false;
+
+        console.log(`✅ Loaded ${filteredGenres.length} Beatport genres for modal (fast mode)`);
+        console.log(`💾 Cached ${filteredGenres.length} genres for future use`);
+        showToast(`Loaded ${filteredGenres.length} genres for browsing`, 'success');
+
+        // Now fetch images progressively in the background
+        if (filteredGenres.length > 5) {
+            console.log('🖼️ Loading genre images progressively for modal...');
+            loadGenreBrowserImagesProgressively(filteredGenres);
+        }
+
+    } catch (error) {
+        console.error('❌ Error loading genres for modal:', error);
+        genresGrid.innerHTML = `
+            <div class="genre-browser-loading-container">
+                <p style="color: rgba(255, 255, 255, 0.7);">❌ Failed to load genres: ${error.message}</p>
+                <button onclick="loadGenreBrowserGenres()" style="margin-top: 10px; padding: 10px 20px; border: 1px solid rgba(255, 255, 255, 0.3); background: rgba(20, 20, 20, 0.8); color: white; border-radius: 8px; cursor: pointer;">🔄 Retry</button>
+            </div>
+        `;
+        showToast(`Error loading genres: ${error.message}`, 'error');
+    }
+}
+
+function displayCachedGenres() {
+    console.log('💾 Displaying cached genres...');
+
+    const genresGrid = document.getElementById('genre-browser-genres-grid');
+    if (!genresGrid) {
+        console.error('❌ Genre browser grid not found');
+        return;
+    }
+
+    const genres = genreBrowserCache.genres;
+    if (!genres || genres.length === 0) {
+        console.error('❌ No cached genres available');
+        return;
+    }
+
+    // Generate genre cards from cached data
+    const genreCardsHTML = genres.map(genre => `
+        <div class="genre-browser-card genre-browser-card-fallback"
+             data-genre-slug="${genre.slug}"
+             data-genre-id="${genre.id}"
+             data-genre-name="${genre.name}"
+             data-url="${genre.url}">
+            <div class="genre-browser-card-image">🎵</div>
+            <div class="genre-browser-card-content">
+                <h3 class="genre-browser-card-title">${genre.name}</h3>
+                <p class="genre-browser-card-subtitle">Top 10 & Top 100 Charts</p>
+            </div>
+        </div>
+    `).join('');
+
+    genresGrid.innerHTML = genreCardsHTML;
+
+    console.log(`✅ Displayed ${genres.length} cached genres instantly`);
+
+    // Handle image loading based on current state
+    if (genreBrowserCache.imagesLoaded) {
+        console.log('🖼️ Images already loaded, restoring them...');
+        restoreCachedImages(genres);
+    } else if (!genreBrowserCache.imageLoadingActive && genres.length > 5) {
+        // Resume or start image loading
+        const cachedCount = genres.filter(g => g.imageUrl).length;
+        if (cachedCount > 0) {
+            console.log(`🔄 Resuming image loading (${cachedCount}/${genres.length} already cached)...`);
+            restoreCachedImages(genres); // Show already cached images
+        } else {
+            console.log('🖼️ Starting fresh image loading for cached genres...');
+        }
+        loadGenreBrowserImagesProgressively(genres);
+    } else {
+        console.log('📷 Image loading in progress, showing cached images...');
+        restoreCachedImages(genres);
+    }
+}
+
+function restoreCachedImages(genres) {
+    // Restore images that were already loaded in previous sessions
+    genres.forEach(genre => {
+        if (genre.imageUrl) {
+            const genreCard = document.querySelector(
+                `.genre-browser-card[data-genre-slug="${genre.slug}"][data-genre-id="${genre.id}"]`
+            );
+
+            if (genreCard) {
+                const imageElement = genreCard.querySelector('.genre-browser-card-image');
+                if (imageElement) {
+                    imageElement.innerHTML = `<img src="${genre.imageUrl}" alt="${genre.name}" style="width: 100%; height: 100%; object-fit: cover;">`;
+                    genreCard.classList.remove('genre-browser-card-fallback');
+                }
+            }
+        }
+    });
+}
+
+async function loadGenreBrowserImagesProgressively(genres) {
+    // Load genre images with 2 concurrent workers for faster loading
+    // Only process genres that don't already have cached images
+    const imageQueue = genres.filter(genre => !genre.imageUrl);
+    let imagesLoaded = 0;
+    const maxWorkers = 2;
+
+    // Mark loading as active
+    genreBrowserCache.imageLoadingActive = true;
+
+    console.log(`🖼️ Starting progressive image loading for modal with ${maxWorkers} workers for ${imageQueue.length} remaining genres (${genres.length - imageQueue.length} already cached)`);
+
+    // If all images are already cached, mark as complete
+    if (imageQueue.length === 0) {
+        console.log('✅ All images already cached, marking as complete');
+        genreBrowserCache.imagesLoaded = true;
+        genreBrowserCache.imageLoadingActive = false;
+        return;
+    }
+
+    // Function to process a single image
+    async function processImage(genre) {
+        try {
+            // Fetch individual genre image from backend
+            const response = await fetch(`/api/beatport/genre-image/${genre.slug}/${genre.id}`);
+
+            if (response.ok) {
+                const data = await response.json();
+
+                if (data.success && data.image_url) {
+                    // Cache the image URL in the genre object
+                    genre.imageUrl = data.image_url;
+
+                    // Find the genre card in the modal
+                    const genreCard = document.querySelector(
+                        `.genre-browser-card[data-genre-slug="${genre.slug}"][data-genre-id="${genre.id}"]`
+                    );
+
+                    if (genreCard) {
+                        const imageElement = genreCard.querySelector('.genre-browser-card-image');
+                        if (imageElement) {
+                            // Replace the fallback emoji with the actual image
+                            imageElement.innerHTML = `<img src="${data.image_url}" alt="${genre.name}" style="width: 100%; height: 100%; object-fit: cover;">`;
+                            genreCard.classList.remove('genre-browser-card-fallback');
+
+                            console.log(`✅ Loaded and cached image for ${genre.name} in modal`);
+                        }
+                    }
+                }
+            }
+
+            imagesLoaded++;
+            console.log(`📷 Progress: ${imagesLoaded}/${genres.length} images loaded for modal`);
+
+        } catch (error) {
+            console.log(`⚠️ Could not load image for ${genre.name} in modal: ${error.message}`);
+            imagesLoaded++;
+        }
+    }
+
+    // Worker function to process images from the queue
+    async function worker() {
+        while (imageQueue.length > 0 && genreBrowserCache.imageLoadingActive) {
+            const genre = imageQueue.shift();
+            if (genre) {
+                await processImage(genre);
+                // Small delay to prevent overwhelming the server
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+
+            // Check if we should pause
+            if (!genreBrowserCache.imageLoadingActive) {
+                console.log('⏸️ Worker paused - modal closed');
+                break;
+            }
+        }
+    }
+
+    // Start the workers
+    const workers = [];
+    for (let i = 0; i < maxWorkers; i++) {
+        workers.push(worker());
+    }
+
+    // Wait for all workers to complete
+    await Promise.all(workers);
+
+    // Check if loading was completed or paused
+    if (genreBrowserCache.imageLoadingActive) {
+        // Completed successfully
+        genreBrowserCache.imagesLoaded = true;
+        genreBrowserCache.imageLoadingActive = false;
+        console.log(`🎉 Completed loading all genre images for modal (${imagesLoaded}/${genres.length})`);
+        console.log(`💾 Marked images as loaded in cache`);
+    } else {
+        // Was paused
+        console.log(`⏸️ Image loading paused (${imagesLoaded}/${genres.length} completed)`);
+        console.log(`💾 Partial progress saved in cache`);
+    }
+}
+
+function filterGenreBrowserCards(searchTerm) {
+    const genreCards = document.querySelectorAll('.genre-browser-card');
+    const searchLower = searchTerm.toLowerCase();
+
+    genreCards.forEach(card => {
+        const genreName = card.dataset.genreName?.toLowerCase() || '';
+        const shouldShow = genreName.includes(searchLower);
+
+        card.style.display = shouldShow ? 'block' : 'none';
+    });
+
+    console.log(`🔍 Filtered genre cards with search term: "${searchTerm}"`);
+}
+
+// Initialize the Genre Browser Modal when the page loads
+document.addEventListener('DOMContentLoaded', () => {
+    initializeGenreBrowserModal();
+});

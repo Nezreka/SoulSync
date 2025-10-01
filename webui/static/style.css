@@ -14616,3 +14616,314 @@ body {
         height: 18px;
     }
 }
+
+/* ================================= */
+/* GENRE BROWSER MODAL STYLES       */
+/* ================================= */
+
+.genre-browser-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(10px);
+    display: none;
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+    animation: genreBrowserFadeIn 0.3s ease-out;
+}
+
+.genre-browser-modal-overlay.active {
+    display: flex;
+}
+
+.genre-browser-modal-container {
+    background: linear-gradient(135deg,
+        rgba(15, 15, 15, 0.95) 0%,
+        rgba(20, 20, 20, 0.95) 50%,
+        rgba(25, 25, 25, 0.95) 100%);
+    border-radius: 20px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8);
+    width: 95vw;
+    height: 90vh;
+    max-width: 1600px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    animation: genreBrowserSlideIn 0.4s ease-out;
+}
+
+.genre-browser-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 25px 30px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    background: linear-gradient(90deg,
+        rgba(30, 30, 30, 0.8) 0%,
+        rgba(40, 40, 40, 0.8) 100%);
+}
+
+.genre-browser-modal-title {
+    font-size: 28px;
+    font-weight: 700;
+    color: #ffffff;
+    margin: 0;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+.genre-browser-modal-close {
+    background: rgba(255, 255, 255, 0.1);
+    border: none;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    backdrop-filter: blur(10px);
+}
+
+.genre-browser-modal-close:hover {
+    background: rgba(255, 255, 255, 0.2);
+    transform: scale(1.1);
+}
+
+.genre-browser-close-icon {
+    font-size: 24px;
+    color: #ffffff;
+    font-weight: 300;
+}
+
+.genre-browser-modal-content {
+    flex: 1;
+    padding: 30px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 25px;
+}
+
+.genre-browser-search-section {
+    width: 100%;
+}
+
+.genre-browser-search-container {
+    position: relative;
+    max-width: 500px;
+    margin: 0 auto;
+}
+
+.genre-browser-search-input {
+    width: 100%;
+    padding: 15px 20px 15px 50px;
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    border-radius: 25px;
+    background: rgba(20, 20, 20, 0.8);
+    color: #ffffff;
+    font-size: 16px;
+    outline: none;
+    transition: all 0.3s ease;
+    backdrop-filter: blur(10px);
+}
+
+.genre-browser-search-input:focus {
+    border-color: #1db954;
+    box-shadow: 0 0 20px rgba(29, 185, 84, 0.3);
+}
+
+.genre-browser-search-input::placeholder {
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.genre-browser-search-icon {
+    position: absolute;
+    left: 18px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 18px;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.genre-browser-genres-section {
+    flex: 1;
+}
+
+.genre-browser-genres-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 20px;
+    padding: 10px 0;
+}
+
+.genre-browser-loading-container {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 20px;
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.genre-browser-loading-spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid rgba(255, 255, 255, 0.1);
+    border-top: 3px solid #1db954;
+    border-radius: 50%;
+    animation: genreBrowserSpin 1s linear infinite;
+    margin-bottom: 20px;
+}
+
+.genre-browser-loading-text {
+    font-size: 16px;
+    text-align: center;
+    margin: 0;
+}
+
+.genre-browser-card {
+    background: linear-gradient(135deg,
+        rgba(25, 25, 25, 0.9) 0%,
+        rgba(35, 35, 35, 0.9) 100%);
+    border-radius: 16px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    transition: all 0.3s ease;
+    cursor: pointer;
+    position: relative;
+    height: 200px;
+    backdrop-filter: blur(10px);
+}
+
+.genre-browser-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 15px 40px rgba(0, 0, 0, 0.6);
+    border-color: rgba(29, 185, 84, 0.5);
+}
+
+.genre-browser-card-image {
+    width: 100%;
+    height: 120px;
+    object-fit: cover;
+    transition: all 0.3s ease;
+}
+
+.genre-browser-card:hover .genre-browser-card-image {
+    transform: scale(1.05);
+}
+
+.genre-browser-card-content {
+    padding: 20px;
+    position: relative;
+    z-index: 2;
+}
+
+.genre-browser-card-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: #ffffff;
+    margin: 0 0 8px 0;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.7);
+}
+
+.genre-browser-card-subtitle {
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.7);
+    margin: 0;
+}
+
+.genre-browser-card-fallback {
+    background: linear-gradient(135deg,
+        rgba(30, 30, 30, 0.9) 0%,
+        rgba(45, 45, 45, 0.9) 100%);
+}
+
+.genre-browser-card-fallback .genre-browser-card-image {
+    background: linear-gradient(135deg,
+        rgba(40, 40, 40, 1) 0%,
+        rgba(60, 60, 60, 1) 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 48px;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .genre-browser-modal-container {
+        width: 95vw;
+        height: 90vh;
+        border-radius: 15px;
+    }
+
+    .genre-browser-modal-header {
+        padding: 20px;
+    }
+
+    .genre-browser-modal-title {
+        font-size: 22px;
+    }
+
+    .genre-browser-modal-content {
+        padding: 20px;
+        gap: 20px;
+    }
+
+    .genre-browser-genres-grid {
+        grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+        gap: 15px;
+    }
+
+    .genre-browser-card {
+        height: 180px;
+    }
+}
+
+@media (max-width: 480px) {
+    .genre-browser-genres-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+
+    .genre-browser-card {
+        height: 160px;
+    }
+}
+
+/* Animations */
+@keyframes genreBrowserFadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes genreBrowserSlideIn {
+    from {
+        opacity: 0;
+        transform: scale(0.9) translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+@keyframes genreBrowserSpin {
+    0% {
+        transform: rotate(0deg);
+    }
+    100% {
+        transform: rotate(360deg);
+    }
+}
