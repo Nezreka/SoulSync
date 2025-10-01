@@ -18806,7 +18806,9 @@ function setupBeatportRebuildSliderIndicators() {
     const indicators = document.querySelectorAll('.beatport-rebuild-indicator');
 
     indicators.forEach((indicator, index) => {
-        indicator.addEventListener('click', () => {
+        indicator.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
             goToBeatportRebuildSlide(index);
             resetBeatportRebuildSliderAutoPlay();
         });
