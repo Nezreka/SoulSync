@@ -13143,6 +13143,71 @@ def get_beatport_genre_new_charts(genre_slug, genre_id):
             "count": 0
         }), 500
 
+@app.route('/api/beatport/genre/<genre_slug>/<genre_id>/hero', methods=['GET'])
+def get_beatport_genre_hero(genre_slug, genre_id):
+    """Get hero slider data for a specific Beatport genre with 1-hour caching"""
+    try:
+        logger.info(f"🎠 API request for {genre_slug} genre hero slider (ID: {genre_id})")
+
+        # Check cache first (1-hour TTL like other genre data)
+        cache_key = f"hero_{genre_slug}_{genre_id}"
+        cached_data = get_cached_beatport_data('genre', cache_key, genre_slug)
+
+        if cached_data:
+            logger.info(f"💾 Returning cached hero data for {genre_slug}")
+            return jsonify({
+                "success": True,
+                "releases": cached_data,
+                "count": len(cached_data),
+                "genre_slug": genre_slug,
+                "genre_id": genre_id,
+                "cached": True,
+                "cache_timestamp": time.time()
+            })
+
+        # Initialize the Beatport scraper
+        scraper = BeatportUnifiedScraper()
+
+        # Scrape hero slider data
+        hero_releases = scraper.scrape_genre_hero_slider(genre_slug, genre_id)
+
+        if hero_releases:
+            # Cache the data (1-hour TTL)
+            set_cached_beatport_data('genre', cache_key, hero_releases, genre_slug)
+
+            logger.info(f"✅ Successfully scraped and cached {len(hero_releases)} hero releases for {genre_slug}")
+
+            return jsonify({
+                "success": True,
+                "releases": hero_releases,
+                "count": len(hero_releases),
+                "genre_slug": genre_slug,
+                "genre_id": genre_id,
+                "cached": False,
+                "scrape_timestamp": time.time()
+            })
+        else:
+            logger.info(f"⚠️ No hero releases found for {genre_slug}")
+            return jsonify({
+                "success": False,
+                "releases": [],
+                "count": 0,
+                "genre_slug": genre_slug,
+                "genre_id": genre_id,
+                "message": "No hero releases found"
+            })
+
+    except Exception as e:
+        logger.error(f"❌ Error fetching hero data for {genre_slug}: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "releases": [],
+            "count": 0,
+            "genre_slug": genre_slug,
+            "genre_id": genre_id
+        }), 500
+
 @app.route('/api/beatport/genre/<genre_slug>/<genre_id>/sections', methods=['GET'])
 def get_beatport_genre_sections(genre_slug, genre_id):
     """Discover all available sections for a specific Beatport genre"""
