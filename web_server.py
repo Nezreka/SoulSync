@@ -13516,6 +13516,71 @@ def get_beatport_homepage_top10_releases_cards():
             "releases_count": 0
         }), 500
 
+@app.route('/api/beatport/scrape-releases', methods=['POST'])
+def scrape_beatport_releases():
+    """General scraper endpoint - takes release URLs and returns tracks"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({
+                "success": False,
+                "error": "No JSON data provided",
+                "tracks": [],
+                "track_count": 0
+            }), 400
+
+        release_urls = data.get('release_urls', [])
+        source_name = data.get('source_name', 'General Release Scraper')
+
+        if not release_urls:
+            return jsonify({
+                "success": False,
+                "error": "No release URLs provided",
+                "tracks": [],
+                "track_count": 0
+            }), 400
+
+        logger.info(f"🎯 API request to scrape {len(release_urls)} release URLs with source: {source_name}")
+
+        # Initialize the Beatport scraper
+        scraper = BeatportUnifiedScraper()
+
+        # Use our new general scraper function
+        tracks = scraper.scrape_multiple_releases(release_urls, source_name)
+
+        logger.info(f"✅ Successfully extracted {len(tracks)} tracks from {len(release_urls)} releases")
+
+        # Apply text cleaning to track data
+        cleaned_tracks = []
+        for track in tracks:
+            cleaned_track = track.copy()
+            if 'title' in cleaned_track:
+                cleaned_track['title'] = clean_beatport_text(cleaned_track['title'])
+            if 'artist' in cleaned_track:
+                cleaned_track['artist'] = clean_beatport_text(cleaned_track['artist'])
+            if 'label' in cleaned_track:
+                cleaned_track['label'] = clean_beatport_text(cleaned_track['label'])
+            cleaned_tracks.append(cleaned_track)
+
+        return jsonify({
+            "success": True,
+            "tracks": cleaned_tracks,
+            "track_count": len(cleaned_tracks),
+            "source": source_name,
+            "release_urls_processed": len(release_urls)
+        })
+
+    except Exception as e:
+        logger.error(f"❌ Error scraping releases: {e}")
+        import traceback
+        logger.error(f"Full traceback: {traceback.format_exc()}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "tracks": [],
+            "track_count": 0
+        }), 500
+
 @app.route('/api/beatport/homepage/featured-charts', methods=['GET'])
 def get_beatport_homepage_featured_charts():
     """Get Beatport Featured Charts from homepage section"""
