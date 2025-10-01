@@ -11434,17 +11434,63 @@ function startBeatportSyncPolling(urlHash) {
     activeYouTubePollers[urlHash] = pollInterval;
 }
 
+async function cancelBeatportSync(urlHash) {
+    try {
+        console.log('❌ Cancelling Beatport sync:', urlHash);
+
+        const state = youtubePlaylistStates[urlHash];
+        if (!state || !state.is_beatport_playlist) {
+            console.error('❌ Invalid Beatport playlist state');
+            return;
+        }
+
+        const response = await fetch(`/api/beatport/sync/cancel/${urlHash}`, {
+            method: 'POST'
+        });
+
+        const result = await response.json();
+
+        if (result.error) {
+            showToast(`Error cancelling sync: ${result.error}`, 'error');
+            return;
+        }
+
+        // Stop polling
+        if (activeYouTubePollers[urlHash]) {
+            clearInterval(activeYouTubePollers[urlHash]);
+            delete activeYouTubePollers[urlHash];
+        }
+
+        // Revert to discovered phase
+        const chartHash = state.beatport_chart_hash || urlHash;
+        state.phase = 'discovered';
+        updateBeatportCardPhase(chartHash, 'discovered');
+        updateBeatportModalButtons(urlHash, 'discovered');
+
+        // Sync with backend Beatport chart state
+        if (beatportChartStates[chartHash]) {
+            beatportChartStates[chartHash].phase = 'discovered';
+        }
+
+        showToast('Beatport sync cancelled', 'info');
+
+    } catch (error) {
+        console.error('❌ Error cancelling Beatport sync:', error);
+        showToast(`Error cancelling sync: ${error.message}`, 'error');
+    }
+}
+
 function updateBeatportModalSyncProgress(urlHash, progress) {
-    const statusDisplay = document.getElementById(`youtube-sync-status-${urlHash}`);
+    const statusDisplay = document.getElementById(`beatport-sync-status-${urlHash}`);
     if (!statusDisplay || !progress) return;
 
     console.log(`📊 Updating Beatport modal sync progress for ${urlHash}:`, progress);
 
-    // Update individual counters exactly like YouTube sync
-    const totalEl = document.getElementById(`youtube-total-${urlHash}`);
-    const matchedEl = document.getElementById(`youtube-matched-${urlHash}`);
-    const failedEl = document.getElementById(`youtube-failed-${urlHash}`);
-    const percentageEl = document.getElementById(`youtube-percentage-${urlHash}`);
+    // Update individual counters with Beatport-specific IDs
+    const totalEl = document.getElementById(`beatport-total-${urlHash}`);
+    const matchedEl = document.getElementById(`beatport-matched-${urlHash}`);
+    const failedEl = document.getElementById(`beatport-failed-${urlHash}`);
+    const percentageEl = document.getElementById(`beatport-percentage-${urlHash}`);
 
     const total = progress.total_tracks || 0;
     const matched = progress.matched_tracks || 0;
@@ -13281,6 +13327,18 @@ function getModalActionButtons(urlHash, phase, state = null) {
                         <span class="sync-separator">/</span>
                         <span class="sync-stat failed-tracks">✗ <span id="tidal-failed-${urlHash}">0</span></span>
                         <span class="sync-stat percentage">(<span id="tidal-percentage-${urlHash}">0</span>%)</span>
+                    </div>
+                `;
+            } else if (isBeatport) {
+                return `
+                    <button class="modal-btn modal-btn-danger" onclick="cancelBeatportSync('${urlHash}')">❌ Cancel Sync</button>
+                    <div class="playlist-modal-sync-status" id="beatport-sync-status-${urlHash}" style="display: flex;">
+                        <span class="sync-stat total-tracks">♪ <span id="beatport-total-${urlHash}">0</span></span>
+                        <span class="sync-separator">/</span>
+                        <span class="sync-stat matched-tracks">✓ <span id="beatport-matched-${urlHash}">0</span></span>
+                        <span class="sync-separator">/</span>
+                        <span class="sync-stat failed-tracks">✗ <span id="beatport-failed-${urlHash}">0</span></span>
+                        <span class="sync-stat percentage">(<span id="beatport-percentage-${urlHash}">0</span>%)</span>
                     </div>
                 `;
             } else {
