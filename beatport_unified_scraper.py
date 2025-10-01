@@ -891,6 +891,58 @@ class BeatportUnifiedScraper:
             print(f"      ❌ Error extracting tracks from {release_url}: {e}")
             return []
 
+    def scrape_multiple_releases(self, release_urls: List[str], source_name: str = "General Release Scraper") -> List[Dict]:
+        """
+        General scraper function - takes list of release URLs and extracts all tracks
+
+        Args:
+            release_urls: List of Beatport release URLs to scrape
+            source_name: Name to use as source identifier for tracks
+
+        Returns:
+            List of track dictionaries with title, artist, label, etc.
+        """
+        print(f"\n🎯 SCRAPING {len(release_urls)} RELEASE URLs")
+        print("=" * 60)
+
+        all_tracks = []
+
+        for i, release_url in enumerate(release_urls, 1):
+            print(f"\n📀 Processing release {i}/{len(release_urls)}: {release_url}")
+
+            try:
+                tracks = self.extract_individual_tracks_from_release_url(release_url, source_name)
+                if tracks:
+                    all_tracks.extend(tracks)
+                    print(f"   ✅ Found {len(tracks)} tracks")
+
+                    # Show first few tracks for verification
+                    for j, track in enumerate(tracks[:3], 1):
+                        title = track.get('title', 'Unknown')
+                        artist = track.get('artist', 'Unknown')
+                        label = track.get('label', 'Unknown')
+                        print(f"      Track {j}: '{title}' by '{artist}' [{label}]")
+
+                    if len(tracks) > 3:
+                        print(f"      ... and {len(tracks) - 3} more tracks")
+                else:
+                    print(f"   ❌ No tracks found")
+
+            except Exception as e:
+                print(f"   ❌ Error processing release: {e}")
+                continue
+
+            # Small delay between requests to be respectful
+            if i < len(release_urls):
+                time.sleep(0.5)
+
+        print(f"\n" + "=" * 60)
+        print(f"🎉 SCRAPING COMPLETE")
+        print(f"   Total releases processed: {len(release_urls)}")
+        print(f"   Total tracks extracted: {len(all_tracks)}")
+
+        return all_tracks
+
     def scrape_hype_top_100(self, limit: int = 100) -> List[Dict]:
         """Scrape Beatport Hype Top 100 - Fixed URL based on parser discovery"""
         print("\n🔥 Scraping Beatport Hype Top 100...")
