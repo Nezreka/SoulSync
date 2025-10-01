@@ -26,28 +26,8 @@ class BeatportUnifiedScraper:
         # Dynamic genres - will be populated by scraping homepage
         self.all_genres = []
 
-    def clean_text(self, text):
-        """Clean and normalize text from HTML elements"""
-        if not text:
-            return text
-
-        # Fix common spacing issues
-        text = re.sub(r'([a-z$!@#%&*])([A-Z])', r'\1 \2', text)  # Add space between lowercase/symbols and uppercase
-        text = re.sub(r'([a-zA-Z])(\d)', r'\1 \2', text)  # Add space between letter and number
-        text = re.sub(r'(\d)([a-zA-Z])', r'\1 \2', text)  # Add space between number and letter
-        text = re.sub(r'([a-zA-Z]),([a-zA-Z])', r'\1, \2', text)  # Add space after comma
-        text = re.sub(r'([a-zA-Z])Mix\b', r'\1 Mix', text)  # Fix "hitMix" -> "hit Mix"
-        text = re.sub(r'([a-zA-Z])Remix\b', r'\1 Remix', text)  # Fix "hitRemix" -> "hit Remix"
-        text = re.sub(r'([a-zA-Z])Extended\b', r'\1 Extended', text)  # Fix "hitExtended" -> "hit Extended"
-        text = re.sub(r'([a-zA-Z])Version\b', r'\1 Version', text)  # Fix "hitVersion" -> "hit Version"
-        text = re.sub(r'\s+', ' ', text)  # Collapse multiple spaces
-        text = text.strip()
-
-        return text
-
-        # Comprehensive fallback genres based on current Beatport dropdown (39 genres)
+        # Current Beatport genres with correct URLs and IDs (updated from live site)
         self.fallback_genres = [
-            # Electronic genres
             {'name': '140 / Deep Dubstep / Grime', 'slug': '140-deep-dubstep-grime', 'id': '95', 'url': f'{self.base_url}/genre/140-deep-dubstep-grime/95'},
             {'name': 'Afro House', 'slug': 'afro-house', 'id': '89', 'url': f'{self.base_url}/genre/afro-house/89'},
             {'name': 'Amapiano', 'slug': 'amapiano', 'id': '98', 'url': f'{self.base_url}/genre/amapiano/98'},
@@ -84,7 +64,7 @@ class BeatportUnifiedScraper:
             {'name': 'Trance (Raw / Deep / Hypnotic)', 'slug': 'trance-raw-deep-hypnotic', 'id': '99', 'url': f'{self.base_url}/genre/trance-raw-deep-hypnotic/99'},
             {'name': 'Trap / Future Bass', 'slug': 'trap-future-bass', 'id': '38', 'url': f'{self.base_url}/genre/trap-future-bass/38'},
             {'name': 'UK Garage / Bassline', 'slug': 'uk-garage-bassline', 'id': '86', 'url': f'{self.base_url}/genre/uk-garage-bassline/86'},
-            # Open Format genres
+            # Additional genres from current Beatport
             {'name': 'African', 'slug': 'african', 'id': '102', 'url': f'{self.base_url}/genre/african/102'},
             {'name': 'Caribbean', 'slug': 'caribbean', 'id': '103', 'url': f'{self.base_url}/genre/caribbean/103'},
             {'name': 'Hip-Hop', 'slug': 'hip-hop', 'id': '105', 'url': f'{self.base_url}/genre/hip-hop/105'},
@@ -92,6 +72,53 @@ class BeatportUnifiedScraper:
             {'name': 'Pop', 'slug': 'pop', 'id': '107', 'url': f'{self.base_url}/genre/pop/107'},
             {'name': 'R&B', 'slug': 'rb', 'id': '108', 'url': f'{self.base_url}/genre/rb/108'}
         ]
+
+    def clean_text(self, text):
+        """Clean and normalize text from HTML elements"""
+        if not text:
+            return text
+
+        # Fix common spacing issues
+        text = re.sub(r'([a-z$!@#%&*])([A-Z])', r'\1 \2', text)  # Add space between lowercase/symbols and uppercase
+        text = re.sub(r'([a-zA-Z])(\d)', r'\1 \2', text)  # Add space between letter and number
+        text = re.sub(r'(\d)([a-zA-Z])', r'\1 \2', text)  # Add space between number and letter
+        text = re.sub(r'([a-zA-Z]),([a-zA-Z])', r'\1, \2', text)  # Add space after comma
+        text = re.sub(r'([a-zA-Z])Mix\b', r'\1 Mix', text)  # Fix "hitMix" -> "hit Mix"
+        text = re.sub(r'([a-zA-Z])Remix\b', r'\1 Remix', text)  # Fix "hitRemix" -> "hit Remix"
+        text = re.sub(r'([a-zA-Z])Extended\b', r'\1 Extended', text)  # Fix "hitExtended" -> "hit Extended"
+        text = re.sub(r'([a-zA-Z])Version\b', r'\1 Version', text)  # Fix "hitVersion" -> "hit Version"
+        text = re.sub(r'\s+', ' ', text)  # Collapse multiple spaces
+        text = text.strip()
+
+        return text
+
+    def _is_valid_genre_name(self, name: str) -> bool:
+        """Check if a name is a valid genre name and not a section title"""
+        # Filter out common section titles
+        section_titles = {
+            'open format', 'electronic', 'genres', 'browse', 'charts',
+            'new releases', 'trending', 'featured', 'popular', 'top',
+            'main', 'explore', 'discover', 'all genres'
+        }
+
+        name_lower = name.lower().strip()
+
+        # Reject if it's a section title
+        if name_lower in section_titles:
+            return False
+
+        # Reject if it's too short or too generic
+        if len(name_lower) < 3:
+            return False
+
+        # Reject if it contains only common words
+        common_words = {'the', 'and', 'or', 'of', 'in', 'on', 'at', 'to', 'for'}
+        words = name_lower.split()
+        if len(words) == 1 and words[0] in common_words:
+            return False
+
+        # Accept everything else
+        return True
 
     def get_page(self, url: str) -> Optional[BeautifulSoup]:
         """Fetch and parse a page with error handling"""
@@ -154,50 +181,140 @@ class BeatportUnifiedScraper:
 
             genres = []
 
-            # Method 1: Look for genres dropdown menu (multiple selectors)
-            potential_dropdowns = [
-                soup.find('div', {'id': 'genres-dropdown-menu'}),
-                soup.find('div', class_=re.compile(r'genres.*dropdown', re.I)),
-                soup.find('nav', class_=re.compile(r'genres', re.I)),
-                soup.find('div', class_=re.compile(r'dropdown.*genres', re.I)),
-                soup.find('ul', class_=re.compile(r'genres', re.I)),
-                soup.find('div', {'data-testid': 'genres-dropdown'}),
-                soup.find('div', {'aria-label': re.compile(r'genres', re.I)})
-            ]
+            # Method 1: Look for the specific genres dropdown menu structure
+            genres_dropdown = soup.find('div', {'id': 'genres-dropdown-menu'})
 
-            for dropdown in potential_dropdowns:
-                if dropdown:
-                    print(f"✅ Found potential genres dropdown: {dropdown.name} with class {dropdown.get('class')}")
-                    # Extract genre links from dropdown - look for the specific pattern
-                    genre_links = dropdown.find_all('a', href=re.compile(r'/genre/[^/]+/\d+'))
+            if genres_dropdown:
+                print("✅ Found genres-dropdown-menu")
 
-                    if genre_links:
-                        print(f"🔗 Found {len(genre_links)} genre links in dropdown")
-                        for link in genre_links:
-                            href = link.get('href', '')
-                            # Get text content, handling nested elements
-                            name_text = link.get_text(strip=True)
+                # Look for the two main div containers as described
+                genre_containers = genres_dropdown.find_all('div', recursive=False)
+                print(f"🔍 Found {len(genre_containers)} top-level containers in dropdown")
 
-                            # Clean up the name - remove "New" tags and extra whitespace
-                            name = re.sub(r'\s*New\s*', '', name_text).strip()
+                for container_idx, container in enumerate(genre_containers):
+                    print(f"📦 Processing container {container_idx + 1}")
 
-                            if href and name and len(name) > 1:  # Filter out empty or single char names
-                                # Parse URL: /genre/house/5 -> slug='house', id='5'
-                                url_parts = href.strip('/').split('/')
-                                if len(url_parts) >= 3 and url_parts[0] == 'genre':
-                                    slug = url_parts[1]
-                                    genre_id = url_parts[2]
+                    # Look specifically for .dropdown_menu classes
+                    dropdown_menus = container.find_all(class_='dropdown_menu')
 
-                                    genres.append({
-                                        'name': name,
-                                        'slug': slug,
-                                        'id': genre_id,
-                                        'url': urljoin(self.base_url, href)
-                                    })
+                    if not dropdown_menus:
+                        # Fallback: Look for any element with class containing 'dropdown' and 'menu'
+                        dropdown_menus = container.find_all(class_=re.compile(r'dropdown.*menu', re.I))
 
-                        if genres:
-                            print(f"🎯 Successfully extracted {len(genres)} genres from dropdown")
-                            break  # Stop after first successful dropdown
+                    if not dropdown_menus:
+                        print(f"⚠️ No .dropdown_menu found in container {container_idx + 1}")
+                        continue
+
+                    for menu_idx, menu in enumerate(dropdown_menus):
+                        print(f"📋 Processing dropdown_menu {menu_idx + 1} in container {container_idx + 1}")
+
+                        # Look for <li> elements first, then <a> elements within them
+                        list_items = menu.find_all('li')
+
+                        if list_items:
+                            print(f"📝 Found {len(list_items)} list items in menu")
+
+                            for li in list_items:
+                                # Find anchor tag within the list item
+                                link = li.find('a', href=re.compile(r'/genre/[^/]+/\d+'))
+
+                                if link:
+                                    href = link.get('href', '')
+                                    name_text = link.get_text(strip=True)
+
+                                    # Keep the name as-is (don't remove "New" prefix)
+                                    name = name_text.strip()
+
+                                    # Filter out section titles and non-genre items
+                                    if href and name and len(name) > 1 and self._is_valid_genre_name(name):
+                                        # Parse URL: /genre/house/5 -> slug='house', id='5'
+                                        url_parts = href.strip('/').split('/')
+                                        if len(url_parts) >= 3 and url_parts[0] == 'genre':
+                                            slug = url_parts[1]
+                                            genre_id = url_parts[2]
+
+                                            genres.append({
+                                                'name': name,
+                                                'slug': slug,
+                                                'id': genre_id,
+                                                'url': urljoin(self.base_url, href)
+                                            })
+                                            print(f"   ✅ Added: {name} ({slug}/{genre_id})")
+                                    else:
+                                        print(f"   🚫 Filtered out: '{name}' (appears to be a section title)")
+                        else:
+                            # Fallback: try the old method if no <li> elements found
+                            print(f"⚠️ No <li> elements found, trying direct <a> search...")
+                            genre_links = menu.find_all('a', href=re.compile(r'/genre/[^/]+/\d+'))
+
+                            if genre_links:
+                                print(f"🔗 Found {len(genre_links)} genre links in menu (fallback method)")
+                                for link in genre_links:
+                                    href = link.get('href', '')
+                                    name_text = link.get_text(strip=True)
+                                    name = name_text.strip()
+
+                                    if href and name and len(name) > 1 and self._is_valid_genre_name(name):
+                                        url_parts = href.strip('/').split('/')
+                                        if len(url_parts) >= 3 and url_parts[0] == 'genre':
+                                            slug = url_parts[1]
+                                            genre_id = url_parts[2]
+
+                                            genres.append({
+                                                'name': name,
+                                                'slug': slug,
+                                                'id': genre_id,
+                                                'url': urljoin(self.base_url, href)
+                                            })
+                                            print(f"   ✅ Added: {name} ({slug}/{genre_id})")
+                            else:
+                                print(f"⚠️ No genre links found in dropdown_menu {menu_idx + 1}")
+
+                if genres:
+                    print(f"🎯 Successfully extracted {len(genres)} genres from dropdown menu")
+                else:
+                    print("⚠️ No genre links found in dropdown menu structure")
+            else:
+                print("❌ Could not find genres-dropdown-menu, trying fallback methods...")
+
+                # Fallback: Look for other potential dropdown structures
+                potential_dropdowns = [
+                    soup.find('div', class_=re.compile(r'genres.*dropdown', re.I)),
+                    soup.find('nav', class_=re.compile(r'genres', re.I)),
+                    soup.find('div', class_=re.compile(r'dropdown.*genres', re.I)),
+                    soup.find('ul', class_=re.compile(r'genres', re.I)),
+                    soup.find('div', {'data-testid': 'genres-dropdown'}),
+                    soup.find('div', {'aria-label': re.compile(r'genres', re.I)})
+                ]
+
+                for dropdown in potential_dropdowns:
+                    if dropdown:
+                        print(f"✅ Found fallback dropdown: {dropdown.name} with class {dropdown.get('class')}")
+                        genre_links = dropdown.find_all('a', href=re.compile(r'/genre/[^/]+/\d+'))
+
+                        if genre_links:
+                            print(f"🔗 Found {len(genre_links)} genre links in fallback dropdown")
+                            for link in genre_links:
+                                href = link.get('href', '')
+                                name_text = link.get_text(strip=True)
+                                name = re.sub(r'\s*New\s*', '', name_text).strip()
+
+                                if href and name and len(name) > 1:
+                                    url_parts = href.strip('/').split('/')
+                                    if len(url_parts) >= 3 and url_parts[0] == 'genre':
+                                        slug = url_parts[1]
+                                        genre_id = url_parts[2]
+
+                                        genres.append({
+                                            'name': name,
+                                            'slug': slug,
+                                            'id': genre_id,
+                                            'url': urljoin(self.base_url, href)
+                                        })
+
+                            if genres:
+                                print(f"🎯 Successfully extracted {len(genres)} genres from fallback dropdown")
+                                break
 
             # Method 2: Look for any genre links on the page
             if not genres:
@@ -405,7 +522,30 @@ class BeatportUnifiedScraper:
             if not soup:
                 return None
 
-            # Look for hero release slideshow images
+            # Priority 1: Look for images in .artwork containers (new method)
+            artwork_imgs = soup.select('.artwork > img')
+            if artwork_imgs:
+                # First, try to find high-quality geo-media images in artwork containers
+                for img in artwork_imgs:
+                    src = img.get('src', '')
+                    if 'geo-media' in src and ('1050x508' in src or '500x500' in src):
+                        print(f"   ✅ Found high-quality artwork image: {src}")
+                        return src
+
+                # Second, try any geo-media images in artwork containers
+                for img in artwork_imgs:
+                    src = img.get('src', '')
+                    if 'geo-media' in src:
+                        print(f"   ✅ Found geo-media artwork image: {src}")
+                        return src
+
+                # Third, use any artwork image as fallback
+                first_artwork_src = artwork_imgs[0].get('src', '')
+                if first_artwork_src:
+                    print(f"   ✅ Found artwork image (fallback): {first_artwork_src}")
+                    return first_artwork_src
+
+            # Priority 2: Original method - Look for hero release slideshow images
             hero_images = soup.find_all('img', src=re.compile(r'geo-media\.beatport\.com/image_size/'))
 
             if hero_images:
@@ -413,11 +553,15 @@ class BeatportUnifiedScraper:
                 for img in hero_images:
                     src = img.get('src', '')
                     if '1050x508' in src or '500x500' in src:
+                        print(f"   ✅ Found high-quality hero image: {src}")
                         return src
 
                 # Fallback to any geo-media image
-                return hero_images[0].get('src', '')
+                fallback_src = hero_images[0].get('src', '')
+                print(f"   ✅ Found hero image (fallback): {fallback_src}")
+                return fallback_src
 
+            print(f"   ⚠️ No suitable images found on page")
             return None
 
         except Exception as e:
