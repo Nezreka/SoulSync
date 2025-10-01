@@ -9876,6 +9876,18 @@ function initializeSyncPage() {
         });
     }
 
+    // Logic for Beatport Top 100 button
+    const beatportTop100Btn = document.getElementById('beatport-top100-btn');
+    if (beatportTop100Btn) {
+        beatportTop100Btn.addEventListener('click', handleBeatportTop100Click);
+    }
+
+    // Logic for Hype Top 100 button
+    const hypeTop100Btn = document.getElementById('hype-top100-btn');
+    if (hypeTop100Btn) {
+        hypeTop100Btn.addEventListener('click', handleHypeTop100Click);
+    }
+
     // Initialize live log viewer
     initializeLiveLogViewer();
 }
@@ -20671,5 +20683,157 @@ async function handleBeatportDJChartCardClick(cardElement, chart) {
         console.error(`❌ Error handling DJ chart click for ${chart.name}:`, error);
         hideLoadingOverlay();
         showToast(`Error loading ${chart.name}: ${error.message}`, 'error');
+    }
+}
+
+/**
+ * Handle click on Beatport Top 100 button - create discovery process for top 100 tracks
+ */
+async function handleBeatportTop100Click() {
+    console.log('💯 Beatport Top 100 button clicked');
+
+    try {
+        // Create unique identifiers for this chart
+        const chartHash = `beatport_top100_${Date.now()}`;
+        const chartName = 'Beatport Top 100';
+
+        showToast('Loading Beatport Top 100...', 'info');
+        showLoadingOverlay('Getting Beatport Top 100 tracks...');
+
+        // Check if we already have a card for Beatport Top 100
+        const existingState = Object.values(beatportChartStates).find(state =>
+            state.chart &&
+            state.chart.name === chartName &&
+            state.chart.chart_type === 'beatport_top100'
+        );
+
+        if (existingState) {
+            console.log('🔄 Found existing Beatport Top 100 card, opening existing modal');
+            hideLoadingOverlay();
+            handleBeatportCardClick(existingState.chart.hash);
+            return;
+        }
+
+        // Get track data from Beatport Top 100 API
+        console.log('💯 Fetching tracks from Beatport Top 100');
+        const response = await fetch('/api/beatport/top-100', {
+            method: 'GET'
+        });
+
+        const data = await response.json();
+
+        if (!data.success || !data.tracks || data.tracks.length === 0) {
+            throw new Error('No tracks found in Beatport Top 100');
+        }
+
+        console.log(`✅ Successfully fetched ${data.tracks.length} tracks from Beatport Top 100`);
+
+        // Transform to standard chart format (following the exact pattern)
+        const chartData = {
+            hash: chartHash,
+            name: chartName,
+            chart_type: 'beatport_top100',
+            track_count: data.tracks.length,
+            tracks: data.tracks.map(track => ({
+                name: cleanTrackText(track.title || 'Unknown Title'),
+                artists: [cleanTrackText(track.artist || 'Unknown Artist')],
+                album: chartName,
+                duration_ms: 0,
+                external_urls: { beatport: track.url || '' },
+                source: 'beatport',
+                // Include position info if available
+                position: track.position || track.rank
+            }))
+        };
+
+        // Create Beatport playlist card (following the exact pattern)
+        addBeatportCardToContainer(chartData);
+
+        // Automatically open discovery modal (following the exact pattern)
+        hideLoadingOverlay();
+        handleBeatportCardClick(chartHash);
+
+        console.log('✅ Created Beatport Top 100 card and opened discovery modal');
+
+    } catch (error) {
+        console.error('❌ Error handling Beatport Top 100 click:', error);
+        hideLoadingOverlay();
+        showToast(`Error loading Beatport Top 100: ${error.message}`, 'error');
+    }
+}
+
+/**
+ * Handle click on Hype Top 100 button - create discovery process for hype top 100 tracks
+ */
+async function handleHypeTop100Click() {
+    console.log('🔥 Hype Top 100 button clicked');
+
+    try {
+        // Create unique identifiers for this chart
+        const chartHash = `hype_top100_${Date.now()}`;
+        const chartName = 'Hype Top 100';
+
+        showToast('Loading Hype Top 100...', 'info');
+        showLoadingOverlay('Getting Hype Top 100 tracks...');
+
+        // Check if we already have a card for Hype Top 100
+        const existingState = Object.values(beatportChartStates).find(state =>
+            state.chart &&
+            state.chart.name === chartName &&
+            state.chart.chart_type === 'hype_top100'
+        );
+
+        if (existingState) {
+            console.log('🔄 Found existing Hype Top 100 card, opening existing modal');
+            hideLoadingOverlay();
+            handleBeatportCardClick(existingState.chart.hash);
+            return;
+        }
+
+        // Get track data from Hype Top 100 API
+        console.log('🔥 Fetching tracks from Hype Top 100');
+        const response = await fetch('/api/beatport/hype-top-100', {
+            method: 'GET'
+        });
+
+        const data = await response.json();
+
+        if (!data.success || !data.tracks || data.tracks.length === 0) {
+            throw new Error('No tracks found in Hype Top 100');
+        }
+
+        console.log(`✅ Successfully fetched ${data.tracks.length} tracks from Hype Top 100`);
+
+        // Transform to standard chart format (following the exact pattern)
+        const chartData = {
+            hash: chartHash,
+            name: chartName,
+            chart_type: 'hype_top100',
+            track_count: data.tracks.length,
+            tracks: data.tracks.map(track => ({
+                name: cleanTrackText(track.title || 'Unknown Title'),
+                artists: [cleanTrackText(track.artist || 'Unknown Artist')],
+                album: chartName,
+                duration_ms: 0,
+                external_urls: { beatport: track.url || '' },
+                source: 'beatport',
+                // Include position info if available
+                position: track.position || track.rank
+            }))
+        };
+
+        // Create Beatport playlist card (following the exact pattern)
+        addBeatportCardToContainer(chartData);
+
+        // Automatically open discovery modal (following the exact pattern)
+        hideLoadingOverlay();
+        handleBeatportCardClick(chartHash);
+
+        console.log('✅ Created Hype Top 100 card and opened discovery modal');
+
+    } catch (error) {
+        console.error('❌ Error handling Hype Top 100 click:', error);
+        hideLoadingOverlay();
+        showToast(`Error loading Hype Top 100: ${error.message}`, 'error');
     }
 }
