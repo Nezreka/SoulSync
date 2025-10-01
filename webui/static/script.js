@@ -3669,10 +3669,13 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
         tracks: spotifyTracks
     };
 
-    // Generate hero section for YouTube playlist context
+    // Generate hero section with dynamic source detection
+    const source = playlistName.includes('[Beatport]') ? 'Beatport' :
+                   playlistName.includes('[Tidal]') ? 'Tidal' : 'YouTube';
+
     const heroContext = {
         type: 'playlist',
-        playlist: { name: playlistName, owner: 'YouTube' },
+        playlist: { name: playlistName, owner: source },
         trackCount: spotifyTracks.length,
         playlistId: virtualPlaylistId
     };
