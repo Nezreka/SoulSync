@@ -9857,15 +9857,8 @@ function initializeSyncPage() {
         });
     }
 
-    // Logic for Rebuild page Hero Slider - follows same pattern as Top 10 lists
-    const beatportHeroSliderContainer = document.querySelector('.beatport-rebuild-slider-container');
-    if (beatportHeroSliderContainer) {
-        beatportHeroSliderContainer.addEventListener('click', (event) => {
-            console.log('🎯 Hero slider container clicked on rebuild page');
-            event.stopPropagation(); // Prevent event bubbling
-            handleRebuildHeroSliderClick();
-        });
-    }
+    // Logic for Rebuild page Hero Slider - individual slide click handlers will be set up in populateBeatportSlider
+    // Container-level click handler removed to allow individual slide clicks like top 10 releases
 
     // Logic for the Start Sync button
     const startSyncBtn = document.getElementById('start-sync-btn');
@@ -10802,8 +10795,8 @@ function showBeatportMainView() {
 // Global variable to store rebuild page track data for reuse
 let rebuildPageTrackData = {
     beatport_top10: null,
-    hype_top10: null,
-    hero_slider: null
+    hype_top10: null
+    // hero_slider removed - now uses individual slide click handlers
 };
 
 async function handleRebuildBeatportTop10Click() {
@@ -10820,30 +10813,8 @@ async function handleRebuildHypeTop10Click() {
     await handleRebuildChartClick('hype_top10', 'Hype Top 10', 'rebuild_hype_top10');
 }
 
-// Debounce flag to prevent double execution
-let heroSliderClickInProgress = false;
-
-async function handleRebuildHeroSliderClick() {
-    console.log('🎯 Handling Hero Slider click on rebuild page');
-
-    // Prevent double execution
-    if (heroSliderClickInProgress) {
-        console.log('⏳ Hero slider click already in progress, ignoring...');
-        return;
-    }
-
-    heroSliderClickInProgress = true;
-
-    try {
-        // Use the existing chart creation pattern from Browse Charts EXACTLY
-        await handleRebuildChartClick('hero_slider', 'Hero Slider Releases', 'rebuild_hero_slider');
-    } finally {
-        // Reset flag after completion (whether success or failure)
-        setTimeout(() => {
-            heroSliderClickInProgress = false;
-        }, 1000); // 1 second cooldown
-    }
-}
+// Hero slider now uses individual slide click handlers instead of container-level clicking
+// The old handleRebuildHeroSliderClick function has been removed in favor of individual release discovery
 
 async function handleRebuildChartClick(trackDataKey, chartName, chartType) {
     try {
@@ -10917,9 +10888,6 @@ async function getRebuildPageTrackData(trackDataKey) {
     } else if (trackDataKey === 'hype_top10') {
         containerSelector = '#beatport-hype10-list';
         cardSelector = '.beatport-hype10-card[data-url]';
-    } else if (trackDataKey === 'hero_slider') {
-        // Hero slider needs special handling - extract release URLs and scrape tracks
-        return await getHeroSliderTrackData();
     } else {
         throw new Error(`Unknown track data key: ${trackDataKey}`);
     }
@@ -10959,63 +10927,8 @@ async function getRebuildPageTrackData(trackDataKey) {
     return tracks;
 }
 
-async function getHeroSliderTrackData() {
-    console.log('🎯 Getting hero slider track data');
-
-    try {
-        // Show loading overlay
-        showLoadingOverlay('Extracting tracks from releases...');
-
-        // Extract all release URLs from hero slider slides
-        const heroSlides = document.querySelectorAll('.beatport-rebuild-slide[data-url]');
-        const releaseUrls = Array.from(heroSlides).map(slide => slide.getAttribute('data-url')).filter(url => url);
-
-        console.log(`🎯 Found ${releaseUrls.length} release URLs from hero slider:`, releaseUrls);
-
-        if (releaseUrls.length === 0) {
-            hideLoadingOverlay();
-            throw new Error('No release URLs found in hero slider');
-        }
-
-        // Call our general scraper function to get tracks from all releases
-        const response = await fetch('/api/beatport/scrape-releases', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                release_urls: releaseUrls,
-                source_name: 'Hero Slider Releases'
-            })
-        });
-
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-
-        const data = await response.json();
-
-        if (!data.success || !data.tracks || data.tracks.length === 0) {
-            hideLoadingOverlay();
-            throw new Error('No tracks found in hero slider releases');
-        }
-
-        console.log(`🎯 Got ${data.tracks.length} tracks from hero slider releases`);
-
-        // Hide loading overlay
-        hideLoadingOverlay();
-
-        // Cache for future use
-        rebuildPageTrackData.hero_slider = data.tracks;
-
-        return data.tracks;
-
-    } catch (error) {
-        console.error('❌ Error getting hero slider track data:', error);
-        hideLoadingOverlay();
-        throw error;
-    }
-}
+// getHeroSliderTrackData function removed - hero slider now uses individual slide click handlers
+// Each slide will create its own discovery modal using handleBeatportReleaseCardClick
 
 // Hook into the loadBeatportTop10Lists function to cache track data
 const originalLoadBeatportTop10Lists = window.loadBeatportTop10Lists;
@@ -18753,7 +18666,50 @@ function populateBeatportSlider(tracks) {
     // Now set up all the functionality
     setupBeatportSliderFunctionality();
 
+    // Add individual click handlers for each slide (like top 10 releases pattern)
+    setupHeroSliderIndividualClickHandlers(tracks);
+
     console.log(`✅ Populated slider with ${tracks.length} real Beatport tracks`);
+}
+
+/**
+ * Set up individual click handlers for hero slider slides (like top 10 releases)
+ */
+function setupHeroSliderIndividualClickHandlers(tracks) {
+    const slides = document.querySelectorAll('.beatport-rebuild-slide[data-url]');
+
+    slides.forEach((slide, index) => {
+        const releaseUrl = slide.getAttribute('data-url');
+        if (releaseUrl && releaseUrl !== '#' && releaseUrl !== '') {
+            // Create release data object from the track data (similar to top 10 releases)
+            const track = tracks[index];
+            if (track) {
+                const releaseData = {
+                    url: releaseUrl,
+                    title: track.title || 'Unknown Title',
+                    artist: track.artist || 'Unknown Artist',
+                    label: track.label || 'Unknown Label',
+                    image_url: track.image_url || ''
+                };
+
+                // Add click handler that mimics the top 10 releases behavior
+                slide.addEventListener('click', (event) => {
+                    // Prevent navigation button clicks from triggering this
+                    if (event.target.closest('.beatport-rebuild-nav-btn') ||
+                        event.target.closest('.beatport-rebuild-indicator')) {
+                        return;
+                    }
+
+                    console.log(`🎯 Hero slider slide clicked: ${releaseData.title} by ${releaseData.artist}`);
+                    handleBeatportReleaseCardClick(slide, releaseData);
+                });
+
+                slide.style.cursor = 'pointer';
+            }
+        }
+    });
+
+    console.log(`✅ Set up individual click handlers for ${slides.length} hero slider slides`);
 }
 
 /**
