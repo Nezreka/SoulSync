@@ -2584,7 +2584,7 @@ function createBeatportCardFromBackendState(chartInfo) {
 
     // Create card HTML using same structure as createBeatportCard
     const cardHtml = `
-        <div class="youtube-playlist-card beatport-chart-card" id="beatport-card-${chartHash}">
+        <div class="youtube-playlist-card" id="beatport-card-${chartHash}">
             <div class="playlist-card-icon">🎧</div>
             <div class="playlist-card-content">
                 <div class="playlist-card-name">${escapeHtml(chartInfo.name)}</div>
@@ -9798,6 +9798,24 @@ function initializeSyncPage() {
         });
     });
 
+    // Logic for Rebuild page Top 10 containers - Beatport Top 10
+    const beatportTop10Container = document.getElementById('beatport-top10-list');
+    if (beatportTop10Container) {
+        beatportTop10Container.addEventListener('click', () => {
+            console.log('🎵 Beatport Top 10 container clicked on rebuild page');
+            handleRebuildBeatportTop10Click();
+        });
+    }
+
+    // Logic for Rebuild page Top 10 containers - Hype Top 10
+    const beatportHype10Container = document.getElementById('beatport-hype10-list');
+    if (beatportHype10Container) {
+        beatportHype10Container.addEventListener('click', () => {
+            console.log('🔥 Hype Top 10 container clicked on rebuild page');
+            handleRebuildHypeTop10Click();
+        });
+    }
+
     // Logic for the Start Sync button
     const startSyncBtn = document.getElementById('start-sync-btn');
     if (startSyncBtn) {
@@ -10715,6 +10733,154 @@ function showBeatportMainView() {
 }
 
 // ===============================
+// REBUILD PAGE TOP 10 FUNCTIONALITY
+// ===============================
+
+// Global variable to store rebuild page track data for reuse
+let rebuildPageTrackData = {
+    beatport_top10: null,
+    hype_top10: null
+};
+
+async function handleRebuildBeatportTop10Click() {
+    console.log('🎵 Handling Beatport Top 10 click on rebuild page');
+
+    // Use the existing chart creation pattern from Browse Charts EXACTLY
+    await handleRebuildChartClick('beatport_top10', 'Beatport Top 10', 'rebuild_beatport_top10');
+}
+
+async function handleRebuildHypeTop10Click() {
+    console.log('🔥 Handling Hype Top 10 click on rebuild page');
+
+    // Use the existing chart creation pattern from Browse Charts EXACTLY
+    await handleRebuildChartClick('hype_top10', 'Hype Top 10', 'rebuild_hype_top10');
+}
+
+async function handleRebuildChartClick(trackDataKey, chartName, chartType) {
+    try {
+        // Create chart hash (following Browse Charts pattern)
+        const chartHash = `${chartType}_${Date.now()}`;
+
+        // Check if we already have an existing state (following Browse Charts pattern)
+        const existingState = Object.values(beatportChartStates).find(state =>
+            state.chart && state.chart.name === chartName && state.chart.chart_type === chartType
+        );
+
+        if (existingState) {
+            console.log(`🔄 Found existing ${chartName} card, opening existing modal`);
+            // Use existing card click handler (following Browse Charts pattern)
+            handleBeatportCardClick(existingState.chart.hash);
+            return;
+        }
+
+        // Get track data from rebuild page data (instead of API scraping)
+        const trackData = await getRebuildPageTrackData(trackDataKey);
+        if (!trackData || trackData.length === 0) {
+            throw new Error(`No track data found for ${chartName}`);
+        }
+
+        // Transform rebuild data to Browse Charts format EXACTLY
+        const chartData = {
+            hash: chartHash,
+            name: chartName,
+            chart_type: chartType,
+            track_count: trackData.length,
+            tracks: trackData.map(track => ({
+                name: cleanTrackText(track.title || 'Unknown Title'),
+                artists: [cleanTrackText(track.artist || 'Unknown Artist')],
+                album: chartName,
+                duration_ms: 0,
+                external_urls: { beatport: track.url || '' },
+                source: 'beatport'
+            }))
+        };
+
+        // Follow Browse Charts pattern EXACTLY:
+        // 1. Add card to container (creates playlist card)
+        console.log(`🃏 Creating Beatport playlist card for: ${chartData.name}`);
+        addBeatportCardToContainer(chartData);
+
+        // 2. Automatically open discovery modal (like when you click a card in fresh state)
+        handleBeatportCardClick(chartHash);
+
+        console.log(`✅ Created ${chartName} card and opened discovery modal`);
+
+    } catch (error) {
+        console.error(`❌ Error handling ${chartName} click:`, error);
+        showToast(`Error loading ${chartName}: ${error.message}`, 'error');
+    }
+}
+
+async function getRebuildPageTrackData(trackDataKey) {
+    // First check if we have cached data from when the rebuild page was loaded
+    if (rebuildPageTrackData[trackDataKey]) {
+        console.log(`📦 Using cached ${trackDataKey} data`);
+        return rebuildPageTrackData[trackDataKey];
+    }
+
+    // If no cached data, extract from DOM (fallback)
+    console.log(`🔍 Extracting ${trackDataKey} data from rebuild page DOM`);
+
+    let containerSelector, cardSelector;
+    if (trackDataKey === 'beatport_top10') {
+        containerSelector = '#beatport-top10-list';
+        cardSelector = '.beatport-top10-card[data-url]';
+    } else if (trackDataKey === 'hype_top10') {
+        containerSelector = '#beatport-hype10-list';
+        cardSelector = '.beatport-hype10-card[data-url]';
+    } else {
+        throw new Error(`Unknown track data key: ${trackDataKey}`);
+    }
+
+    const container = document.querySelector(containerSelector);
+    if (!container) {
+        throw new Error(`Container ${containerSelector} not found`);
+    }
+
+    const trackCards = container.querySelectorAll(cardSelector);
+    if (trackCards.length === 0) {
+        throw new Error(`No track cards found in ${containerSelector}`);
+    }
+
+    // Extract track data from DOM cards
+    const tracks = Array.from(trackCards).map(card => {
+        const title = card.querySelector('.beatport-top10-card-title, .beatport-hype10-card-title')?.textContent?.trim() || 'Unknown Title';
+        const artist = card.querySelector('.beatport-top10-card-artist, .beatport-hype10-card-artist')?.textContent?.trim() || 'Unknown Artist';
+        const label = card.querySelector('.beatport-top10-card-label, .beatport-hype10-card-label')?.textContent?.trim() || 'Unknown Label';
+        const url = card.getAttribute('data-url') || '';
+        const rank = card.querySelector('.beatport-top10-card-rank, .beatport-hype10-card-rank')?.textContent?.trim() || '';
+
+        return {
+            title: title,
+            artist: artist,
+            label: label,
+            url: url,
+            rank: rank
+        };
+    });
+
+    console.log(`📋 Extracted ${tracks.length} tracks from ${containerSelector}`);
+
+    // Cache for future use
+    rebuildPageTrackData[trackDataKey] = tracks;
+
+    return tracks;
+}
+
+// Hook into the loadBeatportTop10Lists function to cache track data
+const originalLoadBeatportTop10Lists = window.loadBeatportTop10Lists;
+if (originalLoadBeatportTop10Lists) {
+    window.loadBeatportTop10Lists = async function() {
+        const result = await originalLoadBeatportTop10Lists.apply(this, arguments);
+
+        // If the load was successful, we can potentially cache the track data
+        // But for now, we'll rely on DOM extraction as it's more reliable
+
+        return result;
+    };
+}
+
+// ===============================
 // BEATPORT CHART FUNCTIONALITY
 // ===============================
 
@@ -10727,7 +10893,7 @@ function createBeatportCard(chartData) {
     let phaseColor = getPhaseColor(phase);
 
     return `
-        <div class="youtube-playlist-card beatport-chart-card" id="beatport-card-${chartData.hash}">
+        <div class="youtube-playlist-card" id="beatport-card-${chartData.hash}">
             <div class="playlist-card-icon">🎧</div>
             <div class="playlist-card-content">
                 <div class="playlist-card-name">${escapeHtml(chartData.name)}</div>
@@ -19751,6 +19917,22 @@ async function loadBeatportTop10Lists() {
 }
 
 /**
+ * Clean track/artist text for proper spacing
+ */
+function cleanTrackText(text) {
+    if (!text) return text;
+
+    // Fix common spacing issues
+    text = text.replace(/([a-z$!@#%&*])([A-Z])/g, '$1 $2');  // Add space between lowercase/symbols and uppercase
+    text = text.replace(/([a-zA-Z]),([a-zA-Z])/g, '$1, $2');  // Add space after comma
+    text = text.replace(/([a-zA-Z])(Mix|Remix|Extended|Version)\b/g, '$1 $2');  // Fix mix types
+    text = text.replace(/\s+/g, ' ');  // Collapse multiple spaces
+    text = text.trim();
+
+    return text;
+}
+
+/**
  * Populate Beatport Top 10 list with data
  */
 function populateBeatportTop10List(tracks) {
@@ -19767,19 +19949,24 @@ function populateBeatportTop10List(tracks) {
     `;
 
     tracks.forEach((track, index) => {
+        // Clean the text data before injection
+        const cleanTitle = cleanTrackText(track.title || 'Unknown Title');
+        const cleanArtist = cleanTrackText(track.artist || 'Unknown Artist');
+        const cleanLabel = cleanTrackText(track.label || 'Unknown Label');
+
         tracksHtml += `
             <div class="beatport-top10-card" data-url="${track.url || '#'}">
                 <div class="beatport-top10-card-rank">${track.rank || index + 1}</div>
                 <div class="beatport-top10-card-artwork">
                     ${track.artwork_url ?
-                        `<img src="${track.artwork_url}" alt="${track.title}" loading="lazy">` :
+                        `<img src="${track.artwork_url}" alt="${cleanTitle}" loading="lazy">` :
                         '<div class="beatport-top10-card-placeholder">🎵</div>'
                     }
                 </div>
                 <div class="beatport-top10-card-info">
-                    <h4 class="beatport-top10-card-title">${track.title || 'Unknown Title'}</h4>
-                    <p class="beatport-top10-card-artist">${track.artist || 'Unknown Artist'}</p>
-                    <p class="beatport-top10-card-label">${track.label || 'Unknown Label'}</p>
+                    <h4 class="beatport-top10-card-title">${cleanTitle}</h4>
+                    <p class="beatport-top10-card-artist">${cleanArtist}</p>
+                    <p class="beatport-top10-card-label">${cleanLabel}</p>
                 </div>
             </div>
         `;
@@ -19806,19 +19993,24 @@ function populateHypeTop10List(tracks) {
     `;
 
     tracks.forEach((track, index) => {
+        // Clean the text data before injection
+        const cleanTitle = cleanTrackText(track.title || 'Unknown Title');
+        const cleanArtist = cleanTrackText(track.artist || 'Unknown Artist');
+        const cleanLabel = cleanTrackText(track.label || 'Unknown Label');
+
         tracksHtml += `
             <div class="beatport-hype10-card" data-url="${track.url || '#'}">
                 <div class="beatport-hype10-card-rank">${track.rank || index + 1}</div>
                 <div class="beatport-hype10-card-artwork">
                     ${track.artwork_url ?
-                        `<img src="${track.artwork_url}" alt="${track.title}" loading="lazy">` :
+                        `<img src="${track.artwork_url}" alt="${cleanTitle}" loading="lazy">` :
                         '<div class="beatport-hype10-card-placeholder">🔥</div>'
                     }
                 </div>
                 <div class="beatport-hype10-card-info">
-                    <h4 class="beatport-hype10-card-title">${track.title || 'Unknown Title'}</h4>
-                    <p class="beatport-hype10-card-artist">${track.artist || 'Unknown Artist'}</p>
-                    <p class="beatport-hype10-card-label">${track.label || 'Unknown Label'}</p>
+                    <h4 class="beatport-hype10-card-title">${cleanTitle}</h4>
+                    <p class="beatport-hype10-card-artist">${cleanArtist}</p>
+                    <p class="beatport-hype10-card-label">${cleanLabel}</p>
                 </div>
             </div>
         `;
