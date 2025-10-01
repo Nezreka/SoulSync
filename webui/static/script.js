@@ -9598,13 +9598,20 @@ async function openDownloadMissingModalForTidal(virtualPlaylistId, playlistName,
         playlist: virtualPlaylist,
         tracks: spotifyTracks
     };
-    
+
+    // Generate hero section for Tidal playlist context (same as YouTube/Beatport)
+    const heroContext = {
+        type: 'playlist',
+        playlist: { name: playlistName, owner: 'Tidal' },
+        trackCount: spotifyTracks.length,
+        playlistId: virtualPlaylistId
+    };
+
     // Use the exact same modal HTML structure as the existing Spotify modal
     modal.innerHTML = `
-        <div class="download-missing-modal-content">
+        <div class="download-missing-modal-content" data-context="playlist">
             <div class="download-missing-modal-header">
-                <h2 class="download-missing-modal-title">Download Missing Tracks - ${escapeHtml(playlistName)}</h2>
-                <span class="download-missing-modal-close" onclick="closeDownloadMissingModal('${virtualPlaylistId}')">&times;</span>
+                ${generateDownloadModalHeroSection(heroContext)}
             </div>
             
             <div class="download-missing-modal-body">
