@@ -891,18 +891,27 @@ class BeatportUnifiedScraper:
             print(f"      ❌ Error extracting tracks from {release_url}: {e}")
             return []
 
-    def scrape_multiple_releases(self, release_urls: List[str], source_name: str = "General Release Scraper") -> List[Dict]:
+    def scrape_multiple_releases(self, release_urls, source_name: str = "General Release Scraper") -> List[Dict]:
         """
-        General scraper function - takes list of release URLs and extracts all tracks
+        General scraper function - takes single release URL or list of release URLs and extracts all tracks
 
         Args:
-            release_urls: List of Beatport release URLs to scrape
+            release_urls: Single Beatport release URL (str) or list of URLs (List[str]) to scrape
             source_name: Name to use as source identifier for tracks
 
         Returns:
             List of track dictionaries with title, artist, label, etc.
         """
-        print(f"\n🎯 SCRAPING {len(release_urls)} RELEASE URLs")
+        # Handle single URL input - convert to list
+        if isinstance(release_urls, str):
+            release_urls = [release_urls]
+
+        # Validate input
+        if not release_urls or len(release_urls) == 0:
+            print("⚠️ No release URLs provided")
+            return []
+
+        print(f"\n🎯 SCRAPING {len(release_urls)} RELEASE URL{'S' if len(release_urls) > 1 else ''}")
         print("=" * 60)
 
         all_tracks = []
