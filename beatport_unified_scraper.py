@@ -26,6 +26,25 @@ class BeatportUnifiedScraper:
         # Dynamic genres - will be populated by scraping homepage
         self.all_genres = []
 
+    def clean_text(self, text):
+        """Clean and normalize text from HTML elements"""
+        if not text:
+            return text
+
+        # Fix common spacing issues
+        text = re.sub(r'([a-z$!@#%&*])([A-Z])', r'\1 \2', text)  # Add space between lowercase/symbols and uppercase
+        text = re.sub(r'([a-zA-Z])(\d)', r'\1 \2', text)  # Add space between letter and number
+        text = re.sub(r'(\d)([a-zA-Z])', r'\1 \2', text)  # Add space between number and letter
+        text = re.sub(r'([a-zA-Z]),([a-zA-Z])', r'\1, \2', text)  # Add space after comma
+        text = re.sub(r'([a-zA-Z])Mix\b', r'\1 Mix', text)  # Fix "hitMix" -> "hit Mix"
+        text = re.sub(r'([a-zA-Z])Remix\b', r'\1 Remix', text)  # Fix "hitRemix" -> "hit Remix"
+        text = re.sub(r'([a-zA-Z])Extended\b', r'\1 Extended', text)  # Fix "hitExtended" -> "hit Extended"
+        text = re.sub(r'([a-zA-Z])Version\b', r'\1 Version', text)  # Fix "hitVersion" -> "hit Version"
+        text = re.sub(r'\s+', ' ', text)  # Collapse multiple spaces
+        text = text.strip()
+
+        return text
+
         # Comprehensive fallback genres based on current Beatport dropdown (39 genres)
         self.fallback_genres = [
             # Electronic genres
@@ -1346,7 +1365,7 @@ class BeatportUnifiedScraper:
             for selector in title_selectors:
                 title_elem = item.select_one(selector)
                 if title_elem:
-                    title = title_elem.get_text(strip=True)
+                    title = self.clean_text(title_elem.get_text(strip=True))
                     if title and title != "Unknown Title":
                         break
 
@@ -1363,7 +1382,7 @@ class BeatportUnifiedScraper:
             for selector in artist_selectors:
                 artist_elem = item.select_one(selector)
                 if artist_elem:
-                    artist = artist_elem.get_text(strip=True)
+                    artist = self.clean_text(artist_elem.get_text(strip=True))
                     if artist and artist != "Unknown Artist":
                         break
 
@@ -1379,7 +1398,7 @@ class BeatportUnifiedScraper:
             for selector in label_selectors:
                 label_elem = item.select_one(selector)
                 if label_elem:
-                    label = label_elem.get_text(strip=True)
+                    label = self.clean_text(label_elem.get_text(strip=True))
                     if label and label != "Unknown Label":
                         break
 
