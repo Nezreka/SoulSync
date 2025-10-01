@@ -2714,10 +2714,13 @@ async function rehydrateBeatportChart(chartInfo, userRequested = false) {
             failed: chartInfo.spotify_total - chartInfo.spotify_matches
         });
 
-        // Handle active discovery polling
+        // Handle active polling resumption
         if (phase === 'discovering') {
             console.log(`🔍 Resuming discovery polling for: ${chartName}`);
             startBeatportDiscoveryPolling(chartHash);
+        } else if (phase === 'syncing') {
+            console.log(`🔄 Resuming sync polling for: ${chartName}`);
+            startBeatportSyncPolling(chartHash);
         }
 
         // Open modal if user requested
@@ -2908,10 +2911,13 @@ async function rehydrateYouTubePlaylist(playlistInfo, userRequested = false) {
         updateYouTubeCardPhase(urlHash, phase);
         updateYouTubeCardProgress(urlHash, playlistInfo);
         
-        // Handle active discovery polling
+        // Handle active polling resumption
         if (phase === 'discovering') {
             console.log(`🔍 Resuming discovery polling for: ${playlistName}`);
             startYouTubeDiscoveryPolling(urlHash);
+        } else if (phase === 'syncing') {
+            console.log(`🔄 Resuming sync polling for: ${playlistName}`);
+            startYouTubeSyncPolling(urlHash);
         }
         
         // Open modal if user requested
@@ -9188,6 +9194,17 @@ async function applyTidalPlaylistState(stateInfo) {
             };
             updateTidalCardProgress(playlist_id, progressInfo);
         }
+
+        // Handle active polling resumption (matching YouTube/Beatport pattern)
+        if (phase === 'discovering') {
+            console.log(`🔍 Resuming discovery polling for Tidal: ${playlistData.name}`);
+            const fakeUrlHash = `tidal_${playlist_id}`;
+            startTidalDiscoveryPolling(fakeUrlHash, playlist_id);
+        } else if (phase === 'syncing') {
+            console.log(`🔄 Resuming sync polling for Tidal: ${playlistData.name}`);
+            const fakeUrlHash = `tidal_${playlist_id}`;
+            startTidalSyncPolling(fakeUrlHash);
+        }
         
         console.log(`✅ Applied saved state for Tidal playlist: ${playlist_id} -> ${phase}`);
         
@@ -9268,8 +9285,9 @@ function startTidalSyncPolling(urlHash) {
     
     const state = youtubePlaylistStates[urlHash];
     const playlistId = state.tidal_playlist_id;
-    
-    const pollInterval = setInterval(async () => {
+
+    // Define the polling function
+    const pollFunction = async () => {
         try {
             const response = await fetch(`/api/tidal/sync/status/${playlistId}`);
             const status = await response.json();
@@ -9329,11 +9347,18 @@ function startTidalSyncPolling(urlHash) {
             
         } catch (error) {
             console.error('❌ Error polling Tidal sync:', error);
-            clearInterval(pollInterval);
-            delete activeYouTubePollers[urlHash];
+            if (activeYouTubePollers[urlHash]) {
+                clearInterval(activeYouTubePollers[urlHash]);
+                delete activeYouTubePollers[urlHash];
+            }
         }
-    }, 1000);
-    
+    };
+
+    // Run immediately to get current status
+    pollFunction();
+
+    // Then continue polling at regular intervals
+    const pollInterval = setInterval(pollFunction, 1000);
     activeYouTubePollers[urlHash] = pollInterval;
 }
 
@@ -11374,7 +11399,8 @@ function startBeatportSyncPolling(urlHash) {
         clearInterval(activeYouTubePollers[urlHash]);
     }
 
-    const pollInterval = setInterval(async () => {
+    // Define the polling function
+    const pollFunction = async () => {
         try {
             const response = await fetch(`/api/beatport/sync/status/${urlHash}`);
             const status = await response.json();
@@ -11426,11 +11452,18 @@ function startBeatportSyncPolling(urlHash) {
 
         } catch (error) {
             console.error('❌ Error polling Beatport sync:', error);
-            clearInterval(pollInterval);
-            delete activeYouTubePollers[urlHash];
+            if (activeYouTubePollers[urlHash]) {
+                clearInterval(activeYouTubePollers[urlHash]);
+                delete activeYouTubePollers[urlHash];
+            }
         }
-    }, 2000); // Poll every 2 seconds
+    };
 
+    // Run immediately to get current status
+    pollFunction();
+
+    // Then continue polling at regular intervals
+    const pollInterval = setInterval(pollFunction, 2000); // Poll every 2 seconds
     activeYouTubePollers[urlHash] = pollInterval;
 }
 
@@ -13176,10 +13209,19 @@ function openYouTubeDiscoveryModal(urlHash) {
         modal.classList.remove('hidden');
         console.log('🔄 Showing existing modal with preserved state');
         
-        // Resume polling if discovery is in progress
+        // Resume polling if discovery or sync is in progress
         if (state.phase === 'discovering' && !activeYouTubePollers[urlHash]) {
             console.log('🔄 Resuming discovery polling...');
             startYouTubeDiscoveryPolling(urlHash);
+        } else if (state.phase === 'syncing' && !activeYouTubePollers[urlHash]) {
+            console.log('🔄 Resuming sync polling...');
+            if (state.is_tidal_playlist) {
+                startTidalSyncPolling(urlHash);
+            } else if (state.is_beatport_playlist) {
+                startBeatportSyncPolling(urlHash);
+            } else {
+                startYouTubeSyncPolling(urlHash);
+            }
         }
     } else {
         // Create new modal (support YouTube, Tidal, and Beatport like sync.py)
@@ -13260,7 +13302,19 @@ function openYouTubeDiscoveryModal(urlHash) {
             };
             updateYouTubeDiscoveryModal(urlHash, progressData);
         }
-        
+
+        // Start polling immediately if modal is opened in syncing phase
+        if (state.phase === 'syncing') {
+            console.log('🔄 Modal opened in syncing phase - starting immediate polling...');
+            if (state.is_tidal_playlist) {
+                startTidalSyncPolling(urlHash);
+            } else if (state.is_beatport_playlist) {
+                startBeatportSyncPolling(urlHash);
+            } else {
+                startYouTubeSyncPolling(urlHash);
+            }
+        }
+
         console.log('✨ Created new modal with current state');
     }
 }
@@ -13684,8 +13738,9 @@ function startYouTubeSyncPolling(urlHash) {
     if (activeYouTubePollers[urlHash]) {
         clearInterval(activeYouTubePollers[urlHash]);
     }
-    
-    const pollInterval = setInterval(async () => {
+
+    // Define the polling function
+    const pollFunction = async () => {
         try {
             const response = await fetch(`/api/youtube/sync/status/${urlHash}`);
             const status = await response.json();
@@ -13729,11 +13784,18 @@ function startYouTubeSyncPolling(urlHash) {
             
         } catch (error) {
             console.error('❌ Error polling YouTube sync:', error);
-            clearInterval(pollInterval);
-            delete activeYouTubePollers[urlHash];
+            if (activeYouTubePollers[urlHash]) {
+                clearInterval(activeYouTubePollers[urlHash]);
+                delete activeYouTubePollers[urlHash];
+            }
         }
-    }, 1000);
-    
+    };
+
+    // Run immediately to get current status
+    pollFunction();
+
+    // Then continue polling at regular intervals
+    const pollInterval = setInterval(pollFunction, 1000);
     activeYouTubePollers[urlHash] = pollInterval;
 }
 
