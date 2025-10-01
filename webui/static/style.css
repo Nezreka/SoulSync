@@ -4437,7 +4437,7 @@ body {
 .beatport-rebuild-slider {
     position: relative;
     width: 100%;
-    height: 400px;
+    height: 500px;
     border-radius: 20px;
     overflow: hidden;
     box-shadow:
@@ -4537,7 +4537,7 @@ body {
     z-index: 2;
     text-align: center;
     padding: 40px;
-    max-width: 600px;
+    max-width: 1000px;
 }
 
 .beatport-rebuild-track-info {
