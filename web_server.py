@@ -5014,12 +5014,12 @@ def _detect_album_info_web(context: dict, artist: dict) -> dict:
                 
                 combined_confidence = (artist_confidence * 0.6 + title_confidence * 0.4)
                 
-                if combined_confidence > best_confidence and combined_confidence > 0.6:  # Lower threshold for better matches
+                if combined_confidence > best_confidence and combined_confidence > 0.75:  # Higher threshold to avoid bad matches
                     best_match = track
                     best_confidence = combined_confidence
 
         # If we found a good Spotify match, use it for clean metadata
-        if best_match and best_confidence > 0.6:
+        if best_match and best_confidence > 0.75:
             print(f"✅ Found matching Spotify track: '{best_match.name}' - Album: '{best_match.album}' (confidence: {best_confidence:.2f})")
             
             # Get detailed track information using Spotify's track API
@@ -13811,6 +13811,21 @@ def get_beatport_discovery_status(url_hash):
         logger.error(f"❌ Error getting Beatport discovery status: {e}")
         return jsonify({"error": str(e)}), 500
 
+def clean_beatport_text(text):
+    """Clean Beatport track/artist text for proper spacing"""
+    if not text:
+        return text
+
+    import re
+    # Fix common spacing issues
+    text = re.sub(r'([a-z$!@#%&*])([A-Z])', r'\1 \2', text)  # Add space between lowercase/symbols and uppercase
+    text = re.sub(r'([a-zA-Z]),([a-zA-Z])', r'\1, \2', text)  # Add space after comma
+    text = re.sub(r'([a-zA-Z])(Mix|Remix|Extended|Version)\b', r'\1 \2', text)  # Fix mix types
+    text = re.sub(r'\s+', ' ', text)  # Collapse multiple spaces
+    text = text.strip()
+
+    return text
+
 def _run_beatport_discovery_worker(url_hash):
     """Background worker for Beatport Spotify discovery process"""
     try:
@@ -13833,17 +13848,17 @@ def _run_beatport_discovery_worker(url_hash):
                 state['discovery_progress'] = int((i / len(tracks)) * 100)
 
                 # Get track info from Beatport data (frontend sends 'name' and 'artists' fields)
-                track_title = track.get('name', 'Unknown Title')
+                track_title = clean_beatport_text(track.get('name', 'Unknown Title'))
                 track_artists = track.get('artists', ['Unknown Artist'])
                 # Handle artists - could be a list or string
                 if isinstance(track_artists, list):
                     if len(track_artists) > 0 and isinstance(track_artists[0], str):
-                        # Handle case like ["CID,Taylr Renee"] - split on comma
-                        track_artist = track_artists[0].split(',')[0].strip()
+                        # Handle case like ["CID,Taylr Renee"] - split on comma and clean
+                        track_artist = clean_beatport_text(track_artists[0].split(',')[0].strip())
                     else:
-                        track_artist = track_artists[0] if track_artists else 'Unknown Artist'
+                        track_artist = clean_beatport_text(track_artists[0] if track_artists else 'Unknown Artist')
                 else:
-                    track_artist = str(track_artists)
+                    track_artist = clean_beatport_text(str(track_artists))
 
                 print(f"🔍 Searching Spotify for: '{track_artist}' - '{track_title}'")
 
@@ -13872,7 +13887,7 @@ def _run_beatport_discovery_worker(url_hash):
                 # Try each search query until we find a good match
                 best_match = None
                 best_confidence = 0.0
-                min_confidence = 0.6  # Minimum confidence threshold for accepting a match
+                min_confidence = 0.75  # Increased threshold to avoid bad matches like "Dolce" for "Fancy $hit"
 
                 for query_idx, search_query in enumerate(search_queries):
                     try:
@@ -13904,8 +13919,8 @@ def _run_beatport_discovery_worker(url_hash):
                                         matching_engine.normalize_string(result.name)
                                     )
 
-                                    # Combined confidence (weighted toward artist matching for dance music)
-                                    combined_confidence = (artist_confidence * 0.6 + title_confidence * 0.4)
+                                    # Combined confidence (more balanced to avoid bad matches from same artist)
+                                    combined_confidence = (artist_confidence * 0.4 + title_confidence * 0.6)
                                 except Exception as e:
                                     print(f"⚠️ Matching engine scoring failed for Beatport, using basic matching: {e}")
                                     # Fallback to simple string matching
@@ -13913,10 +13928,32 @@ def _run_beatport_discovery_worker(url_hash):
                                     title_match = track_title.lower() in result.name.lower() or result.name.lower() in track_title.lower()
                                     combined_confidence = 0.8 if (artist_match and title_match) else 0.4 if (artist_match or title_match) else 0.1
 
-                                print(f"🔍 Match candidate: '{result.artists[0]}' - '{result.name}' (confidence: {combined_confidence:.3f})")
+                                print(f"🔍 Match candidate: '{result.artists[0]}' - '{result.name}'")
+                                print(f"    Artist confidence: {artist_confidence:.3f} ('{track_artist}' vs '{result.artists[0]}')")
+                                print(f"    Title confidence: {title_confidence:.3f} ('{track_title}' vs '{result.name}')")
+                                print(f"    Combined confidence: {combined_confidence:.3f} (threshold: {min_confidence})")
 
-                                # Update best match if this is better
-                                if combined_confidence > best_confidence and combined_confidence >= min_confidence:
+                                # Additional check for core title similarity (excluding version keywords)
+                                def remove_version_keywords(title):
+                                    keywords = ['extended mix', 'radio mix', 'club mix', 'remix', 'extended', 'version', 'mix', 'original']
+                                    clean_title = title.lower()
+                                    for keyword in keywords:
+                                        clean_title = clean_title.replace(keyword, '').strip(' -()[]')
+                                    return clean_title.strip()
+
+                                core_title1 = remove_version_keywords(track_title)
+                                core_title2 = remove_version_keywords(result.name)
+                                core_title_confidence = matching_engine.similarity_score(core_title1, core_title2)
+
+                                print(f"    Core title confidence: {core_title_confidence:.3f} ('{core_title1}' vs '{core_title2}')")
+
+                                # Update best match if this is better AND meets all similarity requirements
+                                min_title_confidence = 0.5  # Require at least 50% title similarity
+                                min_core_title_confidence = 0.4  # Require at least 40% core title similarity
+                                if (combined_confidence > best_confidence and
+                                    combined_confidence >= min_confidence and
+                                    title_confidence >= min_title_confidence and
+                                    core_title_confidence >= min_core_title_confidence):
                                     best_confidence = combined_confidence
                                     best_match = result
                                     print(f"✅ New best match: {result.artists[0]} - {result.name} (confidence: {combined_confidence:.3f})")
