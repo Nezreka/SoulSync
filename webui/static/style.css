@@ -4392,6 +4392,11 @@ body {
     flex-direction: column;
 }
 
+/* Hide Browse Charts tab */
+.beatport-tab-button[data-beatport-tab="browse"] {
+    display: none;
+}
+
 /* ================================= */
 /* BEATPORT REBUILD TAB STYLES */
 /* ================================= */
