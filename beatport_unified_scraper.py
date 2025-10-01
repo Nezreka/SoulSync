@@ -1680,7 +1680,7 @@ class BeatportUnifiedScraper:
             return None
 
     def scrape_new_on_beatport_hero(self, limit: int = 10) -> List[Dict]:
-        """Scrape the 'New on Beatport' hero slideshow from homepage"""
+        """Scrape the 'New on Beatport' hero slideshow from homepage using data-testid standard"""
         print("\n🎯 Scraping 'New on Beatport' hero slideshow...")
 
         soup = self.get_page(self.base_url)
@@ -1689,17 +1689,27 @@ class BeatportUnifiedScraper:
 
         tracks = []
 
-        # Method 1: Look for the specific wrapper class you mentioned
-        hero_wrapper = soup.find('div', class_='Homepage-style__NewOnBeatportWrapper-sc-deeb4244-2 iyIchZ')
-        if hero_wrapper:
-            print("   ✅ Found Homepage NewOnBeatportWrapper")
-            tracks.extend(self._extract_from_hero_wrapper(hero_wrapper, limit))
+        # Method 1 (PRIMARY): Use data-testid standard like all other rebuild functions
+        hero_items = soup.select('[data-testid="new-on-beatport"]')
+        if hero_items:
+            print(f"   ✅ Found {len(hero_items)} items using data-testid='new-on-beatport'")
+            for i, item in enumerate(hero_items[:limit]):
+                track_data = self._extract_track_from_slide(item, f"Hero Item {i+1}")
+                if track_data and track_data.get('url'):
+                    tracks.append(track_data)
 
-        # Method 2: Look for carousel with aria attributes you mentioned
-        if len(tracks) < 5:  # Only try if we don't have enough tracks
+        # Method 2 (FALLBACK): Look for the specific wrapper class (legacy support)
+        if len(tracks) < 5:
+            hero_wrapper = soup.find('div', class_='Homepage-style__NewOnBeatportWrapper-sc-deeb4244-2 iyIchZ')
+            if hero_wrapper:
+                print("   ✅ Found Homepage NewOnBeatportWrapper (fallback)")
+                tracks.extend(self._extract_from_hero_wrapper(hero_wrapper, limit))
+
+        # Method 3 (FALLBACK): Look for carousel with aria attributes
+        if len(tracks) < 5:
             carousel = soup.find('div', {'aria-roledescription': 'carousel', 'aria-label': 'Carousel'})
             if carousel:
-                print("   ✅ Found carousel with aria-roledescription and aria-label")
+                print("   ✅ Found carousel with aria-roledescription and aria-label (fallback)")
                 additional_tracks = self._extract_from_carousel(carousel, limit)
                 # Merge without duplicates
                 existing_urls = {track.get('url') for track in tracks}
@@ -1707,9 +1717,9 @@ class BeatportUnifiedScraper:
                     if track.get('url') not in existing_urls:
                         tracks.append(track)
 
-        # Method 3: Look for individual slide items more broadly
+        # Method 4 (LAST RESORT): Look for individual slide items more broadly
         if len(tracks) < 5:
-            print("   🔍 Looking for individual carousel items...")
+            print("   🔍 Looking for individual carousel items (last resort)...")
             carousel_items = soup.find_all(['div', 'article'], class_=re.compile(r'carousel.*item|item.*carousel|slide', re.I))
             print(f"   Found {len(carousel_items)} potential carousel items")
 
@@ -1890,20 +1900,31 @@ class BeatportUnifiedScraper:
 
             # Apply final cleaning to all extracted data
             if track_data.get('title'):
-                track_data['title'] = self._clean_title(track_data['title'])
+                track_data['title'] = self.clean_beatport_text(self._clean_title(track_data['title']))
             if track_data.get('artist'):
-                track_data['artist'] = self._clean_artist(track_data['artist'])
+                track_data['artist'] = self.clean_beatport_text(self._clean_artist(track_data['artist']))
 
             # Extract all class names for debugging
             classes = slide.get('class', [])
             if classes:
                 track_data['element_classes'] = ' '.join(classes)
 
-            # Only return if we found at least some useful data
-            if track_data.get('title') or track_data.get('artist') or track_data.get('url') or track_data.get('image_url'):
+            # Filter out empty/invalid tracks
+            title = track_data.get('title', '').strip()
+            artist = track_data.get('artist', '').strip()
+
+            # Skip tracks with no title/artist or generic values
+            if (not title or not artist or
+                title.lower() in ['no title', 'unknown title', 'unknown', ''] or
+                artist.lower() in ['no artist', 'unknown artist', 'unknown', 'various artists', '']):
+                print(f"   ❌ {context}: Filtered out invalid track - '{title}' by '{artist}'")
+                return None
+
+            # Only return if we found meaningful data
+            if track_data.get('url') or track_data.get('image_url'):
                 track_data['source'] = f"New on Beatport Hero - {context}"
                 track_data['scraped_at'] = time.time()
-                print(f"   ✅ {context}: {track_data.get('title', 'No title')} - {track_data.get('artist', 'No artist')}")
+                print(f"   ✅ {context}: {title} - {artist}")
                 return track_data
             else:
                 print(f"   ❌ {context}: No usable data found")
@@ -2142,6 +2163,20 @@ class BeatportUnifiedScraper:
         if cleaned_words:
             return ' '.join(cleaned_words)
         return artist
+
+    def clean_beatport_text(self, text: str) -> str:
+        """Clean Beatport track/artist text for proper spacing"""
+        if not text:
+            return text
+
+        # Fix common spacing issues
+        text = re.sub(r'([a-z$!@#%&*])([A-Z])', r'\1 \2', text)  # Add space between lowercase/symbols and uppercase
+        text = re.sub(r'([a-zA-Z]),([a-zA-Z])', r'\1, \2', text)  # Add space after comma
+        text = re.sub(r'([a-zA-Z])(Mix|Remix|Extended|Version)\b', r'\1 \2', text)  # Fix mix types
+        text = re.sub(r'\s+', ' ', text)  # Collapse multiple spaces
+        text = text.strip()
+
+        return text
 
     def scrape_top_10_releases_homepage(self, limit: int = 10) -> List[Dict]:
         """Scrape Top 10 Releases from homepage - Extract individual tracks using URL crawling"""

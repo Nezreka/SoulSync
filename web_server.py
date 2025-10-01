@@ -2141,6 +2141,12 @@ def get_beatport_hero_tracks():
             url = track.get('url', '').strip()
             image_url = track.get('image_url', '').strip()
 
+            # Apply text cleaning for proper spacing
+            if title:
+                title = clean_beatport_text(title)
+            if artist:
+                artist = clean_beatport_text(artist)
+
             # Validation filters
             is_valid = True
             skip_reasons = []
