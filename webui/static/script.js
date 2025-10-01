@@ -18498,10 +18498,6 @@ function populateBeatportSlider(tracks) {
                         <p class="beatport-rebuild-artist-name">${track.artist}</p>
                         <p class="beatport-rebuild-album-name">New on Beatport</p>
                     </div>
-                    <div class="beatport-rebuild-track-meta">
-                        <span class="beatport-rebuild-genre">${track.genre}</span>
-                        <span class="beatport-rebuild-year">${track.year}</span>
-                    </div>
                 </div>
             </div>
         `;
