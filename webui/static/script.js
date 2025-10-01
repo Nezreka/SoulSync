@@ -20325,6 +20325,13 @@ function populateBeatportTop10Releases(releases) {
             card.style.backgroundPosition = 'center';
         }
     });
+
+    // Add click handlers for individual release discovery
+    const releaseCards = container.querySelectorAll('.beatport-releases-top10-card[data-url]');
+    releaseCards.forEach((card, index) => {
+        card.addEventListener('click', () => handleBeatportReleaseCardClick(card, releases[index]));
+        card.style.cursor = 'pointer';
+    });
 }
 
 /**
@@ -20341,4 +20348,95 @@ function showTop10ReleasesError(errorMessage) {
     `;
 
     if (container) container.innerHTML = errorHtml;
+}
+
+/**
+ * Handle click on individual Top 10 Release card - create discovery process for single release
+ */
+async function handleBeatportReleaseCardClick(cardElement, release) {
+    console.log(`💿 Individual release card clicked: ${release.title} by ${release.artist}`);
+
+    if (!release.url || release.url === '#') {
+        showToast('No release URL available', 'error');
+        return;
+    }
+
+    try {
+        // Create unique identifiers for this release
+        const releaseHash = `release_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const chartName = `${release.title} - ${release.artist}`;
+
+        showToast(`Loading ${release.title}...`, 'info');
+        showLoadingOverlay(`Getting tracks from ${release.title}...`);
+
+        // Check if we already have a card for this release
+        const existingState = Object.values(beatportChartStates).find(state =>
+            state.chart &&
+            state.chart.name === chartName &&
+            state.chart.chart_type === 'individual_release'
+        );
+
+        if (existingState) {
+            console.log(`🔄 Found existing card for ${release.title}, opening existing modal`);
+            hideLoadingOverlay();
+            handleBeatportCardClick(existingState.chart.hash);
+            return;
+        }
+
+        // Get track data from this single release
+        console.log(`🎵 Fetching tracks from release: ${release.url}`);
+        const response = await fetch('/api/beatport/scrape-releases', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                release_urls: [release.url],
+                source_name: `Top 10 Release: ${release.title}`
+            })
+        });
+
+        const data = await response.json();
+
+        if (!data.success || !data.tracks || data.tracks.length === 0) {
+            throw new Error('No tracks found in this release');
+        }
+
+        console.log(`✅ Successfully fetched ${data.tracks.length} tracks from ${release.title}`);
+
+        // Transform to standard chart format (following the exact pattern from handleRebuildChartClick)
+        const chartData = {
+            hash: releaseHash,
+            name: chartName,
+            chart_type: 'individual_release',
+            track_count: data.tracks.length,
+            tracks: data.tracks.map(track => ({
+                name: cleanTrackText(track.title || 'Unknown Title'),
+                artists: [cleanTrackText(track.artist || 'Unknown Artist')],
+                album: chartName,
+                duration_ms: 0,
+                external_urls: { beatport: track.url || '' },
+                source: 'beatport',
+                // Include release metadata
+                release_title: release.title,
+                release_artist: release.artist,
+                release_label: release.label,
+                release_image: release.image_url
+            }))
+        };
+
+        // Create Beatport playlist card (following the exact pattern)
+        addBeatportCardToContainer(chartData);
+
+        // Automatically open discovery modal (following the exact pattern)
+        hideLoadingOverlay();
+        handleBeatportCardClick(releaseHash);
+
+        console.log(`✅ Created individual release card and opened discovery modal for ${release.title}`);
+
+    } catch (error) {
+        console.error(`❌ Error handling release click for ${release.title}:`, error);
+        hideLoadingOverlay();
+        showToast(`Error loading ${release.title}: ${error.message}`, 'error');
+    }
 }
