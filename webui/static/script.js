@@ -21301,6 +21301,14 @@ function showGenrePageView(genreSlug, genreId, genreName) {
                     <p class="genre-loading-text">🎠 Loading hero releases...</p>
                 </div>
             </div>
+            <div class="genre-nav-buttons-section">
+                <div class="genre-nav-buttons-container">
+                    <button class="beatport-nav-button" id="genre-top100-btn">
+                        <span class="beatport-nav-icon top100-icon"></span>
+                        <span class="beatport-nav-text">Beatport Top 100</span>
+                    </button>
+                </div>
+            </div>
         `;
 
         modal.querySelector('.genre-browser-modal-content').appendChild(genrePageContent);
@@ -21309,6 +21317,14 @@ function showGenrePageView(genreSlug, genreId, genreName) {
         const backButton = genrePageContent.querySelector('#genre-back-button');
         if (backButton) {
             backButton.addEventListener('click', showGenreListView);
+        }
+
+        // Add genre top 100 button listener
+        const genreTop100Button = genrePageContent.querySelector('#genre-top100-btn');
+        if (genreTop100Button) {
+            genreTop100Button.addEventListener('click', () => {
+                handleGenreTop100Click(genreSlug, genreId, genreName);
+            });
         }
     }
 
@@ -21661,6 +21677,95 @@ function startGenreHeroSliderAutoPlay() {
     }, 5000); // 5 second intervals like the main slider
 
     console.log(`▶️ Started auto-play for genre hero slider (${window.genreHeroSliderState.totalSlides} slides)`);
+}
+
+/**
+ * Handle genre-specific Top 100 button click - create discovery process for genre top 100 tracks
+ */
+async function handleGenreTop100Click(genreSlug, genreId, genreName) {
+    console.log(`💯 Genre Top 100 button clicked for ${genreName}`);
+
+    try {
+        // Create unique identifiers for this chart
+        const chartHash = `${genreSlug}_top100_${Date.now()}`;
+        const chartName = `${genreName} Top 100`;
+
+        showToast(`Loading ${genreName} Top 100...`, 'info');
+        showLoadingOverlay(`Getting ${genreName} Top 100 tracks...`);
+
+        // Check if we already have a card for this genre's Top 100
+        const existingState = Object.values(beatportChartStates).find(state =>
+            state.chart &&
+            state.chart.name === chartName &&
+            state.chart.chart_type === 'genre_top100'
+        );
+
+        if (existingState) {
+            console.log(`🔄 Found existing ${genreName} Top 100 card, opening existing modal`);
+            hideLoadingOverlay();
+            handleBeatportCardClick(existingState.chart.hash);
+            return;
+        }
+
+        // Construct the genre top 100 URL: genre URL + /top-100
+        const genreTop100Url = `https://www.beatport.com/genre/${genreSlug}/${genreId}/top-100`;
+        console.log(`💯 Fetching tracks from ${genreTop100Url}`);
+
+        // Get track data from genre top 100 page
+        const response = await fetch('/api/beatport/scrape-releases', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                release_urls: [genreTop100Url],
+                source_name: chartName
+            })
+        });
+
+        const data = await response.json();
+
+        if (!data.success || !data.tracks || data.tracks.length === 0) {
+            throw new Error(`No tracks found in ${genreName} Top 100`);
+        }
+
+        console.log(`✅ Successfully fetched ${data.tracks.length} tracks from ${genreName} Top 100`);
+
+        // Transform to standard chart format (following the exact pattern)
+        const chartData = {
+            hash: chartHash,
+            name: chartName,
+            chart_type: 'genre_top100',
+            track_count: data.tracks.length,
+            tracks: data.tracks.map(track => ({
+                name: cleanTrackText(track.title || 'Unknown Title'),
+                artists: [cleanTrackText(track.artist || 'Unknown Artist')],
+                album: chartName,
+                duration_ms: 0,
+                external_urls: { beatport: track.url || '' },
+                source: 'beatport',
+                // Include genre metadata
+                genre_slug: genreSlug,
+                genre_id: genreId,
+                genre_name: genreName,
+                position: track.position || track.rank
+            }))
+        };
+
+        // Create Beatport playlist card (following the exact pattern)
+        addBeatportCardToContainer(chartData);
+
+        // Automatically open discovery modal (following the exact pattern)
+        hideLoadingOverlay();
+        handleBeatportCardClick(chartHash);
+
+        console.log(`✅ Created ${genreName} Top 100 card and opened discovery modal`);
+
+    } catch (error) {
+        console.error(`❌ Error handling ${genreName} Top 100 click:`, error);
+        hideLoadingOverlay();
+        showToast(`Error loading ${genreName} Top 100: ${error.message}`, 'error');
+    }
 }
 
 // Initialize the Genre Browser Modal when the page loads

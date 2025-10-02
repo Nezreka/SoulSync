@@ -14988,7 +14988,7 @@ body {
 
 .genre-hero-slider-container {
     width: 100%;
-    height: calc(100% - 80px);
+    height: fit-content;
     overflow-y: auto;
 }
 
@@ -15058,6 +15058,24 @@ body {
     border-color: rgba(255, 255, 255, 0.25);
 }
 
+/* === GENRE NAV BUTTONS SECTION === */
+
+.genre-nav-buttons-section {
+    margin-top: 30px;
+    padding: 20px 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.genre-nav-buttons-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 20px;
+}
+
+/* The button styles are already defined in the main .beatport-nav-button class */
+/* This ensures the genre page button looks identical to the main page buttons */
+
 /* Responsive adjustments for genre page */
 @media (max-width: 768px) {
     .genre-page-header {
@@ -15068,5 +15086,10 @@ body {
 
     .genre-page-title {
         font-size: 20px;
+    }
+
+    .genre-nav-buttons-section {
+        margin-top: 20px;
+        padding: 15px 0;
     }
 }
