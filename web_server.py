@@ -13279,6 +13279,67 @@ def get_beatport_genre_top10_lists(genre_slug, genre_id):
             "cached": False
         }), 500
 
+@app.route('/api/beatport/genre/<genre_slug>/<genre_id>/top-10-releases', methods=['GET'])
+def get_beatport_genre_top10_releases(genre_slug, genre_id):
+    """Get Top 10 releases for a specific genre using .partial-artwork elements with 1-hour caching"""
+    try:
+        logger.info(f"💿 API request for {genre_slug} Top 10 releases (ID: {genre_id})")
+
+        # Check cache first (1-hour TTL)
+        cached_data = get_cached_beatport_data('genre', 'top_10_releases', genre_slug)
+        if cached_data:
+            logger.info(f"✅ Returning cached Top 10 releases for {genre_slug}")
+            cached_data['success'] = True
+            cached_data['cached'] = True
+            return jsonify(cached_data)
+
+        # Initialize the Beatport scraper
+        scraper = BeatportUnifiedScraper()
+
+        # Scrape Top 10 releases from genre page
+        releases = scraper.scrape_genre_top10_releases(genre_slug, genre_id)
+
+        if not releases:
+            return jsonify({
+                "success": False,
+                "error": "No Top 10 releases found for this genre",
+                "releases": [],
+                "releases_count": 0,
+                "genre_slug": genre_slug,
+                "genre_id": genre_id,
+                "cached": False
+            })
+
+        # Prepare response data
+        response_data = {
+            "releases": releases,
+            "releases_count": len(releases),
+            "genre_slug": genre_slug,
+            "genre_id": genre_id,
+            "cached": False,
+            "cache_ttl": 3600  # 1 hour
+        }
+
+        # Cache the data (1-hour TTL)
+        set_cached_beatport_data('genre', 'top_10_releases', response_data, genre_slug)
+
+        logger.info(f"✅ Successfully fetched {response_data['releases_count']} Top 10 releases for {genre_slug}")
+
+        response_data['success'] = True
+        return jsonify(response_data)
+
+    except Exception as e:
+        logger.error(f"❌ Error fetching Top 10 releases for {genre_slug}: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "releases": [],
+            "releases_count": 0,
+            "genre_slug": genre_slug,
+            "genre_id": genre_id,
+            "cached": False
+        }), 500
+
 @app.route('/api/beatport/genre/<genre_slug>/<genre_id>/sections', methods=['GET'])
 def get_beatport_genre_sections(genre_slug, genre_id):
     """Discover all available sections for a specific Beatport genre"""

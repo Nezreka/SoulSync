@@ -3667,6 +3667,105 @@ class BeatportUnifiedScraper:
             print(f"❌ Error extracting track data: {e}")
             return None
 
+    def scrape_genre_top10_releases(self, genre_slug, genre_id):
+        """Scrape Top 10 releases from genre page using .partial-artwork elements"""
+        print(f"💿 Scraping Top 10 releases for {genre_slug} (ID: {genre_id})")
+
+        genre_url = f"https://www.beatport.com/genre/{genre_slug}/{genre_id}"
+
+        response = self.session.get(genre_url)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+
+        # Find all .partial-artwork elements (should return exactly 10)
+        partial_artwork_elements = soup.find_all(class_='partial-artwork')
+
+        if not partial_artwork_elements:
+            print(f"❌ No .partial-artwork elements found on {genre_url}")
+            return []
+
+        print(f"📊 Found {len(partial_artwork_elements)} .partial-artwork elements")
+
+        # Extract release data from each element
+        releases = []
+        for index, element in enumerate(partial_artwork_elements):
+            release_data = self.extract_release_data_from_partial_artwork(element, index + 1)
+            if release_data:
+                releases.append(release_data)
+
+        print(f"✅ Extracted {len(releases)} Top 10 releases")
+        return releases
+
+    def extract_release_data_from_partial_artwork(self, artwork_element, rank):
+        """Extract structured data from a .partial-artwork element using proven selectors"""
+        try:
+            # Extract image
+            img_elem = artwork_element.find('img')
+            image_url = None
+            title = "Unknown Release"
+            if img_elem:
+                image_url = img_elem.get('src') or img_elem.get('data-src', '')
+                if image_url and not image_url.startswith('http'):
+                    image_url = urljoin("https://www.beatport.com", image_url)
+
+                # Extract title from img alt attribute (proven method)
+                alt_text = img_elem.get('alt', '').strip()
+                if alt_text:
+                    title = alt_text
+
+            # Extract URL from main link
+            url = None
+            link_elem = artwork_element.find('a')
+            if link_elem:
+                href = link_elem.get('href', '')
+                if href:
+                    url = urljoin("https://www.beatport.com", href)
+
+                # If no title from img alt, try title attribute from link
+                if title == "Unknown Release":
+                    link_title = link_elem.get('title', '').strip()
+                    if link_title:
+                        title = link_title
+
+            # Extract artist from artist links (proven method)
+            artist = "Unknown Artist"
+            artist_links = artwork_element.find_all('a', href=re.compile(r'/artist/'))
+            if artist_links:
+                # Get first artist (main artist)
+                first_artist = artist_links[0].get_text(strip=True)
+                if first_artist:
+                    artist = first_artist
+
+            # Extract label from label links
+            label = "Unknown Label"
+            label_link = artwork_element.find('a', href=re.compile(r'/label/'))
+            if label_link:
+                label_text = label_link.get_text(strip=True)
+                if label_text:
+                    label = label_text
+
+            # Clean the extracted data
+            title = self.clean_beatport_text(title) if title != "Unknown Release" else title
+            artist = self.clean_beatport_text(artist) if artist != "Unknown Artist" else artist
+            label = self.clean_beatport_text(label) if label != "Unknown Label" else label
+
+            print(f"   📦 Release #{rank}: '{title}' by '{artist}' [{label}]")
+
+            return {
+                'title': title,
+                'artist': artist,
+                'label': label,
+                'url': url,
+                'image_url': image_url,
+                'rank': rank,
+                'type': 'release',
+                'source': 'genre_partial_artwork'
+            }
+
+        except Exception as e:
+            print(f"❌ Error extracting release data from .partial-artwork: {e}")
+            return None
+
     def extract_hero_release_data(self, release_element) -> Dict:
         """Extract structured data from a hero release element"""
         data = {
