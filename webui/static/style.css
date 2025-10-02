@@ -14632,7 +14632,7 @@ body {
     display: none;
     justify-content: center;
     align-items: center;
-    z-index: 9999;
+    z-index: 8888;
     animation: genreBrowserFadeIn 0.3s ease-out;
 }
 
@@ -14925,5 +14925,148 @@ body {
     }
     100% {
         transform: rotate(360deg);
+    }
+}
+
+/* === GENRE PAGE VIEW STYLES === */
+
+.genre-page-content {
+    display: none;
+    width: 100%;
+    height: 100%;
+    animation: genreBrowserSlideIn 0.3s ease;
+}
+
+.genre-page-header {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    margin-bottom: 25px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.genre-back-button {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    background: linear-gradient(135deg,
+        rgba(30, 30, 30, 0.8) 0%,
+        rgba(20, 20, 20, 0.9) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 10px;
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.genre-back-button:hover {
+    background: linear-gradient(135deg,
+        rgba(40, 40, 40, 0.9) 0%,
+        rgba(30, 30, 30, 0.95) 100%);
+    border-color: rgba(255, 255, 255, 0.25);
+    transform: translateX(-2px);
+}
+
+.back-icon {
+    font-size: 16px;
+    transition: transform 0.2s ease;
+}
+
+.genre-back-button:hover .back-icon {
+    transform: translateX(-2px);
+}
+
+.genre-page-title {
+    font-size: 24px;
+    font-weight: 600;
+    color: #ffffff;
+    margin: 0;
+}
+
+.genre-hero-slider-container {
+    width: 100%;
+    height: calc(100% - 80px);
+    overflow-y: auto;
+}
+
+.genre-loading-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 20px;
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.genre-loading-spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid rgba(255, 255, 255, 0.1);
+    border-top: 3px solid #1db954;
+    border-radius: 50%;
+    animation: genreBrowserSpin 1s linear infinite;
+    margin-bottom: 15px;
+}
+
+.genre-loading-text {
+    font-size: 16px;
+    margin: 0;
+    text-align: center;
+}
+
+.genre-error-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 20px;
+    text-align: center;
+}
+
+.genre-error-text {
+    font-size: 18px;
+    color: #ff6b6b;
+    margin: 0 0 10px 0;
+}
+
+.genre-error-details {
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.6);
+    margin: 0 0 20px 0;
+}
+
+.genre-retry-button {
+    padding: 10px 20px;
+    background: linear-gradient(135deg,
+        rgba(30, 30, 30, 0.8) 0%,
+        rgba(20, 20, 20, 0.9) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 10px;
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.genre-retry-button:hover {
+    background: linear-gradient(135deg,
+        rgba(40, 40, 40, 0.9) 0%,
+        rgba(30, 30, 30, 0.95) 100%);
+    border-color: rgba(255, 255, 255, 0.25);
+}
+
+/* Responsive adjustments for genre page */
+@media (max-width: 768px) {
+    .genre-page-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+
+    .genre-page-title {
+        font-size: 20px;
     }
 }
