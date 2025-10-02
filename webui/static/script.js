@@ -21748,7 +21748,7 @@ function createGenreTop10ListsHTML(data, genreName) {
                 <p class="beatport-top10-subtitle">Current trending ${genreName.toLowerCase()} tracks</p>
             </div>
 
-            <div class="beatport-top10-container">
+            <div class="beatport-top10-container"${!has_hype_section ? ' style="grid-template-columns: 1fr; justify-items: center; max-width: 700px;"' : ''}>
                 <!-- Beatport Top 10 List (same classes, unique ID) -->
                 <div class="beatport-top10-list" id="genre-beatport-top10-list">
                     <div class="beatport-top10-list-header">
@@ -21827,23 +21827,8 @@ function createGenreTop10ListsHTML(data, genreName) {
                     </div>
                 </div>
         `;
-    } else {
-        // Add empty hype placeholder to maintain side-by-side layout
-        html += `
-                <!-- Empty Hype Placeholder -->
-                <div class="beatport-hype10-list" id="genre-beatport-hype10-list">
-                    <div class="beatport-hype10-list-header">
-                        <h3 class="beatport-hype10-list-title">🔥 Hype Top 10</h3>
-                        <p class="beatport-hype10-list-subtitle">No trending picks available</p>
-                    </div>
-                    <div class="beatport-hype10-tracks">
-                        <div class="beatport-hype10-empty">
-                            <p>No Hype Top 10 tracks for this genre</p>
-                        </div>
-                    </div>
-                </div>
-        `;
     }
+    // No else block - completely hide hype section when no hype tracks available
 
     html += `
             </div>
