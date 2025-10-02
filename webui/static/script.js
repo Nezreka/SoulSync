@@ -21006,6 +21006,9 @@ async function loadGenreBrowserGenres() {
 
         genresGrid.innerHTML = genreCardsHTML;
 
+        // Add click event listeners to genre cards
+        addGenreBrowserCardClickListeners();
+
         // Cache the filtered genres data
         genreBrowserCache.genres = filteredGenres;
         genreBrowserCache.lastLoaded = new Date();
@@ -21064,6 +21067,9 @@ function displayCachedGenres() {
     `).join('');
 
     genresGrid.innerHTML = genreCardsHTML;
+
+    // Add click event listeners to genre cards
+    addGenreBrowserCardClickListeners();
 
     console.log(`✅ Displayed ${genres.length} cached genres instantly`);
 
@@ -21219,6 +21225,442 @@ function filterGenreBrowserCards(searchTerm) {
     });
 
     console.log(`🔍 Filtered genre cards with search term: "${searchTerm}"`);
+}
+
+// === GENRE BROWSER CARD CLICK HANDLERS ===
+
+function addGenreBrowserCardClickListeners() {
+    const genreCards = document.querySelectorAll('.genre-browser-card');
+    genreCards.forEach(card => {
+        card.addEventListener('click', () => {
+            const genreSlug = card.dataset.genreSlug;
+            const genreId = card.dataset.genreId;
+            const genreName = card.dataset.genreName;
+
+            console.log(`🎵 Genre card clicked: ${genreName} (${genreSlug})`);
+            handleGenreBrowserCardClick(genreSlug, genreId, genreName);
+        });
+    });
+
+    console.log(`🔗 Added click listeners to ${genreCards.length} genre browser cards`);
+}
+
+async function handleGenreBrowserCardClick(genreSlug, genreId, genreName) {
+    console.log(`🎠 Loading hero slider for ${genreName}...`);
+
+    try {
+        // Show the genre page view
+        showGenrePageView(genreSlug, genreId, genreName);
+
+        // Load the hero slider data
+        await loadGenreHeroSlider(genreSlug, genreId, genreName);
+
+    } catch (error) {
+        console.error(`❌ Error loading genre page for ${genreName}:`, error);
+        showToast(`Error loading ${genreName}: ${error.message}`, 'error');
+
+        // Return to genre list on error
+        showGenreListView();
+    }
+}
+
+function showGenrePageView(genreSlug, genreId, genreName) {
+    console.log(`🎯 Showing genre page view for ${genreName}`);
+
+    // CRITICAL: Stop all other slider auto-play to prevent conflicts
+    if (typeof beatportRebuildSliderState !== 'undefined' && beatportRebuildSliderState.autoPlayInterval) {
+        clearInterval(beatportRebuildSliderState.autoPlayInterval);
+        console.log('🛑 Stopped main slider auto-play to prevent conflicts');
+    }
+
+    const modal = document.getElementById('genre-browser-modal');
+    if (!modal) return;
+
+    // Hide genre list elements
+    const searchSection = modal.querySelector('.genre-browser-search-section');
+    const genresSection = modal.querySelector('.genre-browser-genres-section');
+
+    if (searchSection) searchSection.style.display = 'none';
+    if (genresSection) genresSection.style.display = 'none';
+
+    // Create or show genre page content
+    let genrePageContent = modal.querySelector('.genre-page-content');
+    if (!genrePageContent) {
+        genrePageContent = document.createElement('div');
+        genrePageContent.className = 'genre-page-content';
+        genrePageContent.innerHTML = `
+            <div class="genre-page-header">
+                <button class="genre-back-button" id="genre-back-button">
+                    <span class="back-icon">←</span> Back to Genres
+                </button>
+                <h2 class="genre-page-title"></h2>
+            </div>
+            <div class="genre-hero-slider-container" id="genre-hero-slider-container">
+                <div class="genre-loading-container">
+                    <div class="genre-loading-spinner"></div>
+                    <p class="genre-loading-text">🎠 Loading hero releases...</p>
+                </div>
+            </div>
+        `;
+
+        modal.querySelector('.genre-browser-modal-content').appendChild(genrePageContent);
+
+        // Add back button listener
+        const backButton = genrePageContent.querySelector('#genre-back-button');
+        if (backButton) {
+            backButton.addEventListener('click', showGenreListView);
+        }
+    }
+
+    // Update title and show genre page
+    const titleElement = genrePageContent.querySelector('.genre-page-title');
+    if (titleElement) titleElement.textContent = genreName;
+
+    genrePageContent.style.display = 'block';
+
+    // Store current genre info for potential back navigation
+    genrePageContent.dataset.genreSlug = genreSlug;
+    genrePageContent.dataset.genreId = genreId;
+    genrePageContent.dataset.genreName = genreName;
+}
+
+function showGenreListView() {
+    console.log(`🔙 Returning to genre list view`);
+
+    // Clean up genre hero slider
+    if (window.genreHeroSliderState && window.genreHeroSliderState.autoPlayInterval) {
+        clearInterval(window.genreHeroSliderState.autoPlayInterval);
+        console.log('🧹 Cleaned up genre hero slider auto-play');
+    }
+
+    // CRITICAL: Restart main slider auto-play
+    if (typeof beatportRebuildSliderState !== 'undefined' && !beatportRebuildSliderState.autoPlayInterval) {
+        if (typeof startBeatportRebuildSliderAutoPlay === 'function') {
+            startBeatportRebuildSliderAutoPlay();
+            console.log('🔄 Restarted main slider auto-play');
+        }
+    }
+
+    const modal = document.getElementById('genre-browser-modal');
+    if (!modal) return;
+
+    // Show genre list elements
+    const searchSection = modal.querySelector('.genre-browser-search-section');
+    const genresSection = modal.querySelector('.genre-browser-genres-section');
+    const genrePageContent = modal.querySelector('.genre-page-content');
+
+    if (searchSection) searchSection.style.display = 'block';
+    if (genresSection) genresSection.style.display = 'block';
+    if (genrePageContent) genrePageContent.style.display = 'none';
+}
+
+async function loadGenreHeroSlider(genreSlug, genreId, genreName) {
+    console.log(`🎠 Loading hero slider data for ${genreName}...`);
+
+    const container = document.getElementById('genre-hero-slider-container');
+    if (!container) return;
+
+    try {
+        // Show loading state
+        container.innerHTML = `
+            <div class="genre-loading-container">
+                <div class="genre-loading-spinner"></div>
+                <p class="genre-loading-text">🎠 Loading ${genreName} hero releases...</p>
+            </div>
+        `;
+
+        // Fetch hero slider data from API
+        const response = await fetch(`/api/beatport/genre/${genreSlug}/${genreId}/hero`);
+        if (!response.ok) {
+            throw new Error(`API returned ${response.status}: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+
+        if (!data.success || !data.releases || data.releases.length === 0) {
+            throw new Error(data.message || 'No hero releases found');
+        }
+
+        console.log(`✅ Loaded ${data.count} hero releases for ${genreName} (cached: ${data.cached})`);
+
+        // Create hero slider HTML
+        const heroSliderHTML = createGenreHeroSliderHTML(data.releases, genreName);
+        container.innerHTML = heroSliderHTML;
+
+        // Add click handlers to individual releases (for future download functionality)
+        addGenreHeroReleaseClickHandlers(data.releases);
+
+        showToast(`Loaded ${data.count} ${genreName} releases`, 'success');
+
+    } catch (error) {
+        console.error(`❌ Error loading hero slider for ${genreName}:`, error);
+
+        container.innerHTML = `
+            <div class="genre-error-container">
+                <p class="genre-error-text">❌ Failed to load ${genreName} releases</p>
+                <p class="genre-error-details">${error.message}</p>
+                <button class="genre-retry-button" onclick="loadGenreHeroSlider('${genreSlug}', '${genreId}', '${genreName}')">
+                    🔄 Retry
+                </button>
+            </div>
+        `;
+
+        throw error;
+    }
+}
+
+function createGenreHeroSliderHTML(releases, genreName) {
+    const slidesHTML = releases.map((release, index) => {
+        // Convert relative URL to absolute URL
+        const absoluteUrl = release.url.startsWith('http')
+            ? release.url
+            : `https://www.beatport.com${release.url}`;
+
+        return `
+        <div class="beatport-rebuild-slide ${index === 0 ? 'active' : ''}"
+             data-slide="${index}"
+             data-url="${absoluteUrl}"
+             data-image="${release.image_url}"
+             style="--slide-bg-image: url('${release.image_url}')">
+            <div class="beatport-rebuild-slide-background">
+                <div class="beatport-rebuild-slide-gradient"></div>
+            </div>
+            <div class="beatport-rebuild-slide-content">
+                <div class="beatport-rebuild-track-info">
+                    <h2 class="beatport-rebuild-track-title">${release.title}</h2>
+                    <p class="beatport-rebuild-artist-name">${release.artists_string}</p>
+                    <p class="beatport-rebuild-album-name">${release.label || genreName + ' Hero Release'}</p>
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+
+    const indicatorsHTML = releases.map((_, index) => `
+        <button class="beatport-rebuild-indicator ${index === 0 ? 'active' : ''}" data-slide="${index}"></button>
+    `).join('');
+
+    return `
+        <div class="beatport-rebuild-slider-container">
+            <div class="beatport-rebuild-slider" id="genre-hero-slider">
+                <div class="beatport-rebuild-slider-track" id="genre-hero-slider-track">
+                    ${slidesHTML}
+                </div>
+
+                <!-- Slider Navigation -->
+                <div class="beatport-rebuild-slider-nav">
+                    <button class="beatport-rebuild-nav-btn beatport-rebuild-prev-btn" id="genre-hero-prev-btn">‹</button>
+                    <button class="beatport-rebuild-nav-btn beatport-rebuild-next-btn" id="genre-hero-next-btn">›</button>
+                </div>
+
+                <!-- Slider Indicators -->
+                <div class="beatport-rebuild-slider-indicators">
+                    ${indicatorsHTML}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function addGenreHeroReleaseClickHandlers(releases) {
+    // Clear any existing intervals first
+    if (window.genreHeroSliderState && window.genreHeroSliderState.autoPlayInterval) {
+        clearInterval(window.genreHeroSliderState.autoPlayInterval);
+        console.log('🧹 Cleared previous genre hero auto-play interval');
+    }
+
+    // CRITICAL: Clear ALL possible conflicting intervals
+    if (typeof beatportRebuildSliderState !== 'undefined' && beatportRebuildSliderState.autoPlayInterval) {
+        clearInterval(beatportRebuildSliderState.autoPlayInterval);
+        console.log('🛑 Cleared main rebuild slider auto-play interval');
+    }
+
+    // Initialize global slider state for genre hero slider
+    window.genreHeroSliderState = {
+        currentSlide: 0,
+        totalSlides: releases.length,
+        autoPlayInterval: null
+    };
+
+    console.log(`🎠 Initializing genre hero slider with ${releases.length} slides`);
+
+    // Set up navigation button handlers
+    const prevBtn = document.getElementById('genre-hero-prev-btn');
+    const nextBtn = document.getElementById('genre-hero-next-btn');
+
+    if (prevBtn) {
+        prevBtn.addEventListener('click', () => {
+            window.genreHeroSliderState.currentSlide = window.genreHeroSliderState.currentSlide > 0
+                ? window.genreHeroSliderState.currentSlide - 1
+                : window.genreHeroSliderState.totalSlides - 1;
+            updateGenreHeroSlide(window.genreHeroSliderState.currentSlide);
+            console.log(`⬅️ Previous: Moving to slide ${window.genreHeroSliderState.currentSlide}`);
+        });
+    }
+
+    if (nextBtn) {
+        nextBtn.addEventListener('click', () => {
+            window.genreHeroSliderState.currentSlide = (window.genreHeroSliderState.currentSlide + 1) % window.genreHeroSliderState.totalSlides;
+            updateGenreHeroSlide(window.genreHeroSliderState.currentSlide);
+            console.log(`➡️ Next: Moving to slide ${window.genreHeroSliderState.currentSlide}`);
+        });
+    }
+
+    // Set up indicator handlers
+    const indicators = document.querySelectorAll('#genre-hero-slider .beatport-rebuild-indicator');
+    indicators.forEach((indicator, index) => {
+        indicator.addEventListener('click', () => {
+            window.genreHeroSliderState.currentSlide = index;
+            updateGenreHeroSlide(index);
+            console.log(`🎯 Indicator: Jumping to slide ${index}`);
+        });
+    });
+
+    // Set up individual slide click handlers (like the main hero slider)
+    const slides = document.querySelectorAll('#genre-hero-slider .beatport-rebuild-slide[data-url]');
+    console.log(`🔗 Found ${slides.length} slides to set up click handlers for`);
+
+    slides.forEach((slide, index) => {
+        const releaseUrl = slide.getAttribute('data-url');
+        if (releaseUrl && releaseUrl !== '#' && releaseUrl !== '') {
+            const release = releases[index];
+            if (release) {
+                // Ensure we use the absolute URL and match the expected data structure
+                const releaseData = {
+                    url: releaseUrl, // This is already the absolute URL from data-url
+                    title: release.title || 'Unknown Title',
+                    artist: release.artists_string || 'Unknown Artist', // handleBeatportReleaseCardClick expects 'artist'
+                    label: release.label || 'Unknown Label',
+                    image_url: release.image_url || '',
+                    // Include all original data for completeness
+                    artists_string: release.artists_string,
+                    type: release.type,
+                    source: release.source,
+                    badges: release.badges || []
+                };
+
+                slide.addEventListener('click', async (event) => {
+                    // Prevent navigation button clicks from triggering this
+                    if (event.target.closest('.beatport-rebuild-nav-btn') ||
+                        event.target.closest('.beatport-rebuild-indicator')) {
+                        return;
+                    }
+
+                    console.log(`🎵 Genre hero slide clicked: ${releaseData.title} by ${releaseData.artist}`);
+
+                    // Use the exact same functionality as the main hero slider
+                    await handleBeatportReleaseCardClick(slide, releaseData);
+                });
+
+                slide.style.cursor = 'pointer';
+            }
+        }
+    });
+
+    // Ensure first slide is active BEFORE starting auto-play
+    updateGenreHeroSlide(0);
+
+    // Delay auto-play start to let DOM settle
+    setTimeout(() => {
+        startGenreHeroSliderAutoPlay();
+    }, 100);
+
+    // Pause on hover
+    const sliderContainer = document.querySelector('#genre-hero-slider');
+    if (sliderContainer) {
+        sliderContainer.addEventListener('mouseenter', () => {
+            if (window.genreHeroSliderState.autoPlayInterval) {
+                clearInterval(window.genreHeroSliderState.autoPlayInterval);
+                console.log('⏸️ Paused auto-play on hover');
+            }
+        });
+
+        sliderContainer.addEventListener('mouseleave', () => {
+            // Delay restart to avoid rapid state changes
+            setTimeout(() => {
+                startGenreHeroSliderAutoPlay();
+            }, 100);
+            console.log('▶️ Resumed auto-play after hover');
+        });
+    }
+
+    console.log(`✅ Set up slider functionality for ${releases.length} genre hero releases`);
+}
+
+function updateGenreHeroSlide(slideIndex) {
+    if (!window.genreHeroSliderState) {
+        console.error('❌ Genre hero slider state not initialized');
+        return;
+    }
+
+    // First update the state
+    window.genreHeroSliderState.currentSlide = slideIndex;
+
+    // Update slide visibility - use the exact same logic as main slider
+    const slides = document.querySelectorAll('#genre-hero-slider .beatport-rebuild-slide');
+    console.log(`🔄 Updating slide to index ${slideIndex}, found ${slides.length} slides`);
+
+    if (slideIndex >= slides.length || slideIndex < 0) {
+        console.error(`❌ Invalid slide index ${slideIndex}, max is ${slides.length - 1}`);
+        return;
+    }
+
+    slides.forEach((slide, index) => {
+        slide.classList.remove('active', 'prev', 'next');
+
+        if (index === slideIndex) {
+            slide.classList.add('active');
+            console.log(`✅ Activated slide ${index}: ${slide.getAttribute('data-slide')} - Title: ${slide.querySelector('.beatport-rebuild-track-title')?.textContent}`);
+        } else if (index < slideIndex) {
+            slide.classList.add('prev');
+        } else {
+            slide.classList.add('next');
+        }
+    });
+
+    // Update indicators
+    const indicators = document.querySelectorAll('#genre-hero-slider .beatport-rebuild-indicator');
+    indicators.forEach((indicator, index) => {
+        indicator.classList.toggle('active', index === slideIndex);
+    });
+
+    console.log(`Genre slide updated to: ${window.genreHeroSliderState.currentSlide}`);
+}
+
+function startGenreHeroSliderAutoPlay() {
+    if (!window.genreHeroSliderState) {
+        console.error('❌ Cannot start auto-play: Genre hero slider state not initialized');
+        return;
+    }
+
+    // Clear any existing intervals first
+    if (window.genreHeroSliderState.autoPlayInterval) {
+        clearInterval(window.genreHeroSliderState.autoPlayInterval);
+        console.log('🧹 Cleared existing auto-play interval');
+    }
+
+    window.genreHeroSliderState.autoPlayInterval = setInterval(() => {
+        if (!window.genreHeroSliderState) {
+            console.error('❌ Auto-play fired but state is gone, clearing interval');
+            clearInterval(window.genreHeroSliderState.autoPlayInterval);
+            return;
+        }
+
+        const currentSlide = window.genreHeroSliderState.currentSlide;
+        const totalSlides = window.genreHeroSliderState.totalSlides;
+        const nextSlide = (currentSlide + 1) % totalSlides;
+
+        console.log(`⏰ Auto-play: Current=${currentSlide}, Total=${totalSlides}, Next=${nextSlide}`);
+
+        // Validate the next slide index
+        if (nextSlide >= 0 && nextSlide < totalSlides) {
+            updateGenreHeroSlide(nextSlide);
+        } else {
+            console.error(`❌ Invalid nextSlide calculated: ${nextSlide}, resetting to 0`);
+            updateGenreHeroSlide(0);
+        }
+    }, 5000); // 5 second intervals like the main slider
+
+    console.log(`▶️ Started auto-play for genre hero slider (${window.genreHeroSliderState.totalSlides} slides)`);
 }
 
 // Initialize the Genre Browser Modal when the page loads
