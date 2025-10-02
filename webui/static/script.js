@@ -21888,8 +21888,11 @@ function addGenreTop10ClickHandlers() {
 async function handleGenreBeatportTop10Click() {
     console.log('🎵 Handling Genre Beatport Top 10 click');
 
-    // Use exact same pattern as main page
-    await handleGenreChartClick('genre_beatport_top10', 'Genre Beatport Top 10', 'genre_beatport_top10');
+    // Get the actual genre name from the page title
+    const genreName = document.querySelector('.genre-page-title')?.textContent?.trim() || 'Genre';
+
+    // Use actual genre name in chart title
+    await handleGenreChartClick('genre_beatport_top10', `${genreName} Beatport Top 10`, 'genre_beatport_top10');
 }
 
 /**
@@ -21898,8 +21901,11 @@ async function handleGenreBeatportTop10Click() {
 async function handleGenreHypeTop10Click() {
     console.log('🔥 Handling Genre Hype Top 10 click');
 
-    // Use exact same pattern as main page
-    await handleGenreChartClick('genre_hype_top10', 'Genre Hype Top 10', 'genre_hype_top10');
+    // Get the actual genre name from the page title
+    const genreName = document.querySelector('.genre-page-title')?.textContent?.trim() || 'Genre';
+
+    // Use actual genre name in chart title
+    await handleGenreChartClick('genre_hype_top10', `${genreName} Hype Top 10`, 'genre_hype_top10');
 }
 
 /**
