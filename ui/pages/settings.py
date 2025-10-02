@@ -1,10 +1,11 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                            QFrame, QPushButton, QLineEdit, QComboBox,
-                           QCheckBox, QSpinBox, QTextEdit, QGroupBox, QFormLayout, QMessageBox, QSizePolicy, QScrollArea)
+                           QCheckBox, QSpinBox, QTextEdit, QGroupBox, QFormLayout, QIcon, QMessageBox, QSizePolicy, QScrollArea)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QFont
 from config.settings import config_manager
 from utils.logging_config import get_logger
+import requests
 
 logger = get_logger("settings")
 
