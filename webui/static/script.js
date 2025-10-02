@@ -21253,10 +21253,11 @@ async function handleGenreBrowserCardClick(genreSlug, genreId, genreName) {
         showGenrePageView(genreSlug, genreId, genreName);
 
         // Load the hero slider data
-        // Load hero slider and Top 10 lists in parallel
+        // Load hero slider, Top 10 lists, and Top 10 releases in parallel
         await Promise.all([
             loadGenreHeroSlider(genreSlug, genreId, genreName),
-            loadGenreTop10Lists(genreSlug, genreId, genreName)
+            loadGenreTop10Lists(genreSlug, genreId, genreName),
+            loadGenreTop10Releases(genreSlug, genreId, genreName)
         ]);
 
     } catch (error) {
@@ -21317,6 +21318,12 @@ function showGenrePageView(genreSlug, genreId, genreName) {
                 <div class="genre-top10-loading-container">
                     <div class="genre-loading-spinner"></div>
                     <p class="genre-loading-text">🎵 Loading Top 10 lists...</p>
+                </div>
+            </div>
+            <div class="genre-top10-releases-container" id="genre-top10-releases-container">
+                <div class="genre-top10-releases-loading-container">
+                    <div class="genre-loading-spinner"></div>
+                    <p class="genre-loading-text">💿 Loading Top 10 releases...</p>
                 </div>
             </div>
         `;
@@ -22086,6 +22093,235 @@ async function handleGenreTop100Click(genreSlug, genreId, genreName) {
         hideLoadingOverlay();
         showToast(`Error loading ${genreName} Top 100: ${error.message}`, 'error');
     }
+}
+
+/**
+ * Load Top 10 releases for a specific genre
+ */
+async function loadGenreTop10Releases(genreSlug, genreId, genreName) {
+    console.log(`💿 Loading Top 10 releases for ${genreName}...`);
+
+    const container = document.getElementById('genre-top10-releases-container');
+    if (!container) {
+        console.error('❌ Genre Top 10 releases container not found');
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/beatport/genre/${genreSlug}/${genreId}/top-10-releases`);
+        const data = await response.json();
+
+        if (!data.success) {
+            throw new Error(data.error || 'Failed to load Top 10 releases');
+        }
+
+        console.log(`💿 Loaded ${data.releases.length} Top 10 releases for ${genreName}`);
+        createGenreTop10ReleasesHTML(data.releases, genreName);
+
+    } catch (error) {
+        console.error(`❌ Error loading Top 10 releases for ${genreName}:`, error);
+        showGenreTop10ReleasesError(error.message || 'Failed to load Top 10 releases');
+    }
+}
+
+/**
+ * Create HTML for genre Top 10 releases section (exact parity with main page)
+ */
+function createGenreTop10ReleasesHTML(releases, genreName) {
+    const container = document.getElementById('genre-top10-releases-container');
+    if (!container || !releases || releases.length === 0) return;
+
+    // Create section with unique ID but exact same structure as main page
+    const sectionHtml = `
+        <div class="beatport-releases-top10-section">
+            <div class="beatport-releases-top10-header">
+                <h2 class="beatport-releases-top10-title">💿 Top 10 ${genreName} Releases</h2>
+                <p class="beatport-releases-top10-subtitle">Most popular albums and EPs for ${genreName}</p>
+            </div>
+            <div class="beatport-releases-top10-container">
+                <div class="beatport-releases-top10-list" id="genre-beatport-releases-top10-list">
+                    ${createGenreTop10ReleasesCardsHTML(releases)}
+                </div>
+            </div>
+        </div>
+    `;
+
+    container.innerHTML = sectionHtml;
+
+    // Add background images and click handlers
+    addGenreTop10ReleasesInteractivity(releases);
+}
+
+/**
+ * Create release cards HTML for genre Top 10 releases
+ */
+function createGenreTop10ReleasesCardsHTML(releases) {
+    let cardsHtml = '<div class="beatport-releases-top10-tracks">';
+
+    releases.forEach((release, index) => {
+        cardsHtml += `
+            <div class="beatport-releases-top10-card" data-url="${release.url || '#'}" data-bg-image="${release.image_url || ''}">
+                <div class="beatport-releases-top10-card-rank">${release.rank || index + 1}</div>
+                <div class="beatport-releases-top10-card-artwork">
+                    ${release.image_url ?
+                        `<img src="${release.image_url}" alt="${release.title}" loading="lazy">` :
+                        '<div class="beatport-releases-top10-card-placeholder">💿</div>'
+                    }
+                </div>
+                <div class="beatport-releases-top10-card-info">
+                    <h4 class="beatport-releases-top10-card-title">${release.title || 'Unknown Title'}</h4>
+                    <p class="beatport-releases-top10-card-artist">${release.artist || 'Unknown Artist'}</p>
+                    <p class="beatport-releases-top10-card-label">${release.label || 'Unknown Label'}</p>
+                </div>
+            </div>
+        `;
+    });
+
+    cardsHtml += '</div>';
+    return cardsHtml;
+}
+
+/**
+ * Add interactivity to genre Top 10 releases cards
+ */
+function addGenreTop10ReleasesInteractivity(releases) {
+    const container = document.getElementById('genre-beatport-releases-top10-list');
+    if (!container) return;
+
+    // Set background images for cards
+    const cards = container.querySelectorAll('.beatport-releases-top10-card[data-bg-image]');
+    cards.forEach(card => {
+        const bgImage = card.getAttribute('data-bg-image');
+        if (bgImage) {
+            // Transform image URL from 95x95 to 500x500 for higher quality background
+            const highResImage = bgImage.replace('/image_size/95x95/', '/image_size/500x500/');
+            card.style.backgroundImage = `linear-gradient(rgba(0,0,0,0.7), rgba(0,0,0,0.8)), url('${highResImage}')`;
+            card.style.backgroundSize = 'cover';
+            card.style.backgroundPosition = 'center';
+        }
+    });
+
+    // Add click handlers for individual release discovery (exact same pattern as main page)
+    const releaseCards = container.querySelectorAll('.beatport-releases-top10-card[data-url]');
+    releaseCards.forEach((card, index) => {
+        card.addEventListener('click', () => handleGenreReleaseCardClick(card, releases[index]));
+        card.style.cursor = 'pointer';
+    });
+}
+
+/**
+ * Handle click on individual genre Top 10 Release card (exact parity with main page)
+ */
+async function handleGenreReleaseCardClick(cardElement, release) {
+    console.log(`💿 Individual genre release card clicked: ${release.title} by ${release.artist}`);
+
+    if (!release.url || release.url === '#') {
+        showToast('No release URL available', 'error');
+        return;
+    }
+
+    try {
+        // Create unique identifiers for this release
+        const releaseHash = `genre_release_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const chartName = `${release.title} - ${release.artist}`;
+
+        showToast(`Loading ${release.title}...`, 'info');
+        showLoadingOverlay(`Getting tracks from ${release.title}...`);
+
+        // Check if we already have a card for this release
+        const existingState = Object.values(beatportChartStates).find(state =>
+            state.chart &&
+            state.chart.name === chartName &&
+            state.chart.chart_type === 'individual_release'
+        );
+
+        if (existingState) {
+            console.log(`🔄 Found existing card for ${release.title}, opening existing modal`);
+            hideLoadingOverlay();
+            handleBeatportCardClick(existingState.chart.hash);
+            return;
+        }
+
+        // Get track data from this single release (exact same API call as main page)
+        console.log(`🎵 Fetching tracks from release: ${release.url}`);
+        const response = await fetch('/api/beatport/scrape-releases', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                release_urls: [release.url],
+                source_name: `Genre Top 10 Release: ${release.title}`
+            })
+        });
+
+        const data = await response.json();
+
+        if (!data.success || !data.tracks || data.tracks.length === 0) {
+            throw new Error('No tracks found in this release');
+        }
+
+        console.log(`✅ Successfully fetched ${data.tracks.length} tracks from ${release.title}`);
+
+        // Transform to standard chart format (exact same pattern as main page)
+        const chartData = {
+            hash: releaseHash,
+            name: chartName,
+            chart_type: 'individual_release',
+            track_count: data.tracks.length,
+            tracks: data.tracks.map(track => ({
+                name: cleanTrackText(track.title || 'Unknown Title'),
+                artists: [cleanTrackText(track.artist || 'Unknown Artist')],
+                album: chartName,
+                duration_ms: 0,
+                external_urls: { beatport: track.url || '' },
+                source: 'beatport',
+                // Include release metadata
+                release_title: release.title,
+                release_artist: release.artist,
+                release_label: release.label,
+                release_image: release.image_url
+            }))
+        };
+
+        // Create Beatport playlist card (exact same pattern as main page)
+        addBeatportCardToContainer(chartData);
+
+        // Automatically open discovery modal (exact same pattern as main page)
+        hideLoadingOverlay();
+        handleBeatportCardClick(releaseHash);
+
+        console.log(`✅ Created individual release card and opened discovery modal for ${release.title}`);
+
+    } catch (error) {
+        console.error(`❌ Error handling release click for ${release.title}:`, error);
+        hideLoadingOverlay();
+        showToast(`Error loading ${release.title}: ${error.message}`, 'error');
+    }
+}
+
+/**
+ * Show error message for genre Top 10 releases
+ */
+function showGenreTop10ReleasesError(errorMessage) {
+    const container = document.getElementById('genre-top10-releases-container');
+
+    const errorHtml = `
+        <div class="beatport-releases-top10-section">
+            <div class="beatport-releases-top10-header">
+                <h2 class="beatport-releases-top10-title">💿 Top 10 Releases</h2>
+                <p class="beatport-releases-top10-subtitle">Error loading releases</p>
+            </div>
+            <div class="beatport-releases-top10-container">
+                <div class="beatport-releases-top10-error">
+                    <h3>❌ Error Loading Releases</h3>
+                    <p>${errorMessage}</p>
+                </div>
+            </div>
+        </div>
+    `;
+
+    if (container) container.innerHTML = errorHtml;
 }
 
 // Initialize the Genre Browser Modal when the page loads
