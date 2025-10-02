@@ -8491,7 +8491,7 @@ body {
     height: 100vh;
     background: rgba(0, 0, 0, 0.8);
     backdrop-filter: blur(8px);
-    z-index: 1000;
+    z-index: 9000;
     align-items: center;
     justify-content: center;
 }
