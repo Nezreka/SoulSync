@@ -3539,6 +3539,134 @@ class BeatportUnifiedScraper:
         print(f"   📊 Successfully extracted {len(releases_data)} hero releases")
         return releases_data
 
+    def scrape_genre_top10_tracks(self, genre_slug, genre_id):
+        """Scrape Top 10 tracks lists from genre page (Beatport Top 10 + Hype Top 10 if available)"""
+        print(f"🎵 Scraping Top 10 tracks for {genre_slug} (ID: {genre_id})")
+
+        genre_url = f"https://www.beatport.com/genre/{genre_slug}/{genre_id}"
+
+        response = self.session.get(genre_url)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+
+        # Find all tracks-list-item elements
+        track_items = soup.find_all(attrs={'data-testid': 'tracks-list-item'})
+
+        if not track_items:
+            print(f"❌ No tracks-list-item elements found on {genre_url}")
+            return {
+                'beatport_top10': [],
+                'hype_top10': [],
+                'total_tracks': 0,
+                'has_hype_section': False
+            }
+
+        print(f"📊 Found {len(track_items)} total track items")
+
+        # Extract track data from all items
+        all_tracks = []
+        for index, item in enumerate(track_items):
+            track_data = self.extract_track_data_from_item(item, index + 1)
+            if track_data:
+                all_tracks.append(track_data)
+
+        # Separate into Beatport Top 10 and Hype Top 10 with proper ranking
+        beatport_top10 = []
+        hype_top10 = []
+
+        for i, track in enumerate(all_tracks):
+            if i < 10:
+                # First 10 tracks = Beatport Top 10 (ranks 1-10)
+                track_copy = track.copy()
+                track_copy['rank'] = i + 1
+                beatport_top10.append(track_copy)
+            else:
+                # Remaining tracks = Hype Top 10 (ranks 1-10, not continuing from 11)
+                track_copy = track.copy()
+                track_copy['rank'] = (i - 10) + 1  # Reset ranking for Hype (1, 2, 3...)
+                hype_top10.append(track_copy)
+
+        has_hype_section = len(all_tracks) > 10
+
+        print(f"✅ Extracted {len(beatport_top10)} Beatport Top 10 + {len(hype_top10)} Hype Top 10 tracks")
+
+        return {
+            'beatport_top10': beatport_top10,
+            'hype_top10': hype_top10,
+            'total_tracks': len(all_tracks),
+            'has_hype_section': has_hype_section
+        }
+
+    def extract_track_data_from_item(self, track_item, rank):
+        """Extract structured data from a tracks-list-item element"""
+        try:
+            # Extract title
+            title_elem = track_item.find('a') or track_item.find(class_=re.compile(r'title', re.I))
+            title = title_elem.get_text(strip=True) if title_elem else "Unknown Title"
+
+            # Extract URL
+            url = None
+            if title_elem and title_elem.name == 'a':
+                url = title_elem.get('href', '')
+                if url and not url.startswith('http'):
+                    url = urljoin("https://www.beatport.com", url)
+
+            # Extract artists
+            artist_links = track_item.find_all('a', href=re.compile(r'/artist/'))
+            artists = []
+            artists_string = ""
+
+            if artist_links:
+                for artist_link in artist_links:
+                    artist_name = artist_link.get_text(strip=True)
+                    artist_url = artist_link.get('href', '')
+                    if not artist_url.startswith('http'):
+                        artist_url = urljoin("https://www.beatport.com", artist_url)
+
+                    if artist_name:
+                        artists.append({
+                            'name': artist_name,
+                            'url': artist_url
+                        })
+
+                artists_string = ', '.join([a['name'] for a in artists])
+            else:
+                # Fallback: try to find artist text without links
+                artist_elem = track_item.find(class_=re.compile(r'artist', re.I))
+                artists_string = artist_elem.get_text(strip=True) if artist_elem else "Unknown Artist"
+
+            # Extract label
+            label_elem = track_item.find('a', href=re.compile(r'/label/'))
+            label = label_elem.get_text(strip=True) if label_elem else "Unknown Label"
+
+            # Extract artwork
+            img_elem = track_item.find('img')
+            artwork_url = None
+            if img_elem:
+                artwork_url = img_elem.get('src') or img_elem.get('data-src', '')
+                if artwork_url and not artwork_url.startswith('http'):
+                    artwork_url = urljoin("https://www.beatport.com", artwork_url)
+
+            # Extract any additional metadata
+            classes = track_item.get('class', [])
+
+            return {
+                'title': title,
+                'artist': artists_string,
+                'artists': artists,
+                'label': label,
+                'url': url,
+                'artwork_url': artwork_url,
+                'rank': rank,
+                'type': 'track',
+                'source': 'genre_page',
+                'classes': classes
+            }
+
+        except Exception as e:
+            print(f"❌ Error extracting track data: {e}")
+            return None
+
     def extract_hero_release_data(self, release_element) -> Dict:
         """Extract structured data from a hero release element"""
         data = {
