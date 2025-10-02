@@ -21253,7 +21253,11 @@ async function handleGenreBrowserCardClick(genreSlug, genreId, genreName) {
         showGenrePageView(genreSlug, genreId, genreName);
 
         // Load the hero slider data
-        await loadGenreHeroSlider(genreSlug, genreId, genreName);
+        // Load hero slider and Top 10 lists in parallel
+        await Promise.all([
+            loadGenreHeroSlider(genreSlug, genreId, genreName),
+            loadGenreTop10Lists(genreSlug, genreId, genreName)
+        ]);
 
     } catch (error) {
         console.error(`❌ Error loading genre page for ${genreName}:`, error);
@@ -21307,6 +21311,12 @@ function showGenrePageView(genreSlug, genreId, genreName) {
                         <span class="beatport-nav-icon top100-icon"></span>
                         <span class="beatport-nav-text">Beatport Top 100</span>
                     </button>
+                </div>
+            </div>
+            <div class="genre-top10-lists-container" id="genre-top10-lists-container">
+                <div class="genre-top10-loading-container">
+                    <div class="genre-loading-spinner"></div>
+                    <p class="genre-loading-text">🎵 Loading Top 10 lists...</p>
                 </div>
             </div>
         `;
@@ -21677,6 +21687,325 @@ function startGenreHeroSliderAutoPlay() {
     }, 5000); // 5 second intervals like the main slider
 
     console.log(`▶️ Started auto-play for genre hero slider (${window.genreHeroSliderState.totalSlides} slides)`);
+}
+
+/**
+ * Load Top 10 lists for a specific genre (Beatport + Hype)
+ */
+async function loadGenreTop10Lists(genreSlug, genreId, genreName) {
+    console.log(`🎵 Loading Top 10 lists for ${genreName}...`);
+
+    const container = document.getElementById('genre-top10-lists-container');
+    if (!container) {
+        console.error('❌ Genre Top 10 lists container not found');
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/beatport/genre/${genreSlug}/${genreId}/top-10-lists`);
+        const data = await response.json();
+
+        if (!data.success) {
+            throw new Error(data.error || 'Failed to load Top 10 lists');
+        }
+
+        console.log(`✅ Loaded ${data.beatport_count} Beatport + ${data.hype_count} Hype Top 10 tracks for ${genreName}`);
+
+        // Generate HTML using exact same structure as main page (but unique IDs)
+        const top10ListsHTML = createGenreTop10ListsHTML(data, genreName);
+        container.innerHTML = top10ListsHTML;
+
+        // Add container-level click handlers exactly like main page
+        addGenreTop10ClickHandlers();
+
+        console.log(`✅ Successfully populated genre Top 10 lists for ${genreName}`);
+
+    } catch (error) {
+        console.error(`❌ Error loading Top 10 lists for ${genreName}:`, error);
+
+        // Show error state
+        container.innerHTML = `
+            <div class="genre-top10-error">
+                <h3>❌ Error Loading Top 10 Lists</h3>
+                <p>Could not load Top 10 tracks for ${genreName}</p>
+                <p class="error-detail">${error.message}</p>
+            </div>
+        `;
+    }
+}
+
+/**
+ * Create HTML for genre Top 10 lists (exact structure as main page, unique IDs)
+ */
+function createGenreTop10ListsHTML(data, genreName) {
+    const { beatport_top10, hype_top10, has_hype_section } = data;
+
+    // Use exact same structure as main page but with genre-specific IDs
+    let html = `
+        <div class="beatport-top10-section">
+            <div class="beatport-top10-header">
+                <h2 class="beatport-top10-title">🏆 ${genreName} Top 10 Lists</h2>
+                <p class="beatport-top10-subtitle">Current trending ${genreName.toLowerCase()} tracks</p>
+            </div>
+
+            <div class="beatport-top10-container">
+                <!-- Beatport Top 10 List (same classes, unique ID) -->
+                <div class="beatport-top10-list" id="genre-beatport-top10-list">
+                    <div class="beatport-top10-list-header">
+                        <h3 class="beatport-top10-list-title">🎵 Beatport Top 10</h3>
+                        <p class="beatport-top10-list-subtitle">Most popular ${genreName.toLowerCase()} tracks</p>
+                    </div>
+                    <div class="beatport-top10-tracks">
+    `;
+
+    // Add Beatport Top 10 tracks (same classes as main page)
+    beatport_top10.forEach((track, index) => {
+        const cleanTitle = cleanTrackText(track.title || 'Unknown Title');
+        const cleanArtist = cleanTrackText(track.artist || 'Unknown Artist');
+        const cleanLabel = cleanTrackText(track.label || 'Unknown Label');
+
+        html += `
+            <div class="beatport-top10-card" data-url="${track.url || '#'}">
+                <div class="beatport-top10-card-rank">${track.rank || index + 1}</div>
+                <div class="beatport-top10-card-artwork">
+                    ${track.artwork_url ?
+                        `<img src="${track.artwork_url}" alt="${cleanTitle}" loading="lazy">` :
+                        '<div class="beatport-top10-card-placeholder">🎵</div>'
+                    }
+                </div>
+                <div class="beatport-top10-card-info">
+                    <h4 class="beatport-top10-card-title">${cleanTitle}</h4>
+                    <p class="beatport-top10-card-artist">${cleanArtist}</p>
+                    <p class="beatport-top10-card-label">${cleanLabel}</p>
+                </div>
+            </div>
+        `;
+    });
+
+    html += `
+                    </div>
+                </div>
+    `;
+
+    // Add Hype Top 10 section (same classes, unique ID)
+    if (has_hype_section && hype_top10.length > 0) {
+        html += `
+                <!-- Hype Top 10 List (same classes, unique ID) -->
+                <div class="beatport-hype10-list" id="genre-beatport-hype10-list">
+                    <div class="beatport-hype10-list-header">
+                        <h3 class="beatport-hype10-list-title">🔥 Hype Top 10</h3>
+                        <p class="beatport-hype10-list-subtitle">Editor's trending ${genreName.toLowerCase()} picks</p>
+                    </div>
+                    <div class="beatport-hype10-tracks">
+        `;
+
+        // Add Hype Top 10 tracks (same classes as main page)
+        hype_top10.forEach((track, index) => {
+            const cleanTitle = cleanTrackText(track.title || 'Unknown Title');
+            const cleanArtist = cleanTrackText(track.artist || 'Unknown Artist');
+            const cleanLabel = cleanTrackText(track.label || 'Unknown Label');
+
+            html += `
+                <div class="beatport-hype10-card" data-url="${track.url || '#'}">
+                    <div class="beatport-hype10-card-rank">${track.rank || index + 1}</div>
+                    <div class="beatport-hype10-card-artwork">
+                        ${track.artwork_url ?
+                            `<img src="${track.artwork_url}" alt="${cleanTitle}" loading="lazy">` :
+                            '<div class="beatport-hype10-card-placeholder">🔥</div>'
+                        }
+                    </div>
+                    <div class="beatport-hype10-card-info">
+                        <h4 class="beatport-hype10-card-title">${cleanTitle}</h4>
+                        <p class="beatport-hype10-card-artist">${cleanArtist}</p>
+                        <p class="beatport-hype10-card-label">${cleanLabel}</p>
+                    </div>
+                </div>
+            `;
+        });
+
+        html += `
+                    </div>
+                </div>
+        `;
+    } else {
+        // Add empty hype placeholder to maintain side-by-side layout
+        html += `
+                <!-- Empty Hype Placeholder -->
+                <div class="beatport-hype10-list" id="genre-beatport-hype10-list">
+                    <div class="beatport-hype10-list-header">
+                        <h3 class="beatport-hype10-list-title">🔥 Hype Top 10</h3>
+                        <p class="beatport-hype10-list-subtitle">No trending picks available</p>
+                    </div>
+                    <div class="beatport-hype10-tracks">
+                        <div class="beatport-hype10-empty">
+                            <p>No Hype Top 10 tracks for this genre</p>
+                        </div>
+                    </div>
+                </div>
+        `;
+    }
+
+    html += `
+            </div>
+        </div>
+    `;
+
+    return html;
+}
+
+/**
+ * Add container-level click handlers for genre Top 10 lists (exact parity with main page)
+ */
+function addGenreTop10ClickHandlers() {
+    console.log('🔗 Adding container-level click handlers for genre Top 10 lists...');
+
+    // Add container-level click handler for Beatport Top 10 (exact match to main page)
+    const beatportContainer = document.getElementById('genre-beatport-top10-list');
+    if (beatportContainer) {
+        beatportContainer.addEventListener('click', () => {
+            console.log('🎵 Genre Beatport Top 10 container clicked');
+            handleGenreBeatportTop10Click();
+        });
+        console.log('✅ Added Beatport Top 10 container click handler');
+    }
+
+    // Add container-level click handler for Hype Top 10 (exact match to main page)
+    const hypeContainer = document.getElementById('genre-beatport-hype10-list');
+    if (hypeContainer) {
+        hypeContainer.addEventListener('click', () => {
+            console.log('🔥 Genre Hype Top 10 container clicked');
+            handleGenreHypeTop10Click();
+        });
+        console.log('✅ Added Hype Top 10 container click handler');
+    }
+
+    console.log(`✅ Set up container-level click handlers for genre Top 10 lists`);
+}
+
+/**
+ * Handle genre Beatport Top 10 container click (exact parity with main page)
+ */
+async function handleGenreBeatportTop10Click() {
+    console.log('🎵 Handling Genre Beatport Top 10 click');
+
+    // Use exact same pattern as main page
+    await handleGenreChartClick('genre_beatport_top10', 'Genre Beatport Top 10', 'genre_beatport_top10');
+}
+
+/**
+ * Handle genre Hype Top 10 container click (exact parity with main page)
+ */
+async function handleGenreHypeTop10Click() {
+    console.log('🔥 Handling Genre Hype Top 10 click');
+
+    // Use exact same pattern as main page
+    await handleGenreChartClick('genre_hype_top10', 'Genre Hype Top 10', 'genre_hype_top10');
+}
+
+/**
+ * Handle genre chart click (based on main page handleRebuildChartClick)
+ */
+async function handleGenreChartClick(trackDataKey, chartName, chartType) {
+    try {
+        // Create chart hash (following main page pattern)
+        const chartHash = `${chartType}_${Date.now()}`;
+
+        // Check if we already have an existing state (following main page pattern)
+        const existingState = Object.values(beatportChartStates).find(state =>
+            state.chart && state.chart.name === chartName && state.chart.chart_type === chartType
+        );
+
+        if (existingState) {
+            console.log(`🔄 Found existing ${chartName} card, opening existing modal`);
+            // Use existing card click handler (following main page pattern)
+            handleBeatportCardClick(existingState.chart.hash);
+            return;
+        }
+
+        // Extract track data from DOM cards (exact same pattern as main page)
+        const trackData = await getGenrePageTrackData(trackDataKey);
+        if (!trackData || trackData.length === 0) {
+            throw new Error(`No track data found for ${chartName}`);
+        }
+
+        // Transform DOM data to Browse Charts format EXACTLY like main page
+        const chartData = {
+            hash: chartHash,
+            name: chartName,
+            chart_type: chartType,
+            track_count: trackData.length,
+            tracks: trackData.map(track => ({
+                name: cleanTrackText(track.title || 'Unknown Title'),
+                artists: [cleanTrackText(track.artist || 'Unknown Artist')],
+                album: chartName,
+                duration_ms: 0,
+                external_urls: { beatport: track.url || '' },
+                source: 'beatport'
+            }))
+        };
+
+        // Follow main page pattern EXACTLY:
+        // 1. Add card to container (creates playlist card)
+        console.log(`🃏 Creating Beatport playlist card for: ${chartData.name}`);
+        addBeatportCardToContainer(chartData);
+
+        // 2. Automatically open discovery modal (like when you click a card in fresh state)
+        handleBeatportCardClick(chartHash);
+
+        console.log(`✅ Created ${chartName} card and opened discovery modal`);
+
+    } catch (error) {
+        console.error(`❌ Error handling ${chartName} click:`, error);
+        showToast(`Error loading ${chartName}: ${error.message}`, 'error');
+    }
+}
+
+/**
+ * Extract track data from genre page DOM (based on main page getRebuildPageTrackData)
+ */
+async function getGenrePageTrackData(trackDataKey) {
+    console.log(`🔍 Extracting ${trackDataKey} data from genre page DOM`);
+
+    let containerSelector, cardSelector;
+    if (trackDataKey === 'genre_beatport_top10') {
+        containerSelector = '#genre-beatport-top10-list';
+        cardSelector = '.beatport-top10-card[data-url]';
+    } else if (trackDataKey === 'genre_hype_top10') {
+        containerSelector = '#genre-beatport-hype10-list';
+        cardSelector = '.beatport-hype10-card[data-url]';
+    } else {
+        throw new Error(`Unknown track data key: ${trackDataKey}`);
+    }
+
+    const container = document.querySelector(containerSelector);
+    if (!container) {
+        throw new Error(`Container ${containerSelector} not found`);
+    }
+
+    const trackCards = container.querySelectorAll(cardSelector);
+    if (trackCards.length === 0) {
+        throw new Error(`No track cards found in ${containerSelector}`);
+    }
+
+    // Extract track data from DOM cards (exact same pattern as main page)
+    const tracks = Array.from(trackCards).map(card => {
+        const title = card.querySelector('.beatport-top10-card-title, .beatport-hype10-card-title')?.textContent?.trim() || 'Unknown Title';
+        const artist = card.querySelector('.beatport-top10-card-artist, .beatport-hype10-card-artist')?.textContent?.trim() || 'Unknown Artist';
+        const label = card.querySelector('.beatport-top10-card-label, .beatport-hype10-card-label')?.textContent?.trim() || 'Unknown Label';
+        const url = card.getAttribute('data-url') || '';
+        const rank = card.querySelector('.beatport-top10-card-rank, .beatport-hype10-card-rank')?.textContent?.trim() || '';
+
+        return {
+            title: title,
+            artist: artist,
+            label: label,
+            url: url,
+            rank: rank
+        };
+    });
+
+    console.log(`📋 Extracted ${tracks.length} tracks from ${containerSelector}`);
+    return tracks;
 }
 
 /**

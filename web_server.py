@@ -13208,6 +13208,77 @@ def get_beatport_genre_hero(genre_slug, genre_id):
             "genre_id": genre_id
         }), 500
 
+@app.route('/api/beatport/genre/<genre_slug>/<genre_id>/top-10-lists', methods=['GET'])
+def get_beatport_genre_top10_lists(genre_slug, genre_id):
+    """Get Top 10 lists (Beatport + Hype) for a specific genre with 1-hour caching"""
+    try:
+        logger.info(f"🎵 API request for {genre_slug} Top 10 lists (ID: {genre_id})")
+
+        # Check cache first (1-hour TTL)
+        cached_data = get_cached_beatport_data('genre', 'top_10_lists', genre_slug)
+        if cached_data:
+            logger.info(f"✅ Returning cached Top 10 lists for {genre_slug}")
+            cached_data['success'] = True
+            cached_data['cached'] = True
+            return jsonify(cached_data)
+
+        # Initialize the Beatport scraper
+        scraper = BeatportUnifiedScraper()
+
+        # Scrape Top 10 lists from genre page
+        top10_data = scraper.scrape_genre_top10_tracks(genre_slug, genre_id)
+
+        if not top10_data['beatport_top10'] and not top10_data['hype_top10']:
+            return jsonify({
+                "success": False,
+                "error": "No Top 10 tracks found for this genre",
+                "beatport_top10": [],
+                "hype_top10": [],
+                "beatport_count": 0,
+                "hype_count": 0,
+                "has_hype_section": False,
+                "genre_slug": genre_slug,
+                "genre_id": genre_id,
+                "cached": False
+            })
+
+        # Prepare response data
+        response_data = {
+            "beatport_top10": top10_data['beatport_top10'],
+            "hype_top10": top10_data['hype_top10'],
+            "beatport_count": len(top10_data['beatport_top10']),
+            "hype_count": len(top10_data['hype_top10']),
+            "has_hype_section": top10_data['has_hype_section'],
+            "total_tracks": top10_data['total_tracks'],
+            "genre_slug": genre_slug,
+            "genre_id": genre_id,
+            "cached": False,
+            "cache_ttl": 3600  # 1 hour
+        }
+
+        # Cache the data (1-hour TTL)
+        set_cached_beatport_data('genre', 'top_10_lists', response_data, genre_slug)
+
+        logger.info(f"✅ Successfully fetched {response_data['beatport_count']} Beatport + {response_data['hype_count']} Hype Top 10 tracks for {genre_slug}")
+
+        response_data['success'] = True
+        return jsonify(response_data)
+
+    except Exception as e:
+        logger.error(f"❌ Error fetching Top 10 lists for {genre_slug}: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "beatport_top10": [],
+            "hype_top10": [],
+            "beatport_count": 0,
+            "hype_count": 0,
+            "has_hype_section": False,
+            "genre_slug": genre_slug,
+            "genre_id": genre_id,
+            "cached": False
+        }), 500
+
 @app.route('/api/beatport/genre/<genre_slug>/<genre_id>/sections', methods=['GET'])
 def get_beatport_genre_sections(genre_slug, genre_id):
     """Discover all available sections for a specific Beatport genre"""
