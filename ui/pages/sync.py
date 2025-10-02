@@ -1862,7 +1862,12 @@ class PlaylistDetailsModal(QDialog):
         """Handle analysis completion and start downloads for missing tracks"""
         missing_tracks = [r for r in results if not r.exists_in_plex]
         existing_tracks = [r for r in results if r.exists_in_plex]
-        
+        try:
+            from config.settings import config_manager
+            active_server = config_manager.get_active_media_server()
+            server_name = active_server.title() if active_server else "Plex"
+        except:
+            server_name = "Plex"
         print(f"Analysis complete: {len(missing_tracks)} missing, {len(existing_tracks)} existing")
         
         if not missing_tracks:
