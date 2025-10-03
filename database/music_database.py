@@ -2422,11 +2422,21 @@ class MusicDatabase:
                 genres_str = artist_row['genres'] or ''
                 genres = []
                 if genres_str:
-                    genre_set = set()
-                    for genre in genres_str.split(','):
-                        if genre and genre.strip():
-                            genre_set.add(genre.strip())
-                    genres = list(genre_set)
+                    # Try to parse as JSON first (new format)
+                    try:
+                        import json
+                        parsed_genres = json.loads(genres_str)
+                        if isinstance(parsed_genres, list):
+                            genres = parsed_genres
+                        else:
+                            genres = [str(parsed_genres)]
+                    except (json.JSONDecodeError, ValueError):
+                        # Fall back to comma-separated format (old format)
+                        genre_set = set()
+                        for genre in genres_str.split(','):
+                            if genre and genre.strip():
+                                genre_set.add(genre.strip())
+                        genres = list(genre_set)
 
                 # Get artist's albums with track counts and completion
                 # Include albums from ALL artists with the same name (fixes duplicate artist issue)
