@@ -6698,7 +6698,418 @@ const additionalStyles = `
 // Inject additional styles
 document.head.insertAdjacentHTML('beforeend', additionalStyles);
 
+// ============================================================================
+// DISCOVERY FIX MODAL - Manual Track Matching
+// ============================================================================
+
+// Global state for discovery fix
+let currentDiscoveryFix = {
+    platform: null,    // 'youtube', 'tidal', 'beatport'
+    identifier: null,  // url_hash or playlist_id
+    trackIndex: null,
+    sourceTrack: null,
+    sourceArtist: null
+};
+
+// Store event handler reference to allow proper removal
+let discoveryFixEnterHandler = null;
+
+/**
+ * Open discovery fix modal for a specific track
+ */
+function openDiscoveryFixModal(platform, identifier, trackIndex) {
+    console.log(`🔧 Opening fix modal: ${platform} - ${identifier} - track ${trackIndex}`);
+
+    // Get the discovery state
+    // Note: Beatport and Tidal reuse youtubePlaylistStates for discovery results
+    let state, result;
+    if (platform === 'youtube') {
+        state = youtubePlaylistStates[identifier];
+    } else if (platform === 'tidal') {
+        state = youtubePlaylistStates[identifier]; // Tidal uses YouTube state infrastructure
+    } else if (platform === 'beatport') {
+        state = youtubePlaylistStates[identifier]; // Beatport uses YouTube state infrastructure
+    }
+
+    // Support both camelCase and snake_case for discovery results
+    const results = state?.discoveryResults || state?.discovery_results;
+    result = results?.[trackIndex];
+
+    if (!result) {
+        console.error('❌ Track data not found');
+        console.error('  Platform:', platform);
+        console.error('  Identifier:', identifier);
+        console.error('  State:', state);
+        console.error('  Discovery results (camelCase):', state?.discoveryResults?.length);
+        console.error('  Discovery results (snake_case):', state?.discovery_results?.length);
+        showToast('Track data not found', 'error');
+        return;
+    }
+
+    console.log('✅ Found result:', result);
+
+    // Store context
+    currentDiscoveryFix = {
+        platform,
+        identifier,
+        trackIndex,
+        sourceTrack: result.yt_track || result.tidal_track?.name || result.beatport_track?.title,
+        sourceArtist: result.yt_artist || result.tidal_track?.artist || result.beatport_track?.artist
+    };
+
+    // Find the fix modal within the active discovery modal
+    const discoveryModal = document.getElementById(`youtube-discovery-modal-${identifier}`);
+    if (!discoveryModal) {
+        console.error('❌ Discovery modal not found:', identifier);
+        showToast('Discovery modal not found', 'error');
+        return;
+    }
+
+    const fixModalOverlay = discoveryModal.querySelector('.discovery-fix-modal-overlay');
+    if (!fixModalOverlay) {
+        console.error('❌ Fix modal not found within discovery modal');
+        showToast('Fix modal not found', 'error');
+        return;
+    }
+
+    console.log('🔍 Source track:', currentDiscoveryFix.sourceTrack);
+    console.log('🔍 Source artist:', currentDiscoveryFix.sourceArtist);
+    console.log('🔍 Fix modal overlay found:', fixModalOverlay);
+
+    // Populate modal - use document.getElementById since IDs are unique globally
+    const sourceTrackEl = document.getElementById('fix-modal-source-track');
+    const sourceArtistEl = document.getElementById('fix-modal-source-artist');
+    const trackInput = document.getElementById('fix-modal-track-input');
+    const artistInput = document.getElementById('fix-modal-artist-input');
+
+    console.log('🔍 Elements found:', {
+        sourceTrackEl,
+        sourceArtistEl,
+        trackInput,
+        artistInput
+    });
+
+    if (!sourceTrackEl || !sourceArtistEl || !trackInput || !artistInput) {
+        console.error('❌ Fix modal elements not found in DOM');
+        showToast('Fix modal not properly initialized', 'error');
+        return;
+    }
+
+    sourceTrackEl.textContent = currentDiscoveryFix.sourceTrack;
+    sourceArtistEl.textContent = currentDiscoveryFix.sourceArtist;
+    trackInput.value = currentDiscoveryFix.sourceTrack;
+    artistInput.value = currentDiscoveryFix.sourceArtist;
+
+    console.log('✅ Populated modal with:', {
+        track: trackInput.value,
+        artist: artistInput.value
+    });
+
+    // Remove old enter key handler if exists
+    if (discoveryFixEnterHandler) {
+        trackInput.removeEventListener('keypress', discoveryFixEnterHandler);
+        artistInput.removeEventListener('keypress', discoveryFixEnterHandler);
+    }
+
+    // Add new enter key handler
+    discoveryFixEnterHandler = function(e) {
+        if (e.key === 'Enter') searchDiscoveryFix();
+    };
+    trackInput.addEventListener('keypress', discoveryFixEnterHandler);
+    artistInput.addEventListener('keypress', discoveryFixEnterHandler);
+
+    // Show modal BEFORE auto-search so elements are visible
+    fixModalOverlay.classList.remove('hidden');
+    console.log('✅ Fix modal opened, starting auto-search...');
+
+    // Auto-search with initial values (after a tiny delay to ensure modal is rendered)
+    setTimeout(() => searchDiscoveryFix(), 100);
+}
+
+/**
+ * Close discovery fix modal
+ */
+function closeDiscoveryFixModal() {
+    if (!currentDiscoveryFix.identifier) {
+        console.warn('No active fix modal to close');
+        return;
+    }
+
+    const discoveryModal = document.getElementById(`youtube-discovery-modal-${currentDiscoveryFix.identifier}`);
+    if (discoveryModal) {
+        const fixModalOverlay = discoveryModal.querySelector('.discovery-fix-modal-overlay');
+        if (fixModalOverlay) {
+            fixModalOverlay.classList.add('hidden');
+        }
+    }
+
+    currentDiscoveryFix = { platform: null, identifier: null, trackIndex: null, sourceTrack: null, sourceArtist: null };
+}
+
+/**
+ * Search for tracks in Spotify
+ */
+async function searchDiscoveryFix() {
+    if (!currentDiscoveryFix.identifier) {
+        console.error('No active fix modal context');
+        return;
+    }
+
+    const discoveryModal = document.getElementById(`youtube-discovery-modal-${currentDiscoveryFix.identifier}`);
+    if (!discoveryModal) {
+        console.error('Discovery modal not found');
+        return;
+    }
+
+    const fixModalOverlay = discoveryModal.querySelector('.discovery-fix-modal-overlay');
+    if (!fixModalOverlay) {
+        console.error('Fix modal not found');
+        return;
+    }
+
+    const trackInput = fixModalOverlay.querySelector('#fix-modal-track-input').value.trim();
+    const artistInput = fixModalOverlay.querySelector('#fix-modal-artist-input').value.trim();
+
+    if (!trackInput && !artistInput) {
+        showToast('Enter track name or artist', 'error');
+        return;
+    }
+
+    const resultsContainer = fixModalOverlay.querySelector('#fix-modal-results');
+    resultsContainer.innerHTML = '<div class="loading">🔍 Searching Spotify...</div>';
+
+    try {
+        // Build search query
+        const query = `${artistInput} ${trackInput}`.trim();
+
+        // Call Spotify search API
+        const response = await fetch(`/api/spotify/search_tracks?query=${encodeURIComponent(query)}&limit=20`);
+        const data = await response.json();
+
+        if (data.error) {
+            resultsContainer.innerHTML = `<div class="error-message">❌ ${data.error}</div>`;
+            return;
+        }
+
+        if (!data.tracks || data.tracks.length === 0) {
+            resultsContainer.innerHTML = '<div class="no-results">No matches found. Try different search terms.</div>';
+            return;
+        }
+
+        // Render results
+        renderDiscoveryFixResults(data.tracks, fixModalOverlay);
+
+    } catch (error) {
+        console.error('Search error:', error);
+        resultsContainer.innerHTML = '<div class="error-message">❌ Search failed. Try again.</div>';
+    }
+}
+
+/**
+ * Render search results as clickable cards
+ */
+function renderDiscoveryFixResults(tracks, fixModalOverlay) {
+    const resultsContainer = fixModalOverlay.querySelector('#fix-modal-results');
+    resultsContainer.innerHTML = '';
+
+    tracks.forEach(track => {
+        const card = document.createElement('div');
+        card.className = 'fix-result-card';
+        card.onclick = () => selectDiscoveryFixTrack(track);
+
+        card.innerHTML = `
+            <div class="fix-result-card-content">
+                <div class="fix-result-title">${escapeHtml(track.name || 'Unknown Track')}</div>
+                <div class="fix-result-artist">${escapeHtml((track.artists || ['Unknown Artist']).join(', '))}</div>
+                <div class="fix-result-album">${escapeHtml(track.album || 'Unknown Album')}</div>
+                <div class="fix-result-duration">${formatDuration(track.duration_ms || 0)}</div>
+            </div>
+        `;
+
+        resultsContainer.appendChild(card);
+    });
+}
+
+/**
+ * User selected a track - update discovery state
+ */
+async function selectDiscoveryFixTrack(track) {
+    console.log('✅ User selected track:', track);
+
+    const { platform, identifier, trackIndex } = currentDiscoveryFix;
+
+    console.log('📡 Updating backend match:', { platform, identifier, trackIndex, track });
+
+    // Update backend
+    try {
+        // Get the correct backend identifier based on platform
+        let backendIdentifier = identifier;
+
+        if (platform === 'tidal') {
+            // For Tidal, backend expects the actual playlist_id, not url_hash
+            const state = youtubePlaylistStates[identifier];
+            backendIdentifier = state?.tidal_playlist_id || identifier;
+        } else if (platform === 'beatport') {
+            // For Beatport, backend expects url_hash (same as identifier)
+            backendIdentifier = identifier;
+        }
+
+        const requestBody = {
+            identifier: backendIdentifier,
+            track_index: trackIndex,
+            spotify_track: {
+                id: track.id,
+                name: track.name,
+                artists: track.artists,
+                album: track.album,
+                duration_ms: track.duration_ms
+            }
+        };
+
+        console.log('📡 Request body:', requestBody);
+        console.log('📡 Backend identifier:', backendIdentifier);
+
+        const response = await fetch(`/api/${platform}/discovery/update_match`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody)
+        });
+
+        console.log('📡 Response status:', response.status);
+
+        const data = await response.json();
+
+        console.log('📡 Response data:', data);
+
+        if (data.error) {
+            showToast(`Failed to update: ${data.error}`, 'error');
+            console.error('❌ Backend update failed:', data.error);
+            return;
+        }
+
+        showToast('Match updated successfully!', 'success');
+        console.log('✅ Backend update successful');
+
+        // Update frontend state
+        // Note: Beatport and Tidal reuse youtubePlaylistStates for discovery results
+        let state;
+        if (platform === 'youtube') {
+            state = youtubePlaylistStates[identifier];
+        } else if (platform === 'tidal') {
+            state = youtubePlaylistStates[identifier];
+        } else if (platform === 'beatport') {
+            state = youtubePlaylistStates[identifier];
+        }
+
+        // Support both camelCase and snake_case
+        const results = state?.discoveryResults || state?.discovery_results;
+        if (state && results && results[trackIndex]) {
+            const result = results[trackIndex];
+            const wasNotFound = result.status !== 'found' && result.status_class !== 'found';
+
+            // Update result
+            result.status = '✅ Found';
+            result.status_class = 'found';
+            result.spotify_track = track.name;
+            result.spotify_artist = Array.isArray(track.artists) ? track.artists.join(', ') : track.artists;
+            result.spotify_album = track.album;
+            result.spotify_id = track.id;
+            result.duration = formatDuration(track.duration_ms);
+            result.manual_match = true;
+
+            // IMPORTANT: Also set spotify_data for download/sync compatibility
+            result.spotify_data = {
+                id: track.id,
+                name: track.name,
+                artists: track.artists,
+                album: track.album,
+                duration_ms: track.duration_ms
+            };
+
+            // Increment match count if this was previously not_found or error
+            if (wasNotFound) {
+                state.spotifyMatches = (state.spotifyMatches || 0) + 1;
+
+                // Update progress bar and text
+                const spotify_total = state.spotify_total || state.playlist?.tracks?.length || 0;
+                const progress = spotify_total > 0 ? Math.round((state.spotifyMatches / spotify_total) * 100) : 0;
+
+                const progressBar = document.getElementById(`youtube-discovery-progress-${identifier}`);
+                const progressText = document.getElementById(`youtube-discovery-progress-text-${identifier}`);
+
+                if (progressBar) {
+                    progressBar.style.width = `${progress}%`;
+                }
+                if (progressText) {
+                    progressText.textContent = `${state.spotifyMatches} / ${spotify_total} tracks matched (${progress}%)`;
+                }
+
+                console.log(`✅ Updated progress: ${state.spotifyMatches}/${spotify_total} (${progress}%)`);
+            }
+
+            // Update UI - refresh the table row
+            updateDiscoveryModalSingleRow(platform, identifier, trackIndex);
+        }
+
+        // Close modal
+        closeDiscoveryFixModal();
+
+    } catch (error) {
+        console.error('Error updating match:', error);
+        showToast('Failed to update match', 'error');
+    }
+}
+
+/**
+ * Update a single row in the discovery modal table
+ */
+function updateDiscoveryModalSingleRow(platform, identifier, trackIndex) {
+    // Note: Beatport and Tidal reuse youtubePlaylistStates for discovery results
+    const state = youtubePlaylistStates[identifier];
+
+    // Support both camelCase and snake_case
+    const results = state?.discoveryResults || state?.discovery_results;
+    if (!state || !results || !results[trackIndex]) {
+        console.warn(`Cannot update row: state or result not found`);
+        return;
+    }
+
+    const result = results[trackIndex];
+    const row = document.getElementById(`discovery-row-${identifier}-${trackIndex}`);
+
+    if (!row) {
+        console.warn(`Cannot update row: row element not found for ${identifier}-${trackIndex}`);
+        return;
+    }
+
+    // Update cells
+    const statusCell = row.querySelector('.discovery-status');
+    const spotifyTrackCell = row.querySelector('.spotify-track');
+    const spotifyArtistCell = row.querySelector('.spotify-artist');
+    const spotifyAlbumCell = row.querySelector('.spotify-album');
+    const actionsCell = row.querySelector('.discovery-actions');
+
+    if (statusCell) {
+        statusCell.textContent = result.status;
+        statusCell.className = `discovery-status ${result.status_class}`;
+    }
+
+    if (spotifyTrackCell) spotifyTrackCell.textContent = result.spotify_track || '-';
+    if (spotifyArtistCell) spotifyArtistCell.textContent = result.spotify_artist || '-';
+    if (spotifyAlbumCell) spotifyAlbumCell.textContent = result.spotify_album || '-';
+
+    // Update action button
+    if (actionsCell) {
+        actionsCell.innerHTML = generateDiscoveryActionButton(result, identifier, platform);
+    }
+
+    console.log(`✅ Updated row ${trackIndex} in discovery modal`);
+}
+
 // Make functions available globally for onclick handlers
+window.openDiscoveryFixModal = openDiscoveryFixModal;
+window.closeDiscoveryFixModal = closeDiscoveryFixModal;
+window.searchDiscoveryFix = searchDiscoveryFix;
 window.openMatchingModal = openMatchingModal;
 window.closeMatchingModal = closeMatchingModal;
 window.selectArtist = selectArtist;
@@ -8880,18 +9291,27 @@ async function openTidalDiscoveryModal(playlistId, playlistData) {
     let actualMatches = 0;
     if (isAlreadyDiscovered && tidalCardState.discovery_results) {
         transformedResults = tidalCardState.discovery_results.map((result, index) => {
-            const isFound = result.status === 'found';
+            // Check multiple status formats
+            const isFound = result.status === 'found' ||
+                          result.status === '✅ Found' ||
+                          result.status_class === 'found' ||
+                          result.spotify_data ||
+                          result.spotify_track;
             if (isFound) actualMatches++;
-            
+
             return {
                 index: index,
                 yt_track: result.tidal_track ? result.tidal_track.name : 'Unknown',
                 yt_artist: result.tidal_track ? (result.tidal_track.artists ? result.tidal_track.artists.join(', ') : 'Unknown') : 'Unknown',
                 status: isFound ? '✅ Found' : '❌ Not Found',
                 status_class: isFound ? 'found' : 'not-found',
-                spotify_track: result.spotify_data ? result.spotify_data.name : '-',
-                spotify_artist: result.spotify_data ? result.spotify_data.artists.join(', ') : '-',
-                spotify_album: result.spotify_data ? result.spotify_data.album : '-'
+                spotify_track: result.spotify_data ? result.spotify_data.name : (result.spotify_track || '-'),
+                spotify_artist: result.spotify_data && result.spotify_data.artists ?
+                    (Array.isArray(result.spotify_data.artists) ? result.spotify_data.artists.join(', ') : result.spotify_data.artists) : (result.spotify_artist || '-'),
+                spotify_album: result.spotify_data ? result.spotify_data.album : (result.spotify_album || '-'),
+                spotify_data: result.spotify_data, // Pass through spotify_data
+                spotify_id: result.spotify_id, // Pass through spotify_id
+                manual_match: result.manual_match // Pass through manual match flag
             };
         });
         console.log(`🎵 Tidal modal: Calculated ${actualMatches} matches from ${transformedResults.length} results`);
@@ -8991,16 +9411,28 @@ function startTidalDiscoveryPolling(fakeUrlHash, playlistId) {
                 progress: status.progress,
                 spotify_matches: status.spotify_matches,
                 spotify_total: status.spotify_total,
-                results: status.results.map((result, index) => ({
-                    index: index,
-                    yt_track: result.tidal_track ? result.tidal_track.name : 'Unknown',
-                    yt_artist: result.tidal_track ? (result.tidal_track.artists ? result.tidal_track.artists.join(', ') : 'Unknown') : 'Unknown',
-                    status: result.status === 'found' ? '✅ Found' : '❌ Not Found',
-                    status_class: result.status === 'found' ? 'found' : 'not-found',
-                    spotify_track: result.spotify_data ? result.spotify_data.name : '-',
-                    spotify_artist: result.spotify_data ? result.spotify_data.artists.join(', ') : '-',
-                    spotify_album: result.spotify_data ? result.spotify_data.album : '-'
-                }))
+                results: status.results.map((result, index) => {
+                    const isFound = result.status === 'found' ||
+                                  result.status === '✅ Found' ||
+                                  result.status_class === 'found' ||
+                                  result.spotify_data ||
+                                  result.spotify_track;
+
+                    return {
+                        index: index,
+                        yt_track: result.tidal_track ? result.tidal_track.name : 'Unknown',
+                        yt_artist: result.tidal_track ? (result.tidal_track.artists ? result.tidal_track.artists.join(', ') : 'Unknown') : 'Unknown',
+                        status: isFound ? '✅ Found' : '❌ Not Found',
+                        status_class: isFound ? 'found' : 'not-found',
+                        spotify_track: result.spotify_data ? result.spotify_data.name : (result.spotify_track || '-'),
+                        spotify_artist: result.spotify_data && result.spotify_data.artists ?
+                            (Array.isArray(result.spotify_data.artists) ? result.spotify_data.artists.join(', ') : result.spotify_data.artists) : (result.spotify_artist || '-'),
+                        spotify_album: result.spotify_data ? result.spotify_data.album : (result.spotify_album || '-'),
+                        spotify_data: result.spotify_data, // Pass through
+                        spotify_id: result.spotify_id, // Pass through
+                        manual_match: result.manual_match // Pass through
+                    };
+                })
             };
             
             // Update fake YouTube state with Tidal discovery results
@@ -9499,27 +9931,34 @@ function updateTidalModalButtons(urlHash, phase) {
 async function startTidalDownloadMissing(urlHash) {
     try {
         console.log('🔍 Starting download missing tracks for Tidal playlist:', urlHash);
-        
+
         const state = youtubePlaylistStates[urlHash];
         if (!state || !state.is_tidal_playlist) {
             console.error('❌ Invalid Tidal playlist state for download');
             return;
         }
-        
-        // Get the actual Tidal playlist ID
-        const tidalPlaylistId = state.tidal_playlist_id;
-        const tidalState = tidalPlaylistStates[tidalPlaylistId];
-        
-        if (!tidalState || !tidalState.discovery_results) {
+
+        // Tidal reuses youtubePlaylistStates infrastructure, so get results from there
+        const discoveryResults = state.discoveryResults || state.discovery_results;
+
+        if (!discoveryResults) {
             showToast('No discovery results available for download', 'error');
             return;
         }
-        
+
         // Convert Tidal discovery results to Spotify tracks format (same as YouTube)
         const spotifyTracks = [];
-        for (const result of tidalState.discovery_results) {
+        for (const result of discoveryResults) {
             if (result.spotify_data) {
                 spotifyTracks.push(result.spotify_data);
+            } else if (result.spotify_track && result.status_class === 'found') {
+                // Build from individual fields (automatic discovery format)
+                spotifyTracks.push({
+                    id: result.spotify_id || 'unknown',
+                    name: result.spotify_track || 'Unknown Track',
+                    artists: result.spotify_artist ? [result.spotify_artist] : ['Unknown Artist'],
+                    album: result.spotify_album || 'Unknown Album'
+                });
             }
         }
         
@@ -9527,13 +9966,12 @@ async function startTidalDownloadMissing(urlHash) {
             showToast('No Spotify matches found for download', 'error');
             return;
         }
-        
+
         // Create a virtual playlist for the download system
-        const virtualPlaylistId = `tidal_${tidalPlaylistId}`;
-        const playlistName = `[Tidal] ${tidalState.playlist.name}`;
-        
+        const virtualPlaylistId = `tidal_${state.tidal_playlist_id}`;
+        const playlistName = `[Tidal] ${state.playlist.name}`;
+
         // Store reference for card navigation (same as YouTube)
-        tidalState.convertedSpotifyPlaylistId = virtualPlaylistId;
         state.convertedSpotifyPlaylistId = virtualPlaylistId;
         
         // Close the discovery modal if it's open (same as YouTube)
@@ -10704,12 +11142,15 @@ function startBeatportDiscoveryPolling(urlHash) {
                         index: result.index !== undefined ? result.index : index,
                         yt_track: result.beatport_track ? result.beatport_track.title : 'Unknown',
                         yt_artist: result.beatport_track ? result.beatport_track.artist : 'Unknown',
-                        status: result.status === 'found' ? '✅ Found' : (result.status === 'error' ? '❌ Error' : '❌ Not Found'),
-                        status_class: result.status_class || (result.status === 'found' ? 'found' : (result.status === 'error' ? 'error' : 'not-found')),
-                        spotify_track: result.spotify_data ? result.spotify_data.name : '-',
+                        status: result.status === 'found' || result.status === '✅ Found' || result.status_class === 'found' ? '✅ Found' : (result.status === 'error' ? '❌ Error' : '❌ Not Found'),
+                        status_class: result.status_class || (result.status === 'found' || result.status === '✅ Found' ? 'found' : (result.status === 'error' ? 'error' : 'not-found')),
+                        spotify_track: result.spotify_data ? result.spotify_data.name : (result.spotify_track || '-'),
                         spotify_artist: result.spotify_data && result.spotify_data.artists ?
-                            result.spotify_data.artists.map(a => a.name || a).join(', ') : '-',
-                        spotify_album: result.spotify_data ? result.spotify_data.album : '-'
+                            result.spotify_data.artists.map(a => a.name || a).join(', ') : (result.spotify_artist || '-'),
+                        spotify_album: result.spotify_data ? result.spotify_data.album : (result.spotify_album || '-'),
+                        spotify_data: result.spotify_data, // Pass through
+                        spotify_id: result.spotify_id, // Pass through
+                        manual_match: result.manual_match // Pass through
                     }))
                 };
 
@@ -11065,6 +11506,8 @@ async function handleBeatportCardClick(chartHash) {
                         // Also restore discovery results if available
                         if (fullState.discovery_results) {
                             youtubePlaylistStates[chartHash].discovery_results = fullState.discovery_results;
+                            console.log(`🔄 [Hydration] Restored ${fullState.discovery_results.length} discovery results`);
+                            console.log(`🔄 [Hydration] First result:`, fullState.discovery_results[0]);
                         }
 
                         // Restore discovery progress state
@@ -11073,6 +11516,7 @@ async function handleBeatportCardClick(chartHash) {
                         }
                         if (fullState.spotify_matches !== undefined) {
                             youtubePlaylistStates[chartHash].spotify_matches = fullState.spotify_matches;
+                            console.log(`🔄 [Hydration] Restored spotify_matches: ${fullState.spotify_matches}`);
                         }
                         if (fullState.spotify_total !== undefined) {
                             youtubePlaylistStates[chartHash].spotify_total = fullState.spotify_total;
@@ -11496,7 +11940,10 @@ async function startBeatportDownloadMissing(urlHash) {
         console.log('🔍 Starting download missing tracks for Beatport chart:', urlHash);
 
         const state = youtubePlaylistStates[urlHash];
-        if (!state || !state.discovery_results) {
+        // Support both camelCase and snake_case
+        const discoveryResults = state?.discoveryResults || state?.discovery_results;
+
+        if (!state || !discoveryResults) {
             showToast('No discovery results available for download', 'error');
             return;
         }
@@ -11508,10 +11955,33 @@ async function startBeatportDownloadMissing(urlHash) {
         }
 
         // Convert Beatport discovery results to Spotify tracks format (like Tidal does)
-        const spotifyTracks = state.discovery_results
-            .filter(result => result.spotify_data)
+        console.log(`🔍 Total discovery results: ${discoveryResults.length}`);
+        console.log(`🔍 First result (full object):`, JSON.stringify(discoveryResults[0], null, 2));
+        console.log(`🔍 Second result (full object):`, JSON.stringify(discoveryResults[1], null, 2));
+        console.log(`🔍 Results with spotify_data:`, discoveryResults.filter(r => r.spotify_data).length);
+        console.log(`🔍 Results with spotify_id:`, discoveryResults.filter(r => r.spotify_id).length);
+
+        const spotifyTracks = discoveryResults
+            .filter(result => {
+                // Accept if has spotify_data OR if has spotify_track (from automatic discovery)
+                return result.spotify_data || (result.spotify_track && result.status_class === 'found');
+            })
             .map(result => {
-                const track = result.spotify_data;
+                // Use spotify_data if available, otherwise build from individual fields
+                let track;
+                if (result.spotify_data) {
+                    track = result.spotify_data;
+                } else {
+                    // Build from individual fields (automatic discovery format)
+                    track = {
+                        id: result.spotify_id || 'unknown',
+                        name: result.spotify_track || 'Unknown Track',
+                        artists: result.spotify_artist ? [result.spotify_artist] : ['Unknown Artist'],
+                        album: result.spotify_album || 'Unknown Album',
+                        duration_ms: 0
+                    };
+                }
+
                 // Ensure artists is an array of strings
                 if (track.artists && Array.isArray(track.artists)) {
                     track.artists = track.artists.map(artist =>
@@ -13148,12 +13618,13 @@ function openYouTubeDiscoveryModal(urlHash) {
     
     // Check if modal already exists
     let modal = document.getElementById(`youtube-discovery-modal-${urlHash}`);
-    
+
     if (modal) {
         // Modal exists, just show it
         modal.classList.remove('hidden');
         console.log('🔄 Showing existing modal with preserved state');
-        
+        console.log('🔄 Current discovery results count:', state.discoveryResults?.length || state.discovery_results?.length || 0);
+
         // Resume polling if discovery or sync is in progress
         if (state.phase === 'discovering' && !activeYouTubePollers[urlHash]) {
             console.log('🔄 Resuming discovery polling...');
@@ -13208,7 +13679,7 @@ function openYouTubeDiscoveryModal(urlHash) {
                                         <th>Spotify Track</th>
                                         <th>Spotify Artist</th>
                                         <th>Album</th>
-                                        ${(isTidal || isBeatport) ? '' : '<th>Duration</th>'}
+                                        <th>Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody id="youtube-discovery-table-${urlHash}">
@@ -13224,6 +13695,65 @@ function openYouTubeDiscoveryModal(urlHash) {
                         </div>
                         <div class="modal-footer-right">
                             <button class="modal-btn modal-btn-secondary" onclick="closeYouTubeDiscoveryModal('${urlHash}')">🏠 Close</button>
+                        </div>
+                    </div>
+
+                    <!-- Discovery Fix Modal (nested inside) -->
+                    <div class="discovery-fix-modal-overlay hidden" id="discovery-fix-modal-overlay">
+                        <div class="discovery-fix-modal">
+                            <div class="discovery-fix-modal-header">
+                                <h2>Fix Track Match</h2>
+                                <button class="modal-close-btn" onclick="closeDiscoveryFixModal()">✕</button>
+                            </div>
+
+                            <div class="discovery-fix-modal-content">
+                                <!-- Source track info (read-only) -->
+                                <div class="source-track-info">
+                                    <h3>Source Track</h3>
+                                    <div class="source-track-display">
+                                        <div class="source-field">
+                                            <label>Track:</label>
+                                            <span id="fix-modal-source-track">-</span>
+                                        </div>
+                                        <div class="source-field">
+                                            <label>Artist:</label>
+                                            <span id="fix-modal-source-artist">-</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Search inputs (editable) -->
+                                <div class="search-inputs-section">
+                                    <h3>Search for Match</h3>
+                                    <div class="search-input-group">
+                                        <input type="text"
+                                               id="fix-modal-track-input"
+                                               placeholder="Track name"
+                                               class="fix-modal-input">
+                                        <input type="text"
+                                               id="fix-modal-artist-input"
+                                               placeholder="Artist name"
+                                               class="fix-modal-input">
+                                        <button class="search-btn" onclick="searchDiscoveryFix()">
+                                            🔍 Search
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <!-- Search results -->
+                                <div class="search-results-section">
+                                    <h3>Results</h3>
+                                    <div id="fix-modal-results" class="fix-modal-results">
+                                        <!-- Auto-populated on modal open, updated on search -->
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="discovery-fix-modal-footer">
+                                <button class="modal-btn secondary" onclick="closeDiscoveryFixModal()">
+                                    Cancel
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -13425,10 +13955,14 @@ function getInitialProgressText(phase, isTidal = false, isBeatport = false) {
 function generateTableRowsFromState(state, urlHash) {
     const isTidal = state.is_tidal_playlist;
     const isBeatport = state.is_beatport_playlist;
-    
-    if (state.discoveryResults && state.discoveryResults.length > 0) {
+    const platform = isTidal ? 'tidal' : (isBeatport ? 'beatport' : 'youtube');
+
+    // Support both camelCase and snake_case
+    const discoveryResults = state.discoveryResults || state.discovery_results;
+
+    if (discoveryResults && discoveryResults.length > 0) {
         // Generate rows from existing discovery results
-        return state.discoveryResults.map((result, index) => `
+        return discoveryResults.map((result, index) => `
             <tr id="discovery-row-${urlHash}-${result.index}">
                 <td class="yt-track">${result.yt_track}</td>
                 <td class="yt-artist">${result.yt_artist}</td>
@@ -13436,7 +13970,7 @@ function generateTableRowsFromState(state, urlHash) {
                 <td class="spotify-track">${result.spotify_track || '-'}</td>
                 <td class="spotify-artist">${result.spotify_artist || '-'}</td>
                 <td class="spotify-album">${result.spotify_album || '-'}</td>
-                ${(isTidal || isBeatport) ? '' : `<td class="duration">${result.duration}</td>`}
+                <td class="discovery-actions">${generateDiscoveryActionButton(result, urlHash, platform)}</td>
             </tr>
         `).join('');
     } else {
@@ -13454,7 +13988,7 @@ function generateInitialTableRows(tracks, isTidal = false, urlHash = '', isBeatp
             <td class="spotify-track">-</td>
             <td class="spotify-artist">-</td>
             <td class="spotify-album">-</td>
-            ${(isTidal || isBeatport) ? '' : `<td class="duration">${formatDuration(track.duration_ms)}</td>`}
+            <td class="discovery-actions">-</td>
         </tr>
     `).join('');
 }
@@ -13464,6 +13998,44 @@ function formatDuration(durationMs) {
     const minutes = Math.floor(durationMs / 60000);
     const seconds = Math.floor((durationMs % 60000) / 1000);
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}
+
+/**
+ * Generate action button for discovery table row
+ */
+function generateDiscoveryActionButton(result, identifier, platform) {
+    // Show fix button for not_found, error, or any non-found status
+    const isNotFound = result.status === 'not_found' ||
+                       result.status_class === 'not-found' ||
+                       result.status === '❌ Not Found' ||
+                       result.status === 'Not Found';
+
+    const isError = result.status === 'error' ||
+                    result.status_class === 'error' ||
+                    result.status === '❌ Error';
+
+    const isFound = result.status === 'found' ||
+                    result.status_class === 'found' ||
+                    result.status === '✅ Found';
+
+    if (isNotFound || isError) {
+        return `<button class="fix-match-btn"
+                        onclick="openDiscoveryFixModal('${platform}', '${identifier}', ${result.index})"
+                        title="Manually search for this track">
+                    🔧 Fix
+                </button>`;
+    }
+
+    // For found matches, show optional re-match button
+    if (isFound) {
+        return `<button class="rematch-btn"
+                        onclick="openDiscoveryFixModal('${platform}', '${identifier}', ${result.index})"
+                        title="Change this match">
+                    ↻
+                </button>`;
+    }
+
+    return '-';
 }
 
 function updateYouTubeDiscoveryModal(urlHash, status) {
@@ -13489,18 +14061,26 @@ function updateYouTubeDiscoveryModal(urlHash, status) {
     status.results.forEach(result => {
         const row = document.getElementById(`discovery-row-${urlHash}-${result.index}`);
         if (!row) return;
-        
+
         const statusCell = row.querySelector('.discovery-status');
         const spotifyTrackCell = row.querySelector('.spotify-track');
         const spotifyArtistCell = row.querySelector('.spotify-artist');
         const spotifyAlbumCell = row.querySelector('.spotify-album');
-        
+        const actionsCell = row.querySelector('.discovery-actions');
+
         statusCell.textContent = result.status;
         statusCell.className = `discovery-status ${result.status_class}`;
-        
+
         spotifyTrackCell.textContent = result.spotify_track || '-';
         spotifyArtistCell.textContent = result.spotify_artist || '-';
         spotifyAlbumCell.textContent = result.spotify_album || '-';
+
+        // Update actions cell with appropriate button
+        if (actionsCell) {
+            const state = youtubePlaylistStates[urlHash];
+            const platform = state?.is_tidal_playlist ? 'tidal' : (state?.is_beatport_playlist ? 'beatport' : 'youtube');
+            actionsCell.innerHTML = generateDiscoveryActionButton(result, urlHash, platform);
+        }
     });
     
     // Update action buttons if discovery is complete (progress = 100%)
@@ -13860,17 +14440,32 @@ function updateYouTubeModalButtons(urlHash, phase) {
 async function startYouTubeDownloadMissing(urlHash) {
     try {
         console.log('🔍 Starting download missing tracks for YouTube playlist:', urlHash);
-        
+
         const state = youtubePlaylistStates[urlHash];
-        if (!state || !state.discoveryResults) {
+        // Support both camelCase and snake_case
+        const discoveryResults = state?.discoveryResults || state?.discovery_results;
+
+        if (!state || !discoveryResults) {
             showToast('No discovery results available for download', 'error');
             return;
         }
-        
+
         // Convert YouTube results to a format compatible with the download modal
-        const spotifyTracks = state.discoveryResults
-            .filter(result => result.spotify_data)
-            .map(result => result.spotify_data);
+        const spotifyTracks = discoveryResults
+            .filter(result => result.spotify_data || (result.spotify_track && result.status_class === 'found'))
+            .map(result => {
+                if (result.spotify_data) {
+                    return result.spotify_data;
+                } else {
+                    // Build from individual fields (automatic discovery format)
+                    return {
+                        id: result.spotify_id || 'unknown',
+                        name: result.spotify_track || 'Unknown Track',
+                        artists: result.spotify_artist ? [result.spotify_artist] : ['Unknown Artist'],
+                        album: result.spotify_album || 'Unknown Album'
+                    };
+                }
+            });
         
         if (spotifyTracks.length === 0) {
             showToast('No Spotify matches found for download', 'error');
@@ -14362,7 +14957,7 @@ function displayArtistsResults(query, results) {
  */
 function createArtistCardHTML(artist) {
     const imageUrl = artist.image_url || '';
-    const genres = artist.genres && artist.genres.length > 0 ? 
+    const genres = artist.genres && artist.genres.length > 0 ?
         artist.genres.slice(0, 3).join(', ') : 'Various genres';
     const popularity = artist.popularity || 0;
     
