@@ -10165,8 +10165,40 @@ def get_playlist_tracks(playlist_id):
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/spotify/search_tracks', methods=['GET'])
+def search_spotify_tracks():
+    """Search for tracks on Spotify - used by discovery fix modal"""
+    if not spotify_client or not spotify_client.is_authenticated():
+        return jsonify({"error": "Spotify not authenticated."}), 401
+
+    try:
+        query = request.args.get('query', '').strip()
+        limit = int(request.args.get('limit', 20))
+
+        if not query:
+            return jsonify({"error": "Query parameter is required"}), 400
+
+        # Search using spotify_client
+        tracks = spotify_client.search_tracks(query, limit=limit)
+
+        # Convert tracks to dict format
+        tracks_dict = [{
+            'id': t.id,
+            'name': t.name,
+            'artists': t.artists,
+            'album': t.album,
+            'duration_ms': t.duration_ms
+        } for t in tracks]
+
+        return jsonify({'tracks': tracks_dict})
+
+    except Exception as e:
+        print(f"❌ Error searching Spotify tracks: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 # ===================================================================
-# TIDAL PLAYLIST API ENDPOINTS  
+# TIDAL PLAYLIST API ENDPOINTS
 # ===================================================================
 
 @app.route('/api/tidal/playlists', methods=['GET'])
@@ -10368,10 +10400,77 @@ def get_tidal_discovery_status(playlist_id):
         }
         
         return jsonify(response)
-        
+
     except Exception as e:
         print(f"❌ Error getting Tidal discovery status: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/tidal/discovery/update_match', methods=['POST'])
+def update_tidal_discovery_match():
+    """Update a Tidal discovery result with manually selected Spotify track"""
+    try:
+        data = request.get_json()
+        identifier = data.get('identifier')  # playlist_id
+        track_index = data.get('track_index')
+        spotify_track = data.get('spotify_track')
+
+        if not identifier or track_index is None or not spotify_track:
+            return jsonify({'error': 'Missing required fields'}), 400
+
+        # Get the state
+        state = tidal_discovery_states.get(identifier)
+
+        if not state:
+            return jsonify({'error': 'Discovery state not found'}), 404
+
+        if track_index >= len(state['discovery_results']):
+            return jsonify({'error': 'Invalid track index'}), 400
+
+        # Update the result
+        result = state['discovery_results'][track_index]
+        old_status = result.get('status')
+
+        # Update with user-selected track
+        result['status'] = '✅ Found'
+        result['status_class'] = 'found'
+        result['spotify_track'] = spotify_track['name']
+        result['spotify_artist'] = ', '.join(spotify_track['artists']) if isinstance(spotify_track['artists'], list) else spotify_track['artists']
+        result['spotify_album'] = spotify_track['album']
+        result['spotify_id'] = spotify_track['id']
+
+        # Format duration (Tidal doesn't show duration in table, but store it anyway)
+        duration_ms = spotify_track.get('duration_ms', 0)
+        if duration_ms:
+            minutes = duration_ms // 60000
+            seconds = (duration_ms % 60000) // 1000
+            result['duration'] = f"{minutes}:{seconds:02d}"
+        else:
+            result['duration'] = '0:00'
+
+        # IMPORTANT: Also set spotify_data for sync/download compatibility
+        result['spotify_data'] = {
+            'id': spotify_track['id'],
+            'name': spotify_track['name'],
+            'artists': spotify_track['artists'],
+            'album': spotify_track['album']
+        }
+
+        result['manual_match'] = True  # Flag for tracking
+
+        # Update match count if status changed from not found/error
+        if old_status != 'found' and old_status != '✅ Found':
+            state['spotify_matches'] = state.get('spotify_matches', 0) + 1
+
+        print(f"✅ Manual match updated: tidal - {identifier} - track {track_index}")
+        print(f"   → {result['spotify_artist']} - {result['spotify_track']}")
+
+        return jsonify({'success': True, 'result': result})
+
+    except Exception as e:
+        print(f"❌ Error updating Tidal discovery match: {e}")
+        return jsonify({'error': str(e)}), 500
+
 
 @app.route('/api/tidal/playlists/states', methods=['GET'])
 def get_tidal_playlist_states():
@@ -10727,21 +10826,32 @@ def _search_spotify_for_tidal_track(tidal_track):
 def convert_tidal_results_to_spotify_tracks(discovery_results):
     """Convert Tidal discovery results to Spotify tracks format for sync"""
     spotify_tracks = []
-    
+
     for result in discovery_results:
+        # Support both data formats: spotify_data (manual fixes) and individual fields (automatic discovery)
         if result.get('spotify_data'):
             spotify_data = result['spotify_data']
-            
+
             # Create track object matching the expected format
             track = {
                 'id': spotify_data['id'],
                 'name': spotify_data['name'],
                 'artists': spotify_data['artists'],
                 'album': spotify_data['album'],
-                'duration_ms': spotify_data['duration_ms']
+                'duration_ms': spotify_data.get('duration_ms', 0)
             }
             spotify_tracks.append(track)
-    
+        elif result.get('spotify_track') and result.get('status_class') == 'found':
+            # Build from individual fields (automatic discovery format)
+            track = {
+                'id': result.get('spotify_id', 'unknown'),
+                'name': result.get('spotify_track', 'Unknown Track'),
+                'artists': [result.get('spotify_artist', 'Unknown Artist')] if result.get('spotify_artist') else ['Unknown Artist'],
+                'album': result.get('spotify_album', 'Unknown Album'),
+                'duration_ms': 0
+            }
+            spotify_tracks.append(track)
+
     print(f"🔄 Converted {len(spotify_tracks)} Tidal matches to Spotify tracks for sync")
     return spotify_tracks
 
@@ -10833,11 +10943,13 @@ def get_tidal_sync_status(playlist_id):
             state['phase'] = 'sync_complete'
             state['sync_progress'] = sync_state.get('progress', {})
             # Add activity for sync completion
-            playlist_name = state.get('playlist', {}).get('name', 'Unknown Playlist')
+            playlist = state.get('playlist')
+            playlist_name = playlist.name if playlist and hasattr(playlist, 'name') else 'Unknown Playlist'
             add_activity_item("🔄", "Sync Complete", f"Tidal playlist '{playlist_name}' synced successfully", "Now")
         elif sync_state.get('status') == 'error':
             state['phase'] = 'discovered'  # Revert on error
-            playlist_name = state.get('playlist', {}).get('name', 'Unknown Playlist')
+            playlist = state.get('playlist')
+            playlist_name = playlist.name if playlist and hasattr(playlist, 'name') else 'Unknown Playlist'
             add_activity_item("❌", "Sync Failed", f"Tidal playlist '{playlist_name}' sync failed", "Now")
         
         return jsonify(response)
@@ -10999,10 +11111,76 @@ def get_youtube_discovery_status(url_hash):
         }
         
         return jsonify(response)
-        
+
     except Exception as e:
         print(f"❌ Error getting YouTube discovery status: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/youtube/discovery/update_match', methods=['POST'])
+def update_youtube_discovery_match():
+    """Update a YouTube discovery result with manually selected Spotify track"""
+    try:
+        data = request.get_json()
+        identifier = data.get('identifier')  # url_hash
+        track_index = data.get('track_index')
+        spotify_track = data.get('spotify_track')
+
+        if not identifier or track_index is None or not spotify_track:
+            return jsonify({'error': 'Missing required fields'}), 400
+
+        # Get the state
+        state = youtube_playlist_states.get(identifier)
+
+        if not state:
+            return jsonify({'error': 'Discovery state not found'}), 404
+
+        if track_index >= len(state['discovery_results']):
+            return jsonify({'error': 'Invalid track index'}), 400
+
+        # Update the result
+        result = state['discovery_results'][track_index]
+        old_status = result.get('status')
+
+        # Update with user-selected track
+        result['status'] = '✅ Found'
+        result['status_class'] = 'found'
+        result['spotify_track'] = spotify_track['name']
+        result['spotify_artist'] = ', '.join(spotify_track['artists']) if isinstance(spotify_track['artists'], list) else spotify_track['artists']
+        result['spotify_album'] = spotify_track['album']
+        result['spotify_id'] = spotify_track['id']
+
+        # Format duration
+        duration_ms = spotify_track.get('duration_ms', 0)
+        if duration_ms:
+            minutes = duration_ms // 60000
+            seconds = (duration_ms % 60000) // 1000
+            result['duration'] = f"{minutes}:{seconds:02d}"
+        else:
+            result['duration'] = '0:00'
+
+        # IMPORTANT: Also set spotify_data for sync/download compatibility
+        result['spotify_data'] = {
+            'id': spotify_track['id'],
+            'name': spotify_track['name'],
+            'artists': spotify_track['artists'],
+            'album': spotify_track['album']
+        }
+
+        result['manual_match'] = True  # Flag for tracking
+
+        # Update match count if status changed from not found/error
+        if old_status != 'found' and old_status != '✅ Found':
+            state['spotify_matches'] = state.get('spotify_matches', 0) + 1
+
+        print(f"✅ Manual match updated: youtube - {identifier} - track {track_index}")
+        print(f"   → {result['spotify_artist']} - {result['spotify_track']}")
+
+        return jsonify({'success': True, 'result': result})
+
+    except Exception as e:
+        print(f"❌ Error updating YouTube discovery match: {e}")
+        return jsonify({'error': str(e)}), 500
 
 
 def _run_youtube_discovery_worker(url_hash):
@@ -11518,21 +11696,32 @@ def update_youtube_playlist_phase(url_hash):
 def convert_youtube_results_to_spotify_tracks(discovery_results):
     """Convert YouTube discovery results to Spotify tracks format for sync"""
     spotify_tracks = []
-    
+
     for result in discovery_results:
+        # Support both data formats: spotify_data (manual fixes) and individual fields (automatic discovery)
         if result.get('spotify_data'):
             spotify_data = result['spotify_data']
-            
+
             # Create track object matching the expected format
             track = {
                 'id': spotify_data['id'],
                 'name': spotify_data['name'],
                 'artists': spotify_data['artists'],
                 'album': spotify_data['album'],
-                'duration_ms': spotify_data['duration_ms']
+                'duration_ms': spotify_data.get('duration_ms', 0)
             }
             spotify_tracks.append(track)
-    
+        elif result.get('spotify_track') and result.get('status_class') == 'found':
+            # Build from individual fields (automatic discovery format)
+            track = {
+                'id': result.get('spotify_id', 'unknown'),
+                'name': result.get('spotify_track', 'Unknown Track'),
+                'artists': [result.get('spotify_artist', 'Unknown Artist')] if result.get('spotify_artist') else ['Unknown Artist'],
+                'album': result.get('spotify_album', 'Unknown Album'),
+                'duration_ms': 0
+            }
+            spotify_tracks.append(track)
+
     print(f"🔄 Converted {len(spotify_tracks)} YouTube matches to Spotify tracks for sync")
     return spotify_tracks
 
@@ -11729,7 +11918,8 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json):
         with sync_lock:
             sync_states[playlist_id] = {
                 "status": "finished",
-                "result": result.__dict__ # Convert dataclass to dict
+                "progress": result.__dict__,  # Store result as progress for status endpoint compatibility
+                "result": result.__dict__  # Keep result for backward compatibility
             }
         print(f"🏁 Sync finished for {playlist_id} - state updated")
         
@@ -14079,6 +14269,73 @@ def get_beatport_discovery_status(url_hash):
         logger.error(f"❌ Error getting Beatport discovery status: {e}")
         return jsonify({"error": str(e)}), 500
 
+
+@app.route('/api/beatport/discovery/update_match', methods=['POST'])
+def update_beatport_discovery_match():
+    """Update a Beatport discovery result with manually selected Spotify track"""
+    try:
+        data = request.get_json()
+        identifier = data.get('identifier')  # url_hash
+        track_index = data.get('track_index')
+        spotify_track = data.get('spotify_track')
+
+        if not identifier or track_index is None or not spotify_track:
+            return jsonify({'error': 'Missing required fields'}), 400
+
+        # Get the state
+        state = beatport_chart_states.get(identifier)
+
+        if not state:
+            return jsonify({'error': 'Discovery state not found'}), 404
+
+        if track_index >= len(state['discovery_results']):
+            return jsonify({'error': 'Invalid track index'}), 400
+
+        # Update the result
+        result = state['discovery_results'][track_index]
+        old_status = result.get('status')
+
+        # Update with user-selected track
+        result['status'] = '✅ Found'
+        result['status_class'] = 'found'
+        result['spotify_track'] = spotify_track['name']
+        result['spotify_artist'] = ', '.join(spotify_track['artists']) if isinstance(spotify_track['artists'], list) else spotify_track['artists']
+        result['spotify_album'] = spotify_track['album']
+        result['spotify_id'] = spotify_track['id']
+
+        # Format duration (Beatport doesn't show duration in table, but store it anyway)
+        duration_ms = spotify_track.get('duration_ms', 0)
+        if duration_ms:
+            minutes = duration_ms // 60000
+            seconds = (duration_ms % 60000) // 1000
+            result['duration'] = f"{minutes}:{seconds:02d}"
+        else:
+            result['duration'] = '0:00'
+
+        # IMPORTANT: Also set spotify_data for sync/download compatibility
+        result['spotify_data'] = {
+            'id': spotify_track['id'],
+            'name': spotify_track['name'],
+            'artists': spotify_track['artists'],
+            'album': spotify_track['album']
+        }
+
+        result['manual_match'] = True  # Flag for tracking
+
+        # Update match count if status changed from not found/error
+        if old_status != 'found' and old_status != '✅ Found':
+            state['spotify_matches'] = state.get('spotify_matches', 0) + 1
+
+        logger.info(f"✅ Manual match updated: beatport - {identifier} - track {track_index}")
+        logger.info(f"   → {result['spotify_artist']} - {result['spotify_track']}")
+
+        return jsonify({'success': True, 'result': result})
+
+    except Exception as e:
+        logger.error(f"❌ Error updating Beatport discovery match: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 def clean_beatport_text(text):
     """Clean Beatport track/artist text for proper spacing"""
     if not text:
@@ -14599,6 +14856,7 @@ def convert_beatport_results_to_spotify_tracks(discovery_results):
     spotify_tracks = []
 
     for result in discovery_results:
+        # Support both data formats: spotify_data (manual fixes) and individual fields (automatic discovery)
         if result.get('spotify_data'):
             spotify_data = result['spotify_data']
 
@@ -14614,6 +14872,15 @@ def convert_beatport_results_to_spotify_tracks(discovery_results):
                 'name': spotify_data['name'],
                 'artists': artists,
                 'album': spotify_data['album'],
+                'source': 'beatport'
+            })
+        elif result.get('spotify_track') and result.get('status_class') == 'found':
+            # Build from individual fields (automatic discovery format)
+            spotify_tracks.append({
+                'id': result.get('spotify_id', 'unknown'),
+                'name': result.get('spotify_track', 'Unknown Track'),
+                'artists': [result.get('spotify_artist', 'Unknown Artist')] if result.get('spotify_artist') else ['Unknown Artist'],
+                'album': result.get('spotify_album', 'Unknown Album'),
                 'source': 'beatport'
             })
 

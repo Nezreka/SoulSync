@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y \
     libffi-dev \
     libssl-dev \
     curl \
+    gosu \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user for security
@@ -37,8 +38,12 @@ RUN cp /app/config/config.example.json /app/config/config.json && \
 # Create volume mount points
 VOLUME ["/app/config", "/app/database", "/app/logs", "/app/downloads", "/app/Transfer"]
 
-# Switch to non-root user
-USER soulsync
+# Copy and set up entrypoint script
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Note: Don't switch to soulsync user yet - entrypoint needs root to change UIDs
+# The entrypoint script will switch to soulsync after setting up permissions
 
 # Expose port
 EXPOSE 8008
@@ -51,6 +56,10 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 ENV PYTHONPATH=/app
 ENV FLASK_APP=web_server.py
 ENV FLASK_ENV=production
+ENV PUID=1000
+ENV PGID=1000
+ENV UMASK=022
 
-# Run the web server
+# Set entrypoint and default command
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["python", "web_server.py"]
