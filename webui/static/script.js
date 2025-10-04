@@ -15022,6 +15022,12 @@ async function loadArtistDiscography(artistId) {
         console.log('📦 Using cached discography');
         const cachedDiscography = artistsPageState.cache.discography[artistId];
         displayArtistDiscography(cachedDiscography);
+
+        // Load similar artists in parallel (don't wait)
+        loadSimilarArtists(artistsPageState.selectedArtist?.name).catch(err => {
+            console.error('❌ Error loading similar artists:', err);
+        });
+
         // Still check completion status for cached data
         await checkDiscographyCompletion(artistId, cachedDiscography);
         return;
@@ -15060,10 +15066,15 @@ async function loadArtistDiscography(artistId) {
         
         // Display results
         displayArtistDiscography(discography);
-        
+
+        // Load similar artists and check completion in parallel (don't wait)
+        loadSimilarArtists(artistsPageState.selectedArtist?.name).catch(err => {
+            console.error('❌ Error loading similar artists:', err);
+        });
+
         // Check completion status for all albums and singles
         await checkDiscographyCompletion(artistId, discography);
-        
+
     } catch (error) {
         console.error('❌ Failed to load discography:', error);
         showDiscographyError(error.message);
@@ -15133,6 +15144,238 @@ function displayArtistDiscography(discography) {
             `;
         }
     }
+}
+
+/**
+ * Load similar artists from MusicMap
+ */
+async function loadSimilarArtists(artistName) {
+    if (!artistName) {
+        console.warn('⚠️ No artist name provided for similar artists');
+        return;
+    }
+
+    console.log(`🔍 Loading similar artists for: ${artistName}`);
+
+    // Get DOM elements
+    const section = document.getElementById('similar-artists-section');
+    const loadingEl = document.getElementById('similar-artists-loading');
+    const errorEl = document.getElementById('similar-artists-error');
+    const container = document.getElementById('similar-artists-bubbles-container');
+
+    if (!section || !loadingEl || !errorEl || !container) {
+        console.warn('⚠️ Similar artists section elements not found');
+        return;
+    }
+
+    // Show loading state
+    loadingEl.classList.remove('hidden');
+    errorEl.classList.add('hidden');
+    container.innerHTML = '';
+    section.style.display = 'block';
+
+    try {
+        // Use streaming endpoint for real-time bubble creation
+        const url = `/api/artist/similar/${encodeURIComponent(artistName)}/stream`;
+        console.log(`📡 Streaming from: ${url}`);
+
+        const response = await fetch(url);
+
+        if (!response.ok) {
+            throw new Error(`Failed to fetch similar artists: ${response.status}`);
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let artistCount = 0;
+
+        // Read the stream
+        while (true) {
+            const { done, value } = await reader.read();
+
+            if (done) {
+                console.log('✅ Stream complete');
+                break;
+            }
+
+            // Decode the chunk and add to buffer
+            buffer += decoder.decode(value, { stream: true });
+
+            // Process complete messages (separated by \n\n)
+            const messages = buffer.split('\n\n');
+            buffer = messages.pop() || ''; // Keep incomplete message in buffer
+
+            for (const message of messages) {
+                if (!message.trim() || !message.startsWith('data: ')) continue;
+
+                try {
+                    const jsonData = JSON.parse(message.substring(6)); // Remove 'data: ' prefix
+
+                    if (jsonData.error) {
+                        throw new Error(jsonData.error);
+                    }
+
+                    if (jsonData.artist) {
+                        // Hide loading on first artist
+                        if (artistCount === 0) {
+                            loadingEl.classList.add('hidden');
+                        }
+
+                        // Create and append bubble immediately
+                        const bubble = createSimilarArtistBubble(jsonData.artist);
+                        container.appendChild(bubble);
+                        artistCount++;
+
+                        console.log(`✅ Added bubble for: ${jsonData.artist.name} (${artistCount})`);
+                    }
+
+                    if (jsonData.complete) {
+                        console.log(`🎉 Streaming complete: ${jsonData.total} artists`);
+
+                        if (artistCount === 0) {
+                            loadingEl.classList.add('hidden');
+                            container.innerHTML = `
+                                <div style="width: 100%; text-align: center; padding: 40px 20px; color: rgba(255, 255, 255, 0.5);">
+                                    <div style="font-size: 18px; margin-bottom: 8px;">🎵</div>
+                                    <div style="font-size: 14px;">No similar artists found</div>
+                                </div>
+                            `;
+                        }
+                    }
+                } catch (parseError) {
+                    console.error('❌ Error parsing stream message:', parseError);
+                }
+            }
+        }
+
+    } catch (error) {
+        console.error('❌ Error loading similar artists:', error);
+
+        // Hide loading, show error
+        loadingEl.classList.add('hidden');
+        errorEl.classList.remove('hidden');
+
+        // Also show error message in container
+        container.innerHTML = `
+            <div style="width: 100%; text-align: center; padding: 40px 20px; color: rgba(239, 68, 68, 0.7);">
+                <div style="font-size: 18px; margin-bottom: 8px;">⚠️</div>
+                <div style="font-size: 14px;">${error.message}</div>
+            </div>
+        `;
+    }
+}
+
+/**
+ * Display similar artist bubble cards progressively (one at a time with delay)
+ */
+function displaySimilarArtistsProgressively(artists) {
+    const container = document.getElementById('similar-artists-bubbles-container');
+
+    if (!container) {
+        console.warn('⚠️ Similar artists container not found');
+        return;
+    }
+
+    // Clear container
+    container.innerHTML = '';
+
+    // Add each bubble with a delay to simulate progressive loading
+    artists.forEach((artist, index) => {
+        setTimeout(() => {
+            const bubble = createSimilarArtistBubble(artist);
+            container.appendChild(bubble);
+        }, index * 100); // 100ms delay between each bubble
+    });
+
+    console.log(`✅ Displaying ${artists.length} similar artist bubbles progressively`);
+}
+
+/**
+ * Display similar artist bubble cards (all at once - legacy)
+ */
+function displaySimilarArtists(artists) {
+    const container = document.getElementById('similar-artists-bubbles-container');
+
+    if (!container) {
+        console.warn('⚠️ Similar artists container not found');
+        return;
+    }
+
+    // Clear container
+    container.innerHTML = '';
+
+    // Create bubble cards with staggered animation
+    artists.forEach((artist, index) => {
+        const bubble = createSimilarArtistBubble(artist);
+
+        // Add staggered animation delay (50ms per bubble)
+        bubble.style.animationDelay = `${index * 0.05}s`;
+
+        container.appendChild(bubble);
+    });
+
+    console.log(`✅ Displayed ${artists.length} similar artist bubbles`);
+}
+
+/**
+ * Create a similar artist bubble card element
+ */
+function createSimilarArtistBubble(artist) {
+    // Create bubble container
+    const bubble = document.createElement('div');
+    bubble.className = 'similar-artist-bubble';
+    bubble.setAttribute('data-artist-id', artist.id);
+
+    // Create image container
+    const imageContainer = document.createElement('div');
+    imageContainer.className = 'similar-artist-bubble-image';
+
+    if (artist.image_url && artist.image_url.trim() !== '') {
+        const img = document.createElement('img');
+        img.src = artist.image_url;
+        img.alt = artist.name;
+
+        // Handle image load error
+        img.onerror = () => {
+            console.log(`Failed to load image for ${artist.name}`);
+            imageContainer.innerHTML = `<div class="similar-artist-bubble-image-fallback">🎵</div>`;
+        };
+
+        imageContainer.appendChild(img);
+    } else {
+        // No image - show fallback
+        imageContainer.innerHTML = `<div class="similar-artist-bubble-image-fallback">🎵</div>`;
+    }
+
+    // Create name element
+    const name = document.createElement('div');
+    name.className = 'similar-artist-bubble-name';
+    name.textContent = artist.name;
+    name.title = artist.name; // Tooltip for full name
+
+    // Optional: Create genres element (hidden by default in CSS)
+    const genres = document.createElement('div');
+    genres.className = 'similar-artist-bubble-genres';
+    if (artist.genres && artist.genres.length > 0) {
+        genres.textContent = artist.genres.slice(0, 2).join(', ');
+    }
+
+    // Assemble bubble
+    bubble.appendChild(imageContainer);
+    bubble.appendChild(name);
+    if (artist.genres && artist.genres.length > 0) {
+        bubble.appendChild(genres);
+    }
+
+    // TODO: Add click handler when functionality is ready
+    // For now, just make it visually interactive
+    bubble.addEventListener('click', () => {
+        console.log(`🎵 Clicked similar artist: ${artist.name} (ID: ${artist.id})`);
+        // Future: Navigate to this artist's detail page or trigger action
+    });
+
+    return bubble;
 }
 
 /**
