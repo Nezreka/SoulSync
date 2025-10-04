@@ -1268,11 +1268,36 @@
                                     <!-- Album cards will be populated here -->
                                 </div>
                             </div>
-                            
+
                             <div class="tab-content" id="singles-content">
                                 <div class="singles-cards-container" id="singles-cards-container">
                                     <!-- Singles cards will be populated here -->
                                 </div>
+                            </div>
+                        </div>
+
+                        <!-- Similar Artists Section -->
+                        <div class="similar-artists-section" id="similar-artists-section">
+                            <div class="similar-artists-header">
+                                <h3 class="similar-artists-title">Similar Artists</h3>
+                                <p class="similar-artists-subtitle">Discover artists with a similar sound</p>
+                            </div>
+
+                            <!-- Loading State -->
+                            <div class="similar-artists-loading hidden" id="similar-artists-loading">
+                                <div class="loading-spinner-small"></div>
+                                <span>Finding similar artists...</span>
+                            </div>
+
+                            <!-- Error State -->
+                            <div class="similar-artists-error hidden" id="similar-artists-error">
+                                <span class="error-icon">⚠️</span>
+                                <span class="error-text">Unable to load similar artists</span>
+                            </div>
+
+                            <!-- Similar Artists Bubbles Container -->
+                            <div class="similar-artists-bubbles-container" id="similar-artists-bubbles-container">
+                                <!-- Artist bubble cards will be populated here -->
                             </div>
                         </div>
                     </div>
