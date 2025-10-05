@@ -76,6 +76,7 @@ let downloadsUpdateTimeout = null; // Debounce downloads section updates
 let artistsSearchTimeout = null;
 let artistsSearchController = null;
 let artistCompletionController = null; // Track ongoing completion check to cancel when navigating away
+let similarArtistsController = null; // Track ongoing similar artists stream to cancel when navigating away
 
 // --- Wishlist Modal Persistence State Management ---
 const WishlistModalState = {
@@ -15005,6 +15006,13 @@ async function selectArtistForDetail(artist) {
         artistCompletionController = null;
     }
 
+    // Cancel any ongoing similar artists stream from previous artist
+    if (similarArtistsController) {
+        console.log('⏹️ Canceling previous similar artists stream');
+        similarArtistsController.abort();
+        similarArtistsController = null;
+    }
+
     // Update state
     artistsPageState.selectedArtist = artist;
     artistsPageState.currentView = 'detail';
@@ -15183,11 +15191,16 @@ async function loadSimilarArtists(artistName) {
     section.style.display = 'block';
 
     try {
+        // Create new abort controller for this similar artists stream
+        similarArtistsController = new AbortController();
+
         // Use streaming endpoint for real-time bubble creation
         const url = `/api/artist/similar/${encodeURIComponent(artistName)}/stream`;
         console.log(`📡 Streaming from: ${url}`);
 
-        const response = await fetch(url);
+        const response = await fetch(url, {
+            signal: similarArtistsController.signal
+        });
 
         if (!response.ok) {
             throw new Error(`Failed to fetch similar artists: ${response.status}`);
@@ -15257,7 +15270,17 @@ async function loadSimilarArtists(artistName) {
             }
         }
 
+        // Clear the controller when done
+        similarArtistsController = null;
+
     } catch (error) {
+        // Don't show error if it was aborted (user navigated away)
+        if (error.name === 'AbortError') {
+            console.log('⏹️ Similar artists stream aborted (user navigated to new artist)');
+            loadingEl.classList.add('hidden');
+            return;
+        }
+
         console.error('❌ Error loading similar artists:', error);
 
         // Hide loading, show error
@@ -15271,6 +15294,9 @@ async function loadSimilarArtists(artistName) {
                 <div style="font-size: 14px;">${error.message}</div>
             </div>
         `;
+    } finally {
+        // Always clear the controller
+        similarArtistsController = null;
     }
 }
 
@@ -15770,7 +15796,21 @@ function initializeArtistTabs() {
  */
 function showArtistsSearchState() {
     console.log('🔄 Showing search state');
-    
+
+    // Cancel any ongoing completion check when navigating back to search
+    if (artistCompletionController) {
+        console.log('⏹️ Canceling completion check (navigating back to search)');
+        artistCompletionController.abort();
+        artistCompletionController = null;
+    }
+
+    // Cancel any ongoing similar artists stream when navigating back to search
+    if (similarArtistsController) {
+        console.log('⏹️ Canceling similar artists stream (navigating back to search)');
+        similarArtistsController.abort();
+        similarArtistsController = null;
+    }
+
     const searchState = document.getElementById('artists-search-state');
     const resultsState = document.getElementById('artists-results-state');
     const detailState = document.getElementById('artist-detail-state');
@@ -15796,17 +15836,31 @@ function showArtistsSearchState() {
 
 function showArtistsResultsState() {
     console.log('🔄 Showing results state');
-    
+
+    // Cancel any ongoing completion check when navigating back
+    if (artistCompletionController) {
+        console.log('⏹️ Canceling completion check (navigating back to results)');
+        artistCompletionController.abort();
+        artistCompletionController = null;
+    }
+
+    // Cancel any ongoing similar artists stream when navigating back
+    if (similarArtistsController) {
+        console.log('⏹️ Canceling similar artists stream (navigating back to results)');
+        similarArtistsController.abort();
+        similarArtistsController = null;
+    }
+
     // Clear artist-specific data when navigating back to results
     // This ensures that selecting the same artist again will trigger a fresh scan
     if (artistsPageState.selectedArtist) {
         const artistId = artistsPageState.selectedArtist.id;
         console.log(`🗑️ Clearing cached data for artist: ${artistsPageState.selectedArtist.name}`);
-        
+
         // Clear artist-specific cache data
         delete artistsPageState.cache.completionData[artistId];
         delete artistsPageState.cache.discography[artistId];
-        
+
         // Clear artist state
         artistsPageState.selectedArtist = null;
         artistsPageState.artistDiscography = { albums: [], singles: [] };
