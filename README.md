@@ -16,11 +16,11 @@ Bridge the gap between streaming services and your local music library. Automati
 - **Smart matching** finds what you're missing vs what you own
 - **Download missing tracks** from Soulseek with FLAC priority
 - **Metadata enhancement** adds proper tags and album art
-- **🆕 Automatic lyrics** synchronized LRC files for every download
-- **🆕 Auto server scanning** triggers library scans after downloads
-- **🆕 Auto database updates** keeps SoulSync database current
+- **Automatic lyrics** synchronized LRC files for every download
+- **Auto server scanning** triggers library scans after downloads
+- **Auto database updates** keeps SoulSync database current
 - **File organization** creates clean folder structures
-- **Artist discovery** browse complete discographies
+- **Artist discovery** browse complete discographies with similar artists recommendations powered by [music-map.com](https://music-map.com)
 - **Music library browser** comprehensive collection management with search and completion tracking
 - **Wishlist system** saves failed downloads for automatic retry
 - **Artist watchlist** monitors for new releases and adds missing tracks
@@ -160,12 +160,12 @@ If accessing SoulSync from a different machine than where it's running:
 
 **Search & Download**: Manual track search with preview streaming
 **Playlist Sync**: Spotify/Tidal/YouTube playlist analysis and batch downloads
-**Artist Explorer**: Complete discography browsing with missing indicators
+**Artist Explorer**: Complete discography browsing with missing indicators and real-time similar artist discovery via [music-map.com](https://music-map.com)
 **Library Browser**: Comprehensive local collection management with search, filtering, and completion tracking
 **Smart Matching**: Advanced algorithm prioritizes originals over remixes
-**🆕 Automatic Lyrics**: Downloads synchronized LRC files from LRClib.net - works with any media player that supports .lrc files
-**🆕 Server Integration**: Auto-triggers library scans on Plex/Jellyfin/Navidrome after downloads complete
-**🆕 Smart Database**: Automatically updates SoulSync's internal database with incremental scans
+**Automatic Lyrics**: Downloads synchronized LRC files from LRClib.net - works with any media player that supports .lrc files
+**Server Integration**: Auto-triggers library scans on Plex/Jellyfin/Navidrome after downloads complete
+**Smart Database**: Automatically updates SoulSync's internal database with incremental scans
 **Wishlist Management**: Failed downloads automatically saved and retried hourly
 **Artist Watchlist**: Add favorite artists to monitor for new releases automatically
 **Full Automation**: Hourly retry of failed downloads, metadata enhancement, lyrics, server scanning
@@ -187,9 +187,9 @@ Just hit up the Beatport section in the web UI and start exploring. Perfect for 
 1. **Search**: Query Soulseek via slskd API
 2. **Download**: Files saved to configured download folder
 3. **Process**: Auto-organize to transfer folder with metadata enhancement
-4. **🆕 Lyrics**: Automatic LRC file generation using LRClib.net API
-5. **🆕 Server Scan**: Triggers library scan on your media server (60s delay)
-6. **🆕 Database Sync**: Updates SoulSync database with new tracks
+4. **Lyrics**: Automatic LRC file generation using LRClib.net API
+5. **Server Scan**: Triggers library scan on your media server (60s delay)
+6. **Database Sync**: Updates SoulSync database with new tracks
 7. **Structure**: `Transfer/Artist/Artist - Album/01 - Track.flac` + `01 - Track.lrc`
 8. **Import**: Media server picks up organized files with lyrics
 

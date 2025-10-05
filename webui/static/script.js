@@ -15102,13 +15102,13 @@ async function loadArtistDiscography(artistId) {
  */
 function displayArtistDiscography(discography) {
     console.log(`📀 Displaying discography: ${discography.albums?.length || 0} albums, ${discography.singles?.length || 0} singles`);
-    
+
     // Populate albums
     const albumsContainer = document.getElementById('album-cards-container');
     if (albumsContainer) {
         if (discography.albums?.length > 0) {
             albumsContainer.innerHTML = discography.albums.map(album => createAlbumCardHTML(album)).join('');
-            
+
             // Add dynamic glow effects and click handlers to album cards
             albumsContainer.querySelectorAll('.album-card').forEach((card, index) => {
                 const album = discography.albums[index];
@@ -15117,7 +15117,7 @@ function displayArtistDiscography(discography) {
                         applyDynamicGlow(card, colors);
                     });
                 }
-                
+
                 // Add click handler for download missing tracks modal
                 card.addEventListener('click', () => handleArtistAlbumClick(album, 'albums'));
                 card.style.cursor = 'pointer';
@@ -15131,13 +15131,13 @@ function displayArtistDiscography(discography) {
             `;
         }
     }
-    
+
     // Populate singles
     const singlesContainer = document.getElementById('singles-cards-container');
     if (singlesContainer) {
         if (discography.singles?.length > 0) {
             singlesContainer.innerHTML = discography.singles.map(single => createAlbumCardHTML(single)).join('');
-            
+
             // Add dynamic glow effects and click handlers to singles cards
             singlesContainer.querySelectorAll('.album-card').forEach((card, index) => {
                 const single = discography.singles[index];
@@ -15146,7 +15146,7 @@ function displayArtistDiscography(discography) {
                         applyDynamicGlow(card, colors);
                     });
                 }
-                
+
                 // Add click handler for download missing tracks modal
                 card.addEventListener('click', () => handleArtistAlbumClick(single, 'singles'));
                 card.style.cursor = 'pointer';
@@ -15158,6 +15158,28 @@ function displayArtistDiscography(discography) {
                     <div style="font-size: 14px;">No singles or EPs found</div>
                 </div>
             `;
+        }
+    }
+
+    // Auto-switch to Singles tab if no albums but has singles
+    if ((!discography.albums || discography.albums.length === 0) &&
+        discography.singles && discography.singles.length > 0) {
+        console.log('📀 No albums found, auto-switching to Singles & EPs tab');
+
+        // Switch to singles tab
+        const albumsTab = document.getElementById('albums-tab');
+        const singlesTab = document.getElementById('singles-tab');
+        const albumsContent = document.getElementById('albums-content');
+        const singlesContent = document.getElementById('singles-content');
+
+        if (albumsTab && singlesTab && albumsContent && singlesContent) {
+            // Remove active from albums
+            albumsTab.classList.remove('active');
+            albumsContent.classList.remove('active');
+
+            // Add active to singles
+            singlesTab.classList.add('active');
+            singlesContent.classList.add('active');
         }
     }
 }
