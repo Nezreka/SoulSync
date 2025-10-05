@@ -10164,6 +10164,9 @@ async function openDownloadMissingModalForTidal(virtualPlaylistId, playlistName,
 function initializeSyncPage() {
     // Logic for tab switching
     const tabButtons = document.querySelectorAll('.sync-tab-button');
+    const syncSidebar = document.querySelector('.sync-sidebar');
+    const syncContentArea = document.querySelector('.sync-content-area');
+
     tabButtons.forEach(button => {
         button.addEventListener('click', () => {
             const tabId = button.dataset.tab;
@@ -10177,6 +10180,17 @@ function initializeSyncPage() {
                 content.classList.remove('active');
             });
             document.getElementById(`${tabId}-tab-content`).classList.add('active');
+
+            // Show/hide sidebar based on active tab
+            if (syncSidebar && syncContentArea) {
+                if (tabId === 'spotify') {
+                    syncSidebar.style.display = '';
+                    syncContentArea.style.gridTemplateColumns = '2.5fr 0.75fr';
+                } else {
+                    syncSidebar.style.display = 'none';
+                    syncContentArea.style.gridTemplateColumns = '1fr';
+                }
+            }
         });
     });
 
