@@ -613,16 +613,89 @@ class MusicMatchingEngine:
         """
         Enhanced version of calculate_slskd_match_confidence with version-aware scoring.
         Returns (confidence, version_type) tuple.
+
+        STRICT VERSION MATCHING:
+        - Live versions are ONLY accepted if Spotify track title contains "live" or "live version"
+        - Remixes are ONLY accepted if Spotify track title contains "remix" or "mix"
+        - Acoustic versions are ONLY accepted if Spotify track title contains "acoustic"
+        - etc.
         """
         # Get base confidence using existing logic
         base_confidence = self.calculate_slskd_match_confidence(spotify_track, slskd_track)
-        
-        # Detect version type and get penalty
+
+        # Detect version type in Soulseek result
         version_type, penalty = self.detect_version_type(slskd_track.filename)
-        
-        # Apply version penalty
+
+        # Check if Spotify track title contains version indicators
+        spotify_title_lower = spotify_track.name.lower()
+
+        # STRICT VERSION MATCHING: Reject mismatched versions
+        if version_type == 'live':
+            # Only accept live versions if Spotify title has live as a VERSION INDICATOR
+            # Patterns: (Live), - Live, [Live], Live at, Live from, Live in, Live Version
+            # NOT: words ending with 'live' like "Let Me Live" or starting like "Lively"
+            live_patterns = [
+                r'\(live\)',           # (Live) or (Live at Wembley)
+                r'\[live\]',           # [Live]
+                r'[-–—]\s*live\b',     # - Live or – Live
+                r'\blive\s+at\b',      # Live at
+                r'\blive\s+from\b',    # Live from
+                r'\blive\s+in\b',      # Live in
+                r'\blive\s+version\b', # Live Version
+                r'\blive\s+recording\b' # Live Recording
+            ]
+            has_live_indicator = any(re.search(pattern, spotify_title_lower) for pattern in live_patterns)
+
+            if not has_live_indicator:
+                # Reject: Soulseek has live version but Spotify doesn't want it
+                return 0.0, 'rejected_version_mismatch'
+
+        elif version_type == 'remix':
+            # Only accept remixes if Spotify title has remix as a VERSION INDICATOR
+            # Patterns: (Remix), - Remix, [Remix], Remix, Mix
+            remix_patterns = [
+                r'\(.*?(remix|mix|rmx).*?\)',  # (Remix) or (DJ Remix)
+                r'\[.*?(remix|mix|rmx).*?\]',  # [Remix]
+                r'[-–—]\s*(remix|mix|rmx)\b',  # - Remix
+                r'\b(remix|mix|rmx)\s*$',      # Remix at end
+            ]
+            has_remix_indicator = any(re.search(pattern, spotify_title_lower) for pattern in remix_patterns)
+
+            if not has_remix_indicator:
+                # Reject: Soulseek has remix but Spotify wants original
+                return 0.0, 'rejected_version_mismatch'
+
+        elif version_type == 'acoustic':
+            # Only accept acoustic if Spotify title has acoustic as a VERSION INDICATOR
+            acoustic_patterns = [
+                r'\(.*?acoustic.*?\)',         # (Acoustic)
+                r'\[.*?acoustic.*?\]',         # [Acoustic]
+                r'[-–—]\s*acoustic\b',         # - Acoustic
+                r'\bacoustic\s+version\b',     # Acoustic Version
+            ]
+            has_acoustic_indicator = any(re.search(pattern, spotify_title_lower) for pattern in acoustic_patterns)
+
+            if not has_acoustic_indicator:
+                # Reject: Soulseek has acoustic but Spotify wants original
+                return 0.0, 'rejected_version_mismatch'
+
+        elif version_type == 'instrumental':
+            # Only accept instrumental if Spotify title has instrumental as a VERSION INDICATOR
+            instrumental_patterns = [
+                r'\(.*?instrumental.*?\)',     # (Instrumental)
+                r'\[.*?instrumental.*?\]',     # [Instrumental]
+                r'[-–—]\s*instrumental\b',     # - Instrumental
+                r'\binstrumental\s+version\b', # Instrumental Version
+            ]
+            has_instrumental_indicator = any(re.search(pattern, spotify_title_lower) for pattern in instrumental_patterns)
+
+            if not has_instrumental_indicator:
+                # Reject: Soulseek has instrumental but Spotify wants original
+                return 0.0, 'rejected_version_mismatch'
+
+        # Apply version penalty (for matching versions, slight penalty for quality differences)
         if version_type != 'original':
-            adjusted_confidence = max(0.0, base_confidence - penalty)
+            adjusted_confidence = max(0.0, base_confidence - (penalty * 0.5))  # Reduced penalty since it's a match
             # Store version info on the track object for UI display
             slskd_track.version_type = version_type
             slskd_track.version_penalty = penalty
@@ -630,7 +703,7 @@ class MusicMatchingEngine:
             adjusted_confidence = base_confidence
             slskd_track.version_type = 'original'
             slskd_track.version_penalty = 0.0
-        
+
         return adjusted_confidence, version_type
     
     def find_best_slskd_matches_enhanced(self, spotify_track: SpotifyTrack, slskd_results: List[TrackResult]) -> List[TrackResult]:
