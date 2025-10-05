@@ -75,6 +75,7 @@ let artistDownloadModalOpen = false; // Track if artist download modal is open
 let downloadsUpdateTimeout = null; // Debounce downloads section updates
 let artistsSearchTimeout = null;
 let artistsSearchController = null;
+let artistCompletionController = null; // Track ongoing completion check to cancel when navigating away
 
 // --- Wishlist Modal Persistence State Management ---
 const WishlistModalState = {
@@ -14997,6 +14998,13 @@ function createArtistCardHTML(artist) {
 async function selectArtistForDetail(artist) {
     console.log(`🎤 Selected artist: ${artist.name}`);
 
+    // Cancel any ongoing completion check from previous artist
+    if (artistCompletionController) {
+        console.log('⏹️ Canceling previous artist completion check');
+        artistCompletionController.abort();
+        artistCompletionController = null;
+    }
+
     // Update state
     artistsPageState.selectedArtist = artist;
     artistsPageState.currentView = 'detail';
@@ -15412,10 +15420,11 @@ function restoreCachedCompletionData(artistId) {
  */
 async function checkDiscographyCompletion(artistId, discography) {
     console.log(`🔍 Starting streaming completion check for artist: ${artistId}`);
-    
+
     try {
-        // Use fetch with streaming response (Server-Sent Events)
-        
+        // Create new abort controller for this completion check
+        artistCompletionController = new AbortController();
+
         // Use fetch with streaming response
         const response = await fetch(`/api/artist/${artistId}/completion-stream`, {
             method: 'POST',
@@ -15426,17 +15435,18 @@ async function checkDiscographyCompletion(artistId, discography) {
                 discography: discography,
                 artist_name: artistsPageState.selectedArtist?.name || 'Unknown Artist',
                 test_mode: window.location.search.includes('test=true')
-            })
+            }),
+            signal: artistCompletionController.signal
         });
-        
+
         if (!response.ok) {
             throw new Error(`Failed to start completion check: ${response.status}`);
         }
-        
+
         // Handle streaming response
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
-        
+
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
@@ -15455,10 +15465,22 @@ async function checkDiscographyCompletion(artistId, discography) {
                 }
             }
         }
-        
+
+        // Clear the controller when done
+        artistCompletionController = null;
+
     } catch (error) {
+        // Don't show error if it was aborted (user navigated away)
+        if (error.name === 'AbortError') {
+            console.log('⏹️ Completion check aborted (user navigated to new artist)');
+            return;
+        }
+
         console.error('❌ Failed to check completion status:', error);
         showCompletionError();
+    } finally {
+        // Always clear the controller
+        artistCompletionController = null;
     }
 }
 
