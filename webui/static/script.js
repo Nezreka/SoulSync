@@ -15368,11 +15368,11 @@ function createSimilarArtistBubble(artist) {
         bubble.appendChild(genres);
     }
 
-    // TODO: Add click handler when functionality is ready
-    // For now, just make it visually interactive
+    // Add click handler to navigate to artist detail page
     bubble.addEventListener('click', () => {
         console.log(`🎵 Clicked similar artist: ${artist.name} (ID: ${artist.id})`);
-        // Future: Navigate to this artist's detail page or trigger action
+        // Navigate to this artist's detail page (same as clicking from search results)
+        selectArtistForDetail(artist);
     });
 
     return bubble;
