@@ -200,7 +200,15 @@ def _mark_task_completed(task_id, track_info=None):
 wishlist_auto_processor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="WishlistAutoProcessor")
 wishlist_auto_timer = None  # threading.Timer for scheduling next auto-processing
 wishlist_auto_processing = False  # Flag to prevent concurrent auto-processing
+wishlist_auto_processing_timestamp = 0  # Timestamp when processing started (for stuck detection)
 wishlist_timer_lock = threading.Lock()  # Thread safety for timer operations
+
+# --- Automatic Watchlist Scanning Infrastructure ---
+# Server-side timer system for automatic watchlist scanning (mirrors wishlist pattern for consistency)
+watchlist_auto_timer = None  # threading.Timer for scheduling next auto-scanning
+watchlist_auto_scanning = False  # Flag to prevent concurrent auto-scanning
+watchlist_auto_scanning_timestamp = 0  # Timestamp when scanning started (for stuck detection)
+watchlist_timer_lock = threading.Lock()  # Thread safety for timer operations
 
 # --- Shared Transfer Data Cache ---
 # Cache transfer data to avoid hammering the Soulseek API with multiple concurrent modals
@@ -7041,6 +7049,85 @@ def _sanitize_track_data_for_processing(track_data):
     
     return sanitized
 
+def check_and_recover_stuck_flags():
+    """
+    Check if wishlist_auto_processing or watchlist_auto_scanning flags are stuck.
+    If a flag has been True for more than 2 hours (7200 seconds), reset it.
+    This prevents indefinite blocking when processes crash without cleanup.
+    """
+    global wishlist_auto_processing, wishlist_auto_processing_timestamp
+    global watchlist_auto_scanning, watchlist_auto_scanning_timestamp
+
+    import time
+    current_time = time.time()
+    stuck_timeout = 7200  # 2 hours in seconds
+
+    # Check wishlist flag
+    if wishlist_auto_processing:
+        time_stuck = current_time - wishlist_auto_processing_timestamp
+        if time_stuck > stuck_timeout:
+            print(f"⚠️ [Stuck Detection] Wishlist auto-processing flag has been stuck for {time_stuck/3600:.1f} hours - RESETTING")
+            with wishlist_timer_lock:
+                wishlist_auto_processing = False
+                wishlist_auto_processing_timestamp = 0
+            return True
+
+    # Check watchlist flag
+    if watchlist_auto_scanning:
+        time_stuck = current_time - watchlist_auto_scanning_timestamp
+        if time_stuck > stuck_timeout:
+            print(f"⚠️ [Stuck Detection] Watchlist auto-scanning flag has been stuck for {time_stuck/3600:.1f} hours - RESETTING")
+            with watchlist_timer_lock:
+                watchlist_auto_scanning = False
+                watchlist_auto_scanning_timestamp = 0
+            return True
+
+    return False
+
+def is_wishlist_actually_processing():
+    """
+    Check if wishlist is truly processing (not just flag stuck).
+    Returns True only if flag is set AND timestamp is recent (< 2 hours).
+    """
+    global wishlist_auto_processing, wishlist_auto_processing_timestamp
+
+    if not wishlist_auto_processing:
+        return False
+
+    import time
+    current_time = time.time()
+    time_since_start = current_time - wishlist_auto_processing_timestamp
+
+    # If more than 2 hours, flag is stuck - auto-recover and return False
+    if time_since_start > 7200:
+        print(f"⚠️ [Stuck Detection] Wishlist flag stuck for {time_since_start/3600:.1f} hours - auto-recovering")
+        check_and_recover_stuck_flags()
+        return False
+
+    return True
+
+def is_watchlist_actually_scanning():
+    """
+    Check if watchlist is truly scanning (not just flag stuck).
+    Returns True only if flag is set AND timestamp is recent (< 2 hours).
+    """
+    global watchlist_auto_scanning, watchlist_auto_scanning_timestamp
+
+    if not watchlist_auto_scanning:
+        return False
+
+    import time
+    current_time = time.time()
+    time_since_start = current_time - watchlist_auto_scanning_timestamp
+
+    # If more than 2 hours, flag is stuck - auto-recover and return False
+    if time_since_start > 7200:
+        print(f"⚠️ [Stuck Detection] Watchlist flag stuck for {time_since_start/3600:.1f} hours - auto-recovering")
+        check_and_recover_stuck_flags()
+        return False
+
+    return True
+
 def start_wishlist_auto_processing():
     """Start automatic wishlist processing with 1-minute initial delay."""
     global wishlist_auto_timer
@@ -7060,15 +7147,16 @@ def start_wishlist_auto_processing():
 
 def stop_wishlist_auto_processing():
     """Stop automatic wishlist processing and cleanup timer."""
-    global wishlist_auto_timer, wishlist_auto_processing
-    
+    global wishlist_auto_timer, wishlist_auto_processing, wishlist_auto_processing_timestamp
+
     with wishlist_timer_lock:
         if wishlist_auto_timer is not None:
             wishlist_auto_timer.cancel()
             wishlist_auto_timer = None
             print("⏹️ Stopped automatic wishlist processing")
-        
+
         wishlist_auto_processing = False
+        wishlist_auto_processing_timestamp = 0
 
 def schedule_next_wishlist_processing():
     """Schedule next automatic wishlist processing in 30 minutes."""
@@ -7082,7 +7170,7 @@ def schedule_next_wishlist_processing():
 
 def _process_wishlist_automatically():
     """Main automatic processing logic that runs in background thread."""
-    global wishlist_auto_processing
+    global wishlist_auto_processing, wishlist_auto_processing_timestamp
 
     print("🤖 [Auto-Wishlist] Timer triggered - starting automatic wishlist processing...")
 
@@ -7092,17 +7180,18 @@ def _process_wishlist_automatically():
                 print("⚠️ Wishlist auto-processing already running, skipping.")
                 schedule_next_wishlist_processing()
                 return
-            
-            # Check if watchlist scan is currently running
-            global watchlist_scan_state
-            if (watchlist_scan_state and 
-                isinstance(watchlist_scan_state, dict) and 
-                watchlist_scan_state.get('status') == 'scanning'):
+
+            # Check if watchlist scan is currently running (using smart detection)
+            if is_watchlist_actually_scanning():
                 print("👁️ Watchlist scan in progress, skipping automatic wishlist processing to avoid conflicts.")
                 schedule_next_wishlist_processing()
                 return
-            
+
+            # Set flag and timestamp
+            import time
             wishlist_auto_processing = True
+            wishlist_auto_processing_timestamp = time.time()
+            print(f"🔒 [Auto-Wishlist] Flag set at timestamp {wishlist_auto_processing_timestamp}")
         
         # Use app context for database operations
         with app.app_context():
@@ -7116,6 +7205,7 @@ def _process_wishlist_automatically():
                 print("ℹ️ [Auto-Wishlist] No tracks in wishlist for auto-processing.")
                 with wishlist_timer_lock:
                     wishlist_auto_processing = False
+                    wishlist_auto_processing_timestamp = 0
                 schedule_next_wishlist_processing()
                 return
 
@@ -7139,6 +7229,7 @@ def _process_wishlist_automatically():
                 print("⚠️ No tracks returned from wishlist service.")
                 with wishlist_timer_lock:
                     wishlist_auto_processing = False
+                    wishlist_auto_processing_timestamp = 0
                 schedule_next_wishlist_processing()
                 return
             
@@ -7189,6 +7280,7 @@ def _process_wishlist_automatically():
         
         with wishlist_timer_lock:
             wishlist_auto_processing = False
+            wishlist_auto_processing_timestamp = 0
         schedule_next_wishlist_processing()
 
 # ===============================
@@ -8115,10 +8207,11 @@ def _process_failed_tracks_to_wishlist_exact_with_auto_completion(batch_id):
         if tracks_added > 0:
             add_activity_item("⭐", "Wishlist Updated", f"{tracks_added} failed tracks added to wishlist", "Now")
         
-        # Mark auto-processing as complete
+        # Mark auto-processing as complete and reset timestamp
         with wishlist_timer_lock:
             wishlist_auto_processing = False
-        
+            wishlist_auto_processing_timestamp = 0
+
         # Schedule next automatic processing cycle
         print("⏰ [Auto-Wishlist] Scheduling next automatic cycle in 30 minutes")
         schedule_next_wishlist_processing()
@@ -8130,10 +8223,11 @@ def _process_failed_tracks_to_wishlist_exact_with_auto_completion(batch_id):
         import traceback
         traceback.print_exc()
         
-        # Ensure auto-processing flag is reset even on error
+        # Ensure auto-processing flag is reset even on error and reset timestamp
         with wishlist_timer_lock:
             wishlist_auto_processing = False
-        
+            wishlist_auto_processing_timestamp = 0
+
         # Schedule next cycle even after error to maintain continuity
         print("⏰ [Auto-Wishlist] Scheduling next cycle after error (30 minutes)")
         schedule_next_wishlist_processing()
@@ -10067,9 +10161,26 @@ def cancel_batch(batch_id):
             
             # Mark batch as cancelled
             download_batches[batch_id]['phase'] = 'cancelled'
-            
-            # Reset YouTube playlist phase to 'discovered' if this is a YouTube playlist
+
+            # Get playlist_id before doing resets
             playlist_id = download_batches[batch_id].get('playlist_id')
+
+            # Reset wishlist auto-processing flag if this is a wishlist batch (auto-initiated only)
+            # Manual wishlist downloads don't set the flag, so only reset if auto-initiated
+            if playlist_id == 'wishlist':
+                auto_initiated = download_batches[batch_id].get('auto_initiated', False)
+                if auto_initiated:
+                    global wishlist_auto_processing, wishlist_auto_processing_timestamp
+                    with wishlist_timer_lock:
+                        wishlist_auto_processing = False
+                        wishlist_auto_processing_timestamp = 0
+                    print(f"🔓 [Wishlist Cancel] Reset wishlist auto-processing flag for cancelled auto-batch")
+                    # Schedule next cycle since this one was cancelled
+                    schedule_next_wishlist_processing()
+                else:
+                    print(f"ℹ️ [Wishlist Cancel] Manual wishlist batch cancelled (no flag reset needed)")
+
+            # Reset YouTube playlist phase to 'discovered' if this is a YouTube playlist
             if playlist_id and playlist_id.startswith('youtube_'):
                 url_hash = playlist_id.replace('youtube_', '')
                 if url_hash in youtube_playlist_states:
@@ -12627,23 +12738,33 @@ def start_watchlist_scan():
     try:
         if not spotify_client or not spotify_client.is_authenticated():
             return jsonify({"success": False, "error": "Spotify client not available or not authenticated"}), 400
-        
-        # Check if wishlist auto-processing is currently running
-        global wishlist_auto_processing
-        if wishlist_auto_processing:
+
+        # Check if wishlist auto-processing is currently running (using smart detection)
+        if is_wishlist_actually_processing():
             return jsonify({"success": False, "error": "Wishlist auto-processing is currently running. Please wait for it to complete before starting a watchlist scan."}), 409
+
+        # Check if watchlist is already scanning
+        if is_watchlist_actually_scanning():
+            return jsonify({"success": False, "error": "Watchlist scan is already in progress."}), 409
         
         # Start the scan in a background thread
         def run_scan():
             try:
-                global watchlist_scan_state
+                global watchlist_scan_state, watchlist_auto_scanning, watchlist_auto_scanning_timestamp
                 from core.watchlist_scanner import get_watchlist_scanner
                 from database.music_database import get_database
-                
+
+                # Set flag and timestamp for manual scan
+                import time
+                with watchlist_timer_lock:
+                    watchlist_auto_scanning = True
+                    watchlist_auto_scanning_timestamp = time.time()
+                    print(f"🔒 [Manual Watchlist Scan] Flag set at timestamp {watchlist_auto_scanning_timestamp}")
+
                 # Get list of artists to scan
                 database = get_database()
                 watchlist_artists = database.get_watchlist_artists()
-                
+
                 if not watchlist_artists:
                     watchlist_scan_state['status'] = 'completed'
                     watchlist_scan_state['summary'] = {
@@ -12652,8 +12773,12 @@ def start_watchlist_scan():
                         'new_tracks_found': 0,
                         'tracks_added_to_wishlist': 0
                     }
+                    # Reset flag
+                    with watchlist_timer_lock:
+                        watchlist_auto_scanning = False
+                        watchlist_auto_scanning_timestamp = 0
                     return
-                
+
                 scanner = get_watchlist_scanner(spotify_client)
                 
                 # Initialize detailed progress tracking
@@ -12797,11 +12922,18 @@ def start_watchlist_scan():
                 
                 print(f"Watchlist scan completed: {len(successful_scans)}/{len(scan_results)} artists scanned successfully")
                 print(f"Found {total_new_tracks} new tracks, added {total_added_to_wishlist} to wishlist")
-                
+
             except Exception as e:
                 print(f"Error during watchlist scan: {e}")
                 watchlist_scan_state['status'] = 'error'
                 watchlist_scan_state['error'] = str(e)
+
+            finally:
+                # Always reset flag when scan completes (success or error)
+                with watchlist_timer_lock:
+                    watchlist_auto_scanning = False
+                    watchlist_auto_scanning_timestamp = 0
+                    print("🔓 [Manual Watchlist Scan] Flag reset - scan complete")
         
         # Initialize scan state
         global watchlist_scan_state
@@ -12859,75 +12991,155 @@ watchlist_scan_state = {
 }
 
 def start_watchlist_auto_scanning():
-    """Start automatic daily watchlist scanning"""
-    def daily_scan():
-        while True:
-            try:
-                # Wait 24 hours (86400 seconds)
-                time.sleep(86400)
-                
-                # Check if we have artists to scan and Spotify client is available
-                database = get_database()
-                watchlist_count = database.get_watchlist_count()
-                
-                if watchlist_count > 0 and spotify_client and spotify_client.is_authenticated():
-                    # Check if wishlist auto-processing is currently running
-                    global wishlist_auto_processing
-                    if wishlist_auto_processing:
-                        print("👁️ Skipping automatic daily watchlist scan: wishlist auto-processing is currently running")
-                        continue  # Skip this cycle, will try again in 24 hours
-                    
-                    print(f"Starting automatic daily watchlist scan for {watchlist_count} artists...")
-                    
-                    # Update global scan state
-                    global watchlist_scan_state
-                    watchlist_scan_state = {
-                        'status': 'scanning',
-                        'started_at': datetime.now(),
-                        'results': [],
-                        'summary': {},
-                        'error': None
-                    }
-                    
-                    # Run the scan
-                    from core.watchlist_scanner import get_watchlist_scanner
-                    scanner = get_watchlist_scanner(spotify_client)
-                    results = scanner.scan_all_watchlist_artists()
-                    
-                    # Update state with results
-                    watchlist_scan_state['status'] = 'completed'
-                    watchlist_scan_state['results'] = results
-                    watchlist_scan_state['completed_at'] = datetime.now()
-                    
-                    # Calculate summary
-                    successful_scans = [r for r in results if r.success]
-                    total_new_tracks = sum(r.new_tracks_found for r in successful_scans)
-                    total_added_to_wishlist = sum(r.tracks_added_to_wishlist for r in successful_scans)
-                    
-                    watchlist_scan_state['summary'] = {
-                        'total_artists': len(results),
-                        'successful_scans': len(successful_scans),
-                        'new_tracks_found': total_new_tracks,
-                        'tracks_added_to_wishlist': total_added_to_wishlist
-                    }
-                    
-                    print(f"Automatic watchlist scan completed: {len(successful_scans)}/{len(results)} artists scanned successfully")
-                    print(f"Found {total_new_tracks} new tracks, added {total_added_to_wishlist} to wishlist")
-                    
-                else:
-                    print("Skipping automatic watchlist scan: no artists in watchlist or Spotify client unavailable")
-                    
-            except Exception as e:
-                print(f"Error during automatic watchlist scan: {e}")
-                if 'watchlist_scan_state' in globals():
-                    watchlist_scan_state['status'] = 'error'
-                    watchlist_scan_state['error'] = str(e)
-    
-    # Start the daily scanning thread
-    thread = threading.Thread(target=daily_scan)
-    thread.daemon = True
-    thread.start()
-    print("✅ Automatic daily watchlist scanning started")
+    """Start automatic watchlist scanning with 5-minute initial delay (Timer-based like wishlist)"""
+    global watchlist_auto_timer
+
+    print("🚀 [Auto-Watchlist] Initializing automatic watchlist scanning...")
+
+    with watchlist_timer_lock:
+        # Stop any existing timer to prevent duplicates
+        if watchlist_auto_timer is not None:
+            watchlist_auto_timer.cancel()
+
+        print("🔄 Starting automatic watchlist scanning system (5 minute initial delay)")
+        watchlist_auto_timer = threading.Timer(300.0, _process_watchlist_scan_automatically)  # 5 minutes
+        watchlist_auto_timer.daemon = True
+        watchlist_auto_timer.start()
+        print(f"✅ [Auto-Watchlist] Timer started successfully - will trigger in 5 minutes")
+
+def stop_watchlist_auto_scanning():
+    """Stop automatic watchlist scanning and cleanup timer."""
+    global watchlist_auto_timer, watchlist_auto_scanning
+
+    with watchlist_timer_lock:
+        if watchlist_auto_timer is not None:
+            watchlist_auto_timer.cancel()
+            watchlist_auto_timer = None
+            print("⏹️ Stopped automatic watchlist scanning")
+
+        watchlist_auto_scanning = False
+        watchlist_auto_scanning_timestamp = 0
+
+def schedule_next_watchlist_scan():
+    """Schedule next automatic watchlist scan in 24 hours."""
+    global watchlist_auto_timer
+
+    with watchlist_timer_lock:
+        print("⏰ Scheduling next automatic watchlist scan in 24 hours")
+        watchlist_auto_timer = threading.Timer(86400.0, _process_watchlist_scan_automatically)  # 24 hours
+        watchlist_auto_timer.daemon = True
+        watchlist_auto_timer.start()
+
+def _process_watchlist_scan_automatically():
+    """Main automatic scanning logic that runs in background thread."""
+    global watchlist_auto_scanning, watchlist_auto_scanning_timestamp, watchlist_scan_state
+
+    print("🤖 [Auto-Watchlist] Timer triggered - starting automatic watchlist scan...")
+
+    try:
+        with watchlist_timer_lock:
+            if watchlist_auto_scanning:
+                print("⚠️ Watchlist auto-scanning already running, skipping.")
+                schedule_next_watchlist_scan()
+                return
+
+            # Check if wishlist processing is currently running (using smart detection)
+            if is_wishlist_actually_processing():
+                print("🎵 Wishlist processing in progress, rescheduling watchlist scan for 10 minutes from now")
+                # Smart retry: don't wait 24 hours, just wait 10 minutes and try again
+                global watchlist_auto_timer
+                watchlist_auto_timer = threading.Timer(600.0, _process_watchlist_scan_automatically)  # 10 minutes
+                watchlist_auto_timer.daemon = True
+                watchlist_auto_timer.start()
+                return
+
+            # Set flag and timestamp
+            import time
+            watchlist_auto_scanning = True
+            watchlist_auto_scanning_timestamp = time.time()
+            print(f"🔒 [Auto-Watchlist] Flag set at timestamp {watchlist_auto_scanning_timestamp}")
+
+        # Use app context for database operations
+        with app.app_context():
+            from core.watchlist_scanner import get_watchlist_scanner
+            from database.music_database import get_database
+
+            # Check if we have artists to scan and Spotify client is available
+            database = get_database()
+            watchlist_count = database.get_watchlist_count()
+            print(f"🔍 [Auto-Watchlist] Watchlist count check: {watchlist_count} artists found")
+
+            if watchlist_count == 0:
+                print("ℹ️ [Auto-Watchlist] No artists in watchlist for auto-scanning.")
+                with watchlist_timer_lock:
+                    watchlist_auto_scanning = False
+                    watchlist_auto_scanning_timestamp = 0
+                schedule_next_watchlist_scan()
+                return
+
+            if not spotify_client or not spotify_client.is_authenticated():
+                print("ℹ️ [Auto-Watchlist] Spotify client not available or not authenticated.")
+                with watchlist_timer_lock:
+                    watchlist_auto_scanning = False
+                    watchlist_auto_scanning_timestamp = 0
+                schedule_next_watchlist_scan()
+                return
+
+            print(f"👁️ [Auto-Watchlist] Found {watchlist_count} artists in watchlist, starting automatic scan...")
+
+            # Update global scan state
+            watchlist_scan_state = {
+                'status': 'scanning',
+                'started_at': datetime.now(),
+                'results': [],
+                'summary': {},
+                'error': None
+            }
+
+            # Run the scan
+            scanner = get_watchlist_scanner(spotify_client)
+            results = scanner.scan_all_watchlist_artists()
+
+            # Update state with results
+            watchlist_scan_state['status'] = 'completed'
+            watchlist_scan_state['results'] = results
+            watchlist_scan_state['completed_at'] = datetime.now()
+
+            # Calculate summary
+            successful_scans = [r for r in results if r.success]
+            total_new_tracks = sum(r.new_tracks_found for r in successful_scans)
+            total_added_to_wishlist = sum(r.tracks_added_to_wishlist for r in successful_scans)
+
+            watchlist_scan_state['summary'] = {
+                'total_artists': len(results),
+                'successful_scans': len(successful_scans),
+                'new_tracks_found': total_new_tracks,
+                'tracks_added_to_wishlist': total_added_to_wishlist
+            }
+
+            print(f"Automatic watchlist scan completed: {len(successful_scans)}/{len(results)} artists scanned successfully")
+            print(f"Found {total_new_tracks} new tracks, added {total_added_to_wishlist} to wishlist")
+
+            # Add activity for watchlist scan completion
+            if total_added_to_wishlist > 0:
+                add_activity_item("👁️", "Watchlist Scan Complete", f"{total_added_to_wishlist} new tracks added to wishlist", "Now")
+
+    except Exception as e:
+        print(f"❌ Error in automatic watchlist scan: {e}")
+        import traceback
+        traceback.print_exc()
+
+        watchlist_scan_state['status'] = 'error'
+        watchlist_scan_state['error'] = str(e)
+
+    finally:
+        # Always reset flag and schedule next scan
+        with watchlist_timer_lock:
+            watchlist_auto_scanning = False
+            watchlist_auto_scanning_timestamp = 0
+        schedule_next_watchlist_scan()
+
+    print("✅ Automatic watchlist scanning initialized")
 
 # --- Metadata Updater System ---
 
@@ -16116,20 +16328,28 @@ if __name__ == '__main__':
     print("🔧 Starting OAuth callback servers...")
     start_oauth_callback_servers()
     
+    # Startup diagnostics: Check and recover stuck flags
+    print("🔍 Running startup diagnostics...")
+    stuck_flags_recovered = check_and_recover_stuck_flags()
+    if stuck_flags_recovered:
+        print("⚠️ Recovered stuck flags from previous session")
+    else:
+        print("✅ No stuck flags detected - system healthy")
+
     # Start simple background monitor when server starts
     print("🔧 Starting simple background monitor...")
     start_simple_background_monitor()
     print("✅ Simple background monitor started (includes automatic search cleanup)")
-    
+
     # Start automatic wishlist processing when server starts
     print("🔧 Starting automatic wishlist processing...")
     start_wishlist_auto_processing()
-    print("✅ Automatic wishlist processing started")
-    
+    print("✅ Automatic wishlist processing started (1 minute initial delay, 30 minute cycles)")
+
     # Start automatic watchlist scanning when server starts
     print("🔧 Starting automatic watchlist scanning...")
     start_watchlist_auto_scanning()
-    print("✅ Automatic watchlist scanning started")
+    print("✅ Automatic watchlist scanning started (5 minute initial delay, 24 hour cycles)")
     
     # Initialize app start time for uptime tracking
     import time
