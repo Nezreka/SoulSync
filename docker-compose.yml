@@ -2,6 +2,7 @@ version: '3.8'
 
 services:
   soulsync:
+    build: .
     image: boulderbadgedad/soulsync:latest
     container_name: soulsync-webui
     environment:
