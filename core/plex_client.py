@@ -121,25 +121,85 @@ class PlexClient:
             logger.error(f"Failed to connect to Plex server: {e}")
             self.server = None
     
+    def get_available_music_libraries(self) -> List[Dict[str, str]]:
+        """Get list of all available music libraries on the Plex server"""
+        if not self.ensure_connection() or not self.server:
+            return []
+
+        try:
+            music_libraries = []
+            for section in self.server.library.sections():
+                if section.type == 'artist':
+                    music_libraries.append({
+                        'title': section.title,
+                        'key': str(section.key)
+                    })
+
+            logger.debug(f"Found {len(music_libraries)} music libraries")
+            return music_libraries
+        except Exception as e:
+            logger.error(f"Error getting music libraries: {e}")
+            return []
+
+    def set_music_library_by_name(self, library_name: str) -> bool:
+        """Set the active music library by name"""
+        if not self.server:
+            return False
+
+        try:
+            for section in self.server.library.sections():
+                if section.type == 'artist' and section.title == library_name:
+                    self.music_library = section
+                    logger.info(f"Set music library to: {library_name}")
+
+                    # Store preference in database
+                    from database.music_database import MusicDatabase
+                    db = MusicDatabase()
+                    db.set_preference('plex_music_library', library_name)
+
+                    return True
+
+            logger.warning(f"Music library '{library_name}' not found")
+            return False
+        except Exception as e:
+            logger.error(f"Error setting music library: {e}")
+            return False
+
     def _find_music_library(self):
         if not self.server:
             return
-        
+
         try:
             music_sections = []
-            
+
             # Collect all music libraries
             for section in self.server.library.sections():
                 if section.type == 'artist':
                     music_sections.append(section)
-            
+
             if not music_sections:
                 logger.warning("No music library found on Plex server")
                 return
-            
+
+            # Check if user has a saved preference
+            try:
+                from database.music_database import MusicDatabase
+                db = MusicDatabase()
+                preferred_library = db.get_preference('plex_music_library')
+
+                if preferred_library:
+                    # Try to find the preferred library
+                    for section in music_sections:
+                        if section.title == preferred_library:
+                            self.music_library = section
+                            logger.debug(f"Using user-selected music library: {section.title}")
+                            return
+            except Exception as e:
+                logger.debug(f"Could not check library preference: {e}")
+
             # Priority order for common library names
             priority_names = ['Music', 'music', 'Audio', 'audio', 'Songs', 'songs']
-            
+
             # First, try to find a library with a priority name
             for priority_name in priority_names:
                 for section in music_sections:
@@ -147,16 +207,16 @@ class PlexClient:
                         self.music_library = section
                         logger.debug(f"Found preferred music library: {section.title}")
                         return
-            
+
             # If no priority match found, use the first one
             self.music_library = music_sections[0]
             logger.debug(f"Found music library (first available): {self.music_library.title}")
-            
+
             # Log other available libraries if multiple exist
             if len(music_sections) > 1:
                 other_libraries = [s.title for s in music_sections[1:]]
                 logger.info(f"Other music libraries available: {', '.join(other_libraries)}")
-                
+
         except Exception as e:
             logger.error(f"Error finding music library: {e}")
     

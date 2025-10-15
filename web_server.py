@@ -1991,10 +1991,58 @@ def detect_media_server_endpoint():
         add_activity_item("❌", "Auto-Detect Failed", f"No {server_type} server found", "Now")
         return jsonify({"success": False, "error": f"No {server_type} server found on common local addresses."})
 
+@app.route('/api/plex/music-libraries', methods=['GET'])
+def get_plex_music_libraries():
+    """Get list of all available music libraries from Plex"""
+    try:
+        libraries = plex_client.get_available_music_libraries()
+
+        # Get currently selected library
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+        selected_library = db.get_preference('plex_music_library')
+
+        # Get the currently active library name
+        current_library = None
+        if plex_client.music_library:
+            current_library = plex_client.music_library.title
+
+        return jsonify({
+            "success": True,
+            "libraries": libraries,
+            "selected": selected_library,
+            "current": current_library
+        })
+    except Exception as e:
+        logger.error(f"Error getting Plex music libraries: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/plex/select-music-library', methods=['POST'])
+def select_plex_music_library():
+    """Set the active Plex music library"""
+    try:
+        data = request.get_json()
+        library_name = data.get('library_name')
+
+        if not library_name:
+            return jsonify({"success": False, "error": "No library name provided"}), 400
+
+        success = plex_client.set_music_library_by_name(library_name)
+
+        if success:
+            add_activity_item("📚", "Library Selected", f"Plex music library set to: {library_name}", "Now")
+            return jsonify({"success": True, "message": f"Music library set to: {library_name}"})
+        else:
+            return jsonify({"success": False, "error": f"Library '{library_name}' not found"}), 404
+
+    except Exception as e:
+        logger.error(f"Error setting Plex music library: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
 @app.route('/api/detect-soulseek', methods=['POST'])
 def detect_soulseek_endpoint():
     print("Received auto-detect request for slskd")
-    
+
     # Add activity for soulseek auto-detect start
     add_activity_item("🔍", "Auto-Detect Started", "Searching for slskd server", "Now")
     found_url = run_detection('slskd')

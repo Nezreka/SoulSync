@@ -1653,6 +1653,15 @@
                                         <label>Plex Token:</label>
                                         <input type="password" id="plex-token" placeholder="X-Plex-Token">
                                     </div>
+                                    <div class="form-group" id="plex-library-selector-container" style="display: none;">
+                                        <label>Music Library:</label>
+                                        <select id="plex-music-library" onchange="selectPlexLibrary()">
+                                            <option value="">Loading...</option>
+                                        </select>
+                                        <small style="color: #999; font-size: 0.9em; display: block; margin-top: 5px;">
+                                            Select which music library to use (doesn't affect config file)
+                                        </small>
+                                    </div>
                                     <div class="form-actions">
                                         <button class="detect-button" onclick="autoDetectPlex()">Auto-detect</button>
                                         <button class="test-button" onclick="testConnection('plex')">Test</button>
