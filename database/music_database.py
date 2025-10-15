@@ -1875,6 +1875,14 @@ class MusicDatabase:
     def get_last_full_refresh(self) -> Optional[str]:
         """Get the date of the last full refresh"""
         return self.get_metadata('last_full_refresh')
+
+    def set_preference(self, key: str, value: str):
+        """Set a user preference (alias for set_metadata for clarity)"""
+        self.set_metadata(key, value)
+
+    def get_preference(self, key: str) -> Optional[str]:
+        """Get a user preference (alias for get_metadata for clarity)"""
+        return self.get_metadata(key)
     
     # Wishlist management methods
     

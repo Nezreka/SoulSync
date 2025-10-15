@@ -1451,7 +1451,12 @@ async function loadSettingsData() {
         // Set active server and toggle visibility
         const activeServer = settings.active_media_server || 'plex';
         toggleServer(activeServer);
-        
+
+        // Load Plex music libraries if Plex is the active server
+        if (activeServer === 'plex') {
+            loadPlexMusicLibraries();
+        }
+
         // Populate Soulseek settings
         document.getElementById('soulseek-url').value = settings.soulseek?.slskd_url || '';
         document.getElementById('soulseek-api-key').value = settings.soulseek?.api_key || '';
@@ -1506,6 +1511,11 @@ function toggleServer(serverType) {
     document.getElementById('plex-container').classList.toggle('hidden', serverType !== 'plex');
     document.getElementById('jellyfin-container').classList.toggle('hidden', serverType !== 'jellyfin');
     document.getElementById('navidrome-container').classList.toggle('hidden', serverType !== 'navidrome');
+
+    // Load Plex music libraries when switching to Plex
+    if (serverType === 'plex') {
+        loadPlexMusicLibraries();
+    }
 }
 
 async function saveSettings() {
@@ -23278,3 +23288,74 @@ function showGenreTop10ReleasesError(errorMessage) {
 document.addEventListener('DOMContentLoaded', () => {
     initializeGenreBrowserModal();
 });
+
+// ============ Plex Music Library Selection ============
+
+async function loadPlexMusicLibraries() {
+    try {
+        const response = await fetch('/api/plex/music-libraries');
+        const data = await response.json();
+
+        if (data.success && data.libraries && data.libraries.length > 0) {
+            const selector = document.getElementById('plex-music-library');
+            const container = document.getElementById('plex-library-selector-container');
+
+            // Clear existing options
+            selector.innerHTML = '';
+
+            // Add options for each library
+            data.libraries.forEach(library => {
+                const option = document.createElement('option');
+                option.value = library.title;
+                option.textContent = library.title;
+
+                // Mark the currently selected library
+                if (library.title === data.current || library.title === data.selected) {
+                    option.selected = true;
+                }
+
+                selector.appendChild(option);
+            });
+
+            // Show the container
+            container.style.display = 'block';
+        } else {
+            // Hide if no libraries found or not connected
+            document.getElementById('plex-library-selector-container').style.display = 'none';
+        }
+    } catch (error) {
+        console.error('Error loading Plex music libraries:', error);
+        document.getElementById('plex-library-selector-container').style.display = 'none';
+    }
+}
+
+async function selectPlexLibrary() {
+    const selector = document.getElementById('plex-music-library');
+    const selectedLibrary = selector.value;
+
+    if (!selectedLibrary) return;
+
+    try {
+        const response = await fetch('/api/plex/select-music-library', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                library_name: selectedLibrary
+            })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            console.log(`Plex music library switched to: ${selectedLibrary}`);
+        } else {
+            console.error('Failed to switch library:', data.error);
+            alert(`Failed to switch library: ${data.error}`);
+        }
+    } catch (error) {
+        console.error('Error selecting Plex library:', error);
+        alert('Error selecting library. Please try again.');
+    }
+}
