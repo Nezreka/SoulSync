@@ -8653,8 +8653,8 @@ async function loadDashboardData() {
     await fetchAndUpdateServiceStatus();
     await fetchAndUpdateSystemStats();
     
-    // Start periodic refresh of service status and system stats (every 10 seconds)
-    setInterval(fetchAndUpdateServiceStatus, 10000);
+    // Service status is already polled globally (line 311)
+    // System stats polling kept here (dashboard-specific)
     setInterval(fetchAndUpdateSystemStats, 10000);
     
     // Initial load of activity feed

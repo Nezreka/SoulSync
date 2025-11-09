@@ -1598,51 +1598,74 @@ def index():
 
 # --- API Endpoints ---
 
+# Status check caching to reduce unnecessary API calls
+_status_cache = {
+    'spotify': {'connected': False, 'response_time': 0},
+    'media_server': {'connected': False, 'response_time': 0, 'type': None},
+    'soulseek': {'connected': False, 'response_time': 0}
+}
+_status_cache_timestamps = {
+    'spotify': 0,
+    'media_server': 0,
+    'soulseek': 0
+}
+STATUS_CACHE_TTL = 120  # Cache for 2 minutes (reduces API calls while staying fresh)
+
 @app.route('/status')
 def get_status():
     if not all([spotify_client, plex_client, jellyfin_client, soulseek_client, config_manager]):
         return jsonify({"error": "Core services not initialized."}), 500
     try:
         import time
-        
+
+        current_time = time.time()
         active_server = config_manager.get_active_media_server()
-        
-        # Test Spotify with response time
-        spotify_start = time.time()
-        spotify_status = spotify_client.is_authenticated()
-        spotify_response_time = (time.time() - spotify_start) * 1000  # Convert to ms
-        
-        # Test media server with response time (use fresh client with Docker URL resolution)
-        media_server_start = time.time()
-        media_server_status = False
-        if active_server == "plex":
-            # Create fresh client to ensure Docker URL resolution
-            temp_plex_client = PlexClient()
-            media_server_status = temp_plex_client.is_connected()
-        elif active_server == "jellyfin":
-            # Create fresh client to ensure Docker URL resolution
-            temp_jellyfin_client = JellyfinClient()
-            media_server_status = temp_jellyfin_client.is_connected()
-        elif active_server == "navidrome":
-            # Test Navidrome connection using existing client instance (non-destructive)
-            media_server_status = navidrome_client.is_connected()
-        media_server_response_time = (time.time() - media_server_start) * 1000
-        
-        # Test Soulseek (just check if configured, no network test)
+
+        # Test Spotify - with caching to avoid excessive API calls
+        if current_time - _status_cache_timestamps['spotify'] > STATUS_CACHE_TTL:
+            spotify_start = time.time()
+            # Actually validate authentication (makes API call, but cached for 2 min)
+            spotify_status = spotify_client.is_authenticated()
+            spotify_response_time = (time.time() - spotify_start) * 1000
+            _status_cache['spotify'] = {
+                'connected': spotify_status,
+                'response_time': round(spotify_response_time, 1)
+            }
+            _status_cache_timestamps['spotify'] = current_time
+        # else: use cached value
+
+        # Test media server - use EXISTING instances (they have internal caching)
+        # Media server clients already cache connection checks internally
+        if current_time - _status_cache_timestamps['media_server'] > STATUS_CACHE_TTL:
+            media_server_start = time.time()
+            media_server_status = False
+            if active_server == "plex":
+                # Use existing instance - has 30s internal connection cache
+                media_server_status = plex_client.is_connected()
+            elif active_server == "jellyfin":
+                # Use existing instance - has internal connection caching
+                media_server_status = jellyfin_client.is_connected()
+            elif active_server == "navidrome":
+                # Use existing instance
+                media_server_status = navidrome_client.is_connected()
+            media_server_response_time = (time.time() - media_server_start) * 1000
+            _status_cache['media_server'] = {
+                'connected': media_server_status,
+                'response_time': round(media_server_response_time, 1),
+                'type': active_server
+            }
+            _status_cache_timestamps['media_server'] = current_time
+        # else: use cached value
+
+        # Test Soulseek - just check if configured (instant, no network test)
+        # This is so fast we don't need to cache it
         soulseek_start = time.time()
         soulseek_status = soulseek_client.is_configured()
         soulseek_response_time = (time.time() - soulseek_start) * 1000
 
         status_data = {
-            'spotify': {
-                'connected': spotify_status,
-                'response_time': round(spotify_response_time, 1)
-            },
-            'media_server': {
-                'connected': media_server_status,
-                'response_time': round(media_server_response_time, 1),
-                'type': active_server
-            },
+            'spotify': _status_cache['spotify'],
+            'media_server': _status_cache['media_server'],
             'soulseek': {
                 'connected': soulseek_status,
                 'response_time': round(soulseek_response_time, 1)
