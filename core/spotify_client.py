@@ -212,6 +212,7 @@ class SpotifyClient:
                 return False
         return self.user_id is not None
     
+    @rate_limited
     def get_user_playlists(self) -> List[Playlist]:
         if not self.is_authenticated():
             logger.error("Not authenticated with Spotify")
@@ -243,6 +244,7 @@ class SpotifyClient:
             logger.error(f"Error fetching user playlists: {e}")
             return []
     
+    @rate_limited
     def get_user_playlists_metadata_only(self) -> List[Playlist]:
         """Get playlists without fetching all track details for faster loading"""
         if not self.is_authenticated():
@@ -291,6 +293,7 @@ class SpotifyClient:
             logger.error(f"Error fetching user playlists metadata: {e}")
             return []
     
+    @rate_limited
     def _get_playlist_tracks(self, playlist_id: str) -> List[Track]:
         if not self.is_authenticated():
             return []
@@ -314,6 +317,7 @@ class SpotifyClient:
             logger.error(f"Error fetching playlist tracks: {e}")
             return []
     
+    @rate_limited
     def get_playlist_by_id(self, playlist_id: str) -> Optional[Playlist]:
         if not self.is_authenticated():
             return None
@@ -424,6 +428,7 @@ class SpotifyClient:
             logger.error(f"Error fetching track details: {e}")
             return None
     
+    @rate_limited
     def get_track_features(self, track_id: str) -> Optional[Dict[str, Any]]:
         if not self.is_authenticated():
             return None
@@ -489,6 +494,7 @@ class SpotifyClient:
             logger.error(f"Error fetching artist albums: {e}")
             return []
 
+    @rate_limited
     def get_user_info(self) -> Optional[Dict[str, Any]]:
         if not self.is_authenticated():
             return None
