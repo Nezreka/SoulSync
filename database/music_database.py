@@ -1883,7 +1883,167 @@ class MusicDatabase:
     def get_preference(self, key: str) -> Optional[str]:
         """Get a user preference (alias for get_metadata for clarity)"""
         return self.get_metadata(key)
-    
+
+    # Quality profile management methods
+
+    def get_quality_profile(self) -> dict:
+        """Get the quality profile configuration, returns default if not set"""
+        import json
+
+        profile_json = self.get_preference('quality_profile')
+
+        if profile_json:
+            try:
+                return json.loads(profile_json)
+            except json.JSONDecodeError:
+                logger.error("Failed to parse quality profile JSON, returning default")
+
+        # Return smart defaults (balanced preset)
+        return {
+            "version": 1,
+            "preset": "balanced",
+            "qualities": {
+                "flac": {
+                    "enabled": True,
+                    "min_mb": 0,
+                    "max_mb": 150,
+                    "priority": 1
+                },
+                "mp3_320": {
+                    "enabled": True,
+                    "min_mb": 0,
+                    "max_mb": 20,
+                    "priority": 2
+                },
+                "mp3_256": {
+                    "enabled": True,
+                    "min_mb": 0,
+                    "max_mb": 15,
+                    "priority": 3
+                },
+                "mp3_192": {
+                    "enabled": False,
+                    "min_mb": 0,
+                    "max_mb": 12,
+                    "priority": 4
+                }
+            },
+            "fallback_enabled": True
+        }
+
+    def set_quality_profile(self, profile: dict) -> bool:
+        """Save quality profile configuration"""
+        import json
+
+        try:
+            profile_json = json.dumps(profile)
+            self.set_preference('quality_profile', profile_json)
+            logger.info(f"Quality profile saved: preset={profile.get('preset', 'custom')}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to save quality profile: {e}")
+            return False
+
+    def get_quality_preset(self, preset_name: str) -> dict:
+        """Get a predefined quality preset"""
+        presets = {
+            "audiophile": {
+                "version": 1,
+                "preset": "audiophile",
+                "qualities": {
+                    "flac": {
+                        "enabled": True,
+                        "min_mb": 0,
+                        "max_mb": 200,
+                        "priority": 1
+                    },
+                    "mp3_320": {
+                        "enabled": False,
+                        "min_mb": 0,
+                        "max_mb": 20,
+                        "priority": 2
+                    },
+                    "mp3_256": {
+                        "enabled": False,
+                        "min_mb": 0,
+                        "max_mb": 15,
+                        "priority": 3
+                    },
+                    "mp3_192": {
+                        "enabled": False,
+                        "min_mb": 0,
+                        "max_mb": 12,
+                        "priority": 4
+                    }
+                },
+                "fallback_enabled": False
+            },
+            "balanced": {
+                "version": 1,
+                "preset": "balanced",
+                "qualities": {
+                    "flac": {
+                        "enabled": True,
+                        "min_mb": 0,
+                        "max_mb": 150,
+                        "priority": 1
+                    },
+                    "mp3_320": {
+                        "enabled": True,
+                        "min_mb": 0,
+                        "max_mb": 20,
+                        "priority": 2
+                    },
+                    "mp3_256": {
+                        "enabled": True,
+                        "min_mb": 0,
+                        "max_mb": 15,
+                        "priority": 3
+                    },
+                    "mp3_192": {
+                        "enabled": False,
+                        "min_mb": 0,
+                        "max_mb": 12,
+                        "priority": 4
+                    }
+                },
+                "fallback_enabled": True
+            },
+            "space_saver": {
+                "version": 1,
+                "preset": "space_saver",
+                "qualities": {
+                    "flac": {
+                        "enabled": False,
+                        "min_mb": 0,
+                        "max_mb": 150,
+                        "priority": 4
+                    },
+                    "mp3_320": {
+                        "enabled": True,
+                        "min_mb": 0,
+                        "max_mb": 15,
+                        "priority": 1
+                    },
+                    "mp3_256": {
+                        "enabled": True,
+                        "min_mb": 0,
+                        "max_mb": 12,
+                        "priority": 2
+                    },
+                    "mp3_192": {
+                        "enabled": True,
+                        "min_mb": 0,
+                        "max_mb": 10,
+                        "priority": 3
+                    }
+                },
+                "fallback_enabled": True
+            }
+        }
+
+        return presets.get(preset_name, presets["balanced"])
+
     # Wishlist management methods
     
     def add_to_wishlist(self, spotify_track_data: Dict[str, Any], failure_reason: str = "Download failed", 

@@ -2062,6 +2062,98 @@ def select_plex_music_library():
         logger.error(f"Error setting Plex music library: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+# ===============================
+# == QUALITY PROFILE API       ==
+# ===============================
+
+@app.route('/api/quality-profile', methods=['GET'])
+def get_quality_profile():
+    """Get current quality profile configuration"""
+    try:
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+        profile = db.get_quality_profile()
+
+        return jsonify({
+            "success": True,
+            "profile": profile
+        })
+    except Exception as e:
+        logger.error(f"Error getting quality profile: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/quality-profile', methods=['POST'])
+def save_quality_profile():
+    """Save quality profile configuration"""
+    try:
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "error": "No profile data provided"}), 400
+
+        success = db.set_quality_profile(data)
+
+        if success:
+            add_activity_item("🎵", "Quality Profile Updated", f"Preset: {data.get('preset', 'custom')}", "Now")
+            return jsonify({"success": True, "message": "Quality profile saved successfully"})
+        else:
+            return jsonify({"success": False, "error": "Failed to save quality profile"}), 500
+
+    except Exception as e:
+        logger.error(f"Error saving quality profile: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/quality-profile/presets', methods=['GET'])
+def get_quality_presets():
+    """Get all available quality presets"""
+    try:
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+
+        presets = {
+            "audiophile": db.get_quality_preset("audiophile"),
+            "balanced": db.get_quality_preset("balanced"),
+            "space_saver": db.get_quality_preset("space_saver")
+        }
+
+        return jsonify({
+            "success": True,
+            "presets": presets
+        })
+    except Exception as e:
+        logger.error(f"Error getting quality presets: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/quality-profile/preset/<preset_name>', methods=['POST'])
+def apply_quality_preset(preset_name):
+    """Apply a predefined quality preset"""
+    try:
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+
+        preset = db.get_quality_preset(preset_name)
+        success = db.set_quality_profile(preset)
+
+        if success:
+            add_activity_item("🎵", "Quality Preset Applied", f"Applied '{preset_name}' preset", "Now")
+            return jsonify({
+                "success": True,
+                "message": f"Applied '{preset_name}' preset",
+                "profile": preset
+            })
+        else:
+            return jsonify({"success": False, "error": "Failed to apply preset"}), 500
+
+    except Exception as e:
+        logger.error(f"Error applying quality preset: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+# ===============================
+# == END QUALITY PROFILE API   ==
+# ===============================
+
 @app.route('/api/detect-soulseek', methods=['POST'])
 def detect_soulseek_endpoint():
     print("Received auto-detect request for slskd")
@@ -7790,28 +7882,29 @@ def stop_database_update():
 
 def _filter_candidates_by_quality_preference(candidates):
     """
-    Filter candidates based on user's quality preference.
-    Returns candidates of the preferred quality, sorted by size (largest first for best quality).
+    Filter candidates based on user's quality profile with file size constraints.
+    Uses priority waterfall logic: tries highest priority quality first, falls back to lower priorities.
+    Returns candidates matching quality profile constraints, sorted by confidence and size.
     """
-    from config.settings import config_manager
+    from database.music_database import MusicDatabase
 
-    user_preference = config_manager.get_quality_preference()  # flac, mp3_320, mp3_256, mp3_192, any
+    # Get quality profile from database
+    db = MusicDatabase()
+    profile = db.get_quality_profile()
 
-    # If user wants 'any' quality, return all candidates (already sorted by confidence+size)
-    if user_preference == 'any':
-        return candidates
+    print(f"🎵 [Quality Filter] Using profile preset: '{profile.get('preset', 'custom')}', filtering {len(candidates)} candidates")
 
-    print(f"🎵 [Quality Filter] User preference: '{user_preference}', filtering {len(candidates)} candidates")
-
-    # Categorize candidates by quality
+    # Categorize candidates by quality with file size constraints
     quality_buckets = {
         'flac': [],
         'mp3_320': [],
         'mp3_256': [],
         'mp3_192': [],
-        'mp3_low': [],
         'other': []
     }
+
+    # Track all candidates that pass size checks (for fallback)
+    size_filtered_all = []
 
     for candidate in candidates:
         if not candidate.quality:
@@ -7820,38 +7913,94 @@ def _filter_candidates_by_quality_preference(candidates):
 
         track_format = candidate.quality.lower()
         track_bitrate = candidate.bitrate or 0
+        file_size_mb = candidate.size / (1024 * 1024)  # Convert bytes to MB
 
+        # Categorize and apply file size constraints
         if track_format == 'flac':
-            quality_buckets['flac'].append(candidate)
-        elif track_format == 'mp3':
-            if track_bitrate >= 320:
-                quality_buckets['mp3_320'].append(candidate)
-            elif track_bitrate >= 256:
-                quality_buckets['mp3_256'].append(candidate)
-            elif track_bitrate >= 192:
-                quality_buckets['mp3_192'].append(candidate)
+            quality_config = profile['qualities'].get('flac', {})
+            min_mb = quality_config.get('min_mb', 0)
+            max_mb = quality_config.get('max_mb', 999)
+
+            # Check if within size range
+            if min_mb <= file_size_mb <= max_mb:
+                # Add to bucket if enabled
+                if quality_config.get('enabled', False):
+                    quality_buckets['flac'].append(candidate)
+                # Always track for fallback
+                size_filtered_all.append(candidate)
             else:
-                quality_buckets['mp3_low'].append(candidate)
+                print(f"🎵 [Quality Filter] FLAC file rejected: {file_size_mb:.1f}MB outside range {min_mb}-{max_mb}MB")
+
+        elif track_format == 'mp3':
+            # Determine MP3 quality tier based on bitrate
+            if track_bitrate >= 320:
+                quality_key = 'mp3_320'
+            elif track_bitrate >= 256:
+                quality_key = 'mp3_256'
+            elif track_bitrate >= 192:
+                quality_key = 'mp3_192'
+            else:
+                quality_buckets['other'].append(candidate)
+                continue
+
+            quality_config = profile['qualities'].get(quality_key, {})
+            min_mb = quality_config.get('min_mb', 0)
+            max_mb = quality_config.get('max_mb', 999)
+
+            # Check if within size range
+            if min_mb <= file_size_mb <= max_mb:
+                # Add to bucket if enabled
+                if quality_config.get('enabled', False):
+                    quality_buckets[quality_key].append(candidate)
+                # Always track for fallback
+                size_filtered_all.append(candidate)
+            else:
+                print(f"🎵 [Quality Filter] {quality_key.upper()} file rejected: {file_size_mb:.1f}MB outside range {min_mb}-{max_mb}MB")
         else:
             quality_buckets['other'].append(candidate)
 
-    # Sort each bucket by size (largest first) to get best quality within each category
+    # Sort each bucket by quality score and size
     for bucket in quality_buckets.values():
-        bucket.sort(key=lambda x: x.size, reverse=True)
-
-    # Return candidates matching user preference
-    preferred_candidates = quality_buckets.get(user_preference, [])
+        bucket.sort(key=lambda x: (x.quality_score, x.size), reverse=True)
 
     # Debug logging
     for quality, bucket in quality_buckets.items():
         if bucket:
-            print(f"🎵 [Quality Filter] Found {len(bucket)} '{quality}' candidates")
+            print(f"🎵 [Quality Filter] Found {len(bucket)} '{quality}' candidates (after size filtering)")
 
-    if preferred_candidates:
-        print(f"🎯 [Quality Filter] Returning {len(preferred_candidates)} '{user_preference}' candidates")
-        return preferred_candidates
+    # Waterfall priority logic: try qualities in priority order
+    # Build priority list from enabled qualities
+    quality_priorities = []
+    for quality_name, quality_config in profile['qualities'].items():
+        if quality_config.get('enabled', False):
+            priority = quality_config.get('priority', 999)
+            quality_priorities.append((priority, quality_name))
+
+    # Sort by priority (lower number = higher priority)
+    quality_priorities.sort()
+
+    # Try each quality in priority order
+    for priority, quality_name in quality_priorities:
+        candidates_for_quality = quality_buckets.get(quality_name, [])
+        if candidates_for_quality:
+            print(f"🎯 [Quality Filter] Returning {len(candidates_for_quality)} '{quality_name}' candidates (priority {priority})")
+            return candidates_for_quality
+
+    # If no enabled qualities matched, check if fallback is enabled
+    if profile.get('fallback_enabled', True):
+        print(f"⚠️ [Quality Filter] No enabled qualities matched, falling back to size-filtered candidates")
+        # Return candidates that passed size checks (even if quality disabled)
+        # This respects file size constraints while allowing any quality
+        if size_filtered_all:
+            size_filtered_all.sort(key=lambda x: (x.quality_score, x.size), reverse=True)
+            print(f"🎯 [Quality Filter] Returning {len(size_filtered_all)} fallback candidates (size-filtered, any quality)")
+            return size_filtered_all
+        else:
+            # All candidates failed size checks - respect user's constraints and fail
+            print(f"❌ [Quality Filter] All candidates failed size checks, returning empty (respecting size constraints)")
+            return []
     else:
-        print(f"⚠️ [Quality Filter] No '{user_preference}' candidates found, will fall back to all")
+        print(f"❌ [Quality Filter] No enabled qualities matched and fallback is disabled, returning empty")
         return []
 
 def get_valid_candidates(results, spotify_track, query):
