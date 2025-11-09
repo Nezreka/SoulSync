@@ -1001,9 +1001,9 @@ body {
     font-weight: 500;
 }
 
-/* Settings Page Styling - Two Column Layout */
+/* Settings Page Styling - Three Column Layout */
 .settings-content {
-    max-width: 100%;
+    width: 100%;
     display: flex;
     flex-direction: column;
 }
@@ -1014,8 +1014,9 @@ body {
     margin-bottom: 32px;
 }
 
-.settings-left-column, .settings-right-column {
+.settings-left-column, .settings-right-column, .settings-third-column {
     flex: 1;
+    min-width: 380px;
     display: flex;
     flex-direction: column;
     gap: 18px;

@@ -1541,6 +1541,7 @@
             <div class="page" id="settings-page">
                 <div class="page-header">
                     <h2>Settings</h2>
+                    <button class="save-button" onclick="document.getElementById('save-settings').click()">💾 Save Settings</button>
                 </div>
                 <div class="settings-content">
                     <!-- Two Column Layout -->
@@ -1883,7 +1884,10 @@
                                     Set MIN to 0 to accept all file sizes (recommended for most users).
                                 </div>
                             </div>
+                        </div>
 
+                        <!-- Third Column - Database, Metadata, Playlist Sync, Logging -->
+                        <div class="settings-third-column">
                             <!-- Database Settings -->
                             <div class="settings-group">
                                 <h3>Database Settings</h3>
