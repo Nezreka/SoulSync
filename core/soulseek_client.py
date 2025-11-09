@@ -628,11 +628,17 @@ class SoulseekClient:
             if not response:
                 logger.error("No response from search POST request")
                 return [], []
-            
-            search_id = response.get('id')
+
+            # Handle both dict and list responses from slskd API
+            search_id = None
+            if isinstance(response, dict):
+                search_id = response.get('id')
+            elif isinstance(response, list) and len(response) > 0:
+                search_id = response[0].get('id') if isinstance(response[0], dict) else None
+
             if not search_id:
                 logger.error("No search ID returned from POST request")
-                logger.debug(f"Full response: {response}")
+                logger.debug(f"Full response (type: {type(response)}): {response}")
                 return [], []
             
             logger.info(f"Search initiated with ID: {search_id}")
@@ -844,17 +850,28 @@ class SoulseekClient:
             response = await self._make_request('GET', f'transfers/downloads/{download_id}')
             if not response:
                 return None
-            
+
+            # Handle both dict and list responses (slskd API can vary)
+            download_data = None
+            if isinstance(response, dict):
+                download_data = response
+            elif isinstance(response, list) and len(response) > 0 and isinstance(response[0], dict):
+                download_data = response[0]
+
+            if not download_data:
+                logger.error(f"Invalid response format for download status (type: {type(response)})")
+                return None
+
             return DownloadStatus(
-                id=response.get('id', ''),
-                filename=response.get('filename', ''),
-                username=response.get('username', ''),
-                state=response.get('state', ''),
-                progress=response.get('percentComplete', 0.0),
-                size=response.get('size', 0),
-                transferred=response.get('bytesTransferred', 0),
-                speed=response.get('averageSpeed', 0),
-                time_remaining=response.get('timeRemaining')
+                id=download_data.get('id', ''),
+                filename=download_data.get('filename', ''),
+                username=download_data.get('username', ''),
+                state=download_data.get('state', ''),
+                progress=download_data.get('percentComplete', 0.0),
+                size=download_data.get('size', 0),
+                transferred=download_data.get('bytesTransferred', 0),
+                speed=download_data.get('averageSpeed', 0),
+                time_remaining=download_data.get('timeRemaining')
             )
             
         except Exception as e:
