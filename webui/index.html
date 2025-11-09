@@ -1744,7 +1744,146 @@
                                     </div>
                                 </div>
                             </div>
-                            
+
+                            <!-- Quality Profile Settings -->
+                            <div class="settings-group">
+                                <h3>🎵 Quality Profile</h3>
+
+                                <!-- Presets -->
+                                <div class="quality-presets">
+                                    <label>Quick Presets:</label>
+                                    <div class="preset-buttons">
+                                        <button class="preset-button" onclick="applyQualityPreset('audiophile')" title="FLAC only, strict size constraints">
+                                            🎧 Audiophile
+                                        </button>
+                                        <button class="preset-button active" onclick="applyQualityPreset('balanced')" title="FLAC preferred, MP3 fallback">
+                                            ⚖️ Balanced
+                                        </button>
+                                        <button class="preset-button" onclick="applyQualityPreset('space_saver')" title="MP3 preferred, smaller sizes">
+                                            💾 Space Saver
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <!-- FLAC Quality -->
+                                <div class="quality-tier">
+                                    <div class="quality-tier-header">
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" id="quality-flac-enabled" checked onchange="toggleQuality('flac')">
+                                            <span class="quality-tier-name">FLAC (Lossless)</span>
+                                        </label>
+                                        <span class="quality-tier-priority" id="priority-flac">Priority: 1</span>
+                                    </div>
+                                    <div class="quality-tier-sliders" id="sliders-flac">
+                                        <div class="slider-group">
+                                            <label>File Size Range:</label>
+                                            <div class="dual-slider-container">
+                                                <input type="range" class="range-slider range-slider-min" id="flac-min" min="0" max="200" value="0" step="5" oninput="updateQualityRange('flac')">
+                                                <input type="range" class="range-slider range-slider-max" id="flac-max" min="0" max="200" value="150" step="5" oninput="updateQualityRange('flac')">
+                                                <div class="range-slider-track"></div>
+                                            </div>
+                                            <div class="slider-values">
+                                                <span id="flac-min-value">0 MB</span>
+                                                <span>-</span>
+                                                <span id="flac-max-value">150 MB</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- MP3 320 Quality -->
+                                <div class="quality-tier">
+                                    <div class="quality-tier-header">
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" id="quality-mp3_320-enabled" checked onchange="toggleQuality('mp3_320')">
+                                            <span class="quality-tier-name">MP3 320 kbps</span>
+                                        </label>
+                                        <span class="quality-tier-priority" id="priority-mp3_320">Priority: 2</span>
+                                    </div>
+                                    <div class="quality-tier-sliders" id="sliders-mp3_320">
+                                        <div class="slider-group">
+                                            <label>File Size Range:</label>
+                                            <div class="dual-slider-container">
+                                                <input type="range" class="range-slider range-slider-min" id="mp3_320-min" min="0" max="50" value="0" step="1" oninput="updateQualityRange('mp3_320')">
+                                                <input type="range" class="range-slider range-slider-max" id="mp3_320-max" min="0" max="50" value="20" step="1" oninput="updateQualityRange('mp3_320')">
+                                                <div class="range-slider-track"></div>
+                                            </div>
+                                            <div class="slider-values">
+                                                <span id="mp3_320-min-value">0 MB</span>
+                                                <span>-</span>
+                                                <span id="mp3_320-max-value">20 MB</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- MP3 256 Quality -->
+                                <div class="quality-tier">
+                                    <div class="quality-tier-header">
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" id="quality-mp3_256-enabled" checked onchange="toggleQuality('mp3_256')">
+                                            <span class="quality-tier-name">MP3 256 kbps</span>
+                                        </label>
+                                        <span class="quality-tier-priority" id="priority-mp3_256">Priority: 3</span>
+                                    </div>
+                                    <div class="quality-tier-sliders" id="sliders-mp3_256">
+                                        <div class="slider-group">
+                                            <label>File Size Range:</label>
+                                            <div class="dual-slider-container">
+                                                <input type="range" class="range-slider range-slider-min" id="mp3_256-min" min="0" max="40" value="0" step="1" oninput="updateQualityRange('mp3_256')">
+                                                <input type="range" class="range-slider range-slider-max" id="mp3_256-max" min="0" max="40" value="15" step="1" oninput="updateQualityRange('mp3_256')">
+                                                <div class="range-slider-track"></div>
+                                            </div>
+                                            <div class="slider-values">
+                                                <span id="mp3_256-min-value">0 MB</span>
+                                                <span>-</span>
+                                                <span id="mp3_256-max-value">15 MB</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- MP3 192 Quality -->
+                                <div class="quality-tier">
+                                    <div class="quality-tier-header">
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" id="quality-mp3_192-enabled" onchange="toggleQuality('mp3_192')">
+                                            <span class="quality-tier-name">MP3 192 kbps</span>
+                                        </label>
+                                        <span class="quality-tier-priority" id="priority-mp3_192">Priority: 4</span>
+                                    </div>
+                                    <div class="quality-tier-sliders disabled" id="sliders-mp3_192">
+                                        <div class="slider-group">
+                                            <label>File Size Range:</label>
+                                            <div class="dual-slider-container">
+                                                <input type="range" class="range-slider range-slider-min" id="mp3_192-min" min="0" max="30" value="0" step="1" oninput="updateQualityRange('mp3_192')">
+                                                <input type="range" class="range-slider range-slider-max" id="mp3_192-max" min="0" max="30" value="12" step="1" oninput="updateQualityRange('mp3_192')">
+                                                <div class="range-slider-track"></div>
+                                            </div>
+                                            <div class="slider-values">
+                                                <span id="mp3_192-min-value">0 MB</span>
+                                                <span>-</span>
+                                                <span id="mp3_192-max-value">12 MB</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Fallback Option -->
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="quality-fallback-enabled" checked>
+                                        Allow fallback to any quality if preferred qualities unavailable
+                                    </label>
+                                </div>
+
+                                <div class="help-text">
+                                    <strong>How it works:</strong> Downloads try each enabled quality in priority order (1 = highest).
+                                    File size constraints filter out outliers - MAX limits catch fake files (500MB "FLACs"), MIN limits (optional) can enforce minimum quality.
+                                    Set MIN to 0 to accept all file sizes (recommended for most users).
+                                </div>
+                            </div>
+
                             <!-- Database Settings -->
                             <div class="settings-group">
                                 <h3>Database Settings</h3>

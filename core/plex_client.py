@@ -236,6 +236,12 @@ class PlexClient:
             if not self._is_connecting:
                 self.ensure_connection()
 
+        # For status checks, only verify server connection, not music library
+        # Music library might be None if user hasn't selected one yet
+        return self.server is not None
+
+    def is_fully_configured(self) -> bool:
+        """Check if both server is connected AND music library is selected."""
         return self.server is not None and self.music_library is not None
     
     def get_all_playlists(self) -> List[PlexPlaylistInfo]:

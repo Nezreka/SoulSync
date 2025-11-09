@@ -442,6 +442,7 @@ async function loadPageData(pageId) {
             case 'settings':
                 initializeSettings();
                 await loadSettingsData();
+                await loadQualityProfile();
                 break;
         }
     } catch (error) {
@@ -1518,6 +1519,218 @@ function toggleServer(serverType) {
     }
 }
 
+// ===============================
+// QUALITY PROFILE FUNCTIONS
+// ===============================
+
+let currentQualityProfile = null;
+
+async function loadQualityProfile() {
+    try {
+        const response = await fetch('/api/quality-profile');
+        const data = await response.json();
+
+        if (data.success) {
+            currentQualityProfile = data.profile;
+            populateQualityProfileUI(currentQualityProfile);
+        }
+    } catch (error) {
+        console.error('Error loading quality profile:', error);
+    }
+}
+
+function populateQualityProfileUI(profile) {
+    // Update preset buttons
+    document.querySelectorAll('.preset-button').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    const activePresetBtn = document.querySelector(`.preset-button[onclick*="${profile.preset}"]`);
+    if (activePresetBtn) {
+        activePresetBtn.classList.add('active');
+    }
+
+    // Populate each quality tier
+    const qualities = ['flac', 'mp3_320', 'mp3_256', 'mp3_192'];
+    qualities.forEach(quality => {
+        const config = profile.qualities[quality];
+        if (config) {
+            // Set enabled checkbox
+            const enabledCheckbox = document.getElementById(`quality-${quality}-enabled`);
+            if (enabledCheckbox) {
+                enabledCheckbox.checked = config.enabled;
+            }
+
+            // Set min/max sliders
+            const minSlider = document.getElementById(`${quality}-min`);
+            const maxSlider = document.getElementById(`${quality}-max`);
+            if (minSlider && maxSlider) {
+                minSlider.value = config.min_mb;
+                maxSlider.value = config.max_mb;
+                updateQualityRange(quality);
+            }
+
+            // Set priority display
+            const prioritySpan = document.getElementById(`priority-${quality}`);
+            if (prioritySpan) {
+                prioritySpan.textContent = `Priority: ${config.priority}`;
+            }
+
+            // Toggle sliders visibility
+            const sliders = document.getElementById(`sliders-${quality}`);
+            if (sliders) {
+                if (config.enabled) {
+                    sliders.classList.remove('disabled');
+                } else {
+                    sliders.classList.add('disabled');
+                }
+            }
+        }
+    });
+
+    // Set fallback checkbox
+    const fallbackCheckbox = document.getElementById('quality-fallback-enabled');
+    if (fallbackCheckbox) {
+        fallbackCheckbox.checked = profile.fallback_enabled;
+    }
+}
+
+function updateQualityRange(quality) {
+    const minSlider = document.getElementById(`${quality}-min`);
+    const maxSlider = document.getElementById(`${quality}-max`);
+    const minValue = document.getElementById(`${quality}-min-value`);
+    const maxValue = document.getElementById(`${quality}-max-value`);
+
+    if (!minSlider || !maxSlider || !minValue || !maxValue) return;
+
+    let min = parseInt(minSlider.value);
+    let max = parseInt(maxSlider.value);
+
+    // Ensure min doesn't exceed max
+    if (min > max) {
+        min = max;
+        minSlider.value = min;
+    }
+
+    // Ensure max doesn't go below min
+    if (max < min) {
+        max = min;
+        maxSlider.value = max;
+    }
+
+    minValue.textContent = `${min} MB`;
+    maxValue.textContent = `${max} MB`;
+}
+
+function toggleQuality(quality) {
+    const checkbox = document.getElementById(`quality-${quality}-enabled`);
+    const sliders = document.getElementById(`sliders-${quality}`);
+
+    if (checkbox && sliders) {
+        if (checkbox.checked) {
+            sliders.classList.remove('disabled');
+        } else {
+            sliders.classList.add('disabled');
+        }
+    }
+
+    // Mark preset as custom when manually changing
+    if (currentQualityProfile) {
+        currentQualityProfile.preset = 'custom';
+        document.querySelectorAll('.preset-button').forEach(btn => {
+            btn.classList.remove('active');
+        });
+    }
+}
+
+async function applyQualityPreset(presetName) {
+    try {
+        showLoadingOverlay(`Applying ${presetName} preset...`);
+
+        const response = await fetch(`/api/quality-profile/preset/${presetName}`, {
+            method: 'POST'
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            currentQualityProfile = data.profile;
+            populateQualityProfileUI(currentQualityProfile);
+            showToast(`Applied '${presetName}' preset`, 'success');
+        } else {
+            showToast(`Failed to apply preset: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error applying quality preset:', error);
+        showToast('Failed to apply preset', 'error');
+    } finally {
+        hideLoadingOverlay();
+    }
+}
+
+function collectQualityProfileFromUI() {
+    const profile = {
+        version: 1,
+        preset: 'custom', // Will be overridden if a preset is active
+        qualities: {},
+        fallback_enabled: document.getElementById('quality-fallback-enabled')?.checked || true
+    };
+
+    const qualities = ['flac', 'mp3_320', 'mp3_256', 'mp3_192'];
+    let priority = 1;
+
+    qualities.forEach((quality, index) => {
+        const enabled = document.getElementById(`quality-${quality}-enabled`)?.checked || false;
+        const minSlider = document.getElementById(`${quality}-min`);
+        const maxSlider = document.getElementById(`${quality}-max`);
+
+        profile.qualities[quality] = {
+            enabled: enabled,
+            min_mb: parseInt(minSlider?.value || 0),
+            max_mb: parseInt(maxSlider?.value || 999),
+            priority: index + 1 // 1-4 based on order
+        };
+    });
+
+    // Check if current profile matches a preset
+    if (currentQualityProfile && currentQualityProfile.preset !== 'custom') {
+        profile.preset = currentQualityProfile.preset;
+    }
+
+    return profile;
+}
+
+async function saveQualityProfile() {
+    try {
+        const profile = collectQualityProfileFromUI();
+
+        const response = await fetch('/api/quality-profile', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(profile)
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            currentQualityProfile = profile;
+            console.log('Quality profile saved successfully');
+            return true;
+        } else {
+            console.error('Failed to save quality profile:', data.error);
+            return false;
+        }
+    } catch (error) {
+        console.error('Error saving quality profile:', error);
+        return false;
+    }
+}
+
+// ===============================
+// END QUALITY PROFILE FUNCTIONS
+// ===============================
+
 async function saveSettings() {
     // Determine active server from toggle buttons
     let activeServer = 'plex';
@@ -1575,18 +1788,25 @@ async function saveSettings() {
     
     try {
         showLoadingOverlay('Saving settings...');
-        
+
+        // Save main settings
         const response = await fetch(API.settings, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(settings)
         });
-        
+
         const result = await response.json();
-        
-        if (result.success) {
+
+        // Save quality profile
+        const qualityProfileSaved = await saveQualityProfile();
+
+        if (result.success && qualityProfileSaved) {
             showToast('Settings saved successfully', 'success');
             // Trigger immediate status update
+            setTimeout(updateServiceStatus, 1000);
+        } else if (result.success && !qualityProfileSaved) {
+            showToast('Settings saved, but quality profile failed to save', 'warning');
             setTimeout(updateServiceStatus, 1000);
         } else {
             showToast(`Failed to save settings: ${result.error}`, 'error');
