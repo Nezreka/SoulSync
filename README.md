@@ -156,21 +156,6 @@ If accessing SoulSync from a different machine than where it's running:
 
 **Note**: Spotify only allows `127.0.0.1` as a local redirect URI, hence this workaround. You may need to repeat this process after rebuilding containers.
 
-## 🎯 Core Features
-
-**Search & Download**: Manual track search with preview streaming
-**Playlist Sync**: Spotify/Tidal/YouTube playlist analysis and batch downloads
-**Artist Explorer**: Complete discography browsing with missing indicators and real-time similar artist discovery via [music-map.com](https://music-map.com)
-**Library Browser**: Comprehensive local collection management with search, filtering, and completion tracking
-**Smart Matching**: Advanced algorithm prioritizes originals over remixes
-**Automatic Lyrics**: Downloads synchronized LRC files from LRClib.net - works with any media player that supports .lrc files
-**Server Integration**: Auto-triggers library scans on Plex/Jellyfin/Navidrome after downloads complete
-**Smart Database**: Automatically updates SoulSync's internal database with incremental scans
-**Wishlist Management**: Failed downloads automatically saved and retried hourly
-**Artist Watchlist**: Add favorite artists to monitor for new releases automatically
-**Full Automation**: Hourly retry of failed downloads, metadata enhancement, lyrics, server scanning
-**Activity Feed**: Real-time status and progress tracking
-
 ## 🎵 Beatport Integration
 
 Discover the hottest dance music with our fresh Beatport integration. Whether you're following superstar DJs or hunting for underground gems, SoulSync pulls directly from Beatport's extensive catalog.
