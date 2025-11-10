@@ -3850,10 +3850,14 @@ async function openDownloadMissingModal(playlistId) {
             
             <div class="download-missing-modal-footer">
                 <div class="download-phase-controls">
-                    <div class="force-download-toggle-container" style="margin-bottom: 0px;">
+                    <div class="force-download-toggle-container" style="margin-bottom: 0px; display: flex; flex-direction: column; gap: 8px; align-items: flex-start;">
                         <label class="force-download-toggle">
                             <input type="checkbox" id="force-download-all-${playlistId}">
                             <span>Force Download All</span>
+                        </label>
+                        <label class="force-download-toggle">
+                            <input type="checkbox" id="playlist-folder-mode-${playlistId}">
+                            <span>Organize by Playlist (Downloads/Playlist/Artist - Track.ext)</span>
                         </label>
                     </div>
                     <button class="download-control-btn primary" id="begin-analysis-btn-${playlistId}" onclick="startMissingTracksProcess('${playlistId}')">
@@ -4016,10 +4020,14 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
             
             <div class="download-missing-modal-footer">
                 <div class="download-phase-controls">
-                    <div class="force-download-toggle-container" style="margin-bottom: 0px;">
+                    <div class="force-download-toggle-container" style="margin-bottom: 0px; display: flex; flex-direction: column; gap: 8px; align-items: flex-start;">
                         <label class="force-download-toggle">
                             <input type="checkbox" id="force-download-all-${virtualPlaylistId}">
                             <span>Force Download All</span>
+                        </label>
+                        <label class="force-download-toggle">
+                            <input type="checkbox" id="playlist-folder-mode-${virtualPlaylistId}">
+                            <span>Organize by Playlist (Downloads/Playlist/Artist - Track.ext)</span>
                         </label>
                     </div>
                     <button class="download-control-btn primary" id="begin-analysis-btn-${virtualPlaylistId}" onclick="startMissingTracksProcess('${virtualPlaylistId}')">
@@ -4530,6 +4538,10 @@ async function startMissingTracksProcess(playlistId) {
         const forceDownloadCheckbox = document.getElementById(`force-download-all-${playlistId}`);
         const forceDownloadAll = forceDownloadCheckbox ? forceDownloadCheckbox.checked : false;
 
+        // Check if playlist folder mode toggle is enabled (only for sync page playlists)
+        const playlistFolderModeCheckbox = document.getElementById(`playlist-folder-mode-${playlistId}`);
+        const playlistFolderMode = playlistFolderModeCheckbox ? playlistFolderModeCheckbox.checked : false;
+
         // Hide the force download toggle during processing
         const forceToggleContainer = forceDownloadCheckbox ? forceDownloadCheckbox.closest('.force-download-toggle-container') : null;
         if (forceToggleContainer) {
@@ -4552,6 +4564,11 @@ async function startMissingTracksProcess(playlistId) {
         } else {
             // For playlists/wishlists, use the virtual playlist name
             requestBody.playlist_name = process.playlist.name;
+            // Add playlist folder mode flag for sync page playlists
+            requestBody.playlist_folder_mode = playlistFolderMode;
+            if (playlistFolderMode) {
+                console.log(`📁 [Playlist Folder] Enabled for playlist: ${process.playlist.name}`);
+            }
         }
 
         const response = await fetch(`/api/playlists/${playlistId}/start-missing-process`, {
@@ -10376,10 +10393,14 @@ async function openDownloadMissingModalForTidal(virtualPlaylistId, playlistName,
             
             <div class="download-missing-modal-footer">
                 <div class="download-phase-controls">
-                    <div class="force-download-toggle-container" style="margin-bottom: 0px;">
+                    <div class="force-download-toggle-container" style="margin-bottom: 0px; display: flex; flex-direction: column; gap: 8px; align-items: flex-start;">
                         <label class="force-download-toggle">
                             <input type="checkbox" id="force-download-all-${virtualPlaylistId}">
                             <span>Force Download All</span>
+                        </label>
+                        <label class="force-download-toggle">
+                            <input type="checkbox" id="playlist-folder-mode-${virtualPlaylistId}">
+                            <span>Organize by Playlist (Downloads/Playlist/Artist - Track.ext)</span>
                         </label>
                     </div>
                     <button class="download-control-btn primary" id="begin-analysis-btn-${virtualPlaylistId}" onclick="startMissingTracksProcess('${virtualPlaylistId}')">
