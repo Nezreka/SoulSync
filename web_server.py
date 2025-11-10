@@ -8707,10 +8707,25 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
 
             download_batches[batch_id]['phase'] = 'downloading'
 
+            # Get batch album context (if this is an artist album download)
+            batch = download_batches[batch_id]
+            batch_album_context = batch.get('album_context')
+            batch_artist_context = batch.get('artist_context')
+            batch_is_album = batch.get('is_album_download', False)
+
             for res in missing_tracks:
                 task_id = str(uuid.uuid4())
+                track_info = res['track'].copy()
+
+                # Add explicit album context to track_info for artist album downloads
+                if batch_is_album and batch_album_context and batch_artist_context:
+                    track_info['_explicit_album_context'] = batch_album_context
+                    track_info['_explicit_artist_context'] = batch_artist_context
+                    track_info['_is_explicit_album_download'] = True
+                    print(f"🎵 [Task Creation] Added explicit album context for: {track_info.get('name')}")
+
                 download_tasks[task_id] = {
-                    'status': 'pending', 'track_info': res['track'],
+                    'status': 'pending', 'track_info': track_info,
                     'playlist_id': playlist_id, 'batch_id': batch_id,
                     'track_index': res['track_index'], 'retry_count': 0,
                     'cached_candidates': [], 'used_sources': set(),
@@ -9313,10 +9328,49 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
         try:
             # Update task status to downloading
             _update_task_status(task_id, 'downloading')
-            
-            # Prepare download (using existing infrastructure)
-            spotify_artist_context = {'id': 'from_sync_modal', 'name': track.artists[0] if track.artists else 'Unknown', 'genres': []}
-            spotify_album_context = {'id': 'from_sync_modal', 'name': track.album, 'release_date': '', 'image_url': None}
+
+            # Prepare download - check if we have explicit album context from artist page
+            track_info = None
+            with tasks_lock:
+                if task_id in download_tasks:
+                    track_info = download_tasks[task_id].get('track_info', {})
+
+            # Use explicit album/artist context if available (from artist album downloads)
+            has_explicit_context = track_info and track_info.get('_is_explicit_album_download', False)
+
+            if has_explicit_context:
+                # Use the real Spotify album/artist data from the UI
+                explicit_album = track_info.get('_explicit_album_context', {})
+                explicit_artist = track_info.get('_explicit_artist_context', {})
+
+                spotify_artist_context = {
+                    'id': explicit_artist.get('id', 'explicit_artist'),
+                    'name': explicit_artist.get('name', track.artists[0] if track.artists else 'Unknown'),
+                    'genres': explicit_artist.get('genres', [])
+                }
+                # Handle both image_url formats (direct string or images array)
+                album_image_url = None
+                if explicit_album.get('image_url'):
+                    # Backend API returns image_url as direct string
+                    album_image_url = explicit_album.get('image_url')
+                elif explicit_album.get('images'):
+                    # Fallback: images array format from Spotify API
+                    album_image_url = explicit_album.get('images', [{}])[0].get('url')
+
+                spotify_album_context = {
+                    'id': explicit_album.get('id', 'explicit_album'),
+                    'name': explicit_album.get('name', track.album),
+                    'release_date': explicit_album.get('release_date', ''),
+                    'image_url': album_image_url,
+                    'total_tracks': explicit_album.get('total_tracks', 0),
+                    'album_type': explicit_album.get('album_type', 'album')
+                }
+                print(f"🎵 [Explicit Context] Using real album data: '{spotify_album_context['name']}' ({spotify_album_context['album_type']})")
+            else:
+                # Fallback to generic context for playlists/wishlists
+                spotify_artist_context = {'id': 'from_sync_modal', 'name': track.artists[0] if track.artists else 'Unknown', 'genres': []}
+                spotify_album_context = {'id': 'from_sync_modal', 'name': track.album, 'release_date': '', 'image_url': None}
+
             download_payload = candidate.__dict__
 
             username = download_payload.get('username')
@@ -9377,13 +9431,19 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
                             enhanced_payload['track_number'] = 1
                             print(f"⚠️ [Context] No track.id available, using fallback track_number: 1")
                         
-                        # Determine if this should be treated as album download based on clean data
-                        is_album_context = (
-                            track.album and 
-                            track.album.strip() and 
-                            track.album != "Unknown Album" and
-                            track.album.lower() != track.name.lower()  # Album different from track
-                        )
+                        # Determine if this should be treated as album download
+                        # First check if we have explicit album context from artist page
+                        if has_explicit_context:
+                            is_album_context = True
+                            print(f"✅ [Context] Using explicit album context flag from artist page")
+                        else:
+                            # Fall back to guessing based on clean data
+                            is_album_context = (
+                                track.album and
+                                track.album.strip() and
+                                track.album != "Unknown Album" and
+                                track.album.lower() != track.name.lower()  # Album different from track
+                            )
                     else:
                         # Fallback to original data
                         enhanced_payload['spotify_clean_title'] = enhanced_payload.get('title', '')
@@ -10480,8 +10540,18 @@ def start_missing_tracks_process(playlist_id):
     playlist_name = data.get('playlist_name', 'Unknown Playlist')
     force_download_all = data.get('force_download_all', False)
 
+    # Get album/artist context for artist album downloads
+    is_album_download = data.get('is_album_download', False)
+    album_context = data.get('album_context', None)
+    artist_context = data.get('artist_context', None)
+
     if not tracks:
         return jsonify({"success": False, "error": "No tracks provided"}), 400
+
+    # Log album context if provided
+    if is_album_download and album_context and artist_context:
+        print(f"🎵 [Artist Album] Received album context: '{album_context.get('name')}' by '{artist_context.get('name')}' ({album_context.get('album_type', 'album')})")
+        print(f"   Release: {album_context.get('release_date', 'Unknown')}, Tracks: {album_context.get('total_tracks', len(tracks))}")
 
     # Limit concurrent analysis processes to prevent resource exhaustion
     with tasks_lock:
@@ -10510,7 +10580,11 @@ def start_missing_tracks_process(playlist_id):
             'analysis_total': len(tracks),
             'analysis_processed': 0,
             'analysis_results': [],
-            'force_download_all': force_download_all  # Pass the force flag to the batch
+            'force_download_all': force_download_all,  # Pass the force flag to the batch
+            # Album context for artist album downloads (explicit folder structure)
+            'is_album_download': is_album_download,
+            'album_context': album_context,
+            'artist_context': artist_context
         }
 
     # Link YouTube playlist to download process if this is a YouTube playlist
