@@ -545,10 +545,11 @@ class TidalClient:
             logger.info(f"Using V2 endpoint to fetch playlists for user ID: {user_id}")
 
             # Step 2: Construct the correct V2 endpoint and parameters.
+            # NOTE: We don't include 'items' here because the V2 API only includes ~20 tracks
+            # We'll fetch full track lists separately for each playlist
             endpoint = f"{self.base_url}/playlists"
             params = {
                 'countryCode': 'US',
-                'include': 'items,items.artists', # Include both track data AND artist data
                 'filter[r.owners.id]': user_id
             }
 
@@ -564,16 +565,12 @@ class TidalClient:
             data = response.json()
             playlists = []
 
-            # Step 3: Create lookup maps from the 'included' data for efficient access.
-            included_data = data.get('included', [])
-            track_details_map = {item['id']: item for item in included_data if item['type'] == 'tracks'}
-            artist_details_map = {item['id']: item for item in included_data if item['type'] == 'artists'}
-
-            # Step 4: Process the playlists from the main 'data' array.
+            # Step 3: Process the playlists from the main 'data' array.
             for playlist_data in data.get('data', []):
                 attributes = playlist_data.get('attributes', {})
                 playlist_id = playlist_data.get('id')
 
+                # Create playlist with basic metadata first
                 new_playlist = Playlist(
                     id=str(playlist_id),
                     name=attributes.get('name', 'Unknown Playlist'),
@@ -582,17 +579,17 @@ class TidalClient:
                     public=attributes.get('accessType') == 'PUBLIC'
                 )
 
-                # Step 5: Match track stubs to the full details from the lookup map.
-                track_stubs = playlist_data.get('relationships', {}).get('items', {}).get('data', [])
-                for stub in track_stubs:
-                    track_id = stub.get('id')
-                    full_track_data = track_details_map.get(track_id)
-                    
-                    if full_track_data:
-                        track = self._parse_json_api_track(full_track_data, artist_details_map)
-                        if track:
-                            new_playlist.tracks.append(track)
-                
+                # Step 4: Fetch ALL tracks for this playlist using the paginated get_playlist() method
+                # This ensures we get all tracks, not just the first ~20
+                logger.info(f"Fetching full track list for playlist: {new_playlist.name} ({playlist_id})")
+                full_playlist = self.get_playlist(playlist_id)
+
+                if full_playlist and full_playlist.tracks:
+                    new_playlist.tracks = full_playlist.tracks
+                    logger.info(f"Added {len(full_playlist.tracks)} tracks to playlist {new_playlist.name}")
+                else:
+                    logger.warning(f"Could not fetch tracks for playlist {playlist_id}, it will have 0 tracks")
+
                 playlists.append(new_playlist)
             
             logger.info(f"Successfully retrieved {len(playlists)} playlists with the V2 filter method.")
@@ -708,33 +705,62 @@ class TidalClient:
                 return None
             
             playlist_data = response.json()
-            
-            # Get playlist tracks
-            tracks_response = self.session.get(
-                f"{self.base_url}/playlists/{playlist_id}/items",
-                params={'countryCode': 'US', 'limit': 100},
-                timeout=10
-            )
-            
+
+            # Get playlist tracks with pagination to handle large playlists
             tracks = []
-            if tracks_response.status_code == 200:
+            offset = 0
+            limit = 100
+            total_fetched = 0
+
+            while True:
+                logger.info(f"Fetching tracks for playlist {playlist_id}: offset={offset}, limit={limit}")
+
+                tracks_response = self.session.get(
+                    f"{self.base_url}/playlists/{playlist_id}/items",
+                    params={'countryCode': 'US', 'limit': limit, 'offset': offset},
+                    timeout=10
+                )
+
+                if tracks_response.status_code != 200:
+                    logger.error(f"Failed to get Tidal playlist tracks at offset {offset}: {tracks_response.status_code} - {tracks_response.text}")
+                    break
+
                 tracks_data = tracks_response.json()
-                if 'items' in tracks_data:
-                    for item in tracks_data['items']:
-                        # Handle different item structures
-                        track_data = item
-                        if 'item' in item and item.get('type') == 'track':
-                            track_data = item['item']
-                        elif 'resource' in item:
-                            track_data = item['resource']
-                        
-                        track = self._parse_track_data(track_data)
-                        if track:
-                            tracks.append(track)
-                else:
-                    logger.warning(f"No tracks found in playlist {playlist_id}")
-            else:
-                logger.error(f"Failed to get Tidal playlist tracks: {tracks_response.status_code} - {tracks_response.text}")
+
+                if 'items' not in tracks_data:
+                    logger.warning(f"No items found in playlist {playlist_id} response at offset {offset}")
+                    break
+
+                items = tracks_data['items']
+                if len(items) == 0:
+                    logger.info(f"No more tracks found at offset {offset}, stopping pagination")
+                    break
+
+                # Process this batch of tracks
+                batch_count = 0
+                for item in items:
+                    # Handle different item structures
+                    track_data = item
+                    if 'item' in item and item.get('type') == 'track':
+                        track_data = item['item']
+                    elif 'resource' in item:
+                        track_data = item['resource']
+
+                    track = self._parse_track_data(track_data)
+                    if track:
+                        tracks.append(track)
+                        batch_count += 1
+
+                total_fetched += batch_count
+                logger.info(f"Fetched {batch_count} tracks in this batch, {total_fetched} total so far")
+
+                # If we got fewer items than the limit, we've reached the end
+                if len(items) < limit:
+                    logger.info(f"Received {len(items)} items (less than limit {limit}), pagination complete")
+                    break
+
+                # Move to next page
+                offset += limit
             
             playlist = Playlist(
                 id=playlist_data.get('id', playlist_id),
