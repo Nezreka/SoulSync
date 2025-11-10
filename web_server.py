@@ -6524,47 +6524,71 @@ def _post_process_matched_download_with_verification(context_key, context, file_
         spotify_artist = context.get("spotify_artist")
         if not spotify_artist:
             raise Exception("Missing spotify_artist context for verification")
-            
-        is_album_download = context.get("is_album_download", False)
-        has_clean_spotify_data = context.get("has_clean_spotify_data", False)
-        
-        # Reconstruct the final path logic (mirrors the logic in _post_process_matched_download)
-        if is_album_download and has_clean_spotify_data:
-            original_search = context.get("original_search_result", {})
-            spotify_album = context.get("spotify_album", {})
-            clean_track_name = original_search.get('spotify_clean_title', 'Unknown Track')
-            clean_album_name = original_search.get('spotify_clean_album', 'Unknown Album')
-            track_number = original_search.get('track_number', 1)
-            
-            # Construct the expected final path
-            artist_name_sanitized = spotify_artist.name.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
-            album_name_sanitized = clean_album_name.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
-            track_name_sanitized = clean_track_name.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
-            
-            transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './transfers'))
-            artist_dir = os.path.join(transfer_dir, artist_name_sanitized)
-            album_folder_name = f"{clean_album_name} ({spotify_album.get('release_date', '').split('-')[0] if spotify_album.get('release_date') else 'Unknown'})"
-            album_folder_name = album_folder_name.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
-            album_dir = os.path.join(artist_dir, album_folder_name)
-            
-            file_ext = os.path.splitext(file_path)[1]
-            new_filename = f"{track_number:02d} - {track_name_sanitized}{file_ext}"
-            expected_final_path = os.path.join(album_dir, new_filename)
-            
-        else:
-            # For singles or fallback logic
+
+        # Check if playlist folder mode is enabled
+        track_info = context.get("track_info", {})
+        playlist_folder_mode = track_info.get("_playlist_folder_mode", False)
+
+        # Handle playlist folder mode verification
+        if playlist_folder_mode:
+            playlist_name = track_info.get("_playlist_name", "Unknown Playlist")
+            playlist_name_sanitized = _sanitize_filename(playlist_name)
+
+            transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
+            playlist_dir = os.path.join(transfer_dir, playlist_name_sanitized)
+
             original_search = context.get("original_search_result", {})
             track_name = original_search.get('spotify_clean_title') or original_search.get('title', 'Unknown Track')
-            track_name_sanitized = track_name.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
-            
-            transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './transfers'))
-            artist_name_sanitized = spotify_artist.name.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
-            artist_dir = os.path.join(transfer_dir, artist_name_sanitized)
-            single_dir = os.path.join(artist_dir, "Singles")
-            
+            track_name_sanitized = _sanitize_filename(track_name)
+            artist_name_sanitized = _sanitize_filename(spotify_artist.get("name", "Unknown Artist") if isinstance(spotify_artist, dict) else spotify_artist.name)
+
             file_ext = os.path.splitext(file_path)[1]
-            new_filename = f"{track_name_sanitized}{file_ext}"
-            expected_final_path = os.path.join(single_dir, new_filename)
+            new_filename = f"{artist_name_sanitized} - {track_name_sanitized}{file_ext}"
+            expected_final_path = os.path.join(playlist_dir, new_filename)
+
+            print(f"📁 [Verification - Playlist Mode] Expected path: {expected_final_path}")
+
+        else:
+            # Original album/artist folder verification logic
+            is_album_download = context.get("is_album_download", False)
+            has_clean_spotify_data = context.get("has_clean_spotify_data", False)
+
+            if is_album_download and has_clean_spotify_data:
+                original_search = context.get("original_search_result", {})
+                spotify_album = context.get("spotify_album", {})
+                clean_track_name = original_search.get('spotify_clean_title', 'Unknown Track')
+                clean_album_name = original_search.get('spotify_clean_album', 'Unknown Album')
+                track_number = original_search.get('track_number', 1)
+
+                # Construct the expected final path
+                artist_name_sanitized = spotify_artist.name.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
+                album_name_sanitized = clean_album_name.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
+                track_name_sanitized = clean_track_name.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
+
+                transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './transfers'))
+                artist_dir = os.path.join(transfer_dir, artist_name_sanitized)
+                album_folder_name = f"{clean_album_name} ({spotify_album.get('release_date', '').split('-')[0] if spotify_album.get('release_date') else 'Unknown'})"
+                album_folder_name = album_folder_name.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
+                album_dir = os.path.join(artist_dir, album_folder_name)
+
+                file_ext = os.path.splitext(file_path)[1]
+                new_filename = f"{track_number:02d} - {track_name_sanitized}{file_ext}"
+                expected_final_path = os.path.join(album_dir, new_filename)
+
+            else:
+                # For singles or fallback logic
+                original_search = context.get("original_search_result", {})
+                track_name = original_search.get('spotify_clean_title') or original_search.get('title', 'Unknown Track')
+                track_name_sanitized = track_name.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
+
+                transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './transfers'))
+                artist_name_sanitized = spotify_artist.name.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
+                artist_dir = os.path.join(transfer_dir, artist_name_sanitized)
+                single_dir = os.path.join(artist_dir, "Singles")
+
+                file_ext = os.path.splitext(file_path)[1]
+                new_filename = f"{track_name_sanitized}{file_ext}"
+                expected_final_path = os.path.join(single_dir, new_filename)
         
         # VERIFICATION: Check if file exists at expected final path
         if os.path.exists(expected_final_path):
@@ -6638,11 +6662,68 @@ def _post_process_matched_download(context_key, context, file_path):
         # --- END OF FIX ---
 
         print(f"🎯 Starting robust post-processing for: {context_key}")
-        
+
         spotify_artist = context.get("spotify_artist")
         if not spotify_artist:
             print(f"❌ Post-processing failed: Missing spotify_artist context.")
             return
+
+        # Check if playlist folder mode is enabled (sync page playlists only)
+        track_info = context.get("track_info", {})
+        playlist_folder_mode = track_info.get("_playlist_folder_mode", False)
+
+        print(f"🔍 [Debug] Post-processing - track_info type: {type(track_info)}, is None: {track_info is None}, is empty: {not track_info}")
+        print(f"🔍 [Debug] Post-processing - playlist_folder_mode: {playlist_folder_mode}")
+        if track_info:
+            print(f"🔍 [Debug] Post-processing - track_info keys: {list(track_info.keys())}")
+
+        if playlist_folder_mode:
+            # Use playlist folder structure: Transfer/Playlist Name/Artist - Track.ext
+            playlist_name = track_info.get("_playlist_name", "Unknown Playlist")
+            print(f"📁 [Playlist Folder Mode] Organizing in playlist folder: {playlist_name}")
+
+            transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
+            playlist_name_sanitized = _sanitize_filename(playlist_name)
+            playlist_dir = os.path.join(transfer_dir, playlist_name_sanitized)
+            os.makedirs(playlist_dir, exist_ok=True)
+
+            # Get track name from context
+            original_search = context.get("original_search_result", {})
+            track_name = original_search.get('spotify_clean_title') or original_search.get('title', 'Unknown Track')
+            track_name_sanitized = _sanitize_filename(track_name)
+            artist_name_sanitized = _sanitize_filename(spotify_artist["name"])
+
+            # Create filename: Artist - Track.ext
+            file_ext = os.path.splitext(file_path)[1]
+            new_filename = f"{artist_name_sanitized} - {track_name_sanitized}{file_ext}"
+            final_path = os.path.join(playlist_dir, new_filename)
+
+            print(f"📁 Playlist folder: '{playlist_name_sanitized}'")
+            print(f"🎵 Track filename: '{new_filename}'")
+
+            # Move file to playlist folder
+            print(f"🚚 Moving '{os.path.basename(file_path)}' to '{final_path}'")
+            if os.path.exists(final_path):
+                print(f"⚠️ File already exists, overwriting: {os.path.basename(final_path)}")
+                os.remove(final_path)
+
+            shutil.move(file_path, final_path)
+
+            # Clean up empty directories in downloads folder
+            downloads_path = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
+            _cleanup_empty_directories(downloads_path, file_path)
+
+            print(f"✅ [Playlist Folder Mode] Post-processing complete: {final_path}")
+
+            # WISHLIST REMOVAL: Check if this track should be removed from wishlist
+            try:
+                _check_and_remove_from_wishlist(context)
+            except Exception as wishlist_error:
+                print(f"⚠️ [Playlist Folder] Error checking wishlist removal: {wishlist_error}")
+
+            # NOTE: Don't call callbacks here - let verification function handle completion
+            # The verification function will check file exists and then call callbacks
+            return  # Skip normal album/artist folder structure processing
 
         is_album_download = context.get("is_album_download", False)
         has_clean_spotify_data = context.get("has_clean_spotify_data", False)
@@ -8792,6 +8873,8 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
             batch_album_context = batch.get('album_context')
             batch_artist_context = batch.get('artist_context')
             batch_is_album = batch.get('is_album_download', False)
+            batch_playlist_folder_mode = batch.get('playlist_folder_mode', False)
+            batch_playlist_name = batch.get('playlist_name', 'Unknown Playlist')
 
             for res in missing_tracks:
                 task_id = str(uuid.uuid4())
@@ -8803,6 +8886,14 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                     track_info['_explicit_artist_context'] = batch_artist_context
                     track_info['_is_explicit_album_download'] = True
                     print(f"🎵 [Task Creation] Added explicit album context for: {track_info.get('name')}")
+
+                # Add playlist folder mode flag for sync page playlists
+                if batch_playlist_folder_mode:
+                    track_info['_playlist_folder_mode'] = True
+                    track_info['_playlist_name'] = batch_playlist_name
+                    print(f"📁 [Task Creation] Added playlist folder mode for: {track_info.get('name')} → {batch_playlist_name}")
+                else:
+                    print(f"🔍 [Debug] Task Creation - playlist folder mode NOT enabled for: {track_info.get('name')}")
 
                 download_tasks[task_id] = {
                     'status': 'pending', 'track_info': track_info,
@@ -9543,10 +9634,12 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
                         "is_album_download": is_album_context,  # Critical fix: Use actual album context
                         "has_clean_spotify_data": has_clean_spotify_data,  # Flag for post-processing
                         "task_id": task_id,  # Add task_id for completion callbacks
-                        "batch_id": batch_id  # Add batch_id for completion callbacks
+                        "batch_id": batch_id,  # Add batch_id for completion callbacks
+                        "track_info": track_info  # Add track_info for playlist folder mode
                     }
-                    
+
                     print(f"🎯 [Context] Set is_album_download: {is_album_context} (has clean data: {has_clean_spotify_data})")
+                    print(f"🔍 [Debug] Context creation - track_info: {track_info is not None}, playlist_folder_mode: {track_info.get('_playlist_folder_mode', False) if track_info else False}")
                 
                 # Update task with successful download info
                 with tasks_lock:
@@ -10619,6 +10712,7 @@ def start_missing_tracks_process(playlist_id):
     tracks = data.get('tracks', [])
     playlist_name = data.get('playlist_name', 'Unknown Playlist')
     force_download_all = data.get('force_download_all', False)
+    playlist_folder_mode = data.get('playlist_folder_mode', False)
 
     # Get album/artist context for artist album downloads
     is_album_download = data.get('is_album_download', False)
@@ -10632,6 +10726,10 @@ def start_missing_tracks_process(playlist_id):
     if is_album_download and album_context and artist_context:
         print(f"🎵 [Artist Album] Received album context: '{album_context.get('name')}' by '{artist_context.get('name')}' ({album_context.get('album_type', 'album')})")
         print(f"   Release: {album_context.get('release_date', 'Unknown')}, Tracks: {album_context.get('total_tracks', len(tracks))}")
+
+    # Log playlist folder mode if enabled
+    if playlist_folder_mode:
+        print(f"📁 [Playlist Folder] Enabled for playlist: '{playlist_name}'")
 
     # Limit concurrent analysis processes to prevent resource exhaustion
     with tasks_lock:
@@ -10661,6 +10759,7 @@ def start_missing_tracks_process(playlist_id):
             'analysis_processed': 0,
             'analysis_results': [],
             'force_download_all': force_download_all,  # Pass the force flag to the batch
+            'playlist_folder_mode': playlist_folder_mode,  # Organize downloads by playlist folder
             # Album context for artist album downloads (explicit folder structure)
             'is_album_download': is_album_download,
             'album_context': album_context,
