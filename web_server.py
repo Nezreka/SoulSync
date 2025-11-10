@@ -1959,13 +1959,30 @@ def test_connection_endpoint():
         service = active_server # use the actual server name for the test
 
     success, message = run_service_test(service, test_config)
-    
+
+    # Update status cache immediately when test succeeds to reflect current state
+    import time
+    if success:
+        current_time = time.time()
+        if service == 'spotify':
+            _status_cache['spotify']['connected'] = True
+            _status_cache_timestamps['spotify'] = current_time
+            print("✅ Updated Spotify status cache after successful test")
+        elif service in ['plex', 'jellyfin', 'navidrome']:
+            _status_cache['media_server']['connected'] = True
+            _status_cache['media_server']['type'] = service
+            _status_cache_timestamps['media_server'] = current_time
+            print(f"✅ Updated {service} status cache after successful test")
+        elif service == 'soulseek':
+            # Soulseek doesn't use cache, but update anyway for consistency
+            print("✅ Soulseek test successful")
+
     # Add activity for connection test
     if success:
         add_activity_item("✅", "Connection Test", f"{service.title()} connection successful", "Now")
     else:
         add_activity_item("❌", "Connection Test", f"{service.title()} connection failed", "Now")
-    
+
     return jsonify({"success": success, "error": "" if success else message, "message": message if success else ""})
 
 @app.route('/api/test-dashboard-connection', methods=['POST'])
@@ -1988,13 +2005,30 @@ def test_dashboard_connection_endpoint():
         service = active_server # use the actual server name for the test
 
     success, message = run_service_test(service, test_config)
-    
+
+    # Update status cache immediately when test succeeds to reflect current state
+    import time
+    if success:
+        current_time = time.time()
+        if service == 'spotify':
+            _status_cache['spotify']['connected'] = True
+            _status_cache_timestamps['spotify'] = current_time
+            print("✅ Updated Spotify status cache after successful dashboard test")
+        elif service in ['plex', 'jellyfin', 'navidrome']:
+            _status_cache['media_server']['connected'] = True
+            _status_cache['media_server']['type'] = service
+            _status_cache_timestamps['media_server'] = current_time
+            print(f"✅ Updated {service} status cache after successful dashboard test")
+        elif service == 'soulseek':
+            # Soulseek doesn't use cache, but log anyway for consistency
+            print("✅ Soulseek dashboard test successful")
+
     # Add activity for dashboard connection test (different from settings test)
     if success:
         add_activity_item("🎛️", "Dashboard Test", f"{service.title()} service verified", "Now")
     else:
         add_activity_item("⚠️", "Dashboard Test", f"{service.title()} service check failed", "Now")
-    
+
     return jsonify({"success": success, "error": "" if success else message, "message": message if success else ""})
 
 @app.route('/api/detect-media-server', methods=['POST'])
