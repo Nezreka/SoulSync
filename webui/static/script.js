@@ -4536,14 +4536,28 @@ async function startMissingTracksProcess(playlistId) {
             forceToggleContainer.style.display = 'none';
         }
 
+        // Prepare request body - add album/artist context for artist album downloads
+        const requestBody = {
+            tracks: process.tracks,
+            force_download_all: forceDownloadAll
+        };
+
+        // If this is an artist album download, use album name and include full context
+        if (playlistId.startsWith('artist_album_')) {
+            requestBody.playlist_name = process.album?.name || process.playlist.name;
+            requestBody.is_album_download = true;
+            requestBody.album_context = process.album;   // Full Spotify album object
+            requestBody.artist_context = process.artist; // Full Spotify artist object
+            console.log(`🎵 [Artist Album] Sending album context: ${process.album?.name} by ${process.artist?.name}`);
+        } else {
+            // For playlists/wishlists, use the virtual playlist name
+            requestBody.playlist_name = process.playlist.name;
+        }
+
         const response = await fetch(`/api/playlists/${playlistId}/start-missing-process`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                tracks: process.tracks,
-                playlist_name: process.playlist.name,
-                force_download_all: forceDownloadAll
-            })
+            body: JSON.stringify(requestBody)
         });
 
         const data = await response.json();
@@ -16616,19 +16630,27 @@ async function createArtistAlbumVirtualPlaylist(album, albumType) {
         }
         
         const data = await response.json();
-        
+
         if (!data.success || !data.tracks || data.tracks.length === 0) {
             throw new Error('No tracks found for this album');
         }
-        
-        console.log(`✅ Loaded ${data.tracks.length} tracks for ${album.name}`);
-        
+
+        console.log(`✅ Loaded ${data.tracks.length} tracks`);
+        console.log(`📊 [DEBUG] Backend album data:`, data.album);
+        console.log(`📊 [DEBUG] Album name from backend:`, data.album?.name);
+        console.log(`📊 [DEBUG] Original album param:`, album);
+
+        // Use album data from API response (has complete data including images array)
+        const fullAlbumData = data.album;
+
         // Format playlist name with artist and album info
-        const playlistName = `[${artist.name}] ${album.name}`;
-        
+        const playlistName = `[${artist.name}] ${fullAlbumData.name}`;
+        console.log(`📊 [DEBUG] Playlist name created:`, playlistName);
+
         // Open download missing tracks modal with formatted tracks
         // Pass false for showLoadingOverlay since we already have one from handleArtistAlbumClick
-        await openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlistName, data.tracks, album, artist, false);
+        // Use fullAlbumData from API response instead of album parameter
+        await openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlistName, data.tracks, fullAlbumData, artist, false);
         
         // Track this download for artist bubble management
         registerArtistDownload(artist, album, virtualPlaylistId, albumType);
