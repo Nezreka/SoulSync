@@ -16635,17 +16635,13 @@ async function createArtistAlbumVirtualPlaylist(album, albumType) {
             throw new Error('No tracks found for this album');
         }
 
-        console.log(`✅ Loaded ${data.tracks.length} tracks`);
-        console.log(`📊 [DEBUG] Backend album data:`, data.album);
-        console.log(`📊 [DEBUG] Album name from backend:`, data.album?.name);
-        console.log(`📊 [DEBUG] Original album param:`, album);
+        console.log(`✅ Loaded ${data.tracks.length} tracks for ${data.album.name}`);
 
         // Use album data from API response (has complete data including images array)
         const fullAlbumData = data.album;
 
         // Format playlist name with artist and album info
         const playlistName = `[${artist.name}] ${fullAlbumData.name}`;
-        console.log(`📊 [DEBUG] Playlist name created:`, playlistName);
 
         // Open download missing tracks modal with formatted tracks
         // Pass false for showLoadingOverlay since we already have one from handleArtistAlbumClick

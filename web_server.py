@@ -3829,9 +3829,20 @@ def get_similar_artists_stream(artist_name):
                 yield f"data: {json.dumps({'error': 'Spotify not authenticated'})}\n\n"
                 return
 
+            # Get the searched artist's Spotify ID to exclude them
+            searched_artist_id = None
+            try:
+                searched_results = spotify_client.search_artists(artist_name, limit=1)
+                if searched_results and len(searched_results) > 0:
+                    searched_artist_id = searched_results[0].id
+                    print(f"🎯 Searched artist Spotify ID: {searched_artist_id}")
+            except Exception as e:
+                print(f"⚠️ Could not get searched artist ID: {e}")
+
             # Match each artist to Spotify one by one and stream results
             max_artists = 20
             matched_count = 0
+            seen_artist_ids = set()  # Track seen artist IDs to prevent duplicates
 
             for artist_name_to_match in similar_artist_names[:max_artists]:
                 try:
@@ -3842,6 +3853,18 @@ def get_similar_artists_stream(artist_name):
 
                     if results and len(results) > 0:
                         spotify_artist = results[0]
+
+                        # Skip if this is the searched artist
+                        if spotify_artist.id == searched_artist_id:
+                            print(f"⏭️ Skipping searched artist: {spotify_artist.name}")
+                            continue
+
+                        # Skip if we've already seen this artist ID (deduplication)
+                        if spotify_artist.id in seen_artist_ids:
+                            print(f"⏭️ Skipping duplicate artist: {spotify_artist.name}")
+                            continue
+
+                        seen_artist_ids.add(spotify_artist.id)
 
                         artist_data = {
                             'id': spotify_artist.id,
@@ -3946,9 +3969,20 @@ def get_similar_artists(artist_name):
                 "error": "Spotify not authenticated"
             }), 401
 
+        # Get the searched artist's Spotify ID to exclude them
+        searched_artist_id = None
+        try:
+            searched_results = spotify_client.search_artists(artist_name, limit=1)
+            if searched_results and len(searched_results) > 0:
+                searched_artist_id = searched_results[0].id
+                print(f"🎯 Searched artist Spotify ID: {searched_artist_id}")
+        except Exception as e:
+            print(f"⚠️ Could not get searched artist ID: {e}")
+
         # Match each artist to Spotify (limit to first 20 for performance)
         matched_artists = []
         max_artists = 20
+        seen_artist_ids = set()  # Track seen artist IDs to prevent duplicates
 
         for artist_name_to_match in similar_artist_names[:max_artists]:
             try:
@@ -3959,6 +3993,18 @@ def get_similar_artists(artist_name):
 
                 if results and len(results) > 0:
                     spotify_artist = results[0]
+
+                    # Skip if this is the searched artist
+                    if spotify_artist.id == searched_artist_id:
+                        print(f"⏭️ Skipping searched artist: {spotify_artist.name}")
+                        continue
+
+                    # Skip if we've already seen this artist ID (deduplication)
+                    if spotify_artist.id in seen_artist_ids:
+                        print(f"⏭️ Skipping duplicate artist: {spotify_artist.name}")
+                        continue
+
+                    seen_artist_ids.add(spotify_artist.id)
 
                     matched_artists.append({
                         'id': spotify_artist.id,
