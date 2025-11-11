@@ -27,6 +27,7 @@ let isSortReversed = false;
 let searchAbortController = null;
 let dbStatsInterval = null;
 let dbUpdateStatusInterval = null;
+let qualityScannerStatusInterval = null;
 let wishlistCountInterval = null;
 
 // --- Add these globals for the Sync Page ---
@@ -8781,6 +8782,138 @@ function stopDbUpdatePolling() {
     }
 }
 
+// ===================================================================
+// QUALITY SCANNER TOOL
+// ===================================================================
+
+async function handleQualityScanButtonClick() {
+    const button = document.getElementById('quality-scan-button');
+    const currentAction = button.textContent;
+
+    if (currentAction === 'Scan Library') {
+        const scopeSelect = document.getElementById('quality-scan-scope');
+        const scope = scopeSelect.value;
+
+        try {
+            button.disabled = true;
+            button.textContent = 'Starting...';
+            const response = await fetch('/api/quality-scanner/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ scope: scope })
+            });
+
+            if (response.ok) {
+                showToast('Quality scan started!', 'success');
+                // Start polling immediately to get live status
+                checkAndUpdateQualityScanProgress();
+            } else {
+                const errorData = await response.json();
+                showToast(`Error: ${errorData.error}`, 'error');
+                button.disabled = false;
+                button.textContent = 'Scan Library';
+            }
+        } catch (error) {
+            showToast('Failed to start quality scan.', 'error');
+            button.disabled = false;
+            button.textContent = 'Scan Library';
+        }
+
+    } else { // "Stop Scan"
+        try {
+            const response = await fetch('/api/quality-scanner/stop', { method: 'POST' });
+            if (response.ok) {
+                showToast('Stop request sent.', 'info');
+            } else {
+                showToast('Failed to send stop request.', 'error');
+            }
+        } catch (error) {
+            showToast('Error sending stop request.', 'error');
+        }
+    }
+}
+
+async function checkAndUpdateQualityScanProgress() {
+    try {
+        const response = await fetch('/api/quality-scanner/status', {
+            signal: AbortSignal.timeout(10000) // 10 second timeout
+        });
+        if (!response.ok) return;
+
+        const state = await response.json();
+        console.debug('🔍 Quality Scanner Status:', state.status, `${state.processed}/${state.total}`, `${state.progress.toFixed(1)}%`);
+        updateQualityScanProgressUI(state);
+
+        // Start polling only if not already polling and status is running
+        if (state.status === 'running' && !qualityScannerStatusInterval) {
+            console.log('🔄 Starting quality scanner polling (1 second interval)');
+            qualityScannerStatusInterval = setInterval(checkAndUpdateQualityScanProgress, 1000);
+        }
+
+    } catch (error) {
+        console.warn('Could not fetch quality scanner status:', error);
+        // Don't stop polling on network errors - keep trying
+    }
+}
+
+function updateQualityScanProgressUI(state) {
+    const button = document.getElementById('quality-scan-button');
+    const phaseLabel = document.getElementById('quality-phase-label');
+    const progressLabel = document.getElementById('quality-progress-label');
+    const progressBar = document.getElementById('quality-progress-bar');
+    const scopeSelect = document.getElementById('quality-scan-scope');
+
+    // Stats
+    const processedStat = document.getElementById('quality-stat-processed');
+    const metStat = document.getElementById('quality-stat-met');
+    const lowStat = document.getElementById('quality-stat-low');
+    const matchedStat = document.getElementById('quality-stat-matched');
+
+    if (!button || !phaseLabel || !progressLabel || !progressBar || !scopeSelect) return;
+
+    // Update stats
+    if (processedStat) processedStat.textContent = state.processed || 0;
+    if (metStat) metStat.textContent = state.quality_met || 0;
+    if (lowStat) lowStat.textContent = state.low_quality || 0;
+    if (matchedStat) matchedStat.textContent = state.matched || 0;
+
+    if (state.status === 'running') {
+        button.textContent = 'Stop Scan';
+        button.disabled = false;
+        scopeSelect.disabled = true;
+
+        phaseLabel.textContent = state.phase || 'Scanning...';
+        progressLabel.textContent = `${state.processed} / ${state.total} tracks scanned (${state.progress.toFixed(1)}%)`;
+        progressBar.style.width = `${state.progress}%`;
+    } else { // idle, finished, or error
+        stopQualityScannerPolling();
+        button.textContent = 'Scan Library';
+        button.disabled = false;
+        scopeSelect.disabled = false;
+
+        if (state.status === 'error') {
+            phaseLabel.textContent = `Error: ${state.error_message}`;
+            progressBar.style.backgroundColor = '#ff4444'; // Red for error
+        } else {
+            phaseLabel.textContent = state.phase || 'Ready to scan';
+            progressBar.style.backgroundColor = '#1db954'; // Green for normal
+        }
+
+        if (state.status === 'finished') {
+            // Show completion toast with results
+            showToast(`Scan complete! ${state.matched} tracks added to wishlist`, 'success');
+        }
+    }
+}
+
+function stopQualityScannerPolling() {
+    if (qualityScannerStatusInterval) {
+        console.log('⏹️ Stopping quality scanner polling');
+        clearInterval(qualityScannerStatusInterval);
+        qualityScannerStatusInterval = null;
+    }
+}
+
 function stopWishlistCountPolling() {
     if (wishlistCountInterval) {
         clearInterval(wishlistCountInterval);
@@ -8880,6 +9013,12 @@ async function loadDashboardData() {
     // Check for ongoing metadata update and restore state
     await checkAndRestoreMetadataUpdateState();
 
+    // Attach event listener for the quality scanner tool
+    const qualityScanButton = document.getElementById('quality-scan-button');
+    if (qualityScanButton) {
+        qualityScanButton.addEventListener('click', handleQualityScanButtonClick);
+    }
+
     // Attach event listener for the wishlist button
     const wishlistButton = document.getElementById('wishlist-button');
     if (wishlistButton) {
@@ -8919,7 +9058,10 @@ async function loadDashboardData() {
 
     // Also check the status of any ongoing update when the page loads
     await checkAndUpdateDbProgress();
-    
+
+    // Check for any ongoing quality scanner when the page loads
+    await checkAndUpdateQualityScanProgress();
+
     // Check for any active download processes that need rehydration
     await checkForActiveProcesses();
     
