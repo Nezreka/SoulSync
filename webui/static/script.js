@@ -24315,23 +24315,24 @@ async function loadDiscoverRecentReleases() {
         }
 
         const data = await response.json();
-        if (!data.success || !data.releases || data.releases.length === 0) {
+        if (!data.success || !data.albums || data.albums.length === 0) {
             carousel.innerHTML = '<div class="discover-empty"><p>No recent releases found</p></div>';
             return;
         }
 
         // Build carousel HTML
         let html = '';
-        data.releases.forEach(release => {
-            const coverUrl = release.album_cover_url || '/static/placeholder-album.png';
+        data.albums.forEach(album => {
+            const coverUrl = album.album_cover_url || '/static/placeholder-album.png';
             html += `
                 <div class="discover-card">
                     <div class="discover-card-image">
-                        <img src="${coverUrl}" alt="${release.album_name}">
+                        <img src="${coverUrl}" alt="${album.album_name}">
                     </div>
                     <div class="discover-card-info">
-                        <h4 class="discover-card-title">${release.album_name}</h4>
-                        <p class="discover-card-subtitle">${release.release_date}</p>
+                        <h4 class="discover-card-title">${album.album_name}</h4>
+                        <p class="discover-card-subtitle">${album.artist_name}</p>
+                        <p class="discover-card-meta">${album.release_date}</p>
                     </div>
                 </div>
             `;

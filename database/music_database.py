@@ -473,6 +473,21 @@ class MusicDatabase:
                 )
             """)
 
+            # Discovery Recent Albums cache - for discover page recent releases section
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS discovery_recent_albums (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    album_spotify_id TEXT NOT NULL UNIQUE,
+                    album_name TEXT NOT NULL,
+                    artist_name TEXT NOT NULL,
+                    artist_spotify_id TEXT NOT NULL,
+                    album_cover_url TEXT,
+                    release_date TEXT NOT NULL,
+                    album_type TEXT DEFAULT 'album',
+                    cached_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
             # Create indexes for performance
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_similar_artists_source ON similar_artists (source_artist_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_similar_artists_spotify ON similar_artists (similar_artist_spotify_id)")
@@ -483,6 +498,8 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_is_new ON discovery_pool (is_new_release)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_recent_releases_watchlist ON recent_releases (watchlist_artist_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_recent_releases_date ON recent_releases (release_date)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_recent_albums_date ON discovery_recent_albums (release_date)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_recent_albums_artist ON discovery_recent_albums (artist_spotify_id)")
 
             logger.info("Discovery tables created successfully")
 
@@ -2617,6 +2634,72 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error getting discovery pool tracks: {e}")
             return []
+
+    def cache_discovery_recent_album(self, album_data: Dict[str, Any]) -> bool:
+        """Cache a recent album for the discover page (from watchlist or similar artists)"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                cursor.execute("""
+                    INSERT OR REPLACE INTO discovery_recent_albums
+                    (album_spotify_id, album_name, artist_name, artist_spotify_id, album_cover_url, release_date, album_type, cached_date)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """, (
+                    album_data['album_spotify_id'],
+                    album_data['album_name'],
+                    album_data['artist_name'],
+                    album_data['artist_spotify_id'],
+                    album_data.get('album_cover_url'),
+                    album_data['release_date'],
+                    album_data.get('album_type', 'album')
+                ))
+
+                conn.commit()
+                return True
+
+        except Exception as e:
+            logger.error(f"Error caching discovery recent album: {e}")
+            return False
+
+    def get_discovery_recent_albums(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """Get cached recent albums for discover page"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                cursor.execute("""
+                    SELECT * FROM discovery_recent_albums
+                    ORDER BY release_date DESC
+                    LIMIT ?
+                """, (limit,))
+
+                rows = cursor.fetchall()
+                return [{
+                    'album_spotify_id': row['album_spotify_id'],
+                    'album_name': row['album_name'],
+                    'artist_name': row['artist_name'],
+                    'artist_spotify_id': row['artist_spotify_id'],
+                    'album_cover_url': row['album_cover_url'],
+                    'release_date': row['release_date'],
+                    'album_type': row['album_type']
+                } for row in rows]
+
+        except Exception as e:
+            logger.error(f"Error getting discovery recent albums: {e}")
+            return []
+
+    def clear_discovery_recent_albums(self) -> bool:
+        """Clear all cached recent albums"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM discovery_recent_albums")
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error clearing discovery recent albums: {e}")
+            return False
 
     def add_recent_release(self, watchlist_artist_id: int, album_data: Dict[str, Any]) -> bool:
         """Add a recent release to the recent_releases table"""

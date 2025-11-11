@@ -762,7 +762,7 @@ class WatchlistScanner:
                                     continue
 
                             # Small delay between albums
-                            time.sleep(0.3)
+                            time.sleep(DELAY_BETWEEN_ALBUMS)
 
                         except Exception as album_error:
                             logger.warning(f"Error processing album: {album_error}")
@@ -770,7 +770,7 @@ class WatchlistScanner:
 
                     # Delay between artists
                     if artist_idx < len(similar_artists):
-                        time.sleep(1.0)
+                        time.sleep(DELAY_BETWEEN_ARTISTS)
 
                 except Exception as artist_error:
                     logger.warning(f"Error processing artist {similar_artist.similar_artist_name}: {artist_error}")
@@ -781,8 +781,124 @@ class WatchlistScanner:
             # Rotate discovery pool if needed (maintain 1000-2000 track limit)
             self.database.rotate_discovery_pool(max_tracks=2000, remove_count=500)
 
+            # Cache recent albums for discovery page
+            logger.info("Caching recent albums for discovery page...")
+            self.cache_discovery_recent_albums()
+
         except Exception as e:
             logger.error(f"Error populating discovery pool: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def cache_discovery_recent_albums(self):
+        """Cache recent albums from watchlist and similar artists for discover page"""
+        try:
+            from datetime import datetime, timedelta
+            import random
+
+            logger.info("Caching recent albums for discover page...")
+
+            # Clear existing cache
+            self.database.clear_discovery_recent_albums()
+
+            cutoff_date = datetime.now() - timedelta(days=90)  # 3 months
+            cached_count = 0
+            albums_checked = 0
+
+            # Get watchlist artists (10 random for more variety)
+            watchlist_artists = self.database.get_watchlist_artists()
+            watchlist_sample = random.sample(watchlist_artists, min(10, len(watchlist_artists))) if watchlist_artists else []
+
+            # Get similar artists (10 random from top 30 for more variety)
+            similar_artists = self.database.get_top_similar_artists(limit=30)
+            similar_sample = random.sample(similar_artists, min(10, len(similar_artists))) if similar_artists else []
+
+            logger.info(f"Checking albums from {len(watchlist_sample)} watchlist + {len(similar_sample)} similar artists for recent releases")
+
+            # Process watchlist artists
+            for artist in watchlist_sample:
+                try:
+                    albums = self.spotify_client.get_artist_albums(
+                        artist.spotify_artist_id,
+                        album_type='album,single',
+                        limit=20
+                    )
+
+                    for album in albums:
+                        try:
+                            albums_checked += 1
+                            if hasattr(album, 'release_date') and album.release_date:
+                                release_str = album.release_date
+                                if len(release_str) >= 10:
+                                    release_date = datetime.strptime(release_str[:10], "%Y-%m-%d")
+                                    if release_date >= cutoff_date:
+                                        album_data = {
+                                            'album_spotify_id': album.id,
+                                            'album_name': album.name,
+                                            'artist_name': artist.artist_name,
+                                            'artist_spotify_id': artist.spotify_artist_id,
+                                            'album_cover_url': album.image_url if hasattr(album, 'image_url') else None,
+                                            'release_date': release_str,
+                                            'album_type': album.album_type if hasattr(album, 'album_type') else 'album'
+                                        }
+                                        if self.database.cache_discovery_recent_album(album_data):
+                                            cached_count += 1
+                                            logger.debug(f"Cached recent album: {album.name} by {artist.artist_name} ({release_str})")
+                        except Exception as e:
+                            logger.warning(f"Error checking album for recent releases: {e}")
+                            continue
+
+                except Exception as e:
+                    logger.debug(f"Error fetching albums for watchlist artist {artist.artist_name}: {e}")
+                    continue
+
+                # Rate limiting between artists
+                time.sleep(DELAY_BETWEEN_ARTISTS)
+
+            # Process similar artists
+            for artist in similar_sample:
+                try:
+                    albums = self.spotify_client.get_artist_albums(
+                        artist.similar_artist_spotify_id,
+                        album_type='album,single',
+                        limit=20
+                    )
+
+                    for album in albums:
+                        try:
+                            albums_checked += 1
+                            if hasattr(album, 'release_date') and album.release_date:
+                                release_str = album.release_date
+                                if len(release_str) >= 10:
+                                    release_date = datetime.strptime(release_str[:10], "%Y-%m-%d")
+                                    if release_date >= cutoff_date:
+                                        album_data = {
+                                            'album_spotify_id': album.id,
+                                            'album_name': album.name,
+                                            'artist_name': artist.similar_artist_name,
+                                            'artist_spotify_id': artist.similar_artist_spotify_id,
+                                            'album_cover_url': album.image_url if hasattr(album, 'image_url') else None,
+                                            'release_date': release_str,
+                                            'album_type': album.album_type if hasattr(album, 'album_type') else 'album'
+                                        }
+                                        if self.database.cache_discovery_recent_album(album_data):
+                                            cached_count += 1
+                                            logger.debug(f"Cached recent album: {album.name} by {artist.similar_artist_name} ({release_str})")
+                        except Exception as e:
+                            logger.warning(f"Error checking album for recent releases: {e}")
+                            continue
+
+                except Exception as e:
+                    logger.debug(f"Error fetching albums for similar artist {artist.similar_artist_name}: {e}")
+                    continue
+
+                # Rate limiting between artists
+                time.sleep(DELAY_BETWEEN_ARTISTS)
+
+            logger.info(f"Cached {cached_count} recent albums from {albums_checked} albums checked (cutoff: {cutoff_date.strftime('%Y-%m-%d')})")
+
+        except Exception as e:
+            logger.error(f"Error caching discovery recent albums: {e}")
             import traceback
             traceback.print_exc()
 
