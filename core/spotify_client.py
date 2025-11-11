@@ -498,9 +498,29 @@ class SpotifyClient:
     def get_user_info(self) -> Optional[Dict[str, Any]]:
         if not self.is_authenticated():
             return None
-        
+
         try:
             return self.sp.current_user()
         except Exception as e:
             logger.error(f"Error fetching user info: {e}")
+            return None
+
+    @rate_limited
+    def get_artist(self, artist_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get full artist details from Spotify API.
+
+        Args:
+            artist_id: Spotify artist ID
+
+        Returns:
+            Dictionary with artist data including images, genres, popularity
+        """
+        if not self.is_authenticated():
+            return None
+
+        try:
+            return self.sp.artist(artist_id)
+        except Exception as e:
+            logger.error(f"Error fetching artist {artist_id}: {e}")
             return None

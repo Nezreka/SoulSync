@@ -37,6 +37,10 @@
                     <span class="nav-icon">📚</span>
                     <span class="nav-text">Library</span>
                 </button>
+                <button class="nav-button" data-page="discover">
+                    <span class="nav-icon">🎧</span>
+                    <span class="nav-text">Discover</span>
+                </button>
                 <button class="nav-button" data-page="settings">
                     <span class="nav-icon">⚙️</span>
                     <span class="nav-text">Settings</span>
@@ -1611,6 +1615,97 @@
                                 <div class="releases-grid" id="singles-grid">
                                     <!-- Single cards will be populated here -->
                                 </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Discover Page -->
+            <div class="page" id="discover-page">
+                <div class="discover-container">
+                    <!-- Hero Section -->
+                    <div class="discover-hero">
+                        <div class="discover-hero-background" id="discover-hero-bg"></div>
+                        <div class="discover-hero-overlay"></div>
+                        <div class="discover-hero-content">
+                            <div class="discover-hero-info">
+                                <div class="discover-hero-label">FEATURED ARTIST</div>
+                                <h1 class="discover-hero-title" id="discover-hero-title">Loading...</h1>
+                                <p class="discover-hero-subtitle" id="discover-hero-subtitle">Discover new music tailored to your taste</p>
+                                <div class="discover-hero-actions">
+                                    <button class="discover-hero-button primary" id="discover-hero-play">
+                                        <span class="button-icon">▶</span>
+                                        <span class="button-text">Play</span>
+                                    </button>
+                                    <button class="discover-hero-button secondary" id="discover-hero-add">
+                                        <span class="button-icon">+</span>
+                                        <span class="button-text">Add to Wishlist</span>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="discover-hero-image" id="discover-hero-image">
+                                <div class="hero-image-placeholder">🎧</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Recent Releases Section -->
+                    <div class="discover-section">
+                        <div class="discover-section-header">
+                            <h2 class="discover-section-title">Recent Releases</h2>
+                            <p class="discover-section-subtitle">New music from artists you follow</p>
+                        </div>
+                        <div class="discover-carousel" id="recent-releases-carousel">
+                            <!-- Content will be populated dynamically -->
+                            <div class="discover-loading">
+                                <div class="loading-spinner"></div>
+                                <p>Loading recent releases...</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Release Radar Section -->
+                    <div class="discover-section">
+                        <div class="discover-section-header">
+                            <h2 class="discover-section-title">Release Radar</h2>
+                            <p class="discover-section-subtitle">Fresh tracks from new releases</p>
+                        </div>
+                        <div class="discover-playlist-container compact" id="release-radar-playlist">
+                            <!-- Content will be populated dynamically -->
+                            <div class="discover-loading">
+                                <div class="loading-spinner"></div>
+                                <p>Loading release radar...</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Discovery Weekly Section -->
+                    <div class="discover-section">
+                        <div class="discover-section-header">
+                            <h2 class="discover-section-title">Discovery Weekly</h2>
+                            <p class="discover-section-subtitle">A personalized playlist just for you</p>
+                        </div>
+                        <div class="discover-playlist-container compact" id="discovery-weekly-playlist">
+                            <!-- Content will be populated dynamically -->
+                            <div class="discover-loading">
+                                <div class="loading-spinner"></div>
+                                <p>Curating your discovery playlist...</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- More Playlists Section -->
+                    <div class="discover-section">
+                        <div class="discover-section-header">
+                            <h2 class="discover-section-title">More For You</h2>
+                            <p class="discover-section-subtitle">Curated playlists based on your taste</p>
+                        </div>
+                        <div class="discover-playlists-grid" id="more-playlists-grid">
+                            <!-- Content will be populated dynamically -->
+                            <div class="discover-loading">
+                                <div class="loading-spinner"></div>
+                                <p>Loading playlists...</p>
                             </div>
                         </div>
                     </div>

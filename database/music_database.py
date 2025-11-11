@@ -86,6 +86,47 @@ class WatchlistArtist:
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
+@dataclass
+class SimilarArtist:
+    """Similar artist recommendation from Spotify"""
+    id: int
+    source_artist_id: str  # Watchlist artist's database ID
+    similar_artist_spotify_id: str
+    similar_artist_name: str
+    similarity_rank: int  # 1-10, where 1 is most similar
+    occurrence_count: int  # How many watchlist artists share this similar artist
+    last_updated: datetime
+
+@dataclass
+class DiscoveryTrack:
+    """Track in the discovery pool for recommendations"""
+    id: int
+    spotify_track_id: str
+    spotify_album_id: str
+    spotify_artist_id: str
+    track_name: str
+    artist_name: str
+    album_name: str
+    album_cover_url: Optional[str]
+    duration_ms: int
+    popularity: int
+    release_date: str
+    is_new_release: bool  # Released within last 30 days
+    track_data_json: str  # Full Spotify track object for modal
+    added_date: datetime
+
+@dataclass
+class RecentRelease:
+    """Recent album release from watchlist artist"""
+    id: int
+    watchlist_artist_id: int
+    album_spotify_id: str
+    album_name: str
+    release_date: str
+    album_cover_url: Optional[str]
+    track_count: int
+    added_date: datetime
+
 class MusicDatabase:
     """SQLite database manager for SoulSync music library data"""
     
@@ -210,10 +251,13 @@ class MusicDatabase:
             
             # Add server_source columns for multi-server support (migration)
             self._add_server_source_columns(cursor)
-            
+
             # Migrate ID columns to support both integer (Plex) and string (Jellyfin) IDs
             self._migrate_id_columns_to_text(cursor)
-            
+
+            # Add discovery feature tables (migration)
+            self._add_discovery_tables(cursor)
+
             conn.commit()
             logger.info("Database initialized successfully")
             
@@ -375,7 +419,77 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error migrating ID columns: {e}")
             # Don't raise - this is a migration, database can still function
-    
+
+    def _add_discovery_tables(self, cursor):
+        """Add tables for discovery feature: similar artists, discovery pool, and recent releases"""
+        try:
+            # Similar Artists table - stores similar artists for each watchlist artist
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS similar_artists (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source_artist_id TEXT NOT NULL,
+                    similar_artist_spotify_id TEXT NOT NULL,
+                    similar_artist_name TEXT NOT NULL,
+                    similarity_rank INTEGER DEFAULT 1,
+                    occurrence_count INTEGER DEFAULT 1,
+                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(source_artist_id, similar_artist_spotify_id)
+                )
+            """)
+
+            # Discovery Pool table - rotating pool of 1000-2000 tracks for recommendations
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS discovery_pool (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    spotify_track_id TEXT UNIQUE NOT NULL,
+                    spotify_album_id TEXT NOT NULL,
+                    spotify_artist_id TEXT NOT NULL,
+                    track_name TEXT NOT NULL,
+                    artist_name TEXT NOT NULL,
+                    album_name TEXT NOT NULL,
+                    album_cover_url TEXT,
+                    duration_ms INTEGER,
+                    popularity INTEGER DEFAULT 0,
+                    release_date TEXT,
+                    is_new_release BOOLEAN DEFAULT 0,
+                    track_data_json TEXT NOT NULL,
+                    added_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Recent Releases table - tracks new releases from watchlist artists
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS recent_releases (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    watchlist_artist_id INTEGER NOT NULL,
+                    album_spotify_id TEXT NOT NULL,
+                    album_name TEXT NOT NULL,
+                    release_date TEXT NOT NULL,
+                    album_cover_url TEXT,
+                    track_count INTEGER DEFAULT 0,
+                    added_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(watchlist_artist_id, album_spotify_id),
+                    FOREIGN KEY (watchlist_artist_id) REFERENCES watchlist_artists (id) ON DELETE CASCADE
+                )
+            """)
+
+            # Create indexes for performance
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_similar_artists_source ON similar_artists (source_artist_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_similar_artists_spotify ON similar_artists (similar_artist_spotify_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_similar_artists_occurrence ON similar_artists (occurrence_count)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_spotify_track ON discovery_pool (spotify_track_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_artist ON discovery_pool (spotify_artist_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_added_date ON discovery_pool (added_date)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_is_new ON discovery_pool (is_new_release)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_recent_releases_watchlist ON recent_releases (watchlist_artist_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_recent_releases_date ON recent_releases (release_date)")
+
+            logger.info("Discovery tables created successfully")
+
+        except Exception as e:
+            logger.error(f"Error creating discovery tables: {e}")
+            # Don't raise - this is a migration, database can still function
+
     def close(self):
         """Close database connection (no-op since we create connections per operation)"""
         # Each operation creates and closes its own connection, so nothing to do here
@@ -2304,6 +2418,259 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error getting watchlist count: {e}")
             return 0
+
+    # === Discovery Feature Methods ===
+
+    def add_or_update_similar_artist(self, source_artist_id: str, similar_artist_spotify_id: str,
+                                      similar_artist_name: str, similarity_rank: int = 1) -> bool:
+        """Add or update a similar artist recommendation"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                cursor.execute("""
+                    INSERT INTO similar_artists
+                    (source_artist_id, similar_artist_spotify_id, similar_artist_name, similarity_rank, occurrence_count, last_updated)
+                    VALUES (?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
+                    ON CONFLICT(source_artist_id, similar_artist_spotify_id)
+                    DO UPDATE SET
+                        similarity_rank = excluded.similarity_rank,
+                        occurrence_count = occurrence_count + 1,
+                        last_updated = CURRENT_TIMESTAMP
+                """, (source_artist_id, similar_artist_spotify_id, similar_artist_name, similarity_rank))
+
+                conn.commit()
+                return True
+
+        except Exception as e:
+            logger.error(f"Error adding similar artist: {e}")
+            return False
+
+    def get_similar_artists_for_source(self, source_artist_id: str) -> List[SimilarArtist]:
+        """Get all similar artists for a given source artist"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                cursor.execute("""
+                    SELECT * FROM similar_artists
+                    WHERE source_artist_id = ?
+                    ORDER BY similarity_rank ASC
+                """, (source_artist_id,))
+
+                rows = cursor.fetchall()
+                return [SimilarArtist(
+                    id=row['id'],
+                    source_artist_id=row['source_artist_id'],
+                    similar_artist_spotify_id=row['similar_artist_spotify_id'],
+                    similar_artist_name=row['similar_artist_name'],
+                    similarity_rank=row['similarity_rank'],
+                    occurrence_count=row['occurrence_count'],
+                    last_updated=datetime.fromisoformat(row['last_updated'])
+                ) for row in rows]
+
+        except Exception as e:
+            logger.error(f"Error getting similar artists: {e}")
+            return []
+
+    def get_top_similar_artists(self, limit: int = 50) -> List[SimilarArtist]:
+        """Get top similar artists across all watchlist artists, ordered by occurrence count"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                cursor.execute("""
+                    SELECT
+                        MAX(id) as id,
+                        MAX(source_artist_id) as source_artist_id,
+                        similar_artist_spotify_id,
+                        similar_artist_name,
+                        AVG(similarity_rank) as similarity_rank,
+                        SUM(occurrence_count) as occurrence_count,
+                        MAX(last_updated) as last_updated
+                    FROM similar_artists
+                    GROUP BY similar_artist_spotify_id, similar_artist_name
+                    ORDER BY occurrence_count DESC, similarity_rank ASC
+                    LIMIT ?
+                """, (limit,))
+
+                rows = cursor.fetchall()
+                return [SimilarArtist(
+                    id=row['id'],
+                    source_artist_id=row['source_artist_id'],
+                    similar_artist_spotify_id=row['similar_artist_spotify_id'],
+                    similar_artist_name=row['similar_artist_name'],
+                    similarity_rank=int(row['similarity_rank']),
+                    occurrence_count=row['occurrence_count'],
+                    last_updated=datetime.fromisoformat(row['last_updated'])
+                ) for row in rows]
+
+        except Exception as e:
+            logger.error(f"Error getting top similar artists: {e}")
+            return []
+
+    def add_to_discovery_pool(self, track_data: Dict[str, Any]) -> bool:
+        """Add a track to the discovery pool"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                # Check if track already exists
+                cursor.execute("SELECT COUNT(*) as count FROM discovery_pool WHERE spotify_track_id = ?",
+                              (track_data['spotify_track_id'],))
+                if cursor.fetchone()['count'] > 0:
+                    return True  # Already in pool
+
+                cursor.execute("""
+                    INSERT INTO discovery_pool
+                    (spotify_track_id, spotify_album_id, spotify_artist_id, track_name, artist_name,
+                     album_name, album_cover_url, duration_ms, popularity, release_date,
+                     is_new_release, track_data_json, added_date)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """, (
+                    track_data['spotify_track_id'],
+                    track_data['spotify_album_id'],
+                    track_data['spotify_artist_id'],
+                    track_data['track_name'],
+                    track_data['artist_name'],
+                    track_data['album_name'],
+                    track_data.get('album_cover_url'),
+                    track_data['duration_ms'],
+                    track_data.get('popularity', 0),
+                    track_data['release_date'],
+                    track_data.get('is_new_release', False),
+                    json.dumps(track_data['track_data_json'])
+                ))
+
+                conn.commit()
+                return True
+
+        except Exception as e:
+            logger.error(f"Error adding to discovery pool: {e}")
+            return False
+
+    def rotate_discovery_pool(self, max_tracks: int = 2000, remove_count: int = 500):
+        """Remove oldest tracks from discovery pool if it exceeds max_tracks"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                # Check current count
+                cursor.execute("SELECT COUNT(*) as count FROM discovery_pool")
+                current_count = cursor.fetchone()['count']
+
+                if current_count > max_tracks:
+                    # Remove oldest tracks
+                    cursor.execute("""
+                        DELETE FROM discovery_pool
+                        WHERE id IN (
+                            SELECT id FROM discovery_pool
+                            ORDER BY added_date ASC
+                            LIMIT ?
+                        )
+                    """, (remove_count,))
+
+                    conn.commit()
+                    logger.info(f"Removed {remove_count} oldest tracks from discovery pool")
+
+        except Exception as e:
+            logger.error(f"Error rotating discovery pool: {e}")
+
+    def get_discovery_pool_tracks(self, limit: int = 100, new_releases_only: bool = False) -> List[DiscoveryTrack]:
+        """Get tracks from discovery pool"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                if new_releases_only:
+                    cursor.execute("""
+                        SELECT * FROM discovery_pool
+                        WHERE is_new_release = 1
+                        ORDER BY added_date DESC
+                        LIMIT ?
+                    """, (limit,))
+                else:
+                    cursor.execute("""
+                        SELECT * FROM discovery_pool
+                        ORDER BY added_date DESC
+                        LIMIT ?
+                    """, (limit,))
+
+                rows = cursor.fetchall()
+                return [DiscoveryTrack(
+                    id=row['id'],
+                    spotify_track_id=row['spotify_track_id'],
+                    spotify_album_id=row['spotify_album_id'],
+                    spotify_artist_id=row['spotify_artist_id'],
+                    track_name=row['track_name'],
+                    artist_name=row['artist_name'],
+                    album_name=row['album_name'],
+                    album_cover_url=row['album_cover_url'],
+                    duration_ms=row['duration_ms'],
+                    popularity=row['popularity'],
+                    release_date=row['release_date'],
+                    is_new_release=bool(row['is_new_release']),
+                    track_data_json=row['track_data_json'],
+                    added_date=datetime.fromisoformat(row['added_date'])
+                ) for row in rows]
+
+        except Exception as e:
+            logger.error(f"Error getting discovery pool tracks: {e}")
+            return []
+
+    def add_recent_release(self, watchlist_artist_id: int, album_data: Dict[str, Any]) -> bool:
+        """Add a recent release to the recent_releases table"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                cursor.execute("""
+                    INSERT OR IGNORE INTO recent_releases
+                    (watchlist_artist_id, album_spotify_id, album_name, release_date, album_cover_url, track_count, added_date)
+                    VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """, (
+                    watchlist_artist_id,
+                    album_data['album_spotify_id'],
+                    album_data['album_name'],
+                    album_data['release_date'],
+                    album_data.get('album_cover_url'),
+                    album_data.get('track_count', 0)
+                ))
+
+                conn.commit()
+                return True
+
+        except Exception as e:
+            logger.error(f"Error adding recent release: {e}")
+            return False
+
+    def get_recent_releases(self, limit: int = 50) -> List[RecentRelease]:
+        """Get recent releases from watchlist artists"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                cursor.execute("""
+                    SELECT * FROM recent_releases
+                    ORDER BY release_date DESC, added_date DESC
+                    LIMIT ?
+                """, (limit,))
+
+                rows = cursor.fetchall()
+                return [RecentRelease(
+                    id=row['id'],
+                    watchlist_artist_id=row['watchlist_artist_id'],
+                    album_spotify_id=row['album_spotify_id'],
+                    album_name=row['album_name'],
+                    release_date=row['release_date'],
+                    album_cover_url=row['album_cover_url'],
+                    track_count=row['track_count'],
+                    added_date=datetime.fromisoformat(row['added_date'])
+                ) for row in rows]
+
+        except Exception as e:
+            logger.error(f"Error getting recent releases: {e}")
+            return []
 
     def get_database_info(self) -> Dict[str, Any]:
         """Get comprehensive database information for all servers (legacy method)"""

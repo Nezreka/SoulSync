@@ -441,6 +441,9 @@ async function loadPageData(pageId) {
             case 'artist-detail':
                 // Artist detail page is handled separately by navigateToArtistDetail()
                 break;
+            case 'discover':
+                await loadDiscoverPage();
+                break;
             case 'settings':
                 initializeSettings();
                 await loadSettingsData();
@@ -18596,12 +18599,18 @@ async function showWatchlistModal() {
                 </div>
                 
                 <div class="playlist-modal-body">
-                    <div class="watchlist-actions" style="margin-bottom: 20px;">
-                        <button class="playlist-modal-btn playlist-modal-btn-primary" 
-                                id="scan-watchlist-btn" 
+                    <div class="watchlist-actions" style="margin-bottom: 20px; display: flex; gap: 12px;">
+                        <button class="playlist-modal-btn playlist-modal-btn-primary"
+                                id="scan-watchlist-btn"
                                 onclick="startWatchlistScan()"
                                 ${scanStatus === 'scanning' ? 'disabled' : ''}>
                             ${scanStatus === 'scanning' ? 'Scanning...' : 'Scan for New Releases'}
+                        </button>
+                        <button class="playlist-modal-btn playlist-modal-btn-secondary"
+                                id="update-similar-artists-btn"
+                                onclick="updateSimilarArtists()"
+                                ${scanStatus === 'scanning' ? 'disabled' : ''}>
+                            Update Similar Artists
                         </button>
                     </div>
                     
@@ -18799,6 +18808,103 @@ async function pollWatchlistScanStatus() {
         
     } catch (error) {
         console.error('Error polling watchlist scan status:', error);
+    }
+}
+
+/**
+ * Update similar artists for discovery feature
+ */
+async function updateSimilarArtists() {
+    try {
+        const button = document.getElementById('update-similar-artists-btn');
+        const scanButton = document.getElementById('scan-watchlist-btn');
+
+        button.disabled = true;
+        button.textContent = 'Updating...';
+        if (scanButton) scanButton.disabled = true;
+
+        const response = await fetch('/api/watchlist/update-similar-artists', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        const data = await response.json();
+        if (!data.success) {
+            throw new Error(data.error || 'Failed to update similar artists');
+        }
+
+        showToast('Updating similar artists in background...', 'success');
+
+        // Poll for completion
+        pollSimilarArtistsUpdate();
+
+    } catch (error) {
+        console.error('Error updating similar artists:', error);
+        const button = document.getElementById('update-similar-artists-btn');
+        const scanButton = document.getElementById('scan-watchlist-btn');
+
+        button.disabled = false;
+        button.textContent = 'Update Similar Artists';
+        if (scanButton) scanButton.disabled = false;
+
+        showToast(`Error: ${error.message}`, 'error');
+    }
+}
+
+/**
+ * Poll similar artists update status
+ */
+async function pollSimilarArtistsUpdate() {
+    try {
+        const response = await fetch('/api/watchlist/similar-artists-status');
+        const data = await response.json();
+
+        if (data.success) {
+            const button = document.getElementById('update-similar-artists-btn');
+            const scanButton = document.getElementById('scan-watchlist-btn');
+
+            if (data.status === 'completed') {
+                if (button) {
+                    button.disabled = false;
+                    button.textContent = 'Update Similar Artists';
+                }
+                if (scanButton) scanButton.disabled = false;
+
+                showToast(`Updated similar artists for ${data.artists_processed || 0} artists!`, 'success');
+                return; // Stop polling
+
+            } else if (data.status === 'error') {
+                if (button) {
+                    button.disabled = false;
+                    button.textContent = 'Update Similar Artists';
+                }
+                if (scanButton) scanButton.disabled = false;
+
+                showToast('Error updating similar artists', 'error');
+                return; // Stop polling
+            } else if (data.status === 'running') {
+                // Update button text with progress
+                if (button && data.current_artist) {
+                    button.textContent = `Updating... (${data.artists_processed || 0}/${data.total_artists || 0})`;
+                }
+            }
+        }
+
+        // Continue polling if still running
+        if (data.success && data.status === 'running') {
+            setTimeout(pollSimilarArtistsUpdate, 1000); // Poll every 1 second
+        }
+
+    } catch (error) {
+        console.error('Error polling similar artists update:', error);
+        const button = document.getElementById('update-similar-artists-btn');
+        const scanButton = document.getElementById('scan-watchlist-btn');
+
+        if (button) {
+            button.disabled = false;
+            button.textContent = 'Update Similar Artists';
+        }
+        if (scanButton) scanButton.disabled = false;
     }
 }
 
@@ -24096,5 +24202,363 @@ async function selectPlexLibrary() {
     } catch (error) {
         console.error('Error selecting Plex library:', error);
         alert('Error selecting library. Please try again.');
+    }
+}
+
+// ============================================
+// == DISCOVER PAGE                          ==
+// ============================================
+
+let discoverHeroIndex = 0;
+let discoverHeroArtists = [];
+let discoverHeroInterval = null;
+
+async function loadDiscoverPage() {
+    console.log('Loading discover page...');
+
+    // Load all sections
+    await Promise.all([
+        loadDiscoverHero(),
+        loadDiscoverRecentReleases(),
+        loadDiscoverReleaseRadar(),
+        loadDiscoverWeekly(),
+        loadMoreForYou()
+    ]);
+}
+
+async function loadDiscoverHero() {
+    try {
+        const response = await fetch('/api/discover/hero');
+        if (!response.ok) {
+            console.error('Failed to fetch discover hero');
+            return;
+        }
+
+        const data = await response.json();
+        if (!data.success || !data.artists || data.artists.length === 0) {
+            console.log('No hero artists available');
+            showDiscoverHeroEmpty();
+            return;
+        }
+
+        discoverHeroArtists = data.artists;
+        discoverHeroIndex = 0;
+
+        // Display first artist
+        displayDiscoverHeroArtist(discoverHeroArtists[0]);
+
+        // Start slideshow (change every 8 seconds)
+        if (discoverHeroInterval) {
+            clearInterval(discoverHeroInterval);
+        }
+        if (discoverHeroArtists.length > 1) {
+            discoverHeroInterval = setInterval(() => {
+                discoverHeroIndex = (discoverHeroIndex + 1) % discoverHeroArtists.length;
+                displayDiscoverHeroArtist(discoverHeroArtists[discoverHeroIndex]);
+            }, 8000);
+        }
+
+    } catch (error) {
+        console.error('Error loading discover hero:', error);
+        showDiscoverHeroEmpty();
+    }
+}
+
+function displayDiscoverHeroArtist(artist) {
+    const titleEl = document.getElementById('discover-hero-title');
+    const subtitleEl = document.getElementById('discover-hero-subtitle');
+    const imageEl = document.getElementById('discover-hero-image');
+    const bgEl = document.getElementById('discover-hero-bg');
+
+    if (titleEl) {
+        titleEl.textContent = artist.artist_name;
+    }
+
+    if (subtitleEl) {
+        const genres = artist.genres && artist.genres.length > 0
+            ? artist.genres.slice(0, 3).join(', ')
+            : 'Discover new music';
+        subtitleEl.textContent = genres;
+    }
+
+    if (imageEl && artist.image_url) {
+        imageEl.innerHTML = `<img src="${artist.image_url}" alt="${artist.artist_name}">`;
+    } else if (imageEl) {
+        imageEl.innerHTML = '<div class="hero-image-placeholder">🎧</div>';
+    }
+
+    if (bgEl && artist.image_url) {
+        bgEl.style.backgroundImage = `url('${artist.image_url}')`;
+        bgEl.style.backgroundSize = 'cover';
+        bgEl.style.backgroundPosition = 'center';
+    }
+}
+
+function showDiscoverHeroEmpty() {
+    const titleEl = document.getElementById('discover-hero-title');
+    const subtitleEl = document.getElementById('discover-hero-subtitle');
+
+    if (titleEl) titleEl.textContent = 'No Recommendations Yet';
+    if (subtitleEl) subtitleEl.textContent = 'Run a watchlist scan to generate personalized recommendations';
+}
+
+async function loadDiscoverRecentReleases() {
+    try {
+        const carousel = document.getElementById('recent-releases-carousel');
+        if (!carousel) return;
+
+        carousel.innerHTML = '<div class="discover-loading"><div class="loading-spinner"></div><p>Loading recent releases...</p></div>';
+
+        const response = await fetch('/api/discover/recent-releases');
+        if (!response.ok) {
+            throw new Error('Failed to fetch recent releases');
+        }
+
+        const data = await response.json();
+        if (!data.success || !data.releases || data.releases.length === 0) {
+            carousel.innerHTML = '<div class="discover-empty"><p>No recent releases found</p></div>';
+            return;
+        }
+
+        // Build carousel HTML
+        let html = '';
+        data.releases.forEach(release => {
+            const coverUrl = release.album_cover_url || '/static/placeholder-album.png';
+            html += `
+                <div class="discover-card">
+                    <div class="discover-card-image">
+                        <img src="${coverUrl}" alt="${release.album_name}">
+                    </div>
+                    <div class="discover-card-info">
+                        <h4 class="discover-card-title">${release.album_name}</h4>
+                        <p class="discover-card-subtitle">${release.release_date}</p>
+                    </div>
+                </div>
+            `;
+        });
+
+        carousel.innerHTML = html;
+
+    } catch (error) {
+        console.error('Error loading recent releases:', error);
+        const carousel = document.getElementById('recent-releases-carousel');
+        if (carousel) {
+            carousel.innerHTML = '<div class="discover-empty"><p>Failed to load recent releases</p></div>';
+        }
+    }
+}
+
+async function loadDiscoverReleaseRadar() {
+    try {
+        const playlistContainer = document.getElementById('release-radar-playlist');
+        if (!playlistContainer) return;
+
+        playlistContainer.innerHTML = '<div class="discover-loading"><div class="loading-spinner"></div><p>Loading release radar...</p></div>';
+
+        const response = await fetch('/api/discover/release-radar');
+        if (!response.ok) {
+            throw new Error('Failed to fetch release radar');
+        }
+
+        const data = await response.json();
+        if (!data.success || !data.tracks || data.tracks.length === 0) {
+            playlistContainer.innerHTML = '<div class="discover-empty"><p>No new releases available</p></div>';
+            return;
+        }
+
+        // Build compact playlist HTML
+        let html = '<div class="discover-playlist-tracks-compact">';
+        data.tracks.forEach((track, index) => {
+            const coverUrl = track.album_cover_url || '/static/placeholder-album.png';
+            const durationMin = Math.floor(track.duration_ms / 60000);
+            const durationSec = Math.floor((track.duration_ms % 60000) / 1000);
+            const duration = `${durationMin}:${durationSec.toString().padStart(2, '0')}`;
+
+            html += `
+                <div class="discover-playlist-track-compact" data-track-index="${index}">
+                    <div class="track-compact-number">${index + 1}</div>
+                    <div class="track-compact-image">
+                        <img src="${coverUrl}" alt="${track.album_name}">
+                    </div>
+                    <div class="track-compact-info">
+                        <div class="track-compact-name">${track.track_name}</div>
+                        <div class="track-compact-artist">${track.artist_name}</div>
+                    </div>
+                    <div class="track-compact-album">${track.album_name}</div>
+                    <div class="track-compact-duration">${duration}</div>
+                </div>
+            `;
+        });
+        html += '</div>';
+
+        playlistContainer.innerHTML = html;
+
+    } catch (error) {
+        console.error('Error loading release radar:', error);
+        const playlistContainer = document.getElementById('release-radar-playlist');
+        if (playlistContainer) {
+            playlistContainer.innerHTML = '<div class="discover-empty"><p>Failed to load release radar</p></div>';
+        }
+    }
+}
+
+async function loadDiscoverWeekly() {
+    try {
+        const playlistContainer = document.getElementById('discovery-weekly-playlist');
+        if (!playlistContainer) return;
+
+        playlistContainer.innerHTML = '<div class="discover-loading"><div class="loading-spinner"></div><p>Curating your discovery playlist...</p></div>';
+
+        const response = await fetch('/api/discover/weekly');
+        if (!response.ok) {
+            throw new Error('Failed to fetch discovery weekly');
+        }
+
+        const data = await response.json();
+        if (!data.success || !data.tracks || data.tracks.length === 0) {
+            playlistContainer.innerHTML = '<div class="discover-empty"><p>No tracks available yet</p></div>';
+            return;
+        }
+
+        // Build compact playlist HTML
+        let html = '<div class="discover-playlist-tracks-compact">';
+        data.tracks.forEach((track, index) => {
+            const coverUrl = track.album_cover_url || '/static/placeholder-album.png';
+            const durationMin = Math.floor(track.duration_ms / 60000);
+            const durationSec = Math.floor((track.duration_ms % 60000) / 1000);
+            const duration = `${durationMin}:${durationSec.toString().padStart(2, '0')}`;
+
+            html += `
+                <div class="discover-playlist-track-compact" data-track-index="${index}">
+                    <div class="track-compact-number">${index + 1}</div>
+                    <div class="track-compact-image">
+                        <img src="${coverUrl}" alt="${track.album_name}">
+                    </div>
+                    <div class="track-compact-info">
+                        <div class="track-compact-name">${track.track_name}</div>
+                        <div class="track-compact-artist">${track.artist_name}</div>
+                    </div>
+                    <div class="track-compact-album">${track.album_name}</div>
+                    <div class="track-compact-duration">${duration}</div>
+                </div>
+            `;
+        });
+        html += '</div>';
+
+        playlistContainer.innerHTML = html;
+
+    } catch (error) {
+        console.error('Error loading discovery weekly:', error);
+        const playlistContainer = document.getElementById('discovery-weekly-playlist');
+        if (playlistContainer) {
+            playlistContainer.innerHTML = '<div class="discover-empty"><p>Failed to load discovery weekly</p></div>';
+        }
+    }
+}
+
+async function loadMoreForYou() {
+    try {
+        const grid = document.getElementById('more-playlists-grid');
+        if (!grid) return;
+
+        grid.innerHTML = '<div class="discover-loading"><div class="loading-spinner"></div><p>Loading playlists...</p></div>';
+
+        // Fetch discovery pool tracks to create curated playlists
+        const response = await fetch('/api/discover/weekly');
+        if (!response.ok) {
+            throw new Error('Failed to fetch tracks for playlists');
+        }
+
+        const data = await response.json();
+        if (!data.success || !data.tracks || data.tracks.length === 0) {
+            grid.innerHTML = '<div class="discover-empty"><p>No playlists available yet</p></div>';
+            return;
+        }
+
+        const tracks = data.tracks;
+
+        // Create curated playlists
+        const playlists = [];
+
+        // 1. Popular Picks (by popularity score)
+        const popularTracks = [...tracks].sort((a, b) => b.popularity - a.popularity).slice(0, 20);
+        if (popularTracks.length > 0) {
+            playlists.push({
+                name: 'Popular Picks',
+                description: 'Trending tracks from similar artists',
+                track_count: popularTracks.length,
+                cover: popularTracks[0].album_cover_url
+            });
+        }
+
+        // 2. Deep Cuts (lower popularity, hidden gems)
+        const deepCuts = [...tracks].filter(t => t.popularity < 50).slice(0, 20);
+        if (deepCuts.length > 0) {
+            playlists.push({
+                name: 'Deep Cuts',
+                description: 'Hidden gems you might have missed',
+                track_count: deepCuts.length,
+                cover: deepCuts[0].album_cover_url
+            });
+        }
+
+        // 3. Fresh Finds (newest additions to pool)
+        const freshFinds = [...tracks].slice(0, 20);
+        if (freshFinds.length > 0) {
+            playlists.push({
+                name: 'Fresh Finds',
+                description: 'Recently added to your discovery pool',
+                track_count: freshFinds.length,
+                cover: freshFinds[0].album_cover_url
+            });
+        }
+
+        // 4. Artist Mix (group by artist diversity)
+        const artistMap = {};
+        tracks.forEach(track => {
+            if (!artistMap[track.artist_name]) {
+                artistMap[track.artist_name] = [];
+            }
+            if (artistMap[track.artist_name].length < 3) {
+                artistMap[track.artist_name].push(track);
+            }
+        });
+        const mixTracks = Object.values(artistMap).flat().slice(0, 25);
+        if (mixTracks.length > 0) {
+            playlists.push({
+                name: 'Artist Mix',
+                description: 'Diverse selection from multiple artists',
+                track_count: mixTracks.length,
+                cover: mixTracks[0].album_cover_url
+            });
+        }
+
+        // Build playlist grid HTML
+        let html = '';
+        playlists.forEach(playlist => {
+            const coverUrl = playlist.cover || '/static/placeholder-album.png';
+            html += `
+                <div class="discover-playlist-card">
+                    <div class="discover-playlist-cover">
+                        <img src="${coverUrl}" alt="${playlist.name}">
+                        <div class="playlist-play-overlay">▶</div>
+                    </div>
+                    <div class="discover-playlist-info">
+                        <h4 class="discover-playlist-name">${playlist.name}</h4>
+                        <p class="discover-playlist-description">${playlist.description}</p>
+                        <p class="discover-playlist-count">${playlist.track_count} tracks</p>
+                    </div>
+                </div>
+            `;
+        });
+
+        grid.innerHTML = html;
+
+    } catch (error) {
+        console.error('Error loading more for you:', error);
+        const grid = document.getElementById('more-playlists-grid');
+        if (grid) {
+            grid.innerHTML = '<div class="discover-empty"><p>Failed to load playlists</p></div>';
+        }
     }
 }
