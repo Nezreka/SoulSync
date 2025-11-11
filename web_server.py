@@ -14477,23 +14477,33 @@ def get_discover_release_radar():
         curated_track_ids = database.get_curated_playlist('release_radar')
 
         if curated_track_ids:
-            # Use curated selection - fetch track data from discovery pool
-            discovery_tracks = database.get_discovery_pool_tracks(limit=5000, new_releases_only=False)
-            tracks_by_id = {track.spotify_track_id: track for track in discovery_tracks}
-
+            # Fetch track data directly from Spotify (release radar tracks may not be in discovery pool)
             selected_tracks = []
+
             for track_id in curated_track_ids:
-                if track_id in tracks_by_id:
-                    track = tracks_by_id[track_id]
-                    selected_tracks.append({
-                        "spotify_track_id": track.spotify_track_id,
-                        "track_name": track.track_name,
-                        "artist_name": track.artist_name,
-                        "album_name": track.album_name,
-                        "album_cover_url": track.album_cover_url,
-                        "duration_ms": track.duration_ms,
-                        "track_data_json": track.track_data_json
-                    })
+                try:
+                    # Get track data from Spotify
+                    track_data = spotify_client.get_track_details(track_id)
+
+                    if track_data:
+                        # Get album cover from raw_data (enhanced data doesn't include images)
+                        album_cover = None
+                        if track_data.get('raw_data') and track_data['raw_data'].get('album', {}).get('images'):
+                            album_cover = track_data['raw_data']['album']['images'][0]['url']
+
+                        selected_tracks.append({
+                            "spotify_track_id": track_data['id'],
+                            "track_name": track_data['name'],
+                            "artist_name": track_data.get('primary_artist', 'Unknown'),
+                            "album_name": track_data['album']['name'] if track_data.get('album') else 'Unknown',
+                            "album_cover_url": album_cover,
+                            "duration_ms": track_data.get('duration_ms', 0),
+                            "track_data_json": track_data.get('raw_data', track_data)
+                        })
+                except Exception as track_error:
+                    # Skip tracks that fail to fetch
+                    print(f"Error fetching track {track_id}: {track_error}")
+                    continue
 
             return jsonify({"success": True, "tracks": selected_tracks})
 
