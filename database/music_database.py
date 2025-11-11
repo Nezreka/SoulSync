@@ -488,6 +488,26 @@ class MusicDatabase:
                 )
             """)
 
+            # Discovery Curated Playlists - store curated track selections for consistency
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS discovery_curated_playlists (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    playlist_type TEXT NOT NULL UNIQUE,
+                    track_ids_json TEXT NOT NULL,
+                    curated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Discovery Pool Metadata - track when pool was last populated to prevent over-polling
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS discovery_pool_metadata (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    last_populated_timestamp TIMESTAMP NOT NULL,
+                    track_count INTEGER DEFAULT 0,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
             # Create indexes for performance
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_similar_artists_source ON similar_artists (source_artist_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_similar_artists_spotify ON similar_artists (similar_artist_spotify_id)")
@@ -2490,6 +2510,37 @@ class MusicDatabase:
             logger.error(f"Error getting similar artists: {e}")
             return []
 
+    def has_fresh_similar_artists(self, source_artist_id: str, days_threshold: int = 30) -> bool:
+        """
+        Check if we have cached similar artists that are still fresh (< days_threshold old).
+        Returns True if we have recent data, False if data is stale or missing.
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                cursor.execute("""
+                    SELECT COUNT(*) as count, MAX(last_updated) as last_updated
+                    FROM similar_artists
+                    WHERE source_artist_id = ?
+                """, (source_artist_id,))
+
+                row = cursor.fetchone()
+
+                if not row or row['count'] == 0:
+                    # No similar artists cached
+                    return False
+
+                # Check if data is fresh
+                last_updated = datetime.fromisoformat(row['last_updated'])
+                days_since_update = (datetime.now() - last_updated).total_seconds() / 86400  # seconds to days
+
+                return days_since_update < days_threshold
+
+        except Exception as e:
+            logger.error(f"Error checking similar artists freshness: {e}")
+            return False  # Default to re-fetching on error
+
     def get_top_similar_artists(self, limit: int = 50) -> List[SimilarArtist]:
         """Get top similar artists across all watchlist artists, ordered by occurrence count"""
         try:
@@ -2700,6 +2751,106 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error clearing discovery recent albums: {e}")
             return False
+
+    def save_curated_playlist(self, playlist_type: str, track_ids: List[str]) -> bool:
+        """Save a curated playlist selection (stays same until next discovery pool update)"""
+        try:
+            import json
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT OR REPLACE INTO discovery_curated_playlists
+                    (playlist_type, track_ids_json, curated_date)
+                    VALUES (?, ?, CURRENT_TIMESTAMP)
+                """, (playlist_type, json.dumps(track_ids)))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error saving curated playlist {playlist_type}: {e}")
+            return False
+
+    def get_curated_playlist(self, playlist_type: str) -> Optional[List[str]]:
+        """Get saved curated playlist track IDs"""
+        try:
+            import json
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT track_ids_json FROM discovery_curated_playlists
+                    WHERE playlist_type = ?
+                """, (playlist_type,))
+                row = cursor.fetchone()
+                if row:
+                    return json.loads(row['track_ids_json'])
+                return None
+        except Exception as e:
+            logger.error(f"Error getting curated playlist {playlist_type}: {e}")
+            return None
+
+    def should_populate_discovery_pool(self, hours_threshold: int = 24) -> bool:
+        """Check if discovery pool should be populated (hasn't been updated in X hours)"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT last_populated_timestamp
+                    FROM discovery_pool_metadata
+                    WHERE id = 1
+                """)
+                row = cursor.fetchone()
+
+                if not row:
+                    # Never populated before
+                    return True
+
+                last_populated = datetime.fromisoformat(row['last_populated_timestamp'])
+                hours_since_update = (datetime.now() - last_populated).total_seconds() / 3600
+
+                return hours_since_update >= hours_threshold
+
+        except Exception as e:
+            logger.error(f"Error checking discovery pool timestamp: {e}")
+            return True  # Default to allowing population on error
+
+    def update_discovery_pool_timestamp(self, track_count: int) -> bool:
+        """Update the last populated timestamp and track count"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT OR REPLACE INTO discovery_pool_metadata
+                    (id, last_populated_timestamp, track_count, updated_at)
+                    VALUES (1, ?, ?, CURRENT_TIMESTAMP)
+                """, (datetime.now().isoformat(), track_count))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error updating discovery pool timestamp: {e}")
+            return False
+
+    def cleanup_old_discovery_tracks(self, days_threshold: int = 365) -> int:
+        """Remove tracks from discovery pool older than X days. Returns count of deleted tracks."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                # Delete tracks older than threshold
+                cursor.execute("""
+                    DELETE FROM discovery_pool
+                    WHERE added_date < datetime('now', '-' || ? || ' days')
+                """, (days_threshold,))
+
+                deleted_count = cursor.rowcount
+                conn.commit()
+
+                if deleted_count > 0:
+                    logger.info(f"Cleaned up {deleted_count} discovery tracks older than {days_threshold} days")
+
+                return deleted_count
+
+        except Exception as e:
+            logger.error(f"Error cleaning up old discovery tracks: {e}")
+            return 0
 
     def add_recent_release(self, watchlist_artist_id: int, album_data: Dict[str, Any]) -> bool:
         """Add a recent release to the recent_releases table"""
