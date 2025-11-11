@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from dataclasses import dataclass
 import re
 import time
+import requests
+from bs4 import BeautifulSoup
 from database.music_database import get_database, WatchlistArtist
 from core.spotify_client import SpotifyClient
 from core.wishlist_service import get_wishlist_service
@@ -166,7 +168,11 @@ class WatchlistScanner:
             
             logger.info(f"Watchlist scan complete: {len(successful_scans)}/{len(scan_results)} artists scanned successfully")
             logger.info(f"Found {total_new_tracks} new tracks, added {total_added_to_wishlist} to wishlist")
-            
+
+            # Populate discovery pool with tracks from similar artists
+            logger.info("Starting discovery pool population...")
+            self.populate_discovery_pool()
+
             return scan_results
             
         except Exception as e:
@@ -239,7 +245,10 @@ class WatchlistScanner:
             
             # Update last scan timestamp for this artist
             self.update_artist_scan_timestamp(watchlist_artist.spotify_artist_id)
-            
+
+            # Fetch and store similar artists for discovery feature
+            self.update_similar_artists(watchlist_artist)
+
             return ScanResult(
                 artist_name=watchlist_artist.artist_name,
                 spotify_artist_id=watchlist_artist.spotify_artist_id,
@@ -489,6 +498,293 @@ class WatchlistScanner:
         except Exception as e:
             logger.error(f"Error updating scan timestamp for artist {spotify_artist_id}: {e}")
             return False
+
+    def _fetch_similar_artists_from_musicmap(self, artist_name: str, limit: int = 20) -> List[Dict[str, Any]]:
+        """
+        Fetch similar artists from MusicMap and match them to Spotify.
+
+        Args:
+            artist_name: The artist name to find similar artists for
+            limit: Maximum number of similar artists to return (default: 20)
+
+        Returns:
+            List of matched artist dictionaries with Spotify data
+        """
+        try:
+            logger.info(f"Fetching similar artists from MusicMap for: {artist_name}")
+
+            # Construct MusicMap URL
+            url_artist = artist_name.lower().replace(' ', '+')
+            musicmap_url = f'https://www.music-map.com/{url_artist}'
+
+            # Set headers to mimic a browser
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+            }
+
+            # Fetch MusicMap page
+            response = requests.get(musicmap_url, headers=headers, timeout=10)
+            response.raise_for_status()
+
+            # Parse HTML
+            soup = BeautifulSoup(response.text, 'html.parser')
+            gnod_map = soup.find(id='gnodMap')
+
+            if not gnod_map:
+                logger.warning(f"Could not find artist map on MusicMap for {artist_name}")
+                return []
+
+            # Extract similar artist names
+            all_anchors = gnod_map.find_all('a')
+            searched_artist_lower = artist_name.lower().strip()
+
+            similar_artist_names = []
+            for anchor in all_anchors:
+                artist_text = anchor.get_text(strip=True)
+
+                # Skip if this is the searched artist
+                if artist_text.lower() == searched_artist_lower:
+                    continue
+
+                similar_artist_names.append(artist_text)
+
+            logger.info(f"Found {len(similar_artist_names)} similar artists from MusicMap")
+
+            # Get the searched artist's Spotify ID to exclude them
+            searched_artist_id = None
+            try:
+                searched_results = self.spotify_client.search_artists(artist_name, limit=1)
+                if searched_results and len(searched_results) > 0:
+                    searched_artist_id = searched_results[0].id
+            except Exception as e:
+                logger.warning(f"Could not get searched artist ID: {e}")
+
+            # Match each artist to Spotify
+            matched_artists = []
+            seen_artist_ids = set()  # Track seen artist IDs to prevent duplicates
+
+            for artist_name_to_match in similar_artist_names[:limit]:
+                try:
+                    # Search Spotify for the artist
+                    results = self.spotify_client.search_artists(artist_name_to_match, limit=1)
+
+                    if results and len(results) > 0:
+                        spotify_artist = results[0]
+
+                        # Skip if this is the searched artist
+                        if spotify_artist.id == searched_artist_id:
+                            continue
+
+                        # Skip if we've already seen this artist ID (deduplication)
+                        if spotify_artist.id in seen_artist_ids:
+                            continue
+
+                        seen_artist_ids.add(spotify_artist.id)
+
+                        matched_artists.append({
+                            'id': spotify_artist.id,
+                            'name': spotify_artist.name,
+                            'image_url': spotify_artist.image_url if hasattr(spotify_artist, 'image_url') else None,
+                            'genres': spotify_artist.genres if hasattr(spotify_artist, 'genres') else [],
+                            'popularity': spotify_artist.popularity if hasattr(spotify_artist, 'popularity') else 0
+                        })
+
+                        logger.debug(f"  Matched: {spotify_artist.name}")
+
+                except Exception as match_error:
+                    logger.debug(f"Error matching {artist_name_to_match}: {match_error}")
+                    continue
+
+            logger.info(f"Matched {len(matched_artists)} similar artists to Spotify")
+            return matched_artists
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error fetching from MusicMap: {e}")
+            return []
+        except Exception as e:
+            logger.error(f"Error fetching similar artists from MusicMap: {e}")
+            return []
+
+    def update_similar_artists(self, watchlist_artist: WatchlistArtist, limit: int = 10) -> bool:
+        """
+        Fetch and store similar artists for a watchlist artist.
+        Called after each artist scan to build discovery pool.
+        Uses MusicMap to find similar artists and matches them to Spotify.
+        """
+        try:
+            logger.info(f"Fetching similar artists for {watchlist_artist.artist_name}")
+
+            # Get similar artists from MusicMap (returns list of artist dicts)
+            similar_artists = self._fetch_similar_artists_from_musicmap(watchlist_artist.artist_name, limit=limit)
+
+            if not similar_artists:
+                logger.debug(f"No similar artists found for {watchlist_artist.artist_name}")
+                return True  # Not an error, just no recommendations
+
+            logger.info(f"Found {len(similar_artists)} similar artists for {watchlist_artist.artist_name}")
+
+            # Store each similar artist in database
+            stored_count = 0
+            for rank, similar_artist in enumerate(similar_artists, 1):
+                try:
+                    # similar_artist is a dict with 'id' and 'name' keys
+                    success = self.database.add_or_update_similar_artist(
+                        source_artist_id=watchlist_artist.spotify_artist_id,
+                        similar_artist_spotify_id=similar_artist['id'],
+                        similar_artist_name=similar_artist['name'],
+                        similarity_rank=rank
+                    )
+
+                    if success:
+                        stored_count += 1
+                        logger.debug(f"  #{rank}: {similar_artist['name']} (Spotify ID: {similar_artist['id']})")
+
+                except Exception as e:
+                    logger.warning(f"Error storing similar artist {similar_artist.get('name', 'Unknown')}: {e}")
+                    continue
+
+            logger.info(f"Stored {stored_count}/{len(similar_artists)} similar artists for {watchlist_artist.artist_name}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error fetching similar artists for {watchlist_artist.artist_name}: {e}")
+            return False
+
+    def populate_discovery_pool(self, top_artists_limit: int = 20, albums_per_artist: int = 5):
+        """
+        Populate discovery pool with tracks from top similar artists.
+        Called after watchlist scan completes.
+        """
+        try:
+            from datetime import datetime, timedelta
+            import random
+
+            logger.info("Populating discovery pool from similar artists...")
+
+            # Get top similar artists across all watchlist (ordered by occurrence_count)
+            similar_artists = self.database.get_top_similar_artists(limit=top_artists_limit)
+
+            if not similar_artists:
+                logger.info("No similar artists found to populate discovery pool")
+                return
+
+            logger.info(f"Processing {len(similar_artists)} top similar artists for discovery pool")
+
+            total_tracks_added = 0
+
+            for artist_idx, similar_artist in enumerate(similar_artists, 1):
+                try:
+                    logger.info(f"[{artist_idx}/{len(similar_artists)}] Processing {similar_artist.similar_artist_name} (occurrence: {similar_artist.occurrence_count})")
+
+                    # Get artist's albums from Spotify
+                    all_albums = self.spotify_client.get_artist_albums(
+                        similar_artist.similar_artist_spotify_id,
+                        album_type='album',  # Only full albums, not singles
+                        limit=50
+                    )
+
+                    if not all_albums:
+                        logger.debug(f"No albums found for {similar_artist.similar_artist_name}")
+                        continue
+
+                    # Filter to only studio albums (exclude compilations, live albums)
+                    studio_albums = [a for a in all_albums if 'album_type' not in dir(a) or a.album_type == 'album']
+
+                    if len(studio_albums) == 0:
+                        studio_albums = all_albums  # Fallback to all if no studio albums
+
+                    # Select albums: latest + random selection
+                    selected_albums = []
+
+                    # Always include latest album
+                    if studio_albums:
+                        selected_albums.append(studio_albums[0])  # Latest is first
+
+                    # Add random albums if we have more
+                    if len(studio_albums) > 1:
+                        remaining_slots = min(albums_per_artist - 1, len(studio_albums) - 1)
+                        random_albums = random.sample(studio_albums[1:], remaining_slots)
+                        selected_albums.extend(random_albums)
+
+                    logger.info(f"  Selected {len(selected_albums)} albums from {len(studio_albums)} available")
+
+                    # Process each selected album
+                    for album_idx, album in enumerate(selected_albums, 1):
+                        try:
+                            # Get full album data with tracks
+                            album_data = self.spotify_client.get_album(album.id)
+
+                            if not album_data or 'tracks' not in album_data:
+                                continue
+
+                            tracks = album_data['tracks'].get('items', [])
+                            logger.debug(f"    Album {album_idx}: {album_data.get('name', 'Unknown')} ({len(tracks)} tracks)")
+
+                            # Determine if this is a new release (within last 30 days)
+                            is_new = False
+                            try:
+                                release_date_str = album_data.get('release_date', '')
+                                if release_date_str:
+                                    if len(release_date_str) == 10:  # Full date
+                                        release_date = datetime.strptime(release_date_str, "%Y-%m-%d")
+                                        days_old = (datetime.now() - release_date).days
+                                        is_new = days_old <= 30
+                            except:
+                                pass
+
+                            # Add each track to discovery pool
+                            for track in tracks:
+                                try:
+                                    # Build track data for discovery pool
+                                    track_data = {
+                                        'spotify_track_id': track['id'],
+                                        'spotify_album_id': album_data['id'],
+                                        'spotify_artist_id': similar_artist.similar_artist_spotify_id,
+                                        'track_name': track['name'],
+                                        'artist_name': similar_artist.similar_artist_name,
+                                        'album_name': album_data.get('name', 'Unknown Album'),
+                                        'album_cover_url': album_data.get('images', [{}])[0].get('url') if album_data.get('images') else None,
+                                        'duration_ms': track.get('duration_ms', 0),
+                                        'popularity': album_data.get('popularity', 0),
+                                        'release_date': album_data.get('release_date', ''),
+                                        'is_new_release': is_new,
+                                        'track_data_json': track  # Store full Spotify track object
+                                    }
+
+                                    # Add to discovery pool
+                                    if self.database.add_to_discovery_pool(track_data):
+                                        total_tracks_added += 1
+
+                                except Exception as track_error:
+                                    logger.debug(f"Error adding track to discovery pool: {track_error}")
+                                    continue
+
+                            # Small delay between albums
+                            time.sleep(0.3)
+
+                        except Exception as album_error:
+                            logger.warning(f"Error processing album: {album_error}")
+                            continue
+
+                    # Delay between artists
+                    if artist_idx < len(similar_artists):
+                        time.sleep(1.0)
+
+                except Exception as artist_error:
+                    logger.warning(f"Error processing artist {similar_artist.similar_artist_name}: {artist_error}")
+                    continue
+
+            logger.info(f"Discovery pool population complete: {total_tracks_added} tracks added")
+
+            # Rotate discovery pool if needed (maintain 1000-2000 track limit)
+            self.database.rotate_discovery_pool(max_tracks=2000, remove_count=500)
+
+        except Exception as e:
+            logger.error(f"Error populating discovery pool: {e}")
+            import traceback
+            traceback.print_exc()
 
 # Singleton instance
 _watchlist_scanner_instance = None

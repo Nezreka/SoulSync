@@ -14042,6 +14042,17 @@ def start_watchlist_scan():
                 print(f"Watchlist scan completed: {len(successful_scans)}/{len(scan_results)} artists scanned successfully")
                 print(f"Found {total_new_tracks} new tracks, added {total_added_to_wishlist} to wishlist")
 
+                # Populate discovery pool from similar artists
+                print("🎵 Starting discovery pool population...")
+                watchlist_scan_state['current_phase'] = 'populating_discovery_pool'
+                try:
+                    scanner.populate_discovery_pool()
+                    print("✅ Discovery pool population complete")
+                except Exception as discovery_error:
+                    print(f"⚠️ Error populating discovery pool: {discovery_error}")
+                    import traceback
+                    traceback.print_exc()
+
             except Exception as e:
                 print(f"Error during watchlist scan: {e}")
                 watchlist_scan_state['status'] = 'error'
@@ -14086,19 +14097,130 @@ def get_watchlist_scan_status():
                 "status": "idle",
                 "summary": {}
             })
-        
+
         # Convert datetime objects to ISO format for JSON serialization
         state = watchlist_scan_state.copy()
         if 'started_at' in state and state['started_at']:
             state['started_at'] = state['started_at'].isoformat()
         if 'completed_at' in state and state['completed_at']:
             state['completed_at'] = state['completed_at'].isoformat()
-        
+
+        # Remove results array - it contains ScanResult objects that aren't JSON serializable
+        # The summary already contains the aggregate data we need
+        if 'results' in state:
+            del state['results']
+
         return jsonify({"success": True, **state})
-        
+
     except Exception as e:
         print(f"Error getting watchlist scan status: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
+# Similar Artists Update State
+similar_artists_update_state = {
+    'status': 'idle',  # idle, running, completed, error
+    'artists_processed': 0,
+    'total_artists': 0,
+    'current_artist': None,
+    'error': None
+}
+similar_artists_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="SimilarArtistsUpdate")
+
+@app.route('/api/watchlist/update-similar-artists', methods=['POST'])
+def update_similar_artists_endpoint():
+    """Update similar artists for all watchlist artists (for discovery feature)"""
+    try:
+        global similar_artists_update_state
+
+        if similar_artists_update_state['status'] == 'running':
+            return jsonify({"success": False, "error": "Similar artists update already in progress"}), 409
+
+        if not spotify_client or not spotify_client.is_authenticated():
+            return jsonify({"success": False, "error": "Spotify client not available"}), 400
+
+        # Reset state
+        similar_artists_update_state = {
+            'status': 'running',
+            'artists_processed': 0,
+            'total_artists': 0,
+            'current_artist': None,
+            'error': None
+        }
+
+        # Start update in background
+        similar_artists_executor.submit(_update_similar_artists_worker)
+
+        return jsonify({"success": True, "message": "Similar artists update started"})
+
+    except Exception as e:
+        print(f"Error starting similar artists update: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/watchlist/similar-artists-status', methods=['GET'])
+def get_similar_artists_update_status():
+    """Get status of similar artists update"""
+    try:
+        global similar_artists_update_state
+        return jsonify({"success": True, **similar_artists_update_state})
+    except Exception as e:
+        print(f"Error getting similar artists status: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+def _update_similar_artists_worker():
+    """Background worker to update similar artists for all watchlist artists"""
+    global similar_artists_update_state
+
+    try:
+        from core.watchlist_scanner import get_watchlist_scanner
+        from database.music_database import get_database
+        import time
+
+        print("🎵 [Similar Artists] Starting similar artists update...")
+
+        database = get_database()
+        watchlist_artists = database.get_watchlist_artists()
+
+        if not watchlist_artists:
+            similar_artists_update_state['status'] = 'completed'
+            print("📭 [Similar Artists] No watchlist artists to process")
+            return
+
+        similar_artists_update_state['total_artists'] = len(watchlist_artists)
+        print(f"📊 [Similar Artists] Processing {len(watchlist_artists)} watchlist artists")
+
+        scanner = get_watchlist_scanner(spotify_client)
+
+        for idx, artist in enumerate(watchlist_artists, 1):
+            try:
+                similar_artists_update_state['artists_processed'] = idx
+                similar_artists_update_state['current_artist'] = artist.artist_name
+
+                print(f"[{idx}/{len(watchlist_artists)}] Updating similar artists for {artist.artist_name}")
+
+                # Update similar artists for this artist
+                scanner.update_similar_artists(artist, limit=10)
+
+                # Rate limiting
+                if idx < len(watchlist_artists):
+                    time.sleep(2.0)  # 2 seconds between artists
+
+            except Exception as artist_error:
+                print(f"❌ [Similar Artists] Error processing {artist.artist_name}: {artist_error}")
+                continue
+
+        # Update complete
+        similar_artists_update_state['status'] = 'completed'
+        similar_artists_update_state['current_artist'] = None
+
+        print(f"✅ [Similar Artists] Update complete! Processed {len(watchlist_artists)} artists")
+
+    except Exception as e:
+        print(f"❌ [Similar Artists] Critical error: {e}")
+        import traceback
+        traceback.print_exc()
+
+        similar_artists_update_state['status'] = 'error'
+        similar_artists_update_state['error'] = str(e)
 
 # --- Watchlist Auto-Scanning System ---
 
@@ -14281,6 +14403,366 @@ metadata_update_state = {
 
 metadata_update_worker = None
 metadata_update_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="metadata_update")
+
+# ===============================
+# == DISCOVER PAGE ENDPOINTS   ==
+# ===============================
+
+@app.route('/api/discover/hero', methods=['GET'])
+def get_discover_hero():
+    """Get featured similar artists for hero slideshow"""
+    try:
+        database = get_database()
+
+        # Get top similar artists (by occurrence count)
+        similar_artists = database.get_top_similar_artists(limit=10)
+
+        if not similar_artists:
+            return jsonify({"success": True, "artists": []})
+
+        # Convert to JSON format with Spotify data enrichment
+        hero_artists = []
+        for artist in similar_artists:
+            artist_data = {
+                "spotify_artist_id": artist.similar_artist_spotify_id,
+                "artist_name": artist.similar_artist_name,
+                "occurrence_count": artist.occurrence_count,
+                "similarity_rank": artist.similarity_rank
+            }
+
+            # Try to get artist image from Spotify
+            try:
+                if spotify_client and spotify_client.is_authenticated():
+                    sp_artist = spotify_client.get_artist(artist.similar_artist_spotify_id)
+                    if sp_artist and sp_artist.get('images'):
+                        artist_data['image_url'] = sp_artist['images'][0]['url'] if sp_artist['images'] else None
+                        artist_data['genres'] = sp_artist.get('genres', [])
+                        artist_data['popularity'] = sp_artist.get('popularity', 0)
+            except:
+                pass
+
+            hero_artists.append(artist_data)
+
+        return jsonify({"success": True, "artists": hero_artists})
+
+    except Exception as e:
+        print(f"Error getting discover hero: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/discover/recent-releases', methods=['GET'])
+def get_discover_recent_releases():
+    """Get recent albums/EPs from watchlist artists and similar artists (last 3 months)"""
+    try:
+        from datetime import datetime, timedelta
+        import random
+
+        database = get_database()
+
+        if not spotify_client or not spotify_client.is_authenticated():
+            return jsonify({"success": True, "albums": []})
+
+        # Get watchlist artists (5 random)
+        watchlist_artists = database.get_watchlist_artists()
+        watchlist_sample = random.sample(watchlist_artists, min(5, len(watchlist_artists))) if watchlist_artists else []
+
+        # Get similar artists (5 random from top 20)
+        similar_artists = database.get_top_similar_artists(limit=20)
+        similar_sample = random.sample(similar_artists, min(5, len(similar_artists))) if similar_artists else []
+
+        recent_albums = []
+        cutoff_date = datetime.now() - timedelta(days=90)  # 3 months
+
+        # Process watchlist artists
+        for artist in watchlist_sample:
+            try:
+                albums = spotify_client.get_artist_albums(
+                    artist.spotify_artist_id,
+                    album_type='album,single',
+                    limit=20
+                )
+
+                for album in albums:
+                    try:
+                        # Check if album is recent (last 3 months)
+                        if hasattr(album, 'release_date') and album.release_date:
+                            release_str = album.release_date
+                            if len(release_str) >= 10:  # Full date
+                                release_date = datetime.strptime(release_str[:10], "%Y-%m-%d")
+                                if release_date >= cutoff_date:
+                                    recent_albums.append({
+                                        "album_spotify_id": album.id,
+                                        "album_name": album.name,
+                                        "artist_name": artist.artist_name,
+                                        "artist_spotify_id": artist.spotify_artist_id,
+                                        "album_cover_url": album.image_url if hasattr(album, 'image_url') else None,
+                                        "release_date": release_str,
+                                        "album_type": album.album_type if hasattr(album, 'album_type') else 'album'
+                                    })
+                    except Exception as e:
+                        continue
+
+            except Exception as e:
+                print(f"Error fetching albums for watchlist artist {artist.artist_name}: {e}")
+                continue
+
+        # Process similar artists
+        for artist in similar_sample:
+            try:
+                albums = spotify_client.get_artist_albums(
+                    artist.similar_artist_spotify_id,
+                    album_type='album,single',
+                    limit=20
+                )
+
+                for album in albums:
+                    try:
+                        # Check if album is recent (last 3 months)
+                        if hasattr(album, 'release_date') and album.release_date:
+                            release_str = album.release_date
+                            if len(release_str) >= 10:  # Full date
+                                release_date = datetime.strptime(release_str[:10], "%Y-%m-%d")
+                                if release_date >= cutoff_date:
+                                    recent_albums.append({
+                                        "album_spotify_id": album.id,
+                                        "album_name": album.name,
+                                        "artist_name": artist.similar_artist_name,
+                                        "artist_spotify_id": artist.similar_artist_spotify_id,
+                                        "album_cover_url": album.image_url if hasattr(album, 'image_url') else None,
+                                        "release_date": release_str,
+                                        "album_type": album.album_type if hasattr(album, 'album_type') else 'album'
+                                    })
+                    except Exception as e:
+                        continue
+
+            except Exception as e:
+                print(f"Error fetching albums for similar artist {artist.similar_artist_name}: {e}")
+                continue
+
+        # Sort by release date (newest first) and limit to 10
+        recent_albums.sort(key=lambda x: x['release_date'], reverse=True)
+        recent_albums = recent_albums[:10]
+
+        return jsonify({"success": True, "albums": recent_albums})
+
+    except Exception as e:
+        print(f"Error getting recent releases: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/discover/release-radar', methods=['GET'])
+def get_discover_release_radar():
+    """Get release radar playlist - 50 tracks randomly selected from recent albums"""
+    try:
+        from datetime import datetime, timedelta
+        import random
+
+        database = get_database()
+
+        if not spotify_client or not spotify_client.is_authenticated():
+            return jsonify({"success": True, "tracks": []})
+
+        # Get watchlist artists (5 random)
+        watchlist_artists = database.get_watchlist_artists()
+        watchlist_sample = random.sample(watchlist_artists, min(5, len(watchlist_artists))) if watchlist_artists else []
+
+        # Get similar artists (5 random from top 20)
+        similar_artists = database.get_top_similar_artists(limit=20)
+        similar_sample = random.sample(similar_artists, min(5, len(similar_artists))) if similar_artists else []
+
+        all_tracks = []
+        cutoff_date = datetime.now() - timedelta(days=90)  # 3 months
+
+        # Process watchlist artists
+        for artist in watchlist_sample:
+            try:
+                albums = spotify_client.get_artist_albums(
+                    artist.spotify_artist_id,
+                    album_type='album,single',
+                    limit=20
+                )
+
+                for album in albums:
+                    try:
+                        # Check if album is recent (last 3 months)
+                        if hasattr(album, 'release_date') and album.release_date:
+                            release_str = album.release_date
+                            if len(release_str) >= 10:  # Full date
+                                release_date = datetime.strptime(release_str[:10], "%Y-%m-%d")
+                                if release_date >= cutoff_date:
+                                    # Get album tracks
+                                    album_data = spotify_client.get_album(album.id)
+                                    if album_data and 'tracks' in album_data:
+                                        for track in album_data['tracks']['items']:
+                                            all_tracks.append({
+                                                "spotify_track_id": track['id'],
+                                                "track_name": track['name'],
+                                                "artist_name": artist.artist_name,
+                                                "album_name": album.name,
+                                                "album_cover_url": album.image_url if hasattr(album, 'image_url') else None,
+                                                "duration_ms": track.get('duration_ms', 0),
+                                                "track_number": track.get('track_number', 0),
+                                                "track_data_json": track
+                                            })
+                    except Exception as e:
+                        continue
+
+            except Exception as e:
+                print(f"Error fetching albums for watchlist artist {artist.artist_name}: {e}")
+                continue
+
+        # Process similar artists
+        for artist in similar_sample:
+            try:
+                albums = spotify_client.get_artist_albums(
+                    artist.similar_artist_spotify_id,
+                    album_type='album,single',
+                    limit=20
+                )
+
+                for album in albums:
+                    try:
+                        # Check if album is recent (last 3 months)
+                        if hasattr(album, 'release_date') and album.release_date:
+                            release_str = album.release_date
+                            if len(release_str) >= 10:  # Full date
+                                release_date = datetime.strptime(release_str[:10], "%Y-%m-%d")
+                                if release_date >= cutoff_date:
+                                    # Get album tracks
+                                    album_data = spotify_client.get_album(album.id)
+                                    if album_data and 'tracks' in album_data:
+                                        for track in album_data['tracks']['items']:
+                                            all_tracks.append({
+                                                "spotify_track_id": track['id'],
+                                                "track_name": track['name'],
+                                                "artist_name": artist.similar_artist_name,
+                                                "album_name": album.name,
+                                                "album_cover_url": album.image_url if hasattr(album, 'image_url') else None,
+                                                "duration_ms": track.get('duration_ms', 0),
+                                                "track_number": track.get('track_number', 0),
+                                                "track_data_json": track
+                                            })
+                    except Exception as e:
+                        continue
+
+            except Exception as e:
+                print(f"Error fetching albums for similar artist {artist.similar_artist_name}: {e}")
+                continue
+
+        # Randomly select 50 tracks
+        random.shuffle(all_tracks)
+        selected_tracks = all_tracks[:50]
+
+        return jsonify({"success": True, "tracks": selected_tracks})
+
+    except Exception as e:
+        print(f"Error getting release radar: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/discover/weekly', methods=['GET'])
+def get_discover_weekly():
+    """Get discovery weekly playlist - 50 tracks randomly selected from any albums (not just recent)"""
+    try:
+        import random
+
+        database = get_database()
+
+        if not spotify_client or not spotify_client.is_authenticated():
+            return jsonify({"success": True, "tracks": []})
+
+        # Get watchlist artists (5 random)
+        watchlist_artists = database.get_watchlist_artists()
+        watchlist_sample = random.sample(watchlist_artists, min(5, len(watchlist_artists))) if watchlist_artists else []
+
+        # Get similar artists (5 random from top 20)
+        similar_artists = database.get_top_similar_artists(limit=20)
+        similar_sample = random.sample(similar_artists, min(5, len(similar_artists))) if similar_artists else []
+
+        all_tracks = []
+
+        # Process watchlist artists - get tracks from any albums (not just recent)
+        for artist in watchlist_sample:
+            try:
+                albums = spotify_client.get_artist_albums(
+                    artist.spotify_artist_id,
+                    album_type='album',  # Full albums only
+                    limit=50
+                )
+
+                # Select 2-3 random albums per artist
+                selected_albums = random.sample(albums, min(3, len(albums))) if albums else []
+
+                for album in selected_albums:
+                    try:
+                        # Get album tracks
+                        album_data = spotify_client.get_album(album.id)
+                        if album_data and 'tracks' in album_data:
+                            for track in album_data['tracks']['items']:
+                                all_tracks.append({
+                                    "spotify_track_id": track['id'],
+                                    "track_name": track['name'],
+                                    "artist_name": artist.artist_name,
+                                    "album_name": album.name,
+                                    "album_cover_url": album.image_url if hasattr(album, 'image_url') else None,
+                                    "duration_ms": track.get('duration_ms', 0),
+                                    "track_number": track.get('track_number', 0),
+                                    "track_data_json": track
+                                })
+                    except Exception as e:
+                        continue
+
+            except Exception as e:
+                print(f"Error fetching albums for watchlist artist {artist.artist_name}: {e}")
+                continue
+
+        # Process similar artists - get tracks from any albums
+        for artist in similar_sample:
+            try:
+                albums = spotify_client.get_artist_albums(
+                    artist.similar_artist_spotify_id,
+                    album_type='album',  # Full albums only
+                    limit=50
+                )
+
+                # Select 2-3 random albums per artist
+                selected_albums = random.sample(albums, min(3, len(albums))) if albums else []
+
+                for album in selected_albums:
+                    try:
+                        # Get album tracks
+                        album_data = spotify_client.get_album(album.id)
+                        if album_data and 'tracks' in album_data:
+                            for track in album_data['tracks']['items']:
+                                all_tracks.append({
+                                    "spotify_track_id": track['id'],
+                                    "track_name": track['name'],
+                                    "artist_name": artist.similar_artist_name,
+                                    "album_name": album.name,
+                                    "album_cover_url": album.image_url if hasattr(album, 'image_url') else None,
+                                    "duration_ms": track.get('duration_ms', 0),
+                                    "track_number": track.get('track_number', 0),
+                                    "track_data_json": track
+                                })
+                    except Exception as e:
+                        continue
+
+            except Exception as e:
+                print(f"Error fetching albums for similar artist {artist.similar_artist_name}: {e}")
+                continue
+
+        # Randomly select 50 tracks
+        random.shuffle(all_tracks)
+        selected_tracks = all_tracks[:50]
+
+        return jsonify({"success": True, "tracks": selected_tracks})
+
+    except Exception as e:
+        print(f"Error getting discovery weekly: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/metadata/start', methods=['POST'])
 def start_metadata_update():

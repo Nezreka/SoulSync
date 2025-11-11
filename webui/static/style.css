@@ -16100,3 +16100,569 @@ body {
 .tool-help-modal-body strong {
     color: #fff;
 }
+
+/* ====================================
+   Discover Page Styles
+   ==================================== */
+
+.discover-container {
+    width: 100%;
+    max-width: 1600px;
+    margin: 0 auto;
+    padding: 0;
+}
+
+/* Hero Section */
+.discover-hero {
+    position: relative;
+    width: 100%;
+    height: 500px;
+    border-radius: 12px;
+    overflow: hidden;
+    margin-bottom: 40px;
+}
+
+.discover-hero-background {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background-size: cover;
+    background-position: center;
+    filter: blur(0px);
+}
+
+.discover-hero-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.4) 70%, transparent 100%);
+}
+
+.discover-hero-content {
+    position: relative;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 60px;
+    gap: 40px;
+}
+
+.discover-hero-info {
+    flex: 1;
+    max-width: 600px;
+    z-index: 1;
+}
+
+.discover-hero-label {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: #1db954;
+    margin-bottom: 12px;
+    text-transform: uppercase;
+}
+
+.discover-hero-title {
+    font-size: 56px;
+    font-weight: 800;
+    color: #fff;
+    margin: 0 0 16px 0;
+    line-height: 1.1;
+    text-shadow: 0 4px 12px rgba(0,0,0,0.4);
+}
+
+.discover-hero-subtitle {
+    font-size: 18px;
+    color: rgba(255, 255, 255, 0.85);
+    margin-bottom: 32px;
+    line-height: 1.6;
+}
+
+.discover-hero-actions {
+    display: flex;
+    gap: 16px;
+}
+
+.discover-hero-button {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 14px 32px;
+    border: none;
+    border-radius: 50px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.discover-hero-button.primary {
+    background-color: #1db954;
+    color: #fff;
+}
+
+.discover-hero-button.primary:hover {
+    background-color: #1ed760;
+    transform: scale(1.05);
+}
+
+.discover-hero-button.secondary {
+    background-color: rgba(255, 255, 255, 0.1);
+    color: #fff;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+}
+
+.discover-hero-button.secondary:hover {
+    background-color: rgba(255, 255, 255, 0.2);
+    border-color: rgba(255, 255, 255, 0.5);
+}
+
+.discover-hero-image {
+    flex-shrink: 0;
+    width: 320px;
+    height: 320px;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.hero-image-placeholder {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 120px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.discover-hero-image img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+/* Discover Sections */
+.discover-section {
+    margin-bottom: 50px;
+    padding: 0 20px;
+}
+
+.discover-section-header {
+    margin-bottom: 24px;
+}
+
+.discover-section-title {
+    font-size: 28px;
+    font-weight: 700;
+    color: #fff;
+    margin: 0 0 8px 0;
+}
+
+.discover-section-subtitle {
+    font-size: 14px;
+    color: #999;
+    margin: 0;
+}
+
+/* Carousel Styles */
+.discover-carousel {
+    display: flex;
+    gap: 20px;
+    overflow-x: auto;
+    padding-bottom: 20px;
+    scroll-behavior: smooth;
+}
+
+.discover-carousel::-webkit-scrollbar {
+    height: 8px;
+}
+
+.discover-carousel::-webkit-scrollbar-track {
+    background: #2a2a2a;
+    border-radius: 4px;
+}
+
+.discover-carousel::-webkit-scrollbar-thumb {
+    background: #555;
+    border-radius: 4px;
+}
+
+.discover-carousel::-webkit-scrollbar-thumb:hover {
+    background: #666;
+}
+
+/* Playlist Grid */
+.discover-playlists-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 20px;
+}
+
+/* Loading State */
+.discover-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 20px;
+    color: #999;
+}
+
+.discover-loading .loading-spinner {
+    width: 40px;
+    height: 40px;
+    border: 4px solid #333;
+    border-top-color: #1db954;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-bottom: 16px;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.discover-loading p {
+    margin: 0;
+    font-size: 14px;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .discover-hero {
+        height: auto;
+        min-height: 400px;
+    }
+
+    .discover-hero-content {
+        flex-direction: column;
+        padding: 40px 20px;
+        text-align: center;
+    }
+
+    .discover-hero-title {
+        font-size: 36px;
+    }
+
+    .discover-hero-image {
+        width: 240px;
+        height: 240px;
+    }
+
+    .discover-hero-actions {
+        justify-content: center;
+    }
+
+    .discover-section {
+        padding: 0 16px;
+    }
+}
+
+/* Discover Cards */
+.discover-card {
+    flex-shrink: 0;
+    width: 200px;
+    background: #1a1a1a;
+    border-radius: 8px;
+    overflow: hidden;
+    cursor: pointer;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.discover-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.discover-card-image {
+    width: 100%;
+    height: 200px;
+    overflow: hidden;
+}
+
+.discover-card-image img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.discover-card-info {
+    padding: 12px;
+}
+
+.discover-card-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #fff;
+    margin: 0 0 4px 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.discover-card-subtitle {
+    font-size: 12px;
+    color: #999;
+    margin: 0 0 4px 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.discover-card-meta {
+    font-size: 11px;
+    color: #666;
+    margin: 0;
+}
+
+/* Discover Empty State */
+.discover-empty {
+    text-align: center;
+    padding: 60px 20px;
+    color: #999;
+}
+
+/* Discover Playlist Tracks */
+.discover-playlist-tracks {
+    background: #1a1a1a;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.discover-playlist-track {
+    display: grid;
+    grid-template-columns: 40px 50px 1fr 2fr 80px;
+    gap: 16px;
+    align-items: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid #2a2a2a;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.discover-playlist-track:hover {
+    background-color: #2a2a2a;
+}
+
+.playlist-track-number {
+    font-size: 14px;
+    color: #999;
+    text-align: center;
+}
+
+.playlist-track-image {
+    width: 50px;
+    height: 50px;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.playlist-track-image img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.playlist-track-info {
+    min-width: 0;
+}
+
+.playlist-track-name {
+    font-size: 14px;
+    font-weight: 500;
+    color: #fff;
+    margin-bottom: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.playlist-track-artist {
+    font-size: 12px;
+    color: #999;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.playlist-track-album {
+    font-size: 12px;
+    color: #999;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.playlist-track-duration {
+    font-size: 12px;
+    color: #999;
+    text-align: right;
+}
+
+/* Compact Playlist Layout */
+.discover-playlist-container.compact {
+    max-height: 500px;
+    overflow-y: auto;
+    background: #1a1a1a;
+    border-radius: 8px;
+}
+
+.discover-playlist-tracks-compact {
+    background: #1a1a1a;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.discover-playlist-track-compact {
+    display: grid;
+    grid-template-columns: 30px 40px 1fr 1.5fr 60px;
+    gap: 12px;
+    align-items: center;
+    padding: 8px 12px;
+    border-bottom: 1px solid #2a2a2a;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.discover-playlist-track-compact:hover {
+    background-color: #2a2a2a;
+}
+
+.track-compact-number {
+    font-size: 13px;
+    color: #999;
+    text-align: center;
+}
+
+.track-compact-image {
+    width: 40px;
+    height: 40px;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.track-compact-image img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.track-compact-info {
+    min-width: 0;
+}
+
+.track-compact-name {
+    font-size: 13px;
+    font-weight: 500;
+    color: #fff;
+    margin-bottom: 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.track-compact-artist {
+    font-size: 11px;
+    color: #999;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.track-compact-album {
+    font-size: 11px;
+    color: #999;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.track-compact-duration {
+    font-size: 11px;
+    color: #999;
+    text-align: right;
+}
+
+/* Discover Playlist Cards */
+.discover-playlist-card {
+    background: #1a1a1a;
+    border-radius: 8px;
+    overflow: hidden;
+    cursor: pointer;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.discover-playlist-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.discover-playlist-cover {
+    position: relative;
+    width: 100%;
+    padding-bottom: 100%;
+    overflow: hidden;
+}
+
+.discover-playlist-cover img {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.playlist-play-overlay {
+    position: absolute;
+    bottom: 12px;
+    right: 12px;
+    width: 48px;
+    height: 48px;
+    background-color: #1db954;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    color: #fff;
+    opacity: 0;
+    transform: translateY(8px);
+    transition: all 0.2s ease;
+}
+
+.discover-playlist-card:hover .playlist-play-overlay {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.discover-playlist-info {
+    padding: 16px;
+}
+
+.discover-playlist-name {
+    font-size: 16px;
+    font-weight: 600;
+    color: #fff;
+    margin: 0 0 8px 0;
+}
+
+.discover-playlist-description {
+    font-size: 13px;
+    color: #999;
+    margin: 0 0 8px 0;
+    line-height: 1.4;
+}
+
+.discover-playlist-count {
+    font-size: 12px;
+    color: #666;
+    margin: 0;
+}
