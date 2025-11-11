@@ -240,7 +240,10 @@
                         <h3 class="section-title">Tools & Operations</h3>
                         <div class="tools-grid">
                             <div class="tool-card" id="db-updater-card">
-                                <h4 class="tool-card-title">Database Updater</h4>
+                                <div class="tool-card-header">
+                                    <h4 class="tool-card-title">Database Updater</h4>
+                                    <button class="tool-help-button" data-tool="db-updater" title="Learn more about this tool">?</button>
+                                </div>
                                 <p class="tool-card-info">Last Full Refresh: <span id="db-last-refresh">Never</span></p>
                                 <div class="tool-card-stats">
                                     <div class="stat-item">
@@ -277,8 +280,9 @@
                             </div>
 
                             <div class="tool-card" id="metadata-updater-card">
-                                <div class="card-header">
-                                    <h3>Metadata Updater</h3>
+                                <div class="tool-card-header">
+                                    <h4 class="tool-card-title">Metadata Updater</h4>
+                                    <button class="tool-help-button" data-tool="metadata-updater" title="Learn more about this tool">?</button>
                                 </div>
                                 <p class="metadata-updater-description tool-card-info">Updates artist photos, genres, and album art from Spotify.</p>
                                  <div class="tool-card-controls">
@@ -302,7 +306,10 @@
                             </div>
 
                             <div class="tool-card" id="quality-scanner-card">
-                                <h4 class="tool-card-title">Quality Scanner</h4>
+                                <div class="tool-card-header">
+                                    <h4 class="tool-card-title">Quality Scanner</h4>
+                                    <button class="tool-help-button" data-tool="quality-scanner" title="Learn more about this tool">?</button>
+                                </div>
                                 <p class="tool-card-info">Scan library for tracks below quality preferences</p>
                                 <div class="tool-card-stats">
                                     <div class="stat-item">
@@ -339,7 +346,10 @@
                             </div>
 
                             <div class="tool-card" id="duplicate-cleaner-card">
-                                <h4 class="tool-card-title">Duplicate Cleaner</h4>
+                                <div class="tool-card-header">
+                                    <h4 class="tool-card-title">Duplicate Cleaner</h4>
+                                    <button class="tool-help-button" data-tool="duplicate-cleaner" title="Learn more about this tool">?</button>
+                                </div>
                                 <p class="tool-card-info">Detect and remove duplicate tracks in Transfer folder</p>
                                 <div class="tool-card-stats">
                                     <div class="stat-item">
@@ -2208,6 +2218,19 @@
                         </div>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tool Help Modal -->
+    <div class="tool-help-modal" id="tool-help-modal">
+        <div class="tool-help-modal-content">
+            <div class="tool-help-modal-header">
+                <h3 id="tool-help-modal-title">Tool Information</h3>
+                <button class="tool-help-modal-close">&times;</button>
+            </div>
+            <div class="tool-help-modal-body" id="tool-help-modal-body">
+                <!-- Content will be dynamically inserted -->
             </div>
         </div>
     </div>
