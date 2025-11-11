@@ -300,6 +300,43 @@
                                     <p class="progress-details-label" id="metadata-progress-label">0 / 0 artists (0.0%)</p>
                                 </div>
                             </div>
+
+                            <div class="tool-card" id="quality-scanner-card">
+                                <h4 class="tool-card-title">Quality Scanner</h4>
+                                <p class="tool-card-info">Scan library for tracks below quality preferences</p>
+                                <div class="tool-card-stats">
+                                    <div class="stat-item">
+                                        <span class="stat-item-label">Processed:</span>
+                                        <span class="stat-item-value" id="quality-stat-processed">0</span>
+                                    </div>
+                                    <div class="stat-item">
+                                        <span class="stat-item-label">Quality Met:</span>
+                                        <span class="stat-item-value" id="quality-stat-met">0</span>
+                                    </div>
+                                    <div class="stat-item">
+                                        <span class="stat-item-label">Low Quality:</span>
+                                        <span class="stat-item-value" id="quality-stat-low">0</span>
+                                    </div>
+                                    <div class="stat-item">
+                                        <span class="stat-item-label">Matched:</span>
+                                        <span class="stat-item-value" id="quality-stat-matched">0</span>
+                                    </div>
+                                </div>
+                                <div class="tool-card-controls">
+                                    <select id="quality-scan-scope">
+                                        <option value="watchlist">Watchlist Artists Only</option>
+                                        <option value="all">All Library Tracks</option>
+                                    </select>
+                                    <button id="quality-scan-button">Scan Library</button>
+                                </div>
+                                <div class="tool-card-progress-section">
+                                    <p class="progress-phase-label" id="quality-phase-label">Ready to scan</p>
+                                    <div class="progress-bar-container">
+                                         <div class="progress-bar-fill" id="quality-progress-bar" style="width: 0%;"></div>
+                                    </div>
+                                    <p class="progress-details-label" id="quality-progress-label">0 / 0 tracks scanned (0.0%)</p>
+                                </div>
+                            </div>
                         </div>
                     </div>
 

@@ -155,6 +155,22 @@ db_update_state = {
     "error_message": ""
 }
 
+# Quality Scanner state
+quality_scanner_state = {
+    "status": "idle",  # idle, running, finished, error
+    "phase": "Ready to scan",
+    "progress": 0,
+    "processed": 0,
+    "total": 0,
+    "quality_met": 0,
+    "low_quality": 0,
+    "matched": 0,
+    "error_message": "",
+    "results": []  # List of low quality tracks with match status
+}
+quality_scanner_lock = threading.Lock()
+quality_scanner_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="QualityScanner")
+
 # --- Sync Page Globals ---
 sync_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="SyncWorker")
 active_sync_workers = {}  # Key: playlist_id, Value: Future object
@@ -8036,6 +8052,390 @@ def stop_database_update():
             return jsonify({"success": True, "message": "Stop request sent."})
         else:
             return jsonify({"success": False, "error": "No update is currently running."}), 404
+
+# ===============================
+# == QUALITY SCANNER           ==
+# ===============================
+
+# Quality tier mappings
+QUALITY_TIERS = {
+    'lossless': {
+        'extensions': ['.flac', '.ape', '.wav', '.alac', '.dsf', '.dff', '.aiff', '.aif'],
+        'tier': 1
+    },
+    'high_lossy': {
+        'extensions': ['.opus', '.ogg'],
+        'tier': 2
+    },
+    'standard_lossy': {
+        'extensions': ['.m4a', '.aac'],
+        'tier': 3
+    },
+    'low_lossy': {
+        'extensions': ['.mp3', '.wma'],
+        'tier': 4
+    }
+}
+
+def _get_quality_tier_from_extension(file_path):
+    """Determine quality tier from file extension"""
+    if not file_path:
+        return ('unknown', 999)
+
+    ext = os.path.splitext(file_path)[1].lower()
+
+    for tier_name, tier_data in QUALITY_TIERS.items():
+        if ext in tier_data['extensions']:
+            return (tier_name, tier_data['tier'])
+
+    return ('unknown', 999)
+
+def _run_quality_scanner(scope='watchlist'):
+    """Main quality scanner worker function"""
+    from core.wishlist_service import get_wishlist_service
+    from database.music_database import MusicDatabase
+
+    try:
+        with quality_scanner_lock:
+            quality_scanner_state["status"] = "running"
+            quality_scanner_state["phase"] = "Initializing scan..."
+            quality_scanner_state["progress"] = 0
+            quality_scanner_state["processed"] = 0
+            quality_scanner_state["total"] = 0
+            quality_scanner_state["quality_met"] = 0
+            quality_scanner_state["low_quality"] = 0
+            quality_scanner_state["matched"] = 0
+            quality_scanner_state["results"] = []
+            quality_scanner_state["error_message"] = ""
+
+        print(f"🔍 [Quality Scanner] Starting scan with scope: {scope}")
+
+        # Get database instance
+        db = MusicDatabase()
+
+        # Get quality profile to determine preferred quality
+        quality_profile = db.get_quality_profile()
+        preferred_qualities = quality_profile.get('qualities', {})
+
+        # Determine minimum acceptable tier based on enabled qualities
+        min_acceptable_tier = 999
+        for quality_name, quality_config in preferred_qualities.items():
+            if quality_config.get('enabled', False):
+                # Map quality profile names to tier names
+                tier_map = {
+                    'flac': 'lossless',
+                    'mp3_320': 'low_lossy',
+                    'mp3_256': 'low_lossy',
+                    'mp3_192': 'low_lossy'
+                }
+                tier_name = tier_map.get(quality_name)
+                if tier_name:
+                    tier_num = QUALITY_TIERS[tier_name]['tier']
+                    min_acceptable_tier = min(min_acceptable_tier, tier_num)
+
+        print(f"🎵 [Quality Scanner] Minimum acceptable tier: {min_acceptable_tier}")
+
+        # Get tracks to scan based on scope
+        with quality_scanner_lock:
+            quality_scanner_state["phase"] = "Loading tracks from database..."
+
+        if scope == 'watchlist':
+            # Get watchlist artists
+            watchlist_artists = db.get_watchlist_artists()
+            if not watchlist_artists:
+                with quality_scanner_lock:
+                    quality_scanner_state["status"] = "finished"
+                    quality_scanner_state["phase"] = "No watchlist artists found"
+                    quality_scanner_state["error_message"] = "Please add artists to watchlist first"
+                print(f"⚠️ [Quality Scanner] No watchlist artists found")
+                return
+
+            # Get artist names from watchlist
+            artist_names = [artist.artist_name for artist in watchlist_artists]
+            print(f"📋 [Quality Scanner] Scanning {len(artist_names)} watchlist artists")
+
+            # Get all tracks for these artists by name
+            conn = db._get_connection()
+            placeholders = ','.join(['?' for _ in artist_names])
+            tracks_to_scan = conn.execute(
+                f"SELECT t.id, t.title, t.artist_id, t.album_id, t.file_path, t.bitrate, a.name as artist_name, al.title as album_title "
+                f"FROM tracks t "
+                f"JOIN artists a ON t.artist_id = a.id "
+                f"JOIN albums al ON t.album_id = al.id "
+                f"WHERE a.name IN ({placeholders}) AND t.file_path IS NOT NULL",
+                artist_names
+            ).fetchall()
+            conn.close()
+        else:
+            # Scan all library tracks
+            with quality_scanner_lock:
+                quality_scanner_state["phase"] = "Loading all library tracks..."
+
+            conn = db._get_connection()
+            tracks_to_scan = conn.execute(
+                "SELECT t.id, t.title, t.artist_id, t.album_id, t.file_path, t.bitrate, a.name as artist_name, al.title as album_title "
+                "FROM tracks t "
+                "JOIN artists a ON t.artist_id = a.id "
+                "JOIN albums al ON t.album_id = al.id "
+                "WHERE t.file_path IS NOT NULL"
+            ).fetchall()
+            conn.close()
+
+        total_tracks = len(tracks_to_scan)
+        print(f"📊 [Quality Scanner] Found {total_tracks} tracks to scan")
+
+        with quality_scanner_lock:
+            quality_scanner_state["total"] = total_tracks
+            quality_scanner_state["phase"] = f"Scanning {total_tracks} tracks..."
+
+        # Initialize Spotify client for matching
+        spotify_client = SpotifyClient()
+        if not spotify_client.is_authenticated():
+            with quality_scanner_lock:
+                quality_scanner_state["status"] = "error"
+                quality_scanner_state["phase"] = "Spotify not authenticated"
+                quality_scanner_state["error_message"] = "Please authenticate with Spotify first"
+            print(f"❌ [Quality Scanner] Spotify not authenticated")
+            return
+
+        wishlist_service = get_wishlist_service()
+
+        # Scan each track
+        for idx, track_row in enumerate(tracks_to_scan, 1):
+            try:
+                track_id, title, artist_id, album_id, file_path, bitrate, artist_name, album_title = track_row
+
+                # Check quality tier
+                tier_name, tier_num = _get_quality_tier_from_extension(file_path)
+
+                # Update progress
+                with quality_scanner_lock:
+                    quality_scanner_state["processed"] = idx
+                    quality_scanner_state["progress"] = (idx / total_tracks) * 100
+                    quality_scanner_state["phase"] = f"Scanning: {artist_name} - {title}"
+
+                # Check if meets quality standards
+                if tier_num <= min_acceptable_tier:
+                    # Quality met
+                    with quality_scanner_lock:
+                        quality_scanner_state["quality_met"] += 1
+                    continue
+
+                # Low quality track found
+                with quality_scanner_lock:
+                    quality_scanner_state["low_quality"] += 1
+
+                print(f"🔍 [Quality Scanner] Low quality: {artist_name} - {title} ({tier_name}, {file_path})")
+
+                # Attempt to match to Spotify using matching_engine
+                matched = False
+                matched_track_data = None
+
+                try:
+                    # Generate search queries using matching engine
+                    temp_track = type('TempTrack', (), {
+                        'name': title,
+                        'artists': [artist_name],
+                        'album': album_title
+                    })()
+
+                    search_queries = matching_engine.generate_download_queries(temp_track)
+                    print(f"🔍 [Quality Scanner] Generated {len(search_queries)} search queries for {artist_name} - {title}")
+
+                    # Find best match using confidence scoring
+                    best_match = None
+                    best_confidence = 0.0
+                    min_confidence = 0.7  # Match existing standard
+
+                    for query_idx, search_query in enumerate(search_queries):
+                        try:
+                            spotify_matches = spotify_client.search_tracks(search_query, limit=5)
+
+                            if not spotify_matches:
+                                continue
+
+                            # Score each result using matching engine
+                            for spotify_track in spotify_matches:
+                                try:
+                                    # Calculate artist confidence
+                                    artist_confidence = 0.0
+                                    if spotify_track.artists:
+                                        for result_artist in spotify_track.artists:
+                                            artist_sim = matching_engine.similarity_score(
+                                                matching_engine.normalize_string(artist_name),
+                                                matching_engine.normalize_string(result_artist)
+                                            )
+                                            artist_confidence = max(artist_confidence, artist_sim)
+
+                                    # Calculate title confidence
+                                    title_confidence = matching_engine.similarity_score(
+                                        matching_engine.normalize_string(title),
+                                        matching_engine.normalize_string(spotify_track.name)
+                                    )
+
+                                    # Combined confidence (50% artist + 50% title)
+                                    combined_confidence = (artist_confidence * 0.5 + title_confidence * 0.5)
+
+                                    print(f"🔍 [Quality Scanner] Candidate: '{spotify_track.artists[0]}' - '{spotify_track.name}' (confidence: {combined_confidence:.3f})")
+
+                                    # Update best match if this is better
+                                    if combined_confidence > best_confidence and combined_confidence >= min_confidence:
+                                        best_confidence = combined_confidence
+                                        best_match = spotify_track
+                                        print(f"✅ [Quality Scanner] New best match: {spotify_track.artists[0]} - {spotify_track.name} (confidence: {combined_confidence:.3f})")
+
+                                except Exception as e:
+                                    print(f"❌ [Quality Scanner] Error scoring result: {e}")
+                                    continue
+
+                            # If we found a very high confidence match, stop searching
+                            if best_confidence >= 0.9:
+                                print(f"🎯 [Quality Scanner] High confidence match found ({best_confidence:.3f}), stopping search")
+                                break
+
+                        except Exception as e:
+                            print(f"❌ [Quality Scanner] Error searching with query '{search_query}': {e}")
+                            continue
+
+                    # Process best match
+                    if best_match:
+                        matched = True
+                        print(f"✅ [Quality Scanner] Final match: {best_match.artists[0]} - {best_match.name} (confidence: {best_confidence:.3f})")
+
+                        # Build full Spotify track data for wishlist
+                        matched_track_data = {
+                            'id': best_match.id,
+                            'name': best_match.name,
+                            'artists': [{'name': artist} for artist in best_match.artists],
+                            'album': {'name': best_match.album},
+                            'duration_ms': best_match.duration_ms,
+                            'popularity': best_match.popularity,
+                            'preview_url': best_match.preview_url,
+                            'external_urls': best_match.external_urls or {}
+                        }
+
+                        # Add to wishlist
+                        source_context = {
+                            'quality_scanner': True,
+                            'original_file_path': file_path,
+                            'original_format': tier_name,
+                            'original_bitrate': bitrate,
+                            'match_confidence': best_confidence,
+                            'scan_date': datetime.now().isoformat()
+                        }
+
+                        success = wishlist_service.add_spotify_track_to_wishlist(
+                            spotify_track_data=matched_track_data,
+                            failure_reason=f"Low quality - {tier_name.replace('_', ' ').title()} format",
+                            source_type='quality_scanner',
+                            source_context=source_context
+                        )
+
+                        if success:
+                            with quality_scanner_lock:
+                                quality_scanner_state["matched"] += 1
+                            print(f"✅ [Quality Scanner] Matched and added to wishlist: {artist_name} - {title}")
+                        else:
+                            print(f"⚠️ [Quality Scanner] Failed to add to wishlist: {artist_name} - {title}")
+                    else:
+                        print(f"⚠️ [Quality Scanner] No suitable match found (best confidence: {best_confidence:.3f}, required: {min_confidence:.3f})")
+
+                except Exception as matching_error:
+                    print(f"❌ [Quality Scanner] Matching error for {artist_name} - {title}: {matching_error}")
+
+                # Store result
+                result_entry = {
+                    'track_id': track_id,
+                    'title': title,
+                    'artist': artist_name,
+                    'album': album_title,
+                    'file_path': file_path,
+                    'current_format': tier_name,
+                    'bitrate': bitrate,
+                    'matched': matched,
+                    'spotify_id': matched_track_data['id'] if matched_track_data else None
+                }
+
+                with quality_scanner_lock:
+                    quality_scanner_state["results"].append(result_entry)
+
+                if not matched:
+                    print(f"⚠️ [Quality Scanner] No Spotify match found for: {artist_name} - {title}")
+
+            except Exception as track_error:
+                print(f"❌ [Quality Scanner] Error processing track: {track_error}")
+                continue
+
+        # Scan complete
+        with quality_scanner_lock:
+            quality_scanner_state["status"] = "finished"
+            quality_scanner_state["progress"] = 100
+            quality_scanner_state["phase"] = "Scan complete"
+
+        print(f"✅ [Quality Scanner] Scan complete: {quality_scanner_state['processed']} processed, "
+              f"{quality_scanner_state['low_quality']} low quality, {quality_scanner_state['matched']} matched to Spotify")
+
+        # Add activity
+        add_activity_item("🔍", "Quality Scan Complete",
+                         f"{quality_scanner_state['matched']} tracks added to wishlist", "Now")
+
+    except Exception as e:
+        print(f"❌ [Quality Scanner] Critical error: {e}")
+        import traceback
+        traceback.print_exc()
+
+        with quality_scanner_lock:
+            quality_scanner_state["status"] = "error"
+            quality_scanner_state["error_message"] = str(e)
+            quality_scanner_state["phase"] = f"Error: {str(e)}"
+
+@app.route('/api/quality-scanner/start', methods=['POST'])
+def start_quality_scan():
+    """Start the quality scanner"""
+    with quality_scanner_lock:
+        if quality_scanner_state["status"] == "running":
+            return jsonify({"success": False, "error": "A scan is already in progress"}), 409
+
+        data = request.get_json() or {}
+        scope = data.get('scope', 'watchlist')  # 'watchlist' or 'all'
+
+        print(f"🔍 [Quality Scanner API] Starting scan with scope: {scope}")
+
+        # Reset state
+        quality_scanner_state["status"] = "running"
+        quality_scanner_state["phase"] = "Initializing..."
+        quality_scanner_state["progress"] = 0
+        quality_scanner_state["processed"] = 0
+        quality_scanner_state["total"] = 0
+        quality_scanner_state["quality_met"] = 0
+        quality_scanner_state["low_quality"] = 0
+        quality_scanner_state["matched"] = 0
+        quality_scanner_state["results"] = []
+        quality_scanner_state["error_message"] = ""
+
+        # Submit worker
+        quality_scanner_executor.submit(_run_quality_scanner, scope)
+
+        add_activity_item("🔍", "Quality Scan Started", f"Scanning {scope} tracks", "Now")
+
+        return jsonify({"success": True, "message": "Quality scan started"})
+
+@app.route('/api/quality-scanner/status', methods=['GET'])
+def get_quality_scanner_status():
+    """Get current quality scanner status"""
+    with quality_scanner_lock:
+        return jsonify(quality_scanner_state)
+
+@app.route('/api/quality-scanner/stop', methods=['POST'])
+def stop_quality_scan():
+    """Stop the quality scanner (sets a stop flag)"""
+    with quality_scanner_lock:
+        if quality_scanner_state["status"] == "running":
+            quality_scanner_state["status"] = "finished"
+            quality_scanner_state["phase"] = "Scan stopped by user"
+            return jsonify({"success": True, "message": "Stop request sent"})
+        else:
+            return jsonify({"success": False, "error": "No scan is currently running"}), 404
 
 # ===============================
 # == DOWNLOAD MISSING TRACKS   ==
