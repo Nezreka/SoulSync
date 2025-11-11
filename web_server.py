@@ -14455,8 +14455,8 @@ def get_discover_recent_releases():
     try:
         database = get_database()
 
-        # Get cached recent albums
-        albums = database.get_discovery_recent_albums(limit=10)
+        # Get cached recent albums (max 20)
+        albums = database.get_discovery_recent_albums(limit=20)
 
         return jsonify({"success": True, "albums": albums})
 
@@ -14466,30 +14466,42 @@ def get_discover_recent_releases():
 
 @app.route('/api/discover/release-radar', methods=['GET'])
 def get_discover_release_radar():
-    """Get release radar playlist - 50 tracks from discovery pool (new releases only)"""
+    """Get release radar playlist - 50 tracks randomly selected from all recent albums"""
     try:
         import random
 
         database = get_database()
 
-        # Get new release tracks from discovery pool (is_new_release = True, last 30 days)
-        discovery_tracks = database.get_discovery_pool_tracks(limit=500, new_releases_only=True)
-
-        if not discovery_tracks:
+        if not spotify_client or not spotify_client.is_authenticated():
             return jsonify({"success": True, "tracks": []})
 
-        # Convert to JSON format
+        # Get all recent albums from cache
+        recent_albums = database.get_discovery_recent_albums(limit=20)
+
+        if not recent_albums:
+            return jsonify({"success": True, "tracks": []})
+
         all_tracks = []
-        for track in discovery_tracks:
-            all_tracks.append({
-                "spotify_track_id": track.spotify_track_id,
-                "track_name": track.track_name,
-                "artist_name": track.artist_name,
-                "album_name": track.album_name,
-                "album_cover_url": track.album_cover_url,
-                "duration_ms": track.duration_ms,
-                "track_data_json": track.track_data_json
-            })
+
+        # Get tracks from each recent album
+        for album in recent_albums:
+            try:
+                # Get album tracks from Spotify
+                album_data = spotify_client.get_album(album['album_spotify_id'])
+                if album_data and 'tracks' in album_data:
+                    for track in album_data['tracks']['items']:
+                        all_tracks.append({
+                            "spotify_track_id": track['id'],
+                            "track_name": track['name'],
+                            "artist_name": album['artist_name'],
+                            "album_name": album['album_name'],
+                            "album_cover_url": album['album_cover_url'],
+                            "duration_ms": track.get('duration_ms', 0),
+                            "track_data_json": track
+                        })
+            except Exception as e:
+                print(f"Error getting tracks for album {album['album_name']}: {e}")
+                continue
 
         # Randomly select up to 50 tracks
         random.shuffle(all_tracks)
@@ -14499,24 +14511,25 @@ def get_discover_release_radar():
 
     except Exception as e:
         print(f"Error getting release radar: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/discover/weekly', methods=['GET'])
 def get_discover_weekly():
-    """Get discovery weekly playlist - 50 tracks from discovery pool (all tracks, not just new)"""
+    """Get discovery weekly playlist - 50 tracks from similar artists, watchlist artists, and database albums"""
     try:
         import random
 
         database = get_database()
 
-        # Get all tracks from discovery pool (not just new releases)
-        discovery_tracks = database.get_discovery_pool_tracks(limit=500, new_releases_only=False)
-
-        if not discovery_tracks:
+        if not spotify_client or not spotify_client.is_authenticated():
             return jsonify({"success": True, "tracks": []})
 
-        # Convert to JSON format
         all_tracks = []
+
+        # 1. Get tracks from discovery pool (similar artists) - aim for ~30 tracks
+        discovery_tracks = database.get_discovery_pool_tracks(limit=300, new_releases_only=False)
         for track in discovery_tracks:
             all_tracks.append({
                 "spotify_track_id": track.spotify_track_id,
@@ -14528,7 +14541,72 @@ def get_discover_weekly():
                 "track_data_json": track.track_data_json
             })
 
-        # Randomly select 50 tracks
+        # 2. Get tracks from random watchlist artists - aim for ~10 tracks
+        try:
+            watchlist_artists = database.get_watchlist_artists()
+            if watchlist_artists:
+                random_watchlist = random.sample(watchlist_artists, min(2, len(watchlist_artists)))
+                for artist in random_watchlist:
+                    try:
+                        albums = spotify_client.get_artist_albums(artist.spotify_artist_id, album_type='album', limit=10)
+                        if albums:
+                            random_album = random.choice(albums)
+                            album_data = spotify_client.get_album(random_album.id)
+                            if album_data and 'tracks' in album_data:
+                                for track in album_data['tracks']['items'][:5]:  # 5 tracks per album
+                                    all_tracks.append({
+                                        "spotify_track_id": track['id'],
+                                        "track_name": track['name'],
+                                        "artist_name": artist.artist_name,
+                                        "album_name": random_album.name,
+                                        "album_cover_url": random_album.image_url if hasattr(random_album, 'image_url') else None,
+                                        "duration_ms": track.get('duration_ms', 0),
+                                        "track_data_json": track
+                                    })
+                    except Exception as e:
+                        continue
+        except Exception as e:
+            print(f"Error getting watchlist tracks: {e}")
+
+        # 3. Get tracks from random database albums - aim for ~10 tracks
+        try:
+            # Get random albums from database
+            with database._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT DISTINCT a.title, ar.name as artist_name
+                    FROM albums_new a
+                    JOIN artists_new ar ON a.artist_id = ar.id
+                    ORDER BY RANDOM()
+                    LIMIT 2
+                """)
+                db_albums = cursor.fetchall()
+
+                for album_row in db_albums:
+                    try:
+                        # Search for album on Spotify
+                        query = f"album:{album_row['title']} artist:{album_row['artist_name']}"
+                        search_results = spotify_client.search_albums(query, limit=1)
+                        if search_results and len(search_results) > 0:
+                            spotify_album = search_results[0]
+                            album_data = spotify_client.get_album(spotify_album.id)
+                            if album_data and 'tracks' in album_data:
+                                for track in album_data['tracks']['items'][:5]:  # 5 tracks per album
+                                    all_tracks.append({
+                                        "spotify_track_id": track['id'],
+                                        "track_name": track['name'],
+                                        "artist_name": album_row['artist_name'],
+                                        "album_name": album_row['title'],
+                                        "album_cover_url": spotify_album.image_url if hasattr(spotify_album, 'image_url') else None,
+                                        "duration_ms": track.get('duration_ms', 0),
+                                        "track_data_json": track
+                                    })
+                    except Exception as e:
+                        continue
+        except Exception as e:
+            print(f"Error getting database album tracks: {e}")
+
+        # Randomly select 50 tracks from the combined pool
         random.shuffle(all_tracks)
         selected_tracks = all_tracks[:50]
 
@@ -14536,6 +14614,8 @@ def get_discover_weekly():
 
     except Exception as e:
         print(f"Error getting discovery weekly: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/metadata/start', methods=['POST'])
