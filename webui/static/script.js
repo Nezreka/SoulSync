@@ -9049,6 +9049,197 @@ function stopDuplicateCleanerPolling() {
     }
 }
 
+// ============================================
+// == TOOL HELP MODAL                        ==
+// ============================================
+
+const TOOL_HELP_CONTENT = {
+    'db-updater': {
+        title: 'Database Updater',
+        content: `
+            <h4>What does this tool do?</h4>
+            <p>The Database Updater syncs your media server library (Plex, Jellyfin, or Navidrome) with SoulSync's internal database.</p>
+
+            <h4>Update Modes</h4>
+            <ul>
+                <li><strong>Incremental Update:</strong> Only scans for new artists, albums, and tracks that have been added since the last update. Fast and efficient for regular updates.</li>
+                <li><strong>Full Refresh:</strong> Completely rebuilds the database from scratch. Use this if you've made significant changes to your library or if data seems out of sync.</li>
+            </ul>
+
+            <h4>When to use it?</h4>
+            <ul>
+                <li>After adding new music to your media server</li>
+                <li>When library statistics seem incorrect</li>
+                <li>After changing media server settings</li>
+            </ul>
+
+            <h4>Progress Persistence</h4>
+            <p>The update runs in the background. You can close this page and return later - progress will be preserved and continue where it left off.</p>
+        `
+    },
+    'metadata-updater': {
+        title: 'Metadata Updater',
+        content: `
+            <h4>What does this tool do?</h4>
+            <p>The Metadata Updater enhances your library by fetching artist photos, genres, and album artwork from Spotify.</p>
+
+            <h4>Refresh Interval Options</h4>
+            <ul>
+                <li><strong>6 months:</strong> Only updates metadata for artists not updated in the last 180 days</li>
+                <li><strong>3 months:</strong> Updates metadata for artists not updated in the last 90 days</li>
+                <li><strong>1 month:</strong> Updates metadata for artists not updated in the last 30 days</li>
+                <li><strong>Force All:</strong> Updates all artists regardless of when they were last updated</li>
+            </ul>
+
+            <h4>What gets updated?</h4>
+            <ul>
+                <li>Artist profile photos</li>
+                <li>Music genres</li>
+                <li>Album cover artwork</li>
+                <li>Spotify popularity scores</li>
+            </ul>
+
+            <h4>Note</h4>
+            <p>This tool is only available for <strong>Plex</strong> media servers. It requires Spotify authentication to fetch metadata.</p>
+        `
+    },
+    'quality-scanner': {
+        title: 'Quality Scanner',
+        content: `
+            <h4>What does this tool do?</h4>
+            <p>The Quality Scanner identifies tracks in your library that don't meet your preferred quality settings and automatically matches them to Spotify to add to your wishlist for re-downloading.</p>
+
+            <h4>Scan Scope</h4>
+            <ul>
+                <li><strong>Watchlist Artists Only:</strong> Only scans tracks from artists you're watching. Faster and more focused.</li>
+                <li><strong>All Library Tracks:</strong> Scans your entire music library. Comprehensive but takes longer.</li>
+            </ul>
+
+            <h4>How it works</h4>
+            <ol>
+                <li>Scans tracks and checks file format against your quality preferences</li>
+                <li>Identifies tracks below your quality threshold (e.g., MP3 when you prefer FLAC)</li>
+                <li>Uses fuzzy matching to find the track on Spotify (70% confidence minimum)</li>
+                <li>Automatically adds matched tracks to your wishlist for re-download</li>
+            </ol>
+
+            <h4>Quality Tiers</h4>
+            <ul>
+                <li><strong>Tier 1 (Best):</strong> FLAC, WAV, ALAC, AIFF - Lossless formats</li>
+                <li><strong>Tier 2:</strong> OPUS, OGG - High quality lossy</li>
+                <li><strong>Tier 3:</strong> M4A, AAC - Standard lossy</li>
+                <li><strong>Tier 4:</strong> MP3, WMA - Lower quality lossy</li>
+            </ul>
+
+            <h4>Stats Explained</h4>
+            <ul>
+                <li><strong>Processed:</strong> Total tracks scanned so far</li>
+                <li><strong>Quality Met:</strong> Tracks that meet your quality standards</li>
+                <li><strong>Low Quality:</strong> Tracks below your quality threshold</li>
+                <li><strong>Matched:</strong> Low quality tracks successfully matched to Spotify and added to wishlist</li>
+            </ul>
+        `
+    },
+    'duplicate-cleaner': {
+        title: 'Duplicate Cleaner',
+        content: `
+            <h4>What does this tool do?</h4>
+            <p>The Duplicate Cleaner scans your Transfer folder for duplicate audio files and automatically removes lower-quality versions, keeping only the best copy.</p>
+
+            <h4>How it detects duplicates</h4>
+            <p>Files are considered duplicates when:</p>
+            <ul>
+                <li>They are in the <strong>same folder</strong></li>
+                <li>They have the <strong>exact same filename</strong> (ignoring file extension)</li>
+            </ul>
+            <p>Example: <code>Song.flac</code> and <code>Song.mp3</code> in the same folder = duplicates ✓</p>
+            <p>Example: <code>Song.flac</code> and <code>Song (Remaster).flac</code> = NOT duplicates ✗</p>
+
+            <h4>Which file is kept?</h4>
+            <p>Priority order (best to worst):</p>
+            <ol>
+                <li><strong>Format priority:</strong> FLAC/Lossless > OPUS/OGG > M4A/AAC > MP3/WMA</li>
+                <li><strong>If same format:</strong> Larger file size is kept (usually indicates better bitrate)</li>
+            </ol>
+
+            <h4>Where do deleted files go?</h4>
+            <p>Removed files are moved to <code>Transfer/deleted/</code> folder (not permanently deleted). You can review and recover them if needed.</p>
+
+            <h4>Safety Features</h4>
+            <ul>
+                <li>Only processes audio files (FLAC, MP3, M4A, etc.)</li>
+                <li>Only removes files with identical names in the same folder</li>
+                <li>Files are moved, not deleted - fully recoverable</li>
+                <li>Preserves original folder structure in the deleted folder</li>
+            </ul>
+
+            <h4>Stats Explained</h4>
+            <ul>
+                <li><strong>Files Scanned:</strong> Total audio files checked</li>
+                <li><strong>Duplicates Found:</strong> Number of duplicate files detected</li>
+                <li><strong>Deleted:</strong> Files moved to deleted folder</li>
+                <li><strong>Space Freed:</strong> Total disk space reclaimed</li>
+            </ul>
+        `
+    }
+};
+
+function initializeToolHelpButtons() {
+    const helpButtons = document.querySelectorAll('.tool-help-button');
+    const modal = document.getElementById('tool-help-modal');
+    const closeButton = modal.querySelector('.tool-help-modal-close');
+
+    // Attach click handlers to all help buttons
+    helpButtons.forEach(button => {
+        button.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const toolId = button.getAttribute('data-tool');
+            openToolHelpModal(toolId);
+        });
+    });
+
+    // Close modal when clicking close button
+    closeButton.addEventListener('click', closeToolHelpModal);
+
+    // Close modal when clicking outside content
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            closeToolHelpModal();
+        }
+    });
+
+    // Close modal on Escape key
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && modal.classList.contains('active')) {
+            closeToolHelpModal();
+        }
+    });
+}
+
+function openToolHelpModal(toolId) {
+    const modal = document.getElementById('tool-help-modal');
+    const titleElement = document.getElementById('tool-help-modal-title');
+    const bodyElement = document.getElementById('tool-help-modal-body');
+
+    const helpData = TOOL_HELP_CONTENT[toolId];
+    if (!helpData) {
+        console.warn(`No help content found for tool: ${toolId}`);
+        return;
+    }
+
+    titleElement.textContent = helpData.title;
+    bodyElement.innerHTML = helpData.content;
+
+    modal.classList.add('active');
+    document.body.style.overflow = 'hidden'; // Prevent background scrolling
+}
+
+function closeToolHelpModal() {
+    const modal = document.getElementById('tool-help-modal');
+    modal.classList.remove('active');
+    document.body.style.overflow = ''; // Restore scrolling
+}
+
 function stopWishlistCountPolling() {
     if (wishlistCountInterval) {
         clearInterval(wishlistCountInterval);
@@ -9159,6 +9350,9 @@ async function loadDashboardData() {
     if (duplicateCleanButton) {
         duplicateCleanButton.addEventListener('click', handleDuplicateCleanButtonClick);
     }
+
+    // Attach event listeners for tool help buttons
+    initializeToolHelpButtons();
 
     // Attach event listener for the wishlist button
     const wishlistButton = document.getElementById('wishlist-button');
