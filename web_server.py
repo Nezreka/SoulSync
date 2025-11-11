@@ -14503,9 +14503,23 @@ def get_discover_release_radar():
                 print(f"Error getting tracks for album {album['album_name']}: {e}")
                 continue
 
-        # Randomly select up to 50 tracks
-        random.shuffle(all_tracks)
-        selected_tracks = all_tracks[:50]
+        # Group tracks by artist to ensure variety
+        tracks_by_artist = {}
+        for track in all_tracks:
+            artist_name = track['artist_name']
+            if artist_name not in tracks_by_artist:
+                tracks_by_artist[artist_name] = []
+            tracks_by_artist[artist_name].append(track)
+
+        # Limit each artist to max 6 tracks for variety
+        balanced_tracks = []
+        for artist_name, tracks in tracks_by_artist.items():
+            random.shuffle(tracks)
+            balanced_tracks.extend(tracks[:6])  # Max 6 tracks per artist
+
+        # Randomly select up to 50 tracks from balanced pool
+        random.shuffle(balanced_tracks)
+        selected_tracks = balanced_tracks[:50]
 
         return jsonify({"success": True, "tracks": selected_tracks})
 
