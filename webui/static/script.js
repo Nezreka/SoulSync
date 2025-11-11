@@ -28,6 +28,7 @@ let searchAbortController = null;
 let dbStatsInterval = null;
 let dbUpdateStatusInterval = null;
 let qualityScannerStatusInterval = null;
+let duplicateCleanerStatusInterval = null;
 let wishlistCountInterval = null;
 
 // --- Add these globals for the Sync Page ---
@@ -8914,6 +8915,140 @@ function stopQualityScannerPolling() {
     }
 }
 
+// ============================================
+// == DUPLICATE CLEANER FUNCTIONS            ==
+// ============================================
+
+async function handleDuplicateCleanButtonClick() {
+    const button = document.getElementById('duplicate-clean-button');
+    const currentAction = button.textContent;
+
+    if (currentAction === 'Clean Duplicates') {
+        try {
+            button.disabled = true;
+            button.textContent = 'Starting...';
+            const response = await fetch('/api/duplicate-cleaner/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+
+            if (response.ok) {
+                showToast('Duplicate cleaner started!', 'success');
+                // Start polling immediately to get live status
+                checkAndUpdateDuplicateCleanProgress();
+            } else {
+                const errorData = await response.json();
+                showToast(`Error: ${errorData.error}`, 'error');
+                button.disabled = false;
+                button.textContent = 'Clean Duplicates';
+            }
+        } catch (error) {
+            showToast('Failed to start duplicate cleaner.', 'error');
+            button.disabled = false;
+            button.textContent = 'Clean Duplicates';
+        }
+
+    } else { // "Stop Cleaning"
+        try {
+            const response = await fetch('/api/duplicate-cleaner/stop', { method: 'POST' });
+            if (response.ok) {
+                showToast('Stop request sent.', 'info');
+            } else {
+                showToast('Failed to send stop request.', 'error');
+            }
+        } catch (error) {
+            showToast('Error sending stop request.', 'error');
+        }
+    }
+}
+
+async function checkAndUpdateDuplicateCleanProgress() {
+    try {
+        const response = await fetch('/api/duplicate-cleaner/status', {
+            signal: AbortSignal.timeout(10000) // 10 second timeout
+        });
+        if (!response.ok) return;
+
+        const state = await response.json();
+        console.debug('🧹 Duplicate Cleaner Status:', state.status, `${state.files_scanned}/${state.total_files}`, `${state.progress.toFixed(1)}%`);
+        updateDuplicateCleanProgressUI(state);
+
+        // Start polling only if not already polling and status is running
+        if (state.status === 'running' && !duplicateCleanerStatusInterval) {
+            console.log('🔄 Starting duplicate cleaner polling (1 second interval)');
+            duplicateCleanerStatusInterval = setInterval(checkAndUpdateDuplicateCleanProgress, 1000);
+        }
+
+    } catch (error) {
+        console.warn('Could not fetch duplicate cleaner status:', error);
+        // Don't stop polling on network errors - keep trying
+    }
+}
+
+function updateDuplicateCleanProgressUI(state) {
+    const button = document.getElementById('duplicate-clean-button');
+    const phaseLabel = document.getElementById('duplicate-phase-label');
+    const progressLabel = document.getElementById('duplicate-progress-label');
+    const progressBar = document.getElementById('duplicate-progress-bar');
+
+    // Stats
+    const scannedStat = document.getElementById('duplicate-stat-scanned');
+    const foundStat = document.getElementById('duplicate-stat-found');
+    const deletedStat = document.getElementById('duplicate-stat-deleted');
+    const spaceStat = document.getElementById('duplicate-stat-space');
+
+    if (!button || !phaseLabel || !progressLabel || !progressBar) return;
+
+    // Update stats
+    if (scannedStat) scannedStat.textContent = state.files_scanned || 0;
+    if (foundStat) foundStat.textContent = state.duplicates_found || 0;
+    if (deletedStat) deletedStat.textContent = state.deleted || 0;
+    if (spaceStat) {
+        const spaceMB = state.space_freed_mb || 0;
+        if (spaceMB >= 1024) {
+            spaceStat.textContent = `${(spaceMB / 1024).toFixed(2)} GB`;
+        } else {
+            spaceStat.textContent = `${spaceMB.toFixed(2)} MB`;
+        }
+    }
+
+    if (state.status === 'running') {
+        button.textContent = 'Stop Cleaning';
+        button.disabled = false;
+
+        phaseLabel.textContent = state.phase || 'Scanning...';
+        progressLabel.textContent = `${state.files_scanned} / ${state.total_files} files scanned (${state.progress.toFixed(1)}%)`;
+        progressBar.style.width = `${state.progress}%`;
+    } else { // idle, finished, or error
+        stopDuplicateCleanerPolling();
+        button.textContent = 'Clean Duplicates';
+        button.disabled = false;
+
+        if (state.status === 'error') {
+            phaseLabel.textContent = `Error: ${state.error_message}`;
+            progressBar.style.backgroundColor = '#ff4444'; // Red for error
+        } else {
+            phaseLabel.textContent = state.phase || 'Ready to scan';
+            progressBar.style.backgroundColor = '#1db954'; // Green for normal
+        }
+
+        if (state.status === 'finished') {
+            // Show completion toast with results
+            const spaceMB = state.space_freed_mb || 0;
+            const spaceDisplay = spaceMB >= 1024 ? `${(spaceMB / 1024).toFixed(2)} GB` : `${spaceMB.toFixed(1)} MB`;
+            showToast(`Cleaning complete! ${state.deleted} files removed, ${spaceDisplay} freed`, 'success');
+        }
+    }
+}
+
+function stopDuplicateCleanerPolling() {
+    if (duplicateCleanerStatusInterval) {
+        console.log('⏹️ Stopping duplicate cleaner polling');
+        clearInterval(duplicateCleanerStatusInterval);
+        duplicateCleanerStatusInterval = null;
+    }
+}
+
 function stopWishlistCountPolling() {
     if (wishlistCountInterval) {
         clearInterval(wishlistCountInterval);
@@ -9019,6 +9154,12 @@ async function loadDashboardData() {
         qualityScanButton.addEventListener('click', handleQualityScanButtonClick);
     }
 
+    // Attach event listener for the duplicate cleaner tool
+    const duplicateCleanButton = document.getElementById('duplicate-clean-button');
+    if (duplicateCleanButton) {
+        duplicateCleanButton.addEventListener('click', handleDuplicateCleanButtonClick);
+    }
+
     // Attach event listener for the wishlist button
     const wishlistButton = document.getElementById('wishlist-button');
     if (wishlistButton) {
@@ -9061,6 +9202,9 @@ async function loadDashboardData() {
 
     // Check for any ongoing quality scanner when the page loads
     await checkAndUpdateQualityScanProgress();
+
+    // Check for any ongoing duplicate cleaner when the page loads
+    await checkAndUpdateDuplicateCleanProgress();
 
     // Check for any active download processes that need rehydration
     await checkForActiveProcesses();
