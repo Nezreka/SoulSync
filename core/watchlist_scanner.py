@@ -246,8 +246,17 @@ class WatchlistScanner:
             # Update last scan timestamp for this artist
             self.update_artist_scan_timestamp(watchlist_artist.spotify_artist_id)
 
-            # Fetch and store similar artists for discovery feature
-            self.update_similar_artists(watchlist_artist)
+            # Fetch and store similar artists for discovery feature (with caching to avoid over-polling)
+            try:
+                # Check if we have fresh similar artists cached (< 30 days old)
+                if self.database.has_fresh_similar_artists(watchlist_artist.spotify_artist_id, days_threshold=30):
+                    logger.info(f"Similar artists for {watchlist_artist.artist_name} are cached and fresh, skipping fetch")
+                else:
+                    logger.info(f"Fetching similar artists for {watchlist_artist.artist_name}...")
+                    self.update_similar_artists(watchlist_artist)
+                    logger.info(f"Similar artists updated for {watchlist_artist.artist_name}")
+            except Exception as similar_error:
+                logger.warning(f"Failed to update similar artists for {watchlist_artist.artist_name}: {similar_error}")
 
             return ScanResult(
                 artist_name=watchlist_artist.artist_name,
@@ -656,10 +665,20 @@ class WatchlistScanner:
         """
         Populate discovery pool with tracks from top similar artists.
         Called after watchlist scan completes.
+
+        This method now:
+        - Checks if pool was updated in last 24 hours (prevents over-polling Spotify)
+        - Appends to existing pool instead of replacing it
+        - Cleans up tracks older than 365 days (maintains 1 year rolling window)
         """
         try:
             from datetime import datetime, timedelta
             import random
+
+            # Check if we should run (prevents over-polling Spotify)
+            if not self.database.should_populate_discovery_pool(hours_threshold=24):
+                logger.info("Discovery pool was populated recently (< 24 hours ago). Skipping to avoid over-polling Spotify.")
+                return
 
             logger.info("Populating discovery pool from similar artists...")
 
@@ -776,14 +795,109 @@ class WatchlistScanner:
                     logger.warning(f"Error processing artist {similar_artist.similar_artist_name}: {artist_error}")
                     continue
 
-            logger.info(f"Discovery pool population complete: {total_tracks_added} tracks added")
+            logger.info(f"Discovery pool from similar artists complete: {total_tracks_added} tracks added")
 
-            # Rotate discovery pool if needed (maintain 1000-2000 track limit)
-            self.database.rotate_discovery_pool(max_tracks=2000, remove_count=500)
+            # Note: Watchlist artist albums are already in discovery pool from the watchlist scan itself
+            # No need to re-fetch them here to avoid duplicate API calls
+
+            # Add tracks from random database albums for extra variety (reduced to 5 to save API calls)
+            logger.info("Adding tracks from database albums to discovery pool...")
+            try:
+                with self.database._get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        SELECT DISTINCT a.title, ar.name as artist_name
+                        FROM albums_new a
+                        JOIN artists_new ar ON a.artist_id = ar.id
+                        ORDER BY RANDOM()
+                        LIMIT 5
+                    """)
+                    db_albums = cursor.fetchall()
+
+                    logger.info(f"Processing {len(db_albums)} database albums for discovery pool")
+
+                    for db_idx, album_row in enumerate(db_albums, 1):
+                        try:
+                            # Search for album on Spotify
+                            query = f"album:{album_row['title']} artist:{album_row['artist_name']}"
+                            search_results = self.spotify_client.search_albums(query, limit=1)
+
+                            if search_results and len(search_results) > 0:
+                                spotify_album = search_results[0]
+                                album_data = self.spotify_client.get_album(spotify_album.id)
+
+                                if album_data and 'tracks' in album_data:
+                                    tracks = album_data['tracks'].get('items', [])
+
+                                    # Check if new release
+                                    is_new = False
+                                    try:
+                                        release_date_str = album_data.get('release_date', '')
+                                        if release_date_str and len(release_date_str) == 10:
+                                            release_date = datetime.strptime(release_date_str, "%Y-%m-%d")
+                                            days_old = (datetime.now() - release_date).days
+                                            is_new = days_old <= 30
+                                    except:
+                                        pass
+
+                                    for track in tracks:
+                                        try:
+                                            track_data = {
+                                                'spotify_track_id': track['id'],
+                                                'spotify_album_id': album_data['id'],
+                                                'spotify_artist_id': album_data['artists'][0]['id'] if album_data.get('artists') else '',
+                                                'track_name': track['name'],
+                                                'artist_name': album_row['artist_name'],
+                                                'album_name': album_row['title'],
+                                                'album_cover_url': album_data.get('images', [{}])[0].get('url') if album_data.get('images') else None,
+                                                'duration_ms': track.get('duration_ms', 0),
+                                                'popularity': album_data.get('popularity', 0),
+                                                'release_date': album_data.get('release_date', ''),
+                                                'is_new_release': is_new,
+                                                'track_data_json': track
+                                            }
+
+                                            if self.database.add_to_discovery_pool(track_data):
+                                                total_tracks_added += 1
+                                        except Exception as track_error:
+                                            continue
+
+                                time.sleep(DELAY_BETWEEN_ALBUMS)
+                        except Exception as album_error:
+                            logger.debug(f"Error processing database album {album_row['title']}: {album_error}")
+                            continue
+
+                        # Rate limit between albums
+                        if db_idx < len(db_albums):
+                            time.sleep(DELAY_BETWEEN_ARTISTS)
+
+            except Exception as db_error:
+                logger.warning(f"Error processing database albums: {db_error}")
+
+            logger.info(f"Discovery pool population complete: {total_tracks_added} total tracks added from all sources")
+
+            # Clean up tracks older than 365 days (maintain 1 year rolling window)
+            logger.info("Cleaning up discovery tracks older than 365 days...")
+            deleted_count = self.database.cleanup_old_discovery_tracks(days_threshold=365)
+            logger.info(f"Cleaned up {deleted_count} old tracks from discovery pool")
+
+            # Get final track count for metadata
+            with self.database._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(*) as count FROM discovery_pool")
+                final_count = cursor.fetchone()['count']
+
+            # Update timestamp to mark when pool was last populated
+            self.database.update_discovery_pool_timestamp(track_count=final_count)
+            logger.info(f"Discovery pool now contains {final_count} total tracks (built over time)")
 
             # Cache recent albums for discovery page
             logger.info("Caching recent albums for discovery page...")
             self.cache_discovery_recent_albums()
+
+            # Curate playlists for consistent daily experience
+            logger.info("Curating discovery playlists...")
+            self.curate_discovery_playlists()
 
         except Exception as e:
             logger.error(f"Error populating discovery pool: {e}")
@@ -899,6 +1013,72 @@ class WatchlistScanner:
 
         except Exception as e:
             logger.error(f"Error caching discovery recent albums: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def curate_discovery_playlists(self):
+        """Curate consistent playlist selections that stay the same until next discovery pool update"""
+        try:
+            import random
+
+            logger.info("Curating Release Radar playlist...")
+
+            # 1. Curate Release Radar - 50 tracks from recent albums
+            recent_albums = self.database.get_discovery_recent_albums(limit=20)
+            release_radar_tracks = []
+
+            if recent_albums:
+                # Group albums by artist for variety
+                albums_by_artist = {}
+                for album in recent_albums:
+                    artist = album['artist_name']
+                    if artist not in albums_by_artist:
+                        albums_by_artist[artist] = []
+                    albums_by_artist[artist].append(album)
+
+                # Get tracks from each album, grouped by artist
+                artist_tracks = {}
+                for artist, albums in albums_by_artist.items():
+                    artist_tracks[artist] = []
+                    for album in albums:
+                        try:
+                            album_data = self.spotify_client.get_album(album['album_spotify_id'])
+                            if album_data and 'tracks' in album_data:
+                                for track in album_data['tracks']['items']:
+                                    artist_tracks[artist].append(track['id'])
+                        except Exception as e:
+                            continue
+
+                # Balance by artist - max 6 tracks per artist
+                balanced_tracks = []
+                for artist, tracks in artist_tracks.items():
+                    random.shuffle(tracks)
+                    balanced_tracks.extend(tracks[:6])  # Max 6 per artist
+
+                # Shuffle and limit to 50
+                random.shuffle(balanced_tracks)
+                release_radar_tracks = balanced_tracks[:50]
+
+            self.database.save_curated_playlist('release_radar', release_radar_tracks)
+            logger.info(f"Release Radar curated: {len(release_radar_tracks)} tracks")
+
+            # 2. Curate Discovery Weekly - 50 tracks from full discovery pool
+            logger.info("Curating Discovery Weekly playlist...")
+            discovery_tracks = self.database.get_discovery_pool_tracks(limit=1000, new_releases_only=False)
+
+            discovery_weekly_tracks = []
+            if discovery_tracks:
+                all_track_ids = [track.spotify_track_id for track in discovery_tracks]
+                random.shuffle(all_track_ids)
+                discovery_weekly_tracks = all_track_ids[:50]
+
+            self.database.save_curated_playlist('discovery_weekly', discovery_weekly_tracks)
+            logger.info(f"Discovery Weekly curated: {len(discovery_weekly_tracks)} tracks")
+
+            logger.info("Playlist curation complete")
+
+        except Exception as e:
+            logger.error(f"Error curating discovery playlists: {e}")
             import traceback
             traceback.print_exc()
 
