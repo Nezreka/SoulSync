@@ -676,10 +676,9 @@ class WatchlistScanner:
             import random
 
             # Check if we should run (prevents over-polling Spotify)
-            # TEMPORARILY DISABLED FOR TESTING
-            # if not self.database.should_populate_discovery_pool(hours_threshold=24):
-            #     logger.info("Discovery pool was populated recently (< 24 hours ago). Skipping to avoid over-polling Spotify.")
-            #     return
+            if not self.database.should_populate_discovery_pool(hours_threshold=24):
+                logger.info("Discovery pool was populated recently (< 24 hours ago). Skipping to avoid over-polling Spotify.")
+                return
 
             logger.info("Populating discovery pool from similar artists...")
 
