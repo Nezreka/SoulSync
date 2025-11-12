@@ -1628,12 +1628,25 @@
                     <div class="discover-hero">
                         <div class="discover-hero-background" id="discover-hero-bg"></div>
                         <div class="discover-hero-overlay"></div>
+
+                        <!-- Navigation Arrows -->
+                        <button class="discover-hero-nav discover-hero-nav-prev" onclick="navigateDiscoverHero(-1)" aria-label="Previous artist">
+                            <span>‹</span>
+                        </button>
+                        <button class="discover-hero-nav discover-hero-nav-next" onclick="navigateDiscoverHero(1)" aria-label="Next artist">
+                            <span>›</span>
+                        </button>
+
                         <div class="discover-hero-content">
                             <div class="discover-hero-info">
                                 <div class="discover-hero-label">FEATURED ARTIST</div>
                                 <h1 class="discover-hero-title" id="discover-hero-title">Loading...</h1>
                                 <p class="discover-hero-subtitle" id="discover-hero-subtitle">Discover new music tailored to your taste</p>
                                 <div class="discover-hero-actions">
+                                    <button class="discover-hero-button secondary" id="discover-hero-discography" onclick="viewDiscoverHeroDiscography()">
+                                        <span class="button-icon">📀</span>
+                                        <span class="button-text">View Discography</span>
+                                    </button>
                                     <button class="discover-hero-button primary watchlist-toggle-btn" id="discover-hero-add" onclick="toggleDiscoverHeroWatchlist(event)">
                                         <span class="watchlist-icon">👁️</span>
                                         <span class="watchlist-text">Add to Watchlist</span>
@@ -1644,6 +1657,9 @@
                                 <div class="hero-image-placeholder">🎧</div>
                             </div>
                         </div>
+
+                        <!-- Slideshow Indicators -->
+                        <div class="discover-hero-indicators" id="discover-hero-indicators"></div>
                     </div>
 
                     <!-- Recent Releases Section -->
