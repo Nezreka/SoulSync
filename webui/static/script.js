@@ -3976,6 +3976,9 @@ async function openDownloadMissingModal(playlistId) {
                     </button>
                 </div>
                 <div class="modal-close-section">
+                    <button class="download-control-btn export" onclick="exportPlaylistAsM3U('${playlistId}')">
+                        📋 Export as M3U
+                    </button>
                     <button class="download-control-btn secondary" onclick="closeDownloadMissingModal('${playlistId}')">Close</button>
                 </div>
             </div>
@@ -3984,6 +3987,57 @@ async function openDownloadMissingModal(playlistId) {
 
     modal.style.display = 'flex';
     hideLoadingOverlay();
+}
+
+function exportPlaylistAsM3U(playlistId) {
+    /**
+     * Export the tracks from the download missing tracks modal as an M3U playlist file
+     */
+    console.log(`📋 Exporting playlist ${playlistId} as M3U`);
+
+    // Get the process data
+    const process = activeDownloadProcesses[playlistId];
+    if (!process || !process.tracks || process.tracks.length === 0) {
+        showToast('No tracks available to export', 'warning');
+        return;
+    }
+
+    const tracks = process.tracks;
+    const playlistName = process.playlistName || 'Playlist';
+
+    // Generate M3U8 content
+    let m3uContent = '#EXTM3U\n';
+    m3uContent += `#PLAYLIST:${playlistName}\n\n`;
+
+    tracks.forEach(track => {
+        // Get duration in seconds
+        const durationSeconds = track.duration_ms ? Math.floor(track.duration_ms / 1000) : -1;
+
+        // Get artist names
+        const artists = Array.isArray(track.artists) ? track.artists.join(', ') : (track.artists || 'Unknown Artist');
+
+        // Add track info
+        m3uContent += `#EXTINF:${durationSeconds},${artists} - ${track.name}\n`;
+
+        // Add a placeholder path (user will need to replace with actual file paths)
+        const sanitizedArtist = artists.replace(/[/\\?%*:|"<>]/g, '-');
+        const sanitizedTrack = track.name.replace(/[/\\?%*:|"<>]/g, '-');
+        m3uContent += `${sanitizedArtist} - ${sanitizedTrack}.mp3\n\n`;
+    });
+
+    // Create a Blob and download it
+    const blob = new Blob([m3uContent], { type: 'audio/x-mpegurl;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${playlistName.replace(/[/\\?%*:|"<>]/g, '-')}.m3u8`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    showToast(`Exported ${tracks.length} tracks as M3U playlist`, 'success');
+    console.log(`✅ Exported ${tracks.length} tracks to ${link.download}`);
 }
 
 async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistName, spotifyTracks) {
@@ -4147,6 +4201,9 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
                     </button>
                 </div>
                 <div class="modal-close-section">
+                    <button class="download-control-btn export" onclick="exportPlaylistAsM3U('${virtualPlaylistId}')">
+                        📋 Export as M3U
+                    </button>
                     <button class="download-control-btn secondary" onclick="closeDownloadMissingModal('${virtualPlaylistId}')">Close</button>
                 </div>
             </div>
@@ -17432,6 +17489,9 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
                     </button>
                 </div>
                 <div class="modal-close-section">
+                    <button class="download-control-btn export" onclick="exportPlaylistAsM3U('${virtualPlaylistId}')">
+                        📋 Export as M3U
+                    </button>
                     <button class="download-control-btn secondary" onclick="closeDownloadMissingModal('${virtualPlaylistId}')">Close</button>
                 </div>
             </div>

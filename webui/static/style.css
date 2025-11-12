@@ -8619,6 +8619,19 @@ body {
     transform: translateY(-1px);
 }
 
+.download-control-btn.export {
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    color: #ffffff;
+    border: 1px solid rgba(118, 75, 162, 0.3);
+    box-shadow: 0 4px 16px rgba(102, 126, 234, 0.25);
+}
+
+.download-control-btn.export:hover {
+    background: linear-gradient(135deg, #7c8ff0, #8a5ab8);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(102, 126, 234, 0.35);
+}
+
 .download-control-btn:disabled {
     background: #333333;
     color: #666666;
@@ -8714,6 +8727,7 @@ body {
 .modal-close-section {
     display: flex;
     align-items: center;
+    gap: 12px;
 }
 
 
