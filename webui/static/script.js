@@ -1677,7 +1677,7 @@ function collectQualityProfileFromUI() {
         version: 1,
         preset: 'custom', // Will be overridden if a preset is active
         qualities: {},
-        fallback_enabled: document.getElementById('quality-fallback-enabled')?.checked || true
+        fallback_enabled: document.getElementById('quality-fallback-enabled')?.checked ?? true
     };
 
     const qualities = ['flac', 'mp3_320', 'mp3_256', 'mp3_192'];
