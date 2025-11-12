@@ -1668,8 +1668,37 @@
                     <!-- Release Radar Section -->
                     <div class="discover-section">
                         <div class="discover-section-header">
-                            <h2 class="discover-section-title">Release Radar</h2>
-                            <p class="discover-section-subtitle">Fresh tracks from new releases</p>
+                            <div>
+                                <h2 class="discover-section-title">Release Radar</h2>
+                                <p class="discover-section-subtitle">Fresh tracks from new releases</p>
+                            </div>
+                            <div class="discover-section-actions">
+                                <button class="action-button secondary" onclick="openDownloadModalForDiscoverPlaylist('release_radar', 'Release Radar')" title="Download missing tracks">
+                                    <span class="button-icon">↓</span>
+                                    <span class="button-text">Download</span>
+                                </button>
+                                <button class="action-button primary" id="release-radar-sync-btn" onclick="startDiscoverPlaylistSync('release_radar', 'Release Radar')" title="Sync to media server">
+                                    <span class="button-icon">⟳</span>
+                                    <span class="button-text">Sync</span>
+                                </button>
+                            </div>
+                        </div>
+                        <!-- Sync Status Display -->
+                        <div class="discover-sync-status" id="release-radar-sync-status" style="display: none;">
+                            <div class="sync-status-content">
+                                <div class="sync-status-label">
+                                    <span class="sync-icon">⟳</span>
+                                    <span>Syncing to media server...</span>
+                                </div>
+                                <div class="sync-status-stats">
+                                    <span class="sync-stat">♪ <span id="release-radar-sync-total">0</span></span>
+                                    <span class="sync-separator">/</span>
+                                    <span class="sync-stat">✓ <span id="release-radar-sync-matched">0</span></span>
+                                    <span class="sync-separator">/</span>
+                                    <span class="sync-stat">✗ <span id="release-radar-sync-failed">0</span></span>
+                                    <span class="sync-stat">(<span id="release-radar-sync-percentage">0</span>%)</span>
+                                </div>
+                            </div>
                         </div>
                         <div class="discover-playlist-container compact" id="release-radar-playlist">
                             <!-- Content will be populated dynamically -->
@@ -1683,8 +1712,37 @@
                     <!-- Discovery Weekly Section -->
                     <div class="discover-section">
                         <div class="discover-section-header">
-                            <h2 class="discover-section-title">Discovery Weekly</h2>
-                            <p class="discover-section-subtitle">A personalized playlist just for you</p>
+                            <div>
+                                <h2 class="discover-section-title">Discovery Weekly</h2>
+                                <p class="discover-section-subtitle">A personalized playlist just for you</p>
+                            </div>
+                            <div class="discover-section-actions">
+                                <button class="action-button secondary" onclick="openDownloadModalForDiscoverPlaylist('discovery_weekly', 'Discovery Weekly')" title="Download missing tracks">
+                                    <span class="button-icon">↓</span>
+                                    <span class="button-text">Download</span>
+                                </button>
+                                <button class="action-button primary" id="discovery-weekly-sync-btn" onclick="startDiscoverPlaylistSync('discovery_weekly', 'Discovery Weekly')" title="Sync to media server">
+                                    <span class="button-icon">⟳</span>
+                                    <span class="button-text">Sync</span>
+                                </button>
+                            </div>
+                        </div>
+                        <!-- Sync Status Display -->
+                        <div class="discover-sync-status" id="discovery-weekly-sync-status" style="display: none;">
+                            <div class="sync-status-content">
+                                <div class="sync-status-label">
+                                    <span class="sync-icon">⟳</span>
+                                    <span>Syncing to media server...</span>
+                                </div>
+                                <div class="sync-status-stats">
+                                    <span class="sync-stat">♪ <span id="discovery-weekly-sync-total">0</span></span>
+                                    <span class="sync-separator">/</span>
+                                    <span class="sync-stat">✓ <span id="discovery-weekly-sync-matched">0</span></span>
+                                    <span class="sync-separator">/</span>
+                                    <span class="sync-stat">✗ <span id="discovery-weekly-sync-failed">0</span></span>
+                                    <span class="sync-stat">(<span id="discovery-weekly-sync-percentage">0</span>%)</span>
+                                </div>
+                            </div>
                         </div>
                         <div class="discover-playlist-container compact" id="discovery-weekly-playlist">
                             <!-- Content will be populated dynamically -->

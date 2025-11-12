@@ -16256,6 +16256,10 @@ body {
 
 .discover-section-header {
     margin-bottom: 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 20px;
 }
 
 .discover-section-title {
@@ -16269,6 +16273,121 @@ body {
     font-size: 14px;
     color: #999;
     margin: 0;
+}
+
+.discover-section-actions {
+    display: flex;
+    gap: 10px;
+    flex-shrink: 0;
+}
+
+.discover-section-actions .action-button {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border-radius: 6px;
+    border: none;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.discover-section-actions .action-button .button-icon {
+    font-size: 16px;
+}
+
+.discover-section-actions .action-button.primary {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: #fff;
+}
+
+.discover-section-actions .action-button.primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.discover-section-actions .action-button.secondary {
+    background: rgba(255, 255, 255, 0.05);
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.discover-section-actions .action-button.secondary:hover {
+    background: rgba(255, 255, 255, 0.1);
+    transform: translateY(-2px);
+}
+
+/* Sync Status Display */
+.discover-sync-status {
+    margin: 16px 20px 20px 20px;
+    padding: 16px 20px;
+    background: rgba(102, 126, 234, 0.1);
+    border: 1px solid rgba(102, 126, 234, 0.3);
+    border-radius: 8px;
+    animation: slideDown 0.3s ease;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.sync-status-content {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+}
+
+.sync-status-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #fff;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.sync-icon {
+    display: inline-block;
+    font-size: 18px;
+    animation: spin 1s linear infinite;
+    transform-origin: center center;
+}
+
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.sync-status-stats {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    color: #fff;
+    font-family: 'Courier New', monospace;
+}
+
+.sync-stat {
+    font-weight: 600;
+}
+
+.sync-separator {
+    color: rgba(255, 255, 255, 0.3);
+    font-weight: 300;
 }
 
 /* Carousel Styles */

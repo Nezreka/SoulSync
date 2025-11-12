@@ -1037,27 +1037,66 @@ class WatchlistScanner:
                     albums_by_artist[artist].append(album)
 
                 # Get tracks from each album, grouped by artist
+                # Also add these tracks to discovery pool for fast lookup
                 artist_tracks = {}
+                artist_track_data = {}  # Store full track data for discovery pool
+
                 for artist, albums in albums_by_artist.items():
                     artist_tracks[artist] = []
+                    artist_track_data[artist] = []
+
                     for album in albums:
                         try:
                             album_data = self.spotify_client.get_album(album['album_spotify_id'])
                             if album_data and 'tracks' in album_data:
                                 for track in album_data['tracks']['items']:
-                                    artist_tracks[artist].append(track['id'])
+                                    track_id = track['id']
+                                    artist_tracks[artist].append(track_id)
+
+                                    # Store full track data for discovery pool
+                                    full_track = {
+                                        'id': track_id,
+                                        'name': track['name'],
+                                        'artists': track.get('artists', []),
+                                        'album': album_data,
+                                        'duration_ms': track.get('duration_ms', 0)
+                                    }
+                                    artist_track_data[artist].append(full_track)
+
                         except Exception as e:
                             continue
 
                 # Balance by artist - max 6 tracks per artist
                 balanced_tracks = []
+                balanced_track_data = []
+
                 for artist, tracks in artist_tracks.items():
-                    random.shuffle(tracks)
-                    balanced_tracks.extend(tracks[:6])  # Max 6 per artist
+                    # Shuffle and get indices
+                    indices = list(range(len(tracks)))
+                    random.shuffle(indices)
+                    selected_indices = indices[:6]
+
+                    # Add selected tracks
+                    for idx in selected_indices:
+                        balanced_tracks.append(tracks[idx])
+                        balanced_track_data.append(artist_track_data[artist][idx])
 
                 # Shuffle and limit to 50
-                random.shuffle(balanced_tracks)
-                release_radar_tracks = balanced_tracks[:50]
+                combined = list(zip(balanced_tracks, balanced_track_data))
+                random.shuffle(combined)
+                combined = combined[:50]
+
+                release_radar_tracks = [track_id for track_id, _ in combined]
+                release_radar_track_data = [track_data for _, track_data in combined]
+
+                # Add Release Radar tracks to discovery pool so they're available for fast lookup
+                logger.info(f"Adding {len(release_radar_track_data)} Release Radar tracks to discovery pool...")
+                for track_data in release_radar_track_data:
+                    try:
+                        self.database.add_to_discovery_pool(track_data, is_new_release=True)
+                    except Exception as e:
+                        logger.warning(f"Failed to add track {track_data['name']} to discovery pool: {e}")
+                        continue
 
             self.database.save_curated_playlist('release_radar', release_radar_tracks)
             logger.info(f"Release Radar curated: {len(release_radar_tracks)} tracks")

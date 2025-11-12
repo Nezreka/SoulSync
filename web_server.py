@@ -11613,7 +11613,7 @@ def get_playlist_tracks(playlist_id):
         full_playlist = spotify_client.get_playlist_by_id(playlist_id)
         if not full_playlist:
             return jsonify({})
-        
+
         # Convert playlist to dict manually since core class doesn't have to_dict method
         playlist_dict = {
             'id': full_playlist.id,
@@ -11628,6 +11628,33 @@ def get_playlist_tracks(playlist_id):
             'tracks': [{'id': t.id, 'name': t.name, 'artists': t.artists, 'album': t.album, 'duration_ms': t.duration_ms, 'popularity': t.popularity} for t in full_playlist.tracks]
         }
         return jsonify(playlist_dict)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/spotify/album/<album_id>', methods=['GET'])
+def get_album_tracks(album_id):
+    """Fetches full track details for a specific album."""
+    if not spotify_client or not spotify_client.is_authenticated():
+        return jsonify({"error": "Spotify not authenticated."}), 401
+    try:
+        album_data = spotify_client.get_album(album_id)
+        if not album_data:
+            return jsonify({"error": "Album not found"}), 404
+
+        # Extract tracks from album data
+        tracks = album_data.get('tracks', {}).get('items', [])
+
+        # Format response
+        album_dict = {
+            'id': album_data['id'],
+            'name': album_data['name'],
+            'artists': album_data.get('artists', []),
+            'release_date': album_data.get('release_date', ''),
+            'total_tracks': album_data.get('total_tracks', 0),
+            'images': album_data.get('images', []),
+            'tracks': tracks
+        }
+        return jsonify(album_dict)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -14477,33 +14504,32 @@ def get_discover_release_radar():
         curated_track_ids = database.get_curated_playlist('release_radar')
 
         if curated_track_ids:
-            # Fetch track data directly from Spotify (release radar tracks may not be in discovery pool)
+            # Use curated selection - fetch track data from discovery pool (same as Discovery Weekly)
+            discovery_tracks = database.get_discovery_pool_tracks(limit=5000, new_releases_only=False)
+            tracks_by_id = {track.spotify_track_id: track for track in discovery_tracks}
+
             selected_tracks = []
-
             for track_id in curated_track_ids:
-                try:
-                    # Get track data from Spotify
-                    track_data = spotify_client.get_track_details(track_id)
+                if track_id in tracks_by_id:
+                    track = tracks_by_id[track_id]
 
-                    if track_data:
-                        # Get album cover from raw_data (enhanced data doesn't include images)
-                        album_cover = None
-                        if track_data.get('raw_data') and track_data['raw_data'].get('album', {}).get('images'):
-                            album_cover = track_data['raw_data']['album']['images'][0]['url']
+                    # Parse track_data_json if it's a string
+                    track_data = track.track_data_json
+                    if isinstance(track_data, str):
+                        try:
+                            track_data = json.loads(track_data)
+                        except:
+                            track_data = None
 
-                        selected_tracks.append({
-                            "spotify_track_id": track_data['id'],
-                            "track_name": track_data['name'],
-                            "artist_name": track_data.get('primary_artist', 'Unknown'),
-                            "album_name": track_data['album']['name'] if track_data.get('album') else 'Unknown',
-                            "album_cover_url": album_cover,
-                            "duration_ms": track_data.get('duration_ms', 0),
-                            "track_data_json": track_data.get('raw_data', track_data)
-                        })
-                except Exception as track_error:
-                    # Skip tracks that fail to fetch
-                    print(f"Error fetching track {track_id}: {track_error}")
-                    continue
+                    selected_tracks.append({
+                        "spotify_track_id": track.spotify_track_id,
+                        "track_name": track.track_name,
+                        "artist_name": track.artist_name,
+                        "album_name": track.album_name,
+                        "album_cover_url": track.album_cover_url,
+                        "duration_ms": track.duration_ms,
+                        "track_data_json": track_data  # Now properly parsed
+                    })
 
             return jsonify({"success": True, "tracks": selected_tracks})
 
@@ -14534,6 +14560,15 @@ def get_discover_weekly():
             for track_id in curated_track_ids:
                 if track_id in tracks_by_id:
                     track = tracks_by_id[track_id]
+
+                    # Parse track_data_json if it's a string
+                    track_data = track.track_data_json
+                    if isinstance(track_data, str):
+                        try:
+                            track_data = json.loads(track_data)
+                        except:
+                            track_data = None
+
                     selected_tracks.append({
                         "spotify_track_id": track.spotify_track_id,
                         "track_name": track.track_name,
@@ -14541,7 +14576,7 @@ def get_discover_weekly():
                         "album_name": track.album_name,
                         "album_cover_url": track.album_cover_url,
                         "duration_ms": track.duration_ms,
-                        "track_data_json": track.track_data_json
+                        "track_data_json": track_data  # Now properly parsed
                     })
 
             return jsonify({"success": True, "tracks": selected_tracks})

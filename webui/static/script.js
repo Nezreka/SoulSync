@@ -24213,6 +24213,11 @@ let discoverHeroIndex = 0;
 let discoverHeroArtists = [];
 let discoverHeroInterval = null;
 
+// Store discover playlist tracks for download/sync functionality
+let discoverReleaseRadarTracks = [];
+let discoverWeeklyTracks = [];
+let discoverRecentAlbums = [];
+
 async function loadDiscoverPage() {
     console.log('Loading discover page...');
 
@@ -24224,6 +24229,71 @@ async function loadDiscoverPage() {
         loadDiscoverWeekly(),
         loadMoreForYou()
     ]);
+
+    // Check for active syncs after page load
+    checkForActiveDiscoverSyncs();
+}
+
+async function checkForActiveDiscoverSyncs() {
+    // Check if Release Radar sync is active
+    try {
+        const releaseRadarResponse = await fetch('/api/sync/status/discover_release_radar');
+        if (releaseRadarResponse.ok) {
+            const data = await releaseRadarResponse.json();
+            if (data.status === 'syncing' || data.status === 'starting') {
+                console.log('🔄 Resuming Release Radar sync polling after page refresh');
+
+                // Show status display
+                const statusDisplay = document.getElementById('release-radar-sync-status');
+                if (statusDisplay) {
+                    statusDisplay.style.display = 'block';
+                }
+
+                // Disable button
+                const syncButton = document.getElementById('release-radar-sync-btn');
+                if (syncButton) {
+                    syncButton.disabled = true;
+                    syncButton.style.opacity = '0.5';
+                    syncButton.style.cursor = 'not-allowed';
+                }
+
+                // Resume polling
+                startDiscoverSyncPolling('release_radar', 'discover_release_radar');
+            }
+        }
+    } catch (error) {
+        // Sync not active, ignore
+    }
+
+    // Check if Discovery Weekly sync is active
+    try {
+        const discoveryWeeklyResponse = await fetch('/api/sync/status/discover_discovery_weekly');
+        if (discoveryWeeklyResponse.ok) {
+            const data = await discoveryWeeklyResponse.json();
+            if (data.status === 'syncing' || data.status === 'starting') {
+                console.log('🔄 Resuming Discovery Weekly sync polling after page refresh');
+
+                // Show status display
+                const statusDisplay = document.getElementById('discovery-weekly-sync-status');
+                if (statusDisplay) {
+                    statusDisplay.style.display = 'block';
+                }
+
+                // Disable button
+                const syncButton = document.getElementById('discovery-weekly-sync-btn');
+                if (syncButton) {
+                    syncButton.disabled = true;
+                    syncButton.style.opacity = '0.5';
+                    syncButton.style.cursor = 'not-allowed';
+                }
+
+                // Resume polling
+                startDiscoverSyncPolling('discovery_weekly', 'discover_discovery_weekly');
+            }
+        }
+    } catch (error) {
+        // Sync not active, ignore
+    }
 }
 
 async function loadDiscoverHero() {
@@ -24320,12 +24390,15 @@ async function loadDiscoverRecentReleases() {
             return;
         }
 
+        // Store albums for download functionality
+        discoverRecentAlbums = data.albums;
+
         // Build carousel HTML
         let html = '';
-        data.albums.forEach(album => {
+        data.albums.forEach((album, index) => {
             const coverUrl = album.album_cover_url || '/static/placeholder-album.png';
             html += `
-                <div class="discover-card">
+                <div class="discover-card" onclick="openDownloadModalForRecentAlbum(${index})" style="cursor: pointer;">
                     <div class="discover-card-image">
                         <img src="${coverUrl}" alt="${album.album_name}">
                     </div>
@@ -24366,6 +24439,9 @@ async function loadDiscoverReleaseRadar() {
             playlistContainer.innerHTML = '<div class="discover-empty"><p>No new releases available</p></div>';
             return;
         }
+
+        // Store tracks for download/sync functionality
+        discoverReleaseRadarTracks = data.tracks;
 
         // Build compact playlist HTML
         let html = '<div class="discover-playlist-tracks-compact">';
@@ -24420,6 +24496,9 @@ async function loadDiscoverWeekly() {
             playlistContainer.innerHTML = '<div class="discover-empty"><p>No tracks available yet</p></div>';
             return;
         }
+
+        // Store tracks for download/sync functionality
+        discoverWeeklyTracks = data.tracks;
 
         // Build compact playlist HTML
         let html = '<div class="discover-playlist-tracks-compact">';
@@ -24561,5 +24640,288 @@ async function loadMoreForYou() {
         if (grid) {
             grid.innerHTML = '<div class="discover-empty"><p>Failed to load playlists</p></div>';
         }
+    }
+}
+
+// ===============================
+// DISCOVER PLAYLIST ACTIONS
+// ===============================
+
+async function openDownloadModalForDiscoverPlaylist(playlistType, playlistName) {
+    console.log(`📥 Opening Download Missing Tracks modal for ${playlistName}`);
+
+    try {
+        // Get tracks based on playlist type
+        let tracks = [];
+        if (playlistType === 'release_radar') {
+            tracks = discoverReleaseRadarTracks;
+        } else if (playlistType === 'discovery_weekly') {
+            tracks = discoverWeeklyTracks;
+        }
+
+        if (!tracks || tracks.length === 0) {
+            showToast(`No tracks available for ${playlistName}`, 'warning');
+            return;
+        }
+
+        // Convert discover tracks to format expected by download modal
+        const spotifyTracks = tracks.map(track => {
+            let spotifyTrack;
+
+            // Use track_data_json if available, otherwise construct from track data
+            if (track.track_data_json) {
+                spotifyTrack = track.track_data_json;
+            } else {
+                // Fallback: construct track object from available data
+                spotifyTrack = {
+                    id: track.spotify_track_id,
+                    name: track.track_name,
+                    artists: [{ name: track.artist_name }],
+                    album: {
+                        name: track.album_name,
+                        images: track.album_cover_url ? [{ url: track.album_cover_url }] : []
+                    },
+                    duration_ms: track.duration_ms || 0
+                };
+            }
+
+            // Normalize artists to array of strings for modal compatibility
+            if (spotifyTrack.artists && Array.isArray(spotifyTrack.artists)) {
+                spotifyTrack.artists = spotifyTrack.artists.map(a => a.name || a);
+            }
+
+            return spotifyTrack;
+        });
+
+        // Create virtual playlist ID
+        const virtualPlaylistId = `discover_${playlistType}`;
+
+        // Use existing modal system (same as YouTube/Tidal playlists)
+        await openDownloadMissingModalForYouTube(virtualPlaylistId, playlistName, spotifyTracks);
+
+    } catch (error) {
+        console.error('Error opening download modal for discover playlist:', error);
+        showToast(`Failed to open download modal: ${error.message}`, 'error');
+        hideLoadingOverlay();  // Ensure overlay is hidden on error
+    }
+}
+
+async function startDiscoverPlaylistSync(playlistType, playlistName) {
+    console.log(`🔄 Starting sync for ${playlistName}`);
+
+    // Get tracks based on playlist type
+    let tracks = [];
+    if (playlistType === 'release_radar') {
+        tracks = discoverReleaseRadarTracks;
+    } else if (playlistType === 'discovery_weekly') {
+        tracks = discoverWeeklyTracks;
+    }
+
+    if (!tracks || tracks.length === 0) {
+        showToast(`No tracks available for ${playlistName}`, 'warning');
+        return;
+    }
+
+    // Convert to format expected by sync API
+    const spotifyTracks = tracks.map(track => {
+        let spotifyTrack;
+
+        // Use track_data_json if available
+        if (track.track_data_json) {
+            spotifyTrack = track.track_data_json;
+        } else {
+            // Fallback: construct track object
+            spotifyTrack = {
+                id: track.spotify_track_id,
+                name: track.track_name,
+                artists: [{ name: track.artist_name }],
+                album: {
+                    name: track.album_name,
+                    images: track.album_cover_url ? [{ url: track.album_cover_url }] : []
+                },
+                duration_ms: track.duration_ms || 0
+            };
+        }
+
+        // Normalize artists to array of strings for sync compatibility
+        if (spotifyTrack.artists && Array.isArray(spotifyTrack.artists)) {
+            spotifyTrack.artists = spotifyTrack.artists.map(a => a.name || a);
+        }
+
+        return spotifyTrack;
+    });
+
+    // Create virtual playlist ID
+    const virtualPlaylistId = `discover_${playlistType}`;
+
+    // Store in cache for sync function
+    playlistTrackCache[virtualPlaylistId] = spotifyTracks;
+
+    // Create virtual playlist object
+    const virtualPlaylist = {
+        id: virtualPlaylistId,
+        name: playlistName,
+        track_count: spotifyTracks.length
+    };
+
+    // Add to spotify playlists array if not already there
+    if (!spotifyPlaylists.find(p => p.id === virtualPlaylistId)) {
+        spotifyPlaylists.push(virtualPlaylist);
+    }
+
+    // Show sync status display
+    const statusId = playlistType === 'release_radar' ? 'release-radar-sync-status' : 'discovery-weekly-sync-status';
+    const statusDisplay = document.getElementById(statusId);
+    if (statusDisplay) {
+        statusDisplay.style.display = 'block';
+    }
+
+    // Disable sync button to prevent duplicate syncs
+    const buttonId = playlistType === 'release_radar' ? 'release-radar-sync-btn' : 'discovery-weekly-sync-btn';
+    const syncButton = document.getElementById(buttonId);
+    if (syncButton) {
+        syncButton.disabled = true;
+        syncButton.style.opacity = '0.5';
+        syncButton.style.cursor = 'not-allowed';
+    }
+
+    // Start sync using existing function
+    await startPlaylistSync(virtualPlaylistId);
+
+    // Start polling for progress updates
+    startDiscoverSyncPolling(playlistType, virtualPlaylistId);
+}
+
+// Track active discover sync pollers
+const discoverSyncPollers = {};
+
+function startDiscoverSyncPolling(playlistType, virtualPlaylistId) {
+    // Stop any existing poller for this playlist type
+    if (discoverSyncPollers[playlistType]) {
+        clearInterval(discoverSyncPollers[playlistType]);
+    }
+
+    console.log(`🔄 Starting sync polling for ${playlistType} (${virtualPlaylistId})`);
+
+    // Poll every 500ms for progress updates
+    discoverSyncPollers[playlistType] = setInterval(async () => {
+        try {
+            const response = await fetch(`/api/sync/status/${virtualPlaylistId}`);
+            if (!response.ok) {
+                console.log(`⚠️ Sync status response not OK: ${response.status}`);
+                return;
+            }
+
+            const data = await response.json();
+            console.log(`📊 Sync status for ${playlistType}:`, data);
+
+            // Update UI with progress (data structure: {status: ..., progress: {...}})
+            const prefix = playlistType === 'release_radar' ? 'release-radar' : 'discovery-weekly';
+            const progress = data.progress || {};
+
+            const totalEl = document.getElementById(`${prefix}-sync-total`);
+            const matchedEl = document.getElementById(`${prefix}-sync-matched`);
+            const failedEl = document.getElementById(`${prefix}-sync-failed`);
+            const percentageEl = document.getElementById(`${prefix}-sync-percentage`);
+
+            const total = progress.total_tracks || 0;
+            const matched = progress.matched_tracks || 0;
+            const failed = progress.failed_tracks || 0;
+            const processed = matched + failed;
+            const completionPercentage = total > 0 ? Math.round((processed / total) * 100) : 0;
+
+            if (totalEl) totalEl.textContent = total;
+            if (matchedEl) matchedEl.textContent = matched;
+            if (failedEl) failedEl.textContent = failed;
+            if (percentageEl) percentageEl.textContent = completionPercentage;
+
+            // If complete, stop polling and hide status after delay
+            if (data.status === 'finished') {
+                console.log(`✅ Sync complete for ${playlistType}`);
+                clearInterval(discoverSyncPollers[playlistType]);
+                delete discoverSyncPollers[playlistType];
+
+                // Re-enable sync button
+                const buttonId = playlistType === 'release_radar' ? 'release-radar-sync-btn' : 'discovery-weekly-sync-btn';
+                const syncButton = document.getElementById(buttonId);
+                if (syncButton) {
+                    syncButton.disabled = false;
+                    syncButton.style.opacity = '1';
+                    syncButton.style.cursor = 'pointer';
+                }
+
+                // Show completion toast
+                showToast(`${playlistType === 'release_radar' ? 'Release Radar' : 'Discovery Weekly'} sync complete!`, 'success');
+
+                // Hide status display after 3 seconds
+                setTimeout(() => {
+                    const statusDisplay = document.getElementById(`${prefix}-sync-status`);
+                    if (statusDisplay) {
+                        statusDisplay.style.display = 'none';
+                    }
+                }, 3000);
+            }
+
+        } catch (error) {
+            console.error(`❌ Error polling sync status for ${playlistType}:`, error);
+        }
+    }, 500);
+}
+
+async function openDownloadModalForRecentAlbum(albumIndex) {
+    const album = discoverRecentAlbums[albumIndex];
+    if (!album) {
+        showToast('Album data not found', 'error');
+        return;
+    }
+
+    console.log(`📥 Opening Download Missing Tracks modal for album: ${album.album_name}`);
+    showLoadingOverlay(`Loading tracks for ${album.album_name}...`);
+
+    try {
+        // Fetch album tracks from Spotify API via backend
+        const response = await fetch(`/api/spotify/album/${album.album_spotify_id}`);
+        if (!response.ok) {
+            throw new Error('Failed to fetch album tracks');
+        }
+
+        const albumData = await response.json();
+        if (!albumData.tracks || albumData.tracks.length === 0) {
+            throw new Error('No tracks found in album');
+        }
+
+        // Convert to expected format
+        const spotifyTracks = albumData.tracks.map(track => {
+            // Normalize artists to array of strings
+            let artists = track.artists || [{ name: album.artist_name }];
+            if (Array.isArray(artists)) {
+                artists = artists.map(a => a.name || a);
+            }
+
+            return {
+                id: track.id,
+                name: track.name,
+                artists: artists,
+                album: {
+                    name: album.album_name,
+                    images: album.album_cover_url ? [{ url: album.album_cover_url }] : []
+                },
+                duration_ms: track.duration_ms || 0
+            };
+        });
+
+        // Create virtual playlist ID
+        const virtualPlaylistId = `discover_album_${album.album_spotify_id}`;
+        const playlistName = `${album.album_name} - ${album.artist_name}`;
+
+        // Open download modal
+        await openDownloadMissingModalForYouTube(virtualPlaylistId, playlistName, spotifyTracks);
+
+        hideLoadingOverlay();
+
+    } catch (error) {
+        console.error('Error opening album download modal:', error);
+        showToast(`Failed to load album: ${error.message}`, 'error');
+        hideLoadingOverlay();
     }
 }
