@@ -24235,13 +24235,13 @@ async function loadDiscoverPage() {
 }
 
 async function checkForActiveDiscoverSyncs() {
-    // Check if Release Radar sync is active
+    // Check if Fresh Tape sync is active
     try {
         const releaseRadarResponse = await fetch('/api/sync/status/discover_release_radar');
         if (releaseRadarResponse.ok) {
             const data = await releaseRadarResponse.json();
             if (data.status === 'syncing' || data.status === 'starting') {
-                console.log('🔄 Resuming Release Radar sync polling after page refresh');
+                console.log('🔄 Resuming Fresh Tape sync polling after page refresh');
 
                 // Show status display
                 const statusDisplay = document.getElementById('release-radar-sync-status');
@@ -24265,13 +24265,13 @@ async function checkForActiveDiscoverSyncs() {
         // Sync not active, ignore
     }
 
-    // Check if Discovery Weekly sync is active
+    // Check if The Archives sync is active
     try {
         const discoveryWeeklyResponse = await fetch('/api/sync/status/discover_discovery_weekly');
         if (discoveryWeeklyResponse.ok) {
             const data = await discoveryWeeklyResponse.json();
             if (data.status === 'syncing' || data.status === 'starting') {
-                console.log('🔄 Resuming Discovery Weekly sync polling after page refresh');
+                console.log('🔄 Resuming The Archives sync polling after page refresh');
 
                 // Show status display
                 const statusDisplay = document.getElementById('discovery-weekly-sync-status');
@@ -24851,7 +24851,7 @@ function startDiscoverSyncPolling(playlistType, virtualPlaylistId) {
                 }
 
                 // Show completion toast
-                showToast(`${playlistType === 'release_radar' ? 'Release Radar' : 'Discovery Weekly'} sync complete!`, 'success');
+                showToast(`${playlistType === 'release_radar' ? 'Fresh Tape' : 'The Archives'} sync complete!`, 'success');
 
                 // Hide status display after 3 seconds
                 setTimeout(() => {
