@@ -3992,6 +3992,7 @@ async function openDownloadMissingModal(playlistId) {
 function exportPlaylistAsM3U(playlistId) {
     /**
      * Export the tracks from the download missing tracks modal as an M3U playlist file
+     * Includes status information from analysis and download results
      */
     console.log(`📋 Exporting playlist ${playlistId} as M3U`);
 
@@ -4003,27 +4004,68 @@ function exportPlaylistAsM3U(playlistId) {
     }
 
     const tracks = process.tracks;
-    const playlistName = process.playlistName || 'Playlist';
+    const playlistName = process.playlist?.name || process.playlistName || 'Playlist';
 
-    // Generate M3U8 content
+    // Generate M3U8 content with status information
     let m3uContent = '#EXTM3U\n';
-    m3uContent += `#PLAYLIST:${playlistName}\n\n`;
+    m3uContent += `#PLAYLIST:${playlistName}\n`;
+    m3uContent += `#GENERATED:${new Date().toISOString()}\n\n`;
 
-    tracks.forEach(track => {
+    let foundCount = 0;
+    let downloadedCount = 0;
+    let missingCount = 0;
+
+    tracks.forEach((track, index) => {
         // Get duration in seconds
         const durationSeconds = track.duration_ms ? Math.floor(track.duration_ms / 1000) : -1;
 
         // Get artist names
         const artists = Array.isArray(track.artists) ? track.artists.join(', ') : (track.artists || 'Unknown Artist');
 
+        // Check library match status from the modal UI
+        const matchEl = document.getElementById(`match-${playlistId}-${index}`);
+        const downloadEl = document.getElementById(`download-${playlistId}-${index}`);
+
+        const isFoundInLibrary = matchEl && matchEl.textContent.includes('Found');
+        const isDownloaded = downloadEl && downloadEl.textContent.includes('Completed');
+        const isMissing = matchEl && matchEl.textContent.includes('Missing');
+
+        // Track status
+        let status = 'UNKNOWN';
+        if (isDownloaded) {
+            status = 'DOWNLOADED';
+            downloadedCount++;
+        } else if (isFoundInLibrary) {
+            status = 'FOUND_IN_LIBRARY';
+            foundCount++;
+        } else if (isMissing) {
+            status = 'MISSING';
+            missingCount++;
+        }
+
         // Add track info
         m3uContent += `#EXTINF:${durationSeconds},${artists} - ${track.name}\n`;
+        m3uContent += `#STATUS:${status}\n`;
 
-        // Add a placeholder path (user will need to replace with actual file paths)
+        // Generate file path
         const sanitizedArtist = artists.replace(/[/\\?%*:|"<>]/g, '-');
         const sanitizedTrack = track.name.replace(/[/\\?%*:|"<>]/g, '-');
-        m3uContent += `${sanitizedArtist} - ${sanitizedTrack}.mp3\n\n`;
+
+        if (isDownloaded || isFoundInLibrary) {
+            // For downloaded or found tracks, use standard music file path format
+            m3uContent += `${sanitizedArtist} - ${sanitizedTrack}.mp3\n\n`;
+        } else {
+            // For missing tracks, comment out the path and add a note
+            m3uContent += `# NOT AVAILABLE: ${sanitizedArtist} - ${sanitizedTrack}.mp3\n\n`;
+        }
     });
+
+    // Add summary at the end
+    m3uContent += `#SUMMARY\n`;
+    m3uContent += `#TOTAL_TRACKS:${tracks.length}\n`;
+    m3uContent += `#FOUND_IN_LIBRARY:${foundCount}\n`;
+    m3uContent += `#DOWNLOADED:${downloadedCount}\n`;
+    m3uContent += `#MISSING:${missingCount}\n`;
 
     // Create a Blob and download it
     const blob = new Blob([m3uContent], { type: 'audio/x-mpegurl;charset=utf-8' });
@@ -4036,8 +4078,9 @@ function exportPlaylistAsM3U(playlistId) {
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
 
-    showToast(`Exported ${tracks.length} tracks as M3U playlist`, 'success');
-    console.log(`✅ Exported ${tracks.length} tracks to ${link.download}`);
+    const availableCount = foundCount + downloadedCount;
+    showToast(`Exported M3U: ${availableCount} available, ${missingCount} missing`, 'success');
+    console.log(`✅ Exported M3U - Total: ${tracks.length}, Available: ${availableCount}, Missing: ${missingCount}`);
 }
 
 async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistName, spotifyTracks) {
