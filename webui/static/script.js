@@ -2349,6 +2349,102 @@ async function rehydrateArtistAlbumModal(virtualPlaylistId, playlistName, batchI
     }
 }
 
+async function rehydrateDiscoverPlaylistModal(virtualPlaylistId, playlistName, batchId) {
+    /**
+     * Rehydrates a discover playlist download modal from backend process data.
+     * Fetches tracks from the appropriate discover API endpoint and recreates the modal.
+     */
+    try {
+        console.log(`💧 Rehydrating discover playlist modal: ${virtualPlaylistId} (${playlistName})`);
+
+        // Determine API endpoint based on playlist ID
+        let apiEndpoint;
+        if (virtualPlaylistId === 'discover_release_radar') {
+            apiEndpoint = '/api/discover/release-radar';
+        } else if (virtualPlaylistId === 'discover_discovery_weekly') {
+            apiEndpoint = '/api/discover/discovery-weekly';
+        } else {
+            console.error(`❌ Unknown discover playlist type: ${virtualPlaylistId}`);
+            return;
+        }
+
+        // Fetch tracks from API
+        console.log(`📡 Fetching tracks from ${apiEndpoint}...`);
+        const response = await fetch(apiEndpoint);
+        if (!response.ok) {
+            console.error(`❌ Failed to fetch discover playlist data: ${response.status}`);
+            return;
+        }
+
+        const data = await response.json();
+        if (!data.success || !data.tracks) {
+            console.error(`❌ Invalid discover playlist data:`, data);
+            return;
+        }
+
+        const tracks = data.tracks;
+        console.log(`✅ Retrieved ${tracks.length} tracks for ${playlistName}`);
+
+        // Transform tracks to format expected by download modal (same as openDownloadModalForDiscoverPlaylist)
+        const spotifyTracks = tracks.map(track => {
+            let spotifyTrack;
+
+            // Use track_data_json if available, otherwise construct from track data
+            if (track.track_data_json) {
+                spotifyTrack = track.track_data_json;
+            } else {
+                // Fallback: construct track object from available data
+                spotifyTrack = {
+                    id: track.spotify_track_id,
+                    name: track.track_name,
+                    artists: [{ name: track.artist_name }],
+                    album: {
+                        name: track.album_name,
+                        images: track.album_cover_url ? [{ url: track.album_cover_url }] : []
+                    },
+                    duration_ms: track.duration_ms || 0
+                };
+            }
+
+            // Normalize artists to array of strings for modal compatibility
+            if (spotifyTrack.artists && Array.isArray(spotifyTrack.artists)) {
+                spotifyTrack.artists = spotifyTrack.artists.map(a => a.name || a);
+            }
+
+            return spotifyTrack;
+        });
+
+        // Create the modal using the same function as normal discover downloads
+        await openDownloadMissingModalForYouTube(virtualPlaylistId, playlistName, spotifyTracks);
+
+        // Update the rehydrated process with batch info and hide modal for background rehydration
+        const process = activeDownloadProcesses[virtualPlaylistId];
+        if (process) {
+            process.status = 'running';
+            process.batchId = batchId;
+
+            // Update button states to reflect running status
+            const beginBtn = document.getElementById(`begin-analysis-btn-${virtualPlaylistId}`);
+            const cancelBtn = document.getElementById(`cancel-all-btn-${virtualPlaylistId}`);
+            if (beginBtn) beginBtn.style.display = 'none';
+            if (cancelBtn) cancelBtn.style.display = 'inline-block';
+
+            // Hide the modal - this is background rehydration, not user-requested
+            if (process.modalElement) {
+                process.modalElement.style.display = 'none';
+                console.log(`🔍 Hiding rehydrated modal for background processing: ${playlistName}`);
+            }
+
+            console.log(`✅ Rehydrated discover playlist modal: ${playlistName}`);
+        } else {
+            console.error(`❌ Failed to find rehydrated process for ${virtualPlaylistId}`);
+        }
+
+    } catch (error) {
+        console.error(`❌ Error rehydrating discover playlist modal:`, error);
+    }
+}
+
 async function rehydrateModal(processInfo, userRequested = false) {
     const { playlist_id, playlist_name, batch_id } = processInfo;
     console.log(`💧 Rehydrating modal for "${playlist_name}" (batch: ${batch_id}) - User requested: ${userRequested}`);
@@ -2369,6 +2465,13 @@ async function rehydrateModal(processInfo, userRequested = false) {
     if (playlist_id.startsWith('artist_album_')) {
         console.log(`💧 Rehydrating artist album virtual playlist: ${playlist_id}`);
         await rehydrateArtistAlbumModal(playlist_id, playlist_name, batch_id);
+        return;
+    }
+
+    // Handle discover virtual playlists (Fresh Tape, The Archives)
+    if (playlist_id.startsWith('discover_')) {
+        console.log(`💧 Rehydrating discover playlist: ${playlist_id}`);
+        await rehydrateDiscoverPlaylistModal(playlist_id, playlist_name, batch_id);
         return;
     }
 
@@ -3931,7 +4034,8 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
 
     // Generate hero section with dynamic source detection
     const source = playlistName.includes('[Beatport]') ? 'Beatport' :
-                   playlistName.includes('[Tidal]') ? 'Tidal' : 'YouTube';
+                   playlistName.includes('[Tidal]') ? 'Tidal' :
+                   virtualPlaylistId.startsWith('discover_') ? 'SoulSync' : 'YouTube';
 
     const heroContext = {
         type: 'playlist',
@@ -24704,6 +24808,57 @@ async function openDownloadModalForDiscoverPlaylist(playlistType, playlistName) 
         showToast(`Failed to open download modal: ${error.message}`, 'error');
         hideLoadingOverlay();  // Ensure overlay is hidden on error
     }
+}
+
+function updateDiscoverDownloadButton(playlistType, state) {
+    /**
+     * Update the download button appearance based on download state
+     * @param {string} playlistType - 'release_radar' or 'discovery_weekly'
+     * @param {string} state - 'idle', 'downloading', or 'complete'
+     */
+    const buttonId = `${playlistType}-download-btn`;
+    const button = document.getElementById(buttonId);
+
+    if (!button) return;
+
+    const icon = button.querySelector('.button-icon');
+    const text = button.querySelector('.button-text');
+
+    if (state === 'downloading') {
+        if (icon) icon.textContent = '⏳';
+        if (text) text.textContent = 'View Progress';
+        button.title = 'View download progress';
+    } else {
+        if (icon) icon.textContent = '↓';
+        if (text) text.textContent = 'Download';
+        button.title = 'Download missing tracks';
+    }
+}
+
+function checkForActiveDiscoverDownloads() {
+    /**
+     * Check for active download processes and update button states
+     * Only runs if discover page is actually loaded in the DOM
+     */
+    // Check if discover page is loaded by looking for a discover-specific element
+    const discoverPage = document.getElementById('release-radar-download-btn') ||
+                        document.getElementById('discovery-weekly-download-btn');
+
+    if (!discoverPage) return;
+
+    const discoverPlaylists = [
+        { id: 'discover_release_radar', type: 'release_radar' },
+        { id: 'discover_discovery_weekly', type: 'discovery_weekly' }
+    ];
+
+    discoverPlaylists.forEach(({ id, type }) => {
+        if (activeDownloadProcesses[id]) {
+            const process = activeDownloadProcesses[id];
+            if (process.status === 'running' || process.status === 'idle') {
+                updateDiscoverDownloadButton(type, 'downloading');
+            }
+        }
+    });
 }
 
 async function startDiscoverPlaylistSync(playlistType, playlistName) {
