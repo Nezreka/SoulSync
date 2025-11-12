@@ -676,9 +676,10 @@ class WatchlistScanner:
             import random
 
             # Check if we should run (prevents over-polling Spotify)
-            if not self.database.should_populate_discovery_pool(hours_threshold=24):
-                logger.info("Discovery pool was populated recently (< 24 hours ago). Skipping to avoid over-polling Spotify.")
-                return
+            # TEMPORARILY DISABLED FOR TESTING
+            # if not self.database.should_populate_discovery_pool(hours_threshold=24):
+            #     logger.info("Discovery pool was populated recently (< 24 hours ago). Skipping to avoid over-polling Spotify.")
+            #     return
 
             logger.info("Populating discovery pool from similar artists...")
 
@@ -1093,7 +1094,22 @@ class WatchlistScanner:
                 logger.info(f"Adding {len(release_radar_track_data)} Release Radar tracks to discovery pool...")
                 for track_data in release_radar_track_data:
                     try:
-                        self.database.add_to_discovery_pool(track_data, is_new_release=True)
+                        # Format track data for discovery pool (expects specific structure)
+                        formatted_track = {
+                            'spotify_track_id': track_data['id'],
+                            'spotify_album_id': track_data['album'].get('id', ''),
+                            'spotify_artist_id': track_data['artists'][0]['id'] if track_data['artists'] else '',
+                            'track_name': track_data['name'],
+                            'artist_name': track_data['artists'][0]['name'] if track_data['artists'] else 'Unknown',
+                            'album_name': track_data['album'].get('name', 'Unknown'),
+                            'album_cover_url': track_data['album']['images'][0]['url'] if track_data['album'].get('images') else None,
+                            'duration_ms': track_data.get('duration_ms', 0),
+                            'popularity': track_data.get('popularity', 0),
+                            'release_date': track_data['album'].get('release_date', ''),
+                            'is_new_release': True,
+                            'track_data_json': track_data
+                        }
+                        self.database.add_to_discovery_pool(formatted_track)
                     except Exception as e:
                         logger.warning(f"Failed to add track {track_data['name']} to discovery pool: {e}")
                         continue
