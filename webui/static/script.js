@@ -24478,8 +24478,10 @@ function displayDiscoverHeroArtist(artist) {
         bgEl.style.backgroundPosition = 'center';
     }
 
-    // Store artist ID for watchlist button and update its state
+    // Store artist ID for both buttons and update watchlist state
     const addBtn = document.getElementById('discover-hero-add');
+    const discographyBtn = document.getElementById('discover-hero-discography');
+
     if (addBtn && artist.spotify_artist_id) {
         addBtn.setAttribute('data-artist-id', artist.spotify_artist_id);
         addBtn.setAttribute('data-artist-name', artist.artist_name);
@@ -24487,6 +24489,14 @@ function displayDiscoverHeroArtist(artist) {
         // Check if this artist is already in watchlist and update button appearance
         checkAndUpdateDiscoverHeroWatchlistButton(artist.spotify_artist_id);
     }
+
+    if (discographyBtn && artist.spotify_artist_id) {
+        discographyBtn.setAttribute('data-artist-id', artist.spotify_artist_id);
+        discographyBtn.setAttribute('data-artist-name', artist.artist_name);
+    }
+
+    // Update slideshow indicators
+    updateDiscoverHeroIndicators();
 }
 
 async function checkAndUpdateDiscoverHeroWatchlistButton(artistId) {
@@ -24538,6 +24548,72 @@ function toggleDiscoverHeroWatchlist(event) {
 
     // Call the existing toggleWatchlist function
     toggleWatchlist(event, artistId, artistName);
+}
+
+function navigateDiscoverHero(direction) {
+    if (!discoverHeroArtists || discoverHeroArtists.length === 0) return;
+
+    // Update index with wrapping
+    discoverHeroIndex = (discoverHeroIndex + direction + discoverHeroArtists.length) % discoverHeroArtists.length;
+
+    // Display the artist
+    displayDiscoverHeroArtist(discoverHeroArtists[discoverHeroIndex]);
+
+    // Update indicators
+    updateDiscoverHeroIndicators();
+}
+
+function updateDiscoverHeroIndicators() {
+    const indicatorsContainer = document.getElementById('discover-hero-indicators');
+    if (!indicatorsContainer || !discoverHeroArtists || discoverHeroArtists.length === 0) return;
+
+    // Create indicator dots
+    indicatorsContainer.innerHTML = discoverHeroArtists.map((_, index) => `
+        <button class="hero-indicator ${index === discoverHeroIndex ? 'active' : ''}"
+                onclick="jumpToDiscoverHeroSlide(${index})"
+                aria-label="Go to slide ${index + 1}"></button>
+    `).join('');
+}
+
+function jumpToDiscoverHeroSlide(index) {
+    if (!discoverHeroArtists || index < 0 || index >= discoverHeroArtists.length) return;
+
+    discoverHeroIndex = index;
+    displayDiscoverHeroArtist(discoverHeroArtists[discoverHeroIndex]);
+    updateDiscoverHeroIndicators();
+}
+
+async function viewDiscoverHeroDiscography() {
+    const button = document.getElementById('discover-hero-discography');
+    if (!button) return;
+
+    const artistId = button.getAttribute('data-artist-id');
+    const artistName = button.getAttribute('data-artist-name');
+
+    if (!artistId || !artistName) {
+        console.error('No artist data found for discography view');
+        return;
+    }
+
+    // Create artist object matching the expected format
+    const artist = {
+        id: artistId,
+        name: artistName,
+        image_url: discoverHeroArtists[discoverHeroIndex]?.image_url || '',
+        genres: discoverHeroArtists[discoverHeroIndex]?.genres || [],
+        popularity: discoverHeroArtists[discoverHeroIndex]?.popularity || 0
+    };
+
+    console.log(`🎵 Navigating to artist detail for: ${artistName}`);
+
+    // Navigate to Artists page
+    navigateToPage('artists');
+
+    // Small delay to let the page load
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    // Load the artist details
+    await selectArtistForDetail(artist);
 }
 
 function showDiscoverHeroEmpty() {
