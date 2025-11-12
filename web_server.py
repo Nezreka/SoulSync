@@ -1752,6 +1752,47 @@ def fix_navidrome_urls():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
+@app.route('/api/save-playlist-m3u', methods=['POST'])
+def save_playlist_m3u():
+    """Save M3U playlist file to transfer folder for playlists"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"status": "error", "message": "No data provided"}), 400
+
+        playlist_name = data.get('playlist_name', 'Playlist')
+        m3u_content = data.get('m3u_content', '')
+
+        if not m3u_content:
+            return jsonify({"status": "error", "message": "No M3U content provided"}), 400
+
+        # Get transfer folder path
+        transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
+
+        # Create 'playlist m3u files' subfolder
+        m3u_folder = os.path.join(transfer_dir, 'playlist m3u files')
+        os.makedirs(m3u_folder, exist_ok=True)
+
+        # Sanitize playlist name for filename
+        safe_filename = playlist_name.replace('/', '-').replace('\\', '-').replace(':', '-').replace('*', '-').replace('?', '-').replace('"', '-').replace('<', '-').replace('>', '-').replace('|', '-')
+        m3u_filename = f"{safe_filename}.m3u"
+        m3u_path = os.path.join(m3u_folder, m3u_filename)
+
+        # Write M3U file (overwrite if exists)
+        with open(m3u_path, 'w', encoding='utf-8') as f:
+            f.write(m3u_content)
+
+        logger.info(f"✅ Saved M3U file: {m3u_path}")
+        return jsonify({
+            "status": "success",
+            "message": f"M3U file saved: {m3u_filename}",
+            "path": m3u_path
+        })
+
+    except Exception as e:
+        logger.error(f"❌ Error saving M3U file: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 @app.route('/api/system/stats')
 def get_system_stats():
     """Get system statistics for dashboard"""

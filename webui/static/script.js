@@ -3989,18 +3989,60 @@ async function openDownloadMissingModal(playlistId) {
     hideLoadingOverlay();
 }
 
-function exportPlaylistAsM3U(playlistId) {
+async function autoSavePlaylistM3U(playlistId) {
     /**
-     * Export the tracks from the download missing tracks modal as an M3U playlist file
-     * Includes status information from analysis and download results
+     * Automatically save M3U file server-side for playlist modals
+     * Only for Spotify/YouTube/Tidal/Beatport playlists, not artist albums
      */
-    console.log(`📋 Exporting playlist ${playlistId} as M3U`);
-
-    // Get the process data
     const process = activeDownloadProcesses[playlistId];
     if (!process || !process.tracks || process.tracks.length === 0) {
-        showToast('No tracks available to export', 'warning');
+        return; // Silently skip if no data
+    }
+
+    // Check if this is a playlist (not an artist album)
+    const modal = document.getElementById(`download-missing-modal-${playlistId}`);
+    if (!modal) return;
+
+    const context = modal.querySelector('.download-missing-modal-content')?.getAttribute('data-context');
+    if (context === 'artist_album') {
+        // Don't auto-save for artist albums
         return;
+    }
+
+    // Generate M3U content (reuse logic from exportPlaylistAsM3U)
+    const m3uContent = generateM3UContent(playlistId);
+    if (!m3uContent) return;
+
+    const playlistName = process.playlist?.name || process.playlistName || 'Playlist';
+
+    try {
+        const response = await fetch('/api/save-playlist-m3u', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                playlist_name: playlistName,
+                m3u_content: m3uContent
+            })
+        });
+
+        if (response.ok) {
+            console.log(`✅ Auto-saved M3U for playlist: ${playlistName}`);
+        } else {
+            console.warn(`⚠️ Failed to auto-save M3U for ${playlistName}`);
+        }
+    } catch (error) {
+        console.debug('Auto-save M3U error (non-critical):', error);
+    }
+}
+
+function generateM3UContent(playlistId) {
+    /**
+     * Generate M3U file content from modal data
+     * Shared between manual export and auto-save
+     */
+    const process = activeDownloadProcesses[playlistId];
+    if (!process || !process.tracks || process.tracks.length === 0) {
+        return null;
     }
 
     const tracks = process.tracks;
@@ -4016,10 +4058,7 @@ function exportPlaylistAsM3U(playlistId) {
     let missingCount = 0;
 
     tracks.forEach((track, index) => {
-        // Get duration in seconds
         const durationSeconds = track.duration_ms ? Math.floor(track.duration_ms / 1000) : -1;
-
-        // Get artist names
         const artists = Array.isArray(track.artists) ? track.artists.join(', ') : (track.artists || 'Unknown Artist');
 
         // Check library match status from the modal UI
@@ -4052,20 +4091,49 @@ function exportPlaylistAsM3U(playlistId) {
         const sanitizedTrack = track.name.replace(/[/\\?%*:|"<>]/g, '-');
 
         if (isDownloaded || isFoundInLibrary) {
-            // For downloaded or found tracks, use standard music file path format
             m3uContent += `${sanitizedArtist} - ${sanitizedTrack}.mp3\n\n`;
         } else {
-            // For missing tracks, comment out the path and add a note
             m3uContent += `# NOT AVAILABLE: ${sanitizedArtist} - ${sanitizedTrack}.mp3\n\n`;
         }
     });
 
-    // Add summary at the end
+    // Add summary
     m3uContent += `#SUMMARY\n`;
     m3uContent += `#TOTAL_TRACKS:${tracks.length}\n`;
     m3uContent += `#FOUND_IN_LIBRARY:${foundCount}\n`;
     m3uContent += `#DOWNLOADED:${downloadedCount}\n`;
     m3uContent += `#MISSING:${missingCount}\n`;
+
+    return m3uContent;
+}
+
+function exportPlaylistAsM3U(playlistId) {
+    /**
+     * Export the tracks from the download missing tracks modal as an M3U playlist file
+     * Includes status information from analysis and download results
+     */
+    console.log(`📋 Exporting playlist ${playlistId} as M3U`);
+
+    const process = activeDownloadProcesses[playlistId];
+    if (!process || !process.tracks || process.tracks.length === 0) {
+        showToast('No tracks available to export', 'warning');
+        return;
+    }
+
+    // Generate M3U content using shared function
+    const m3uContent = generateM3UContent(playlistId);
+    if (!m3uContent) {
+        showToast('Failed to generate M3U content', 'error');
+        return;
+    }
+
+    const playlistName = process.playlist?.name || process.playlistName || 'Playlist';
+
+    // Parse summary from content for toast message
+    const summaryMatch = m3uContent.match(/#FOUND_IN_LIBRARY:(\d+)\n#DOWNLOADED:(\d+)\n#MISSING:(\d+)/);
+    const foundCount = summaryMatch ? parseInt(summaryMatch[1]) : 0;
+    const downloadedCount = summaryMatch ? parseInt(summaryMatch[2]) : 0;
+    const missingCount = summaryMatch ? parseInt(summaryMatch[3]) : 0;
 
     // Create a Blob and download it
     const blob = new Blob([m3uContent], { type: 'audio/x-mpegurl;charset=utf-8' });
@@ -4080,7 +4148,7 @@ function exportPlaylistAsM3U(playlistId) {
 
     const availableCount = foundCount + downloadedCount;
     showToast(`Exported M3U: ${availableCount} available, ${missingCount} missing`, 'success');
-    console.log(`✅ Exported M3U - Total: ${tracks.length}, Available: ${availableCount}, Missing: ${missingCount}`);
+    console.log(`✅ Exported M3U - Total: ${process.tracks.length}, Available: ${availableCount}, Missing: ${missingCount}`);
 }
 
 async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistName, spotifyTracks) {
@@ -5099,7 +5167,7 @@ function processModalStatusUpdate(playlistId, data) {
         const progress = data.analysis_progress;
         const percent = progress.total > 0 ? (progress.processed / progress.total) * 100 : 0;
         document.getElementById(`analysis-progress-fill-${playlistId}`).style.width = `${percent}%`;
-        document.getElementById(`analysis-progress-text-${playlistId}`).textContent = 
+        document.getElementById(`analysis-progress-text-${playlistId}`).textContent =
             `${progress.processed}/${progress.total} tracks analyzed`;
         if (data.analysis_results) {
             updateTrackAnalysisResults(playlistId, data.analysis_results);
@@ -5108,6 +5176,9 @@ function processModalStatusUpdate(playlistId, data) {
             const missingCount = data.analysis_results.filter(r => !r.found).length;
             document.getElementById(`stat-found-${playlistId}`).textContent = foundCount;
             document.getElementById(`stat-missing-${playlistId}`).textContent = missingCount;
+
+            // Auto-save M3U file for playlists after analysis
+            autoSavePlaylistM3U(playlistId);
         }
     } else if (data.phase === 'downloading' || data.phase === 'complete' || data.phase === 'error') {
         console.debug(`📊 [Status Update] Processing ${data.phase} phase for playlistId: ${playlistId}, tasks: ${(data.tasks || []).length}`);
@@ -5233,6 +5304,11 @@ function processModalStatusUpdate(playlistId, data) {
         document.getElementById(`download-progress-text-${playlistId}`).textContent = `${completedCount}/${missingCount} completed (${progressPercent.toFixed(0)}%)`;
         document.getElementById(`stat-downloaded-${playlistId}`).textContent = completedCount;
 
+        // Auto-save M3U file for playlists as downloads progress
+        if (completedCount > 0) {
+            autoSavePlaylistM3U(playlistId);
+        }
+
         // CLIENT-SIDE COMPLETION: If all tracks are finished (completed or failed), complete the modal
         const allTracksFinished = totalFinished >= missingCount && missingCount > 0;
         if (allTracksFinished && process.status !== 'complete') {
@@ -5257,6 +5333,9 @@ function processModalStatusUpdate(playlistId, data) {
                     setTimeout(() => setAlbumDownloadedStatus(albumId), 500); // Small delay to ensure UI updates
                 }
             }
+
+            // Auto-save final M3U file for playlists
+            autoSavePlaylistM3U(playlistId);
 
             // Show completion message
             const completionMessage = `Download complete! ${completedCount} downloaded, ${failedOrCancelledCount} failed.`;
