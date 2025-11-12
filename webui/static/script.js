@@ -24449,10 +24449,21 @@ function displayDiscoverHeroArtist(artist) {
     }
 
     if (subtitleEl) {
-        const genres = artist.genres && artist.genres.length > 0
-            ? artist.genres.slice(0, 3).join(', ')
-            : 'Discover new music';
-        subtitleEl.textContent = genres;
+        // Show recommendation context based on occurrence count
+        let subtitle = '';
+        if (artist.occurrence_count > 1) {
+            subtitle = `Similar to ${artist.occurrence_count} artists in your watchlist`;
+        } else {
+            subtitle = 'Similar to an artist in your watchlist';
+        }
+
+        // Add genre context if available
+        if (artist.genres && artist.genres.length > 0) {
+            const topGenres = artist.genres.slice(0, 2).join(', ');
+            subtitle += ` • ${topGenres}`;
+        }
+
+        subtitleEl.textContent = subtitle;
     }
 
     if (imageEl && artist.image_url) {
@@ -24466,6 +24477,67 @@ function displayDiscoverHeroArtist(artist) {
         bgEl.style.backgroundSize = 'cover';
         bgEl.style.backgroundPosition = 'center';
     }
+
+    // Store artist ID for watchlist button and update its state
+    const addBtn = document.getElementById('discover-hero-add');
+    if (addBtn && artist.spotify_artist_id) {
+        addBtn.setAttribute('data-artist-id', artist.spotify_artist_id);
+        addBtn.setAttribute('data-artist-name', artist.artist_name);
+
+        // Check if this artist is already in watchlist and update button appearance
+        checkAndUpdateDiscoverHeroWatchlistButton(artist.spotify_artist_id);
+    }
+}
+
+async function checkAndUpdateDiscoverHeroWatchlistButton(artistId) {
+    try {
+        const response = await fetch('/api/watchlist/check', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ artist_id: artistId })
+        });
+
+        const data = await response.json();
+        if (!data.success) return;
+
+        const addBtn = document.getElementById('discover-hero-add');
+        if (!addBtn) return;
+
+        const icon = addBtn.querySelector('.watchlist-icon');
+        const text = addBtn.querySelector('.watchlist-text');
+
+        if (data.is_watching) {
+            // Artist is in watchlist
+            if (icon) icon.textContent = '👁️';
+            if (text) text.textContent = 'Watching...';
+            addBtn.classList.add('watching');
+        } else {
+            // Artist not in watchlist
+            if (icon) icon.textContent = '👁️';
+            if (text) text.textContent = 'Add to Watchlist';
+            addBtn.classList.remove('watching');
+        }
+    } catch (error) {
+        console.error('Error checking watchlist status for hero:', error);
+    }
+}
+
+function toggleDiscoverHeroWatchlist(event) {
+    event.stopPropagation();
+
+    const button = document.getElementById('discover-hero-add');
+    if (!button) return;
+
+    const artistId = button.getAttribute('data-artist-id');
+    const artistName = button.getAttribute('data-artist-name');
+
+    if (!artistId || !artistName) {
+        console.error('No artist data found on discover hero button');
+        return;
+    }
+
+    // Call the existing toggleWatchlist function
+    toggleWatchlist(event, artistId, artistName);
 }
 
 function showDiscoverHeroEmpty() {
