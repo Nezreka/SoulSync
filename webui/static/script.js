@@ -9467,6 +9467,44 @@ const TOOL_HELP_CONTENT = {
                 <li><strong>Space Freed:</strong> Total disk space reclaimed</li>
             </ul>
         `
+    },
+    'media-scan': {
+        title: 'Media Server Scan',
+        content: `
+            <h4>What does this tool do?</h4>
+            <p>The Media Server Scan tool manually triggers a Plex media library scan to detect newly downloaded music files.</p>
+
+            <h4>When to use it?</h4>
+            <ul>
+                <li>After downloading new tracks to refresh your Plex library</li>
+                <li>When new music isn't showing up in Plex</li>
+                <li>To force an immediate library update instead of waiting for auto-scan</li>
+            </ul>
+
+            <h4>What happens when you scan?</h4>
+            <ol>
+                <li><strong>Plex library scan:</strong> Plex scans your music folder for new/changed files</li>
+                <li><strong>Automatic database update:</strong> After the scan completes, SoulSync automatically updates its internal database with new tracks</li>
+                <li><strong>Library refreshed:</strong> New music appears in Plex and SoulSync within moments</li>
+            </ol>
+
+            <h4>Plex only?</h4>
+            <p>Yes! This tool only appears when Plex is your active media server because:</p>
+            <ul>
+                <li><strong>Jellyfin</strong> automatically detects new files instantly (real-time monitoring)</li>
+                <li><strong>Navidrome</strong> automatically detects new files instantly (real-time monitoring)</li>
+                <li><strong>Plex</strong> requires manual scans or has delayed auto-scanning</li>
+            </ul>
+
+            <h4>Stats Explained</h4>
+            <ul>
+                <li><strong>Last Scan:</strong> Time of the most recent scan request</li>
+                <li><strong>Status:</strong> Current scan state (Idle, Scanning, Error)</li>
+            </ul>
+
+            <h4>Scan workflow</h4>
+            <p>This tool replicates the same scan process that runs automatically after completing a download modal - ensuring your new tracks are immediately available in your library!</p>
+        `
     }
 };
 
@@ -9636,6 +9674,15 @@ async function loadDashboardData() {
     if (duplicateCleanButton) {
         duplicateCleanButton.addEventListener('click', handleDuplicateCleanButtonClick);
     }
+
+    // Attach event listener for the media scan tool
+    const mediaScanButton = document.getElementById('media-scan-button');
+    if (mediaScanButton) {
+        mediaScanButton.addEventListener('click', handleMediaScanButtonClick);
+    }
+
+    // Check active media server and show media scan tool only for Plex
+    await checkAndShowMediaScanForPlex();
 
     // Attach event listeners for tool help buttons
     initializeToolHelpButtons();
@@ -19453,6 +19500,159 @@ async function checkAndHideMetadataUpdaterForNonPlex() {
         }
     } catch (error) {
         console.warn('Could not check active media server for metadata updater visibility:', error);
+    }
+}
+
+async function checkAndShowMediaScanForPlex() {
+    /**
+     * Show media scan tool only for Plex (Jellyfin/Navidrome auto-scan)
+     */
+    try {
+        const response = await fetch('/api/active-media-server');
+        const data = await response.json();
+
+        if (data.success) {
+            const mediaScanCard = document.getElementById('media-scan-card');
+            if (mediaScanCard) {
+                // Show media scan tool only for Plex
+                if (data.active_server === 'plex') {
+                    mediaScanCard.style.display = 'flex';
+                    console.log('Media scan tool shown: Plex is active server');
+                } else {
+                    // Hide for Jellyfin/Navidrome (they auto-scan)
+                    mediaScanCard.style.display = 'none';
+                    console.log(`Media scan tool hidden: ${data.active_server} auto-scans`);
+                }
+            }
+        }
+    } catch (error) {
+        console.warn('Could not check active media server for media scan visibility:', error);
+    }
+}
+
+async function handleMediaScanButtonClick() {
+    /**
+     * Trigger a manual Plex media library scan
+     */
+    const button = document.getElementById('media-scan-button');
+    const phaseLabel = document.getElementById('media-scan-phase-label');
+    const progressBar = document.getElementById('media-scan-progress-bar');
+    const progressLabel = document.getElementById('media-scan-progress-label');
+    const statusValue = document.getElementById('media-scan-status');
+
+    if (!button) return;
+
+    try {
+        // Disable button and update UI
+        button.disabled = true;
+        phaseLabel.textContent = 'Requesting scan...';
+        progressBar.style.width = '30%';
+        progressLabel.textContent = 'Sending scan request to Plex';
+        statusValue.textContent = 'Scanning...';
+        statusValue.style.color = '#1db954';
+
+        // Request scan
+        const response = await fetch('/api/scan/request', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                reason: 'Manual scan triggered from dashboard',
+                auto_database_update: true
+            })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            // Update UI to show scan in progress
+            phaseLabel.textContent = 'Scan in progress...';
+            progressBar.style.width = '100%';
+
+            if (result.scan_info && result.scan_info.delay_seconds) {
+                progressLabel.textContent = `Scan scheduled (${result.scan_info.delay_seconds}s delay)`;
+                showToast(`📡 Media scan scheduled (${result.scan_info.delay_seconds}s delay)`, 'success', 5000);
+            } else {
+                progressLabel.textContent = 'Scan initiated successfully';
+                showToast('📡 Media scan initiated successfully', 'success', 3000);
+            }
+
+            // Show auto database update message
+            if (result.auto_database_update) {
+                showToast('🔄 Database will update automatically after scan', 'info', 3000);
+            }
+
+            // Update last scan time
+            const lastTimeEl = document.getElementById('media-scan-last-time');
+            if (lastTimeEl) {
+                const now = new Date();
+                lastTimeEl.textContent = now.toLocaleTimeString();
+            }
+
+            // Poll scan status for ~30 seconds
+            let pollCount = 0;
+            const pollInterval = setInterval(async () => {
+                pollCount++;
+
+                if (pollCount > 15) { // Stop after 30 seconds (15 * 2s)
+                    clearInterval(pollInterval);
+                    // Reset UI
+                    button.disabled = false;
+                    phaseLabel.textContent = 'Scan completed';
+                    progressBar.style.width = '0%';
+                    progressLabel.textContent = 'Ready for next scan';
+                    statusValue.textContent = 'Idle';
+                    statusValue.style.color = '#b3b3b3';
+                    return;
+                }
+
+                try {
+                    const statusResponse = await fetch('/api/scan/status');
+                    const statusData = await statusResponse.json();
+
+                    if (statusData.success && statusData.status) {
+                        const status = statusData.status;
+
+                        // Update status display
+                        if (status.is_scanning) {
+                            phaseLabel.textContent = 'Plex is scanning library...';
+                            progressLabel.textContent = status.progress_message || 'Scan in progress';
+                        } else {
+                            // Scan complete
+                            clearInterval(pollInterval);
+                            button.disabled = false;
+                            phaseLabel.textContent = 'Scan completed successfully';
+                            progressBar.style.width = '0%';
+                            progressLabel.textContent = 'Ready for next scan';
+                            statusValue.textContent = 'Idle';
+                            statusValue.style.color = '#b3b3b3';
+                            showToast('✅ Media scan completed', 'success', 3000);
+                        }
+                    }
+                } catch (pollError) {
+                    console.debug('Scan status poll error:', pollError);
+                }
+            }, 2000); // Poll every 2 seconds
+
+        } else {
+            // Error occurred
+            showToast(`❌ Scan request failed: ${result.error}`, 'error', 5000);
+            button.disabled = false;
+            phaseLabel.textContent = 'Scan failed';
+            progressBar.style.width = '0%';
+            progressLabel.textContent = result.error || 'Unknown error';
+            statusValue.textContent = 'Error';
+            statusValue.style.color = '#f44336';
+        }
+
+    } catch (error) {
+        console.error('Error requesting media scan:', error);
+        showToast('❌ Failed to request media scan', 'error', 3000);
+        button.disabled = false;
+        phaseLabel.textContent = 'Error';
+        progressBar.style.width = '0%';
+        progressLabel.textContent = error.message;
+        statusValue.textContent = 'Error';
+        statusValue.style.color = '#f44336';
     }
 }
 

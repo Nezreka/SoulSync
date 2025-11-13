@@ -4136,6 +4136,44 @@ body {
     transform: none;
 }
 
+/* Media Scan Button Styling */
+.media-scan-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    background: linear-gradient(135deg, #667eea, #764ba2) !important;
+    padding: 14px 24px !important;
+    font-size: 15px !important;
+    box-shadow: 0 4px 16px rgba(102, 126, 234, 0.3);
+    width: 100%;
+}
+
+.media-scan-btn:hover:not(:disabled) {
+    background: linear-gradient(135deg, #7c8ff0, #8a5ab8) !important;
+    box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+    transform: translateY(-2px);
+}
+
+.media-scan-btn .scan-icon {
+    font-size: 18px;
+    animation: pulse 2s ease-in-out infinite;
+}
+
+.media-scan-btn:disabled .scan-icon {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.7; transform: scale(1.1); }
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
 .tool-card-progress-section {
     padding-top: 10px;
     border-top: 1px solid #404040;

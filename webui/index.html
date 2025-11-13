@@ -384,6 +384,37 @@
                                     <p class="progress-details-label" id="duplicate-progress-label">0 files scanned (0.0%)</p>
                                 </div>
                             </div>
+
+                            <div class="tool-card" id="media-scan-card" style="display: none;">
+                                <div class="tool-card-header">
+                                    <h4 class="tool-card-title">Media Server Scan</h4>
+                                    <button class="tool-help-button" data-tool="media-scan" title="Learn more about this tool">?</button>
+                                </div>
+                                <p class="tool-card-info">Manually trigger Plex media library scan for music</p>
+                                <div class="tool-card-stats">
+                                    <div class="stat-item">
+                                        <span class="stat-item-label">Last Scan:</span>
+                                        <span class="stat-item-value" id="media-scan-last-time">Never</span>
+                                    </div>
+                                    <div class="stat-item">
+                                        <span class="stat-item-label">Status:</span>
+                                        <span class="stat-item-value" id="media-scan-status">Idle</span>
+                                    </div>
+                                </div>
+                                <div class="tool-card-controls">
+                                    <button id="media-scan-button" class="media-scan-btn">
+                                        <span class="scan-icon">📡</span>
+                                        <span class="scan-text">Scan Library</span>
+                                    </button>
+                                </div>
+                                <div class="tool-card-progress-section">
+                                    <p class="progress-phase-label" id="media-scan-phase-label">Ready to scan</p>
+                                    <div class="progress-bar-container">
+                                         <div class="progress-bar-fill" id="media-scan-progress-bar" style="width: 0%;"></div>
+                                    </div>
+                                    <p class="progress-details-label" id="media-scan-progress-label">Waiting for scan request</p>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
