@@ -2505,40 +2505,41 @@ async function rehydrateModal(processInfo, userRequested = false) {
             
             console.log(`✅ [Rehydrate] Successfully updated existing wishlist modal for auto-process`);
         } else {
-            console.log(`💧 [Rehydrate] Creating new wishlist modal for active process: ${batch_id}`);
-            
-            // Create the modal with current server state
-            await openDownloadMissingWishlistModal();
-            const process = activeDownloadProcesses[playlist_id];
-            if (!process) {
-                console.error('❌ [Rehydrate] Failed to create wishlist process in activeDownloadProcesses');
-                return;
-            }
-
-            // Sync process state with server
-            console.log(`✅ [Rehydrate] Syncing wishlist process state - batchId: ${batch_id}, status: running`);
-            process.status = 'running';
-            process.batchId = batch_id;
-
-            // Update UI to reflect running state
-            const beginBtn = document.getElementById(`begin-analysis-btn-${playlist_id}`);
-            const cancelBtn = document.getElementById(`cancel-all-btn-${playlist_id}`);
-            if (beginBtn) beginBtn.style.display = 'none';
-            if (cancelBtn) cancelBtn.style.display = 'inline-block';
-
-            // Start polling for live updates
-            startModalDownloadPolling(playlist_id);
-
-            // SIMPLIFIED VISIBILITY LOGIC: Show modal if user requested it, otherwise keep hidden for background sync
+            // Only create modal if user requested it - don't create for background auto-processing
             if (userRequested) {
+                console.log(`💧 [Rehydrate] User requested - creating wishlist modal for active process: ${batch_id}`);
+
+                // Create the modal with current server state
+                await openDownloadMissingWishlistModal();
+                const process = activeDownloadProcesses[playlist_id];
+                if (!process) {
+                    console.error('❌ [Rehydrate] Failed to create wishlist process in activeDownloadProcesses');
+                    return;
+                }
+
+                // Sync process state with server
+                console.log(`✅ [Rehydrate] Syncing wishlist process state - batchId: ${batch_id}, status: running`);
+                process.status = 'running';
+                process.batchId = batch_id;
+
+                // Update UI to reflect running state
+                const beginBtn = document.getElementById(`begin-analysis-btn-${playlist_id}`);
+                const cancelBtn = document.getElementById(`cancel-all-btn-${playlist_id}`);
+                if (beginBtn) beginBtn.style.display = 'none';
+                if (cancelBtn) cancelBtn.style.display = 'inline-block';
+
+                // Start polling for live updates
+                startModalDownloadPolling(playlist_id);
+
+                // Show modal
                 console.log('👤 [Rehydrate] User requested - showing wishlist modal');
                 process.modalElement.style.display = 'flex';
                 WishlistModalState.setVisible();
                 WishlistModalState.clearUserClosed();
             } else {
-                console.log('🔄 [Rehydrate] Background sync - keeping modal hidden until user interaction');
-                process.modalElement.style.display = 'none';
-                WishlistModalState.setHidden();
+                console.log('🔄 [Rehydrate] Background auto-processing detected - NOT creating modal (user must click wishlist button to see progress)');
+                // Don't create modal for background auto-processing
+                // User must click the wishlist button to see the modal
             }
         }
         return;
