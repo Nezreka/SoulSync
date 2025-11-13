@@ -27,6 +27,10 @@ Bridge the gap between streaming services and your local music library. Automati
 - **Background automation** retries failed downloads every hour
 
 
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=Nezreka/SoulSync&type=date&legend=top-left)](https://www.star-history.com/#Nezreka/SoulSync&type=date&legend=top-left)
+
 ## 🚀 Three Ways to Run
 
 ### 1. Desktop GUI (Original)
