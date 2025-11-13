@@ -24,6 +24,7 @@ Bridge the gap between streaming services and your local music library. Automati
 - **Music library browser** comprehensive collection management with search and completion tracking
 - **Wishlist system** saves failed downloads for automatic retry
 - **Artist watchlist** monitors for new releases and adds missing tracks
+- **Discover page** intelligent music discovery using your watchlist to curate personalized playlists
 - **Background automation** retries failed downloads every hour
 
 
@@ -170,6 +171,65 @@ Discover the hottest dance music with our fresh Beatport integration. Whether yo
 **Premium Discovery**: Access the same charts that DJs use to find their next big tracks
 
 Just hit up the Beatport section in the web UI and start exploring. Perfect for DJs building sets or anyone who wants to stay ahead of the curve on electronic music trends.
+
+## 🎧 Discover Page - Intelligent Music Discovery
+
+The Discover page is your personalized music recommendation engine, powered by your watchlist and listening habits. Unlike generic algorithms, it builds recommendations based on artists you actively care about.
+
+### How It Works
+
+**Watchlist-Driven Discovery**
+- Add artists to your watchlist on the Artists page
+- SoulSync automatically builds a database of similar artists using [music-map.com](https://music-map.com)
+- This creates a web of related artists based on your taste, not generic popularity
+
+**Curated Playlists**
+The Discover page generates three intelligent playlists:
+
+1. **Release Radar** - New releases from the past 7 days
+   - Tracks from your watchlist artists
+   - Tracks from similar artists in the database
+   - Tracks from artists already in your library
+   - Always fresh, always relevant
+
+2. **Discovery Weekly** - Curated selection of recent music
+   - Similar to Release Radar but with a broader time window
+   - Helps you catch up on releases you might have missed
+   - Blends familiar and new artists
+
+3. **Featured Artist Slideshow**
+   - Hero carousel showcasing similar artists you might like
+   - Shows why each artist is recommended (e.g., "Similar to 5 artists in your watchlist")
+   - One-click add to watchlist or view full discography
+   - Genre tags and popularity indicators
+
+### The Discovery Flow
+
+```
+Your Watchlist → Similar Artists Database → Spotify API → Curated Playlists
+     ↓                     ↓                      ↓              ↓
+  Artists you       Related artists        New releases    Personalized
+    follow         from music-map         and catalogs      discovery
+```
+
+**Key Features:**
+- 📊 **Data-driven**: Uses actual music relationship data, not just popularity
+- 🎯 **Personalized**: Built around your specific tastes via watchlist
+- 🔄 **Always fresh**: Release Radar updates daily with new music
+- 🎨 **Visual discovery**: Hero slideshow makes finding new artists engaging
+- 📥 **One-click downloads**: Add entire playlists or individual tracks instantly
+
+### Why It's Different
+
+Traditional recommendation engines suggest popular artists or use collaborative filtering ("people who liked X also liked Y"). SoulSync's Discover page is different:
+
+- **Taste-focused**: Only recommends based on artists you explicitly watch
+- **Relationship-based**: Uses actual musical similarities via music-map
+- **Library-aware**: Considers what you already own to avoid duplicates
+- **Fresh content**: Prioritizes new releases over backcatalog
+- **Transparent**: Shows you exactly why each artist is recommended
+
+Perfect for discovering new music that actually matches your taste, not what's trending globally.
 
 ## 📁 File Flow
 
