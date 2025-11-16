@@ -24708,6 +24708,14 @@ let discoverSeasonalAlbums = [];
 let discoverSeasonalTracks = [];
 let currentSeasonKey = null;
 
+// Personalized playlists storage
+let personalizedRecentlyAdded = [];
+let personalizedTopTracks = [];
+let personalizedForgottenFavorites = [];
+let personalizedPopularPicks = [];
+let personalizedHiddenGems = [];
+let personalizedDailyMixes = [];
+
 async function loadDiscoverPage() {
     console.log('Loading discover page...');
 
@@ -24715,9 +24723,15 @@ async function loadDiscoverPage() {
     await Promise.all([
         loadDiscoverHero(),
         loadDiscoverRecentReleases(),
-        loadSeasonalContent(),  // NEW: Seasonal discovery
+        loadSeasonalContent(),  // Seasonal discovery
+        loadPersonalizedRecentlyAdded(),  // NEW: Recently added from library
+        loadPersonalizedDailyMixes(),  // NEW: Daily Mix playlists
         loadDiscoverReleaseRadar(),
         loadDiscoverWeekly(),
+        loadPersonalizedPopularPicks(),  // NEW: Popular picks from discovery pool
+        loadPersonalizedHiddenGems(),  // NEW: Hidden gems from discovery pool
+        loadPersonalizedTopTracks(),  // NEW: Your top tracks
+        loadPersonalizedForgottenFavorites(),  // NEW: Forgotten favorites
         loadMoreForYou()
     ]);
 
@@ -25514,6 +25528,208 @@ async function syncSeasonalPlaylist() {
 
     // Trigger sync (reuse existing sync infrastructure)
     await syncPlaylistToLibrary(playlistData);
+}
+
+// ===============================
+// PERSONALIZED PLAYLISTS
+// ===============================
+
+async function loadPersonalizedRecentlyAdded() {
+    try {
+        const container = document.getElementById('personalized-recently-added');
+        if (!container) return;
+
+        const response = await fetch('/api/discover/personalized/recently-added');
+        if (!response.ok) return;
+
+        const data = await response.json();
+        if (!data.success || !data.tracks || data.tracks.length === 0) {
+            container.closest('.discover-section').style.display = 'none';
+            return;
+        }
+
+        personalizedRecentlyAdded = data.tracks;
+        renderCompactPlaylist(container, data.tracks);
+        container.closest('.discover-section').style.display = 'block';
+
+    } catch (error) {
+        console.error('Error loading recently added:', error);
+    }
+}
+
+async function loadPersonalizedTopTracks() {
+    try {
+        const container = document.getElementById('personalized-top-tracks');
+        if (!container) return;
+
+        const response = await fetch('/api/discover/personalized/top-tracks');
+        if (!response.ok) return;
+
+        const data = await response.json();
+        if (!data.success || !data.tracks || data.tracks.length === 0) {
+            container.closest('.discover-section').style.display = 'none';
+            return;
+        }
+
+        personalizedTopTracks = data.tracks;
+        renderCompactPlaylist(container, data.tracks);
+        container.closest('.discover-section').style.display = 'block';
+
+    } catch (error) {
+        console.error('Error loading top tracks:', error);
+    }
+}
+
+async function loadPersonalizedForgottenFavorites() {
+    try {
+        const container = document.getElementById('personalized-forgotten-favorites');
+        if (!container) return;
+
+        const response = await fetch('/api/discover/personalized/forgotten-favorites');
+        if (!response.ok) return;
+
+        const data = await response.json();
+        if (!data.success || !data.tracks || data.tracks.length === 0) {
+            container.closest('.discover-section').style.display = 'none';
+            return;
+        }
+
+        personalizedForgottenFavorites = data.tracks;
+        renderCompactPlaylist(container, data.tracks);
+        container.closest('.discover-section').style.display = 'block';
+
+    } catch (error) {
+        console.error('Error loading forgotten favorites:', error);
+    }
+}
+
+async function loadPersonalizedPopularPicks() {
+    try {
+        const container = document.getElementById('personalized-popular-picks');
+        if (!container) return;
+
+        const response = await fetch('/api/discover/personalized/popular-picks');
+        if (!response.ok) return;
+
+        const data = await response.json();
+        if (!data.success || !data.tracks || data.tracks.length === 0) {
+            container.closest('.discover-section').style.display = 'none';
+            return;
+        }
+
+        personalizedPopularPicks = data.tracks;
+        renderCompactPlaylist(container, data.tracks);
+        container.closest('.discover-section').style.display = 'block';
+
+    } catch (error) {
+        console.error('Error loading popular picks:', error);
+    }
+}
+
+async function loadPersonalizedHiddenGems() {
+    try {
+        const container = document.getElementById('personalized-hidden-gems');
+        if (!container) return;
+
+        const response = await fetch('/api/discover/personalized/hidden-gems');
+        if (!response.ok) return;
+
+        const data = await response.json();
+        if (!data.success || !data.tracks || data.tracks.length === 0) {
+            container.closest('.discover-section').style.display = 'none';
+            return;
+        }
+
+        personalizedHiddenGems = data.tracks;
+        renderCompactPlaylist(container, data.tracks);
+        container.closest('.discover-section').style.display = 'block';
+
+    } catch (error) {
+        console.error('Error loading hidden gems:', error);
+    }
+}
+
+async function loadPersonalizedDailyMixes() {
+    try {
+        const container = document.getElementById('daily-mixes-grid');
+        if (!container) return;
+
+        const response = await fetch('/api/discover/personalized/daily-mixes');
+        if (!response.ok) return;
+
+        const data = await response.json();
+        if (!data.success || !data.mixes || data.mixes.length === 0) {
+            container.closest('.discover-section').style.display = 'none';
+            return;
+        }
+
+        personalizedDailyMixes = data.mixes;
+
+        // Render Daily Mix cards
+        let html = '';
+        data.mixes.forEach((mix, index) => {
+            const coverUrl = mix.tracks && mix.tracks.length > 0 ?
+                (mix.tracks[0].album_cover_url || '/static/placeholder-album.png') :
+                '/static/placeholder-album.png';
+
+            html += `
+                <div class="discover-playlist-card" onclick="openDailyMix(${index})">
+                    <div class="discover-playlist-cover">
+                        <img src="${coverUrl}" alt="${mix.name}">
+                        <div class="playlist-play-overlay">▶</div>
+                    </div>
+                    <div class="discover-playlist-info">
+                        <h4 class="discover-playlist-name">${mix.name}</h4>
+                        <p class="discover-playlist-description">${mix.description}</p>
+                        <p class="discover-playlist-count">${mix.track_count} tracks</p>
+                    </div>
+                </div>
+            `;
+        });
+
+        container.innerHTML = html;
+        container.closest('.discover-section').style.display = 'block';
+
+    } catch (error) {
+        console.error('Error loading daily mixes:', error);
+    }
+}
+
+function renderCompactPlaylist(container, tracks) {
+    let html = '<div class="discover-playlist-tracks-compact">';
+
+    tracks.forEach((track, index) => {
+        const coverUrl = track.album_cover_url || '/static/placeholder-album.png';
+        const durationMin = Math.floor(track.duration_ms / 60000);
+        const durationSec = Math.floor((track.duration_ms % 60000) / 1000);
+        const duration = `${durationMin}:${durationSec.toString().padStart(2, '0')}`;
+
+        html += `
+            <div class="discover-playlist-track-compact" data-track-index="${index}">
+                <div class="track-compact-number">${index + 1}</div>
+                <div class="track-compact-image">
+                    <img src="${coverUrl}" alt="${track.album_name}">
+                </div>
+                <div class="track-compact-info">
+                    <div class="track-compact-name">${track.track_name}</div>
+                    <div class="track-compact-artist">${track.artist_name}</div>
+                </div>
+                <div class="track-compact-album">${track.album_name}</div>
+                <div class="track-compact-duration">${duration}</div>
+            </div>
+        `;
+    });
+
+    html += '</div>';
+    container.innerHTML = html;
+}
+
+function openDailyMix(mixIndex) {
+    const mix = personalizedDailyMixes[mixIndex];
+    if (!mix || !mix.tracks) return;
+
+    // TODO: Open modal or dedicated view for Daily Mix
+    console.log('Opening Daily Mix:', mix.name);
 }
 
 // ===============================
