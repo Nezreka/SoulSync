@@ -288,11 +288,73 @@ class SpotifyClient:
             
             logger.info(f"Retrieved {len(playlists)} total playlist metadata")
             return playlists
-            
+
         except Exception as e:
             logger.error(f"Error fetching user playlists metadata: {e}")
             return []
-    
+
+    @rate_limited
+    def get_saved_tracks_count(self) -> int:
+        """Get the total count of user's saved/liked songs without fetching all tracks"""
+        if not self.is_authenticated():
+            logger.error("Not authenticated with Spotify")
+            return 0
+
+        try:
+            # Just fetch first page to get the total count
+            results = self.sp.current_user_saved_tracks(limit=1)
+            if results and 'total' in results:
+                total_count = results['total']
+                logger.info(f"User has {total_count} saved tracks")
+                return total_count
+            return 0
+        except Exception as e:
+            logger.error(f"Error fetching saved tracks count: {e}")
+            return 0
+
+    @rate_limited
+    def get_saved_tracks(self) -> List[Track]:
+        """Fetch all user's saved/liked songs from Spotify"""
+        if not self.is_authenticated():
+            logger.error("Not authenticated with Spotify")
+            return []
+
+        tracks = []
+
+        try:
+            limit = 50  # Maximum allowed by Spotify API
+            offset = 0
+            total_fetched = 0
+
+            while True:
+                results = self.sp.current_user_saved_tracks(limit=limit, offset=offset)
+
+                if not results or 'items' not in results:
+                    break
+
+                batch_count = 0
+                for item in results['items']:
+                    if item['track'] and item['track']['id']:
+                        track = Track.from_spotify_track(item['track'])
+                        tracks.append(track)
+                        batch_count += 1
+
+                total_fetched += batch_count
+                logger.info(f"Retrieved {batch_count} saved tracks in batch (offset {offset}), total: {total_fetched}")
+
+                # Check if we've fetched all saved tracks
+                if len(results['items']) < limit or not results.get('next'):
+                    break
+
+                offset += limit
+
+            logger.info(f"Retrieved {len(tracks)} total saved tracks")
+            return tracks
+
+        except Exception as e:
+            logger.error(f"Error fetching saved tracks: {e}")
+            return []
+
     @rate_limited
     def _get_playlist_tracks(self, playlist_id: str) -> List[Track]:
         if not self.is_authenticated():
