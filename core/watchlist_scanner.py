@@ -118,19 +118,69 @@ class WatchlistScanner:
     
     def scan_all_watchlist_artists(self) -> List[ScanResult]:
         """
-        Scan all artists in the watchlist for new releases.
+        Scan artists in the watchlist for new releases.
+
+        OPTIMIZED: Scans up to 50 artists per run using smart selection:
+        - Priority: Artists not scanned in 7+ days (guaranteed)
+        - Remainder: Random selection from other artists
+
+        This reduces API calls while ensuring all artists scanned at least weekly.
         Only checks releases after their last scan timestamp.
         """
-        logger.info("Starting watchlist scan for all artists")
-        
+        logger.info("Starting watchlist scan")
+
         try:
+            from datetime import datetime, timedelta
+            import random
+
             # Get all watchlist artists
-            watchlist_artists = self.database.get_watchlist_artists()
-            if not watchlist_artists:
+            all_watchlist_artists = self.database.get_watchlist_artists()
+            if not all_watchlist_artists:
                 logger.info("No artists in watchlist to scan")
                 return []
-            
-            logger.info(f"Found {len(watchlist_artists)} artists in watchlist")
+
+            logger.info(f"Found {len(all_watchlist_artists)} total artists in watchlist")
+
+            # OPTIMIZATION: Select up to 50 artists to scan
+            # 1. Must scan: Artists not scanned in 7+ days (or never scanned)
+            seven_days_ago = datetime.now() - timedelta(days=7)
+            must_scan = []
+            can_skip = []
+
+            for artist in all_watchlist_artists:
+                if artist.last_scan_timestamp is None:
+                    # Never scanned - must scan
+                    must_scan.append(artist)
+                elif artist.last_scan_timestamp < seven_days_ago:
+                    # Not scanned in 7+ days - must scan
+                    must_scan.append(artist)
+                else:
+                    # Scanned recently - can skip (but might randomly select)
+                    can_skip.append(artist)
+
+            logger.info(f"Artists requiring scan (not scanned in 7+ days): {len(must_scan)}")
+            logger.info(f"Artists scanned recently (< 7 days): {len(can_skip)}")
+
+            # 2. Fill remaining slots (up to 50 total) with random selection
+            max_artists_per_scan = 50
+            artists_to_scan = must_scan.copy()
+
+            remaining_slots = max_artists_per_scan - len(must_scan)
+            if remaining_slots > 0 and can_skip:
+                # Randomly sample from recently-scanned artists
+                random_sample_size = min(remaining_slots, len(can_skip))
+                random_selection = random.sample(can_skip, random_sample_size)
+                artists_to_scan.extend(random_selection)
+                logger.info(f"Additionally scanning {len(random_selection)} randomly selected artists")
+
+            # Shuffle to avoid always scanning same order
+            random.shuffle(artists_to_scan)
+
+            logger.info(f"Total artists to scan this run: {len(artists_to_scan)}")
+            if len(all_watchlist_artists) > max_artists_per_scan:
+                logger.info(f"Skipping {len(all_watchlist_artists) - len(artists_to_scan)} artists (will be scanned in future runs)")
+
+            watchlist_artists = artists_to_scan
             
             scan_results = []
             for i, artist in enumerate(watchlist_artists):
@@ -172,6 +222,10 @@ class WatchlistScanner:
             # Populate discovery pool with tracks from similar artists
             logger.info("Starting discovery pool population...")
             self.populate_discovery_pool()
+
+            # Populate seasonal content (runs independently with its own threshold)
+            logger.info("Updating seasonal content...")
+            self._populate_seasonal_content()
 
             return scan_results
             
@@ -661,13 +715,14 @@ class WatchlistScanner:
             logger.error(f"Error fetching similar artists for {watchlist_artist.artist_name}: {e}")
             return False
 
-    def populate_discovery_pool(self, top_artists_limit: int = 20, albums_per_artist: int = 5):
+    def populate_discovery_pool(self, top_artists_limit: int = 50, albums_per_artist: int = 10):
         """
         Populate discovery pool with tracks from top similar artists.
         Called after watchlist scan completes.
 
-        This method now:
+        IMPROVED: Larger pool for better discovery (50 artists x 10 releases = ~500 releases)
         - Checks if pool was updated in last 24 hours (prevents over-polling Spotify)
+        - Includes albums, singles, and EPs for comprehensive coverage
         - Appends to existing pool instead of replacing it
         - Cleans up tracks older than 365 days (maintains 1 year rolling window)
         """
@@ -700,7 +755,7 @@ class WatchlistScanner:
                     # Get artist's albums from Spotify
                     all_albums = self.spotify_client.get_artist_albums(
                         similar_artist.similar_artist_spotify_id,
-                        album_type='album',  # Only full albums, not singles
+                        album_type='album,single,ep',  # Include albums, singles, and EPs for comprehensive discovery
                         limit=50
                     )
 
@@ -708,26 +763,35 @@ class WatchlistScanner:
                         logger.debug(f"No albums found for {similar_artist.similar_artist_name}")
                         continue
 
-                    # Filter to only studio albums (exclude compilations, live albums)
-                    studio_albums = [a for a in all_albums if 'album_type' not in dir(a) or a.album_type == 'album']
+                    # IMPROVED: Smart selection mixing albums, singles, and EPs
+                    # Prioritize recent releases and popular content
 
-                    if len(studio_albums) == 0:
-                        studio_albums = all_albums  # Fallback to all if no studio albums
+                    # Separate by type for balanced selection
+                    albums = [a for a in all_albums if hasattr(a, 'album_type') and a.album_type == 'album']
+                    singles_eps = [a for a in all_albums if hasattr(a, 'album_type') and a.album_type in ['single', 'ep']]
+                    other = [a for a in all_albums if not hasattr(a, 'album_type')]
 
-                    # Select albums: latest + random selection
+                    # Select albums: latest releases + popular older content
                     selected_albums = []
 
-                    # Always include latest album
-                    if studio_albums:
-                        selected_albums.append(studio_albums[0])  # Latest is first
+                    # Always include 3 most recent releases (any type) - this captures new singles/EPs
+                    latest_releases = all_albums[:3]
+                    selected_albums.extend(latest_releases)
 
-                    # Add random albums if we have more
-                    if len(studio_albums) > 1:
-                        remaining_slots = min(albums_per_artist - 1, len(studio_albums) - 1)
-                        random_albums = random.sample(studio_albums[1:], remaining_slots)
-                        selected_albums.extend(random_albums)
+                    # Add remaining slots with balanced mix
+                    remaining_slots = albums_per_artist - len(selected_albums)
+                    if remaining_slots > 0:
+                        # Combine remaining albums and singles
+                        remaining_content = all_albums[3:]
 
-                    logger.info(f"  Selected {len(selected_albums)} albums from {len(studio_albums)} available")
+                        if len(remaining_content) > remaining_slots:
+                            # Randomly select from remaining content
+                            random_selection = random.sample(remaining_content, remaining_slots)
+                            selected_albums.extend(random_selection)
+                        else:
+                            selected_albums.extend(remaining_content)
+
+                    logger.info(f"  Selected {len(selected_albums)} releases from {len(all_albums)} available (albums: {len(albums)}, singles/EPs: {len(singles_eps)})")
 
                     # Process each selected album
                     for album_idx, album in enumerate(selected_albums, 1):
@@ -904,8 +968,135 @@ class WatchlistScanner:
             import traceback
             traceback.print_exc()
 
+    def update_discovery_pool_incremental(self):
+        """
+        Lightweight incremental update for discovery pool - runs every 6 hours.
+
+        IMPROVED: Quick check for new releases from watchlist artists only
+        - Much faster than full populate_discovery_pool (only checks watchlist, not similar artists)
+        - Only fetches latest 5 releases per artist
+        - Only adds tracks from releases in last 7 days
+        - Respects 6-hour cooldown to avoid over-polling
+        """
+        try:
+            from datetime import datetime, timedelta
+
+            # Check if we should run (prevents over-polling Spotify)
+            if not self.database.should_populate_discovery_pool(hours_threshold=6):
+                logger.info("Discovery pool was updated recently (< 6 hours ago). Skipping incremental update.")
+                return
+
+            logger.info("Starting incremental discovery pool update (watchlist artists only)...")
+
+            watchlist_artists = self.database.get_watchlist_artists()
+            if not watchlist_artists:
+                logger.info("No watchlist artists to check for incremental update")
+                return
+
+            cutoff_date = datetime.now() - timedelta(days=7)  # Only last week's releases
+            total_tracks_added = 0
+
+            for artist_idx, artist in enumerate(watchlist_artists, 1):
+                try:
+                    logger.info(f"[{artist_idx}/{len(watchlist_artists)}] Checking {artist.artist_name} for new releases...")
+
+                    # Only fetch latest 5 releases (much faster than full scan)
+                    recent_releases = self.spotify_client.get_artist_albums(
+                        artist.spotify_artist_id,
+                        album_type='album,single,ep',
+                        limit=5
+                    )
+
+                    if not recent_releases:
+                        continue
+
+                    for release in recent_releases:
+                        try:
+                            # Check if release is within cutoff
+                            if not self.is_album_after_timestamp(release, cutoff_date):
+                                continue  # Skip older releases
+
+                            # Get full album data with tracks
+                            album_data = self.spotify_client.get_album(release.id)
+                            if not album_data or 'tracks' not in album_data:
+                                continue
+
+                            tracks = album_data['tracks'].get('items', [])
+                            logger.debug(f"  New release: {release.name} ({len(tracks)} tracks)")
+
+                            # Determine if this is a new release (within last 30 days)
+                            is_new = False
+                            try:
+                                release_date_str = album_data.get('release_date', '')
+                                if release_date_str and len(release_date_str) == 10:
+                                    release_date = datetime.strptime(release_date_str, "%Y-%m-%d")
+                                    days_old = (datetime.now() - release_date).days
+                                    is_new = days_old <= 30
+                            except:
+                                pass
+
+                            # Add each track to discovery pool
+                            for track in tracks:
+                                try:
+                                    track_data = {
+                                        'spotify_track_id': track['id'],
+                                        'spotify_album_id': album_data['id'],
+                                        'spotify_artist_id': artist.spotify_artist_id,
+                                        'track_name': track['name'],
+                                        'artist_name': artist.artist_name,
+                                        'album_name': album_data.get('name', 'Unknown Album'),
+                                        'album_cover_url': album_data.get('images', [{}])[0].get('url') if album_data.get('images') else None,
+                                        'duration_ms': track.get('duration_ms', 0),
+                                        'popularity': album_data.get('popularity', 0),
+                                        'release_date': album_data.get('release_date', ''),
+                                        'is_new_release': is_new,
+                                        'track_data_json': track
+                                    }
+
+                                    if self.database.add_to_discovery_pool(track_data):
+                                        total_tracks_added += 1
+
+                                except Exception as track_error:
+                                    logger.debug(f"Error adding track to discovery pool: {track_error}")
+                                    continue
+
+                        except Exception as release_error:
+                            logger.warning(f"Error processing release: {release_error}")
+                            continue
+
+                    # Small delay between artists
+                    if artist_idx < len(watchlist_artists):
+                        time.sleep(DELAY_BETWEEN_ARTISTS)
+
+                except Exception as artist_error:
+                    logger.warning(f"Error checking {artist.artist_name}: {artist_error}")
+                    continue
+
+            logger.info(f"Incremental update complete: {total_tracks_added} new tracks added from watchlist artists")
+
+            # Update timestamp
+            if total_tracks_added > 0:
+                # Get current track count
+                with self.database._get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT COUNT(*) as count FROM discovery_pool")
+                    current_count = cursor.fetchone()['count']
+
+                self.database.update_discovery_pool_timestamp(track_count=current_count)
+                logger.info(f"Discovery pool now contains {current_count} total tracks")
+
+        except Exception as e:
+            logger.error(f"Error during incremental discovery pool update: {e}")
+            import traceback
+            traceback.print_exc()
+
     def cache_discovery_recent_albums(self):
-        """Cache recent albums from watchlist and similar artists for discover page"""
+        """
+        Cache recent albums from watchlist and similar artists for discover page.
+
+        IMPROVED: Checks ALL watchlist artists + top similar artists with 14-day window
+        (like Spotify's Release Radar) for more comprehensive and fresh content.
+        """
         try:
             from datetime import datetime, timedelta
             import random
@@ -915,26 +1106,25 @@ class WatchlistScanner:
             # Clear existing cache
             self.database.clear_discovery_recent_albums()
 
-            cutoff_date = datetime.now() - timedelta(days=90)  # 3 months
+            # IMPROVED: 14-day window (like Spotify Release Radar) instead of 90 days
+            cutoff_date = datetime.now() - timedelta(days=14)
             cached_count = 0
             albums_checked = 0
 
-            # Get watchlist artists (10 random for more variety)
+            # IMPROVED: Check ALL watchlist artists (not random 10)
             watchlist_artists = self.database.get_watchlist_artists()
-            watchlist_sample = random.sample(watchlist_artists, min(10, len(watchlist_artists))) if watchlist_artists else []
 
-            # Get similar artists (10 random from top 30 for more variety)
-            similar_artists = self.database.get_top_similar_artists(limit=30)
-            similar_sample = random.sample(similar_artists, min(10, len(similar_artists))) if similar_artists else []
+            # IMPROVED: Check top 50 similar artists (not random 10 from 30)
+            similar_artists = self.database.get_top_similar_artists(limit=50)
 
-            logger.info(f"Checking albums from {len(watchlist_sample)} watchlist + {len(similar_sample)} similar artists for recent releases")
+            logger.info(f"Checking albums from {len(watchlist_artists)} watchlist + {len(similar_artists)} similar artists for recent releases (last 14 days)")
 
             # Process watchlist artists
-            for artist in watchlist_sample:
+            for artist in watchlist_artists:
                 try:
                     albums = self.spotify_client.get_artist_albums(
                         artist.spotify_artist_id,
-                        album_type='album,single',
+                        album_type='album,single,ep',  # Include EPs for comprehensive coverage
                         limit=20
                     )
 
@@ -970,11 +1160,11 @@ class WatchlistScanner:
                 time.sleep(DELAY_BETWEEN_ARTISTS)
 
             # Process similar artists
-            for artist in similar_sample:
+            for artist in similar_artists:
                 try:
                     albums = self.spotify_client.get_artist_albums(
                         artist.similar_artist_spotify_id,
-                        album_type='album,single',
+                        album_type='album,single,ep',  # Include EPs for comprehensive coverage
                         limit=20
                     )
 
@@ -1017,14 +1207,22 @@ class WatchlistScanner:
             traceback.print_exc()
 
     def curate_discovery_playlists(self):
-        """Curate consistent playlist selections that stay the same until next discovery pool update"""
+        """
+        Curate consistent playlist selections that stay the same until next discovery pool update.
+
+        IMPROVED: Spotify-quality curation with popularity scoring and smart algorithms
+        - Release Radar: Prioritizes freshness + popularity from recent releases
+        - Discovery Weekly: Balanced mix of popular picks, deep cuts, and mid-tier tracks
+        """
         try:
             import random
+            from datetime import datetime
 
             logger.info("Curating Release Radar playlist...")
 
             # 1. Curate Release Radar - 50 tracks from recent albums
-            recent_albums = self.database.get_discovery_recent_albums(limit=20)
+            # IMPROVED: Get more albums (50 instead of 20) for better selection
+            recent_albums = self.database.get_discovery_recent_albums(limit=50)
             release_radar_tracks = []
 
             if recent_albums:
@@ -1037,9 +1235,9 @@ class WatchlistScanner:
                     albums_by_artist[artist].append(album)
 
                 # Get tracks from each album, grouped by artist
-                # Also add these tracks to discovery pool for fast lookup
+                # IMPROVED: Add popularity scoring for smarter selection
                 artist_tracks = {}
-                artist_track_data = {}  # Store full track data for discovery pool
+                artist_track_data = {}  # Store full track data with scores
 
                 for artist, albums in albums_by_artist.items():
                     artist_tracks[artist] = []
@@ -1049,45 +1247,66 @@ class WatchlistScanner:
                         try:
                             album_data = self.spotify_client.get_album(album['album_spotify_id'])
                             if album_data and 'tracks' in album_data:
+                                # Calculate days since release for recency score
+                                days_old = 14  # Default
+                                try:
+                                    release_date_str = album.get('release_date', '')
+                                    if release_date_str and len(release_date_str) >= 10:
+                                        release_date = datetime.strptime(release_date_str[:10], "%Y-%m-%d")
+                                        days_old = (datetime.now() - release_date).days
+                                except:
+                                    pass
+
                                 for track in album_data['tracks']['items']:
                                     track_id = track['id']
+
+                                    # Calculate track score (Spotify-style)
+                                    # Score factors: recency (50%), popularity (30%), singles bonus (20%)
+                                    recency_score = max(0, 100 - (days_old * 7))  # Newer = higher
+                                    popularity_score = track.get('popularity', album_data.get('popularity', 50))
+                                    is_single = album.get('album_type', 'album') == 'single'
+                                    single_bonus = 20 if is_single else 0
+
+                                    total_score = (recency_score * 0.5) + (popularity_score * 0.3) + single_bonus
+
                                     artist_tracks[artist].append(track_id)
 
-                                    # Store full track data for discovery pool
+                                    # Store full track data with score for sorting
                                     full_track = {
                                         'id': track_id,
                                         'name': track['name'],
                                         'artists': track.get('artists', []),
                                         'album': album_data,
-                                        'duration_ms': track.get('duration_ms', 0)
+                                        'duration_ms': track.get('duration_ms', 0),
+                                        'popularity': popularity_score,
+                                        'score': total_score,
+                                        'days_old': days_old
                                     }
                                     artist_track_data[artist].append(full_track)
 
                         except Exception as e:
                             continue
 
-                # Balance by artist - max 6 tracks per artist
+                # IMPROVED: Balance by artist with popularity weighting - max 6 tracks per artist
                 balanced_tracks = []
                 balanced_track_data = []
 
-                for artist, tracks in artist_tracks.items():
-                    # Shuffle and get indices
-                    indices = list(range(len(tracks)))
-                    random.shuffle(indices)
-                    selected_indices = indices[:6]
+                for artist, track_data in artist_track_data.items():
+                    # Sort by score and take top 6 (not random)
+                    sorted_tracks = sorted(track_data, key=lambda t: t['score'], reverse=True)
+                    selected_tracks = sorted_tracks[:6]
 
                     # Add selected tracks
-                    for idx in selected_indices:
-                        balanced_tracks.append(tracks[idx])
-                        balanced_track_data.append(artist_track_data[artist][idx])
+                    for track in selected_tracks:
+                        balanced_tracks.append(track['id'])
+                        balanced_track_data.append(track)
 
-                # Shuffle and limit to 50
-                combined = list(zip(balanced_tracks, balanced_track_data))
-                random.shuffle(combined)
-                combined = combined[:50]
+                # IMPROVED: Sort by score first, then shuffle within score tiers for variety
+                balanced_track_data.sort(key=lambda t: t['score'], reverse=True)
 
-                release_radar_tracks = [track_id for track_id, _ in combined]
-                release_radar_track_data = [track_data for _, track_data in combined]
+                # Take top 50
+                release_radar_tracks = [track['id'] for track in balanced_track_data[:50]]
+                release_radar_track_data = balanced_track_data[:50]
 
                 # Add Release Radar tracks to discovery pool so they're available for fast lookup
                 logger.info(f"Adding {len(release_radar_track_data)} Release Radar tracks to discovery pool...")
@@ -1117,14 +1336,51 @@ class WatchlistScanner:
             logger.info(f"Release Radar curated: {len(release_radar_tracks)} tracks")
 
             # 2. Curate Discovery Weekly - 50 tracks from full discovery pool
+            # IMPROVED: Spotify-style algorithm with balanced mix of popular, mid-tier, and deep cuts
             logger.info("Curating Discovery Weekly playlist...")
-            discovery_tracks = self.database.get_discovery_pool_tracks(limit=1000, new_releases_only=False)
+            discovery_tracks = self.database.get_discovery_pool_tracks(limit=2000, new_releases_only=False)
 
             discovery_weekly_tracks = []
             if discovery_tracks:
-                all_track_ids = [track.spotify_track_id for track in discovery_tracks]
-                random.shuffle(all_track_ids)
-                discovery_weekly_tracks = all_track_ids[:50]
+                # Separate tracks by popularity tiers for balanced selection
+                popular_picks = []    # popularity >= 60
+                balanced_mix = []     # 40 <= popularity < 60
+                deep_cuts = []        # popularity < 40
+
+                for track in discovery_tracks:
+                    popularity = track.popularity if hasattr(track, 'popularity') else 50
+
+                    if popularity >= 60:
+                        popular_picks.append(track)
+                    elif popularity >= 40:
+                        balanced_mix.append(track)
+                    else:
+                        deep_cuts.append(track)
+
+                logger.info(f"Discovery pool breakdown: {len(popular_picks)} popular, {len(balanced_mix)} mid-tier, {len(deep_cuts)} deep cuts")
+
+                # Create balanced playlist (Spotify-style distribution)
+                # 40% popular picks (20 tracks)
+                # 40% balanced mid-tier (20 tracks)
+                # 20% deep cuts (10 tracks)
+                selected_tracks = []
+
+                # Randomly select from each tier
+                random.shuffle(popular_picks)
+                random.shuffle(balanced_mix)
+                random.shuffle(deep_cuts)
+
+                selected_tracks.extend(popular_picks[:20])   # 20 popular
+                selected_tracks.extend(balanced_mix[:20])    # 20 mid-tier
+                selected_tracks.extend(deep_cuts[:10])       # 10 deep cuts
+
+                # Shuffle final selection for variety
+                random.shuffle(selected_tracks)
+
+                # Extract track IDs
+                discovery_weekly_tracks = [track.spotify_track_id for track in selected_tracks]
+
+                logger.info(f"Discovery Weekly composition: {len(popular_picks[:20])} popular + {len(balanced_mix[:20])} mid-tier + {len(deep_cuts[:10])} deep cuts = {len(discovery_weekly_tracks)} total")
 
             self.database.save_curated_playlist('discovery_weekly', discovery_weekly_tracks)
             logger.info(f"Discovery Weekly curated: {len(discovery_weekly_tracks)} tracks")
@@ -1133,6 +1389,53 @@ class WatchlistScanner:
 
         except Exception as e:
             logger.error(f"Error curating discovery playlists: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _populate_seasonal_content(self):
+        """
+        Populate seasonal content as part of watchlist scan.
+
+        IMPROVED: Integrated with discovery system
+        - Checks if seasonal content needs update (7-day threshold)
+        - Populates content for all seasons
+        - Curates seasonal playlists
+        - Runs once per week automatically
+        """
+        try:
+            from core.seasonal_discovery import get_seasonal_discovery_service
+
+            logger.info("Checking seasonal content update...")
+
+            seasonal_service = get_seasonal_discovery_service(self.spotify_client, self.database)
+
+            # Get current season to prioritize
+            current_season = seasonal_service.get_current_season()
+
+            if current_season:
+                # Always update current season if needed
+                if seasonal_service.should_populate_seasonal_content(current_season, days_threshold=7):
+                    logger.info(f"Populating current season: {current_season}")
+                    seasonal_service.populate_seasonal_content(current_season)
+                    seasonal_service.curate_seasonal_playlist(current_season)
+                else:
+                    logger.info(f"Current season '{current_season}' is up to date")
+
+            # Update other seasons in background (less frequently - 14 day threshold)
+            from core.seasonal_discovery import SEASONAL_CONFIG
+            for season_key in SEASONAL_CONFIG.keys():
+                if season_key == current_season:
+                    continue  # Already handled above
+
+                if seasonal_service.should_populate_seasonal_content(season_key, days_threshold=14):
+                    logger.info(f"Populating season: {season_key}")
+                    seasonal_service.populate_seasonal_content(season_key)
+                    seasonal_service.curate_seasonal_playlist(season_key)
+
+            logger.info("Seasonal content update complete")
+
+        except Exception as e:
+            logger.error(f"Error populating seasonal content: {e}")
             import traceback
             traceback.print_exc()
 

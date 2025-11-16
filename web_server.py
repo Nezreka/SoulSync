@@ -14685,6 +14685,181 @@ def get_discover_weekly():
         print(f"Error getting discovery weekly: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+# ========================================
+# SEASONAL DISCOVERY ENDPOINTS
+# ========================================
+
+@app.route('/api/discover/seasonal/current', methods=['GET'])
+def get_current_seasonal_content():
+    """Auto-detect and return current season's content"""
+    try:
+        from core.seasonal_discovery import get_seasonal_discovery_service
+
+        database = get_database()
+        seasonal_service = get_seasonal_discovery_service(spotify_client, database)
+
+        # Get current season
+        current_season = seasonal_service.get_current_season()
+
+        if not current_season:
+            return jsonify({"success": True, "season": None, "albums": [], "playlist_available": False})
+
+        # Get seasonal config
+        from core.seasonal_discovery import SEASONAL_CONFIG
+        config = SEASONAL_CONFIG[current_season]
+
+        # Get albums
+        albums = seasonal_service.get_seasonal_albums(current_season, limit=20)
+
+        # Check if playlist is curated
+        playlist_track_ids = seasonal_service.get_curated_seasonal_playlist(current_season)
+
+        return jsonify({
+            "success": True,
+            "season": current_season,
+            "name": config['name'],
+            "description": config['description'],
+            "icon": config['icon'],
+            "albums": albums,
+            "playlist_available": len(playlist_track_ids) > 0
+        })
+
+    except Exception as e:
+        print(f"Error getting current seasonal content: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/discover/seasonal/<season_key>/albums', methods=['GET'])
+def get_seasonal_albums(season_key):
+    """Get albums for a specific season"""
+    try:
+        from core.seasonal_discovery import get_seasonal_discovery_service, SEASONAL_CONFIG
+
+        if season_key not in SEASONAL_CONFIG:
+            return jsonify({"success": False, "error": "Invalid season"}), 400
+
+        database = get_database()
+        seasonal_service = get_seasonal_discovery_service(spotify_client, database)
+
+        albums = seasonal_service.get_seasonal_albums(season_key, limit=20)
+        config = SEASONAL_CONFIG[season_key]
+
+        return jsonify({
+            "success": True,
+            "season": season_key,
+            "name": config['name'],
+            "description": config['description'],
+            "icon": config['icon'],
+            "albums": albums
+        })
+
+    except Exception as e:
+        print(f"Error getting seasonal albums: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/discover/seasonal/<season_key>/playlist', methods=['GET'])
+def get_seasonal_playlist(season_key):
+    """Get curated playlist for a specific season"""
+    try:
+        from core.seasonal_discovery import get_seasonal_discovery_service, SEASONAL_CONFIG
+
+        if season_key not in SEASONAL_CONFIG:
+            return jsonify({"success": False, "error": "Invalid season"}), 400
+
+        database = get_database()
+        seasonal_service = get_seasonal_discovery_service(spotify_client, database)
+
+        # Get curated track IDs
+        track_ids = seasonal_service.get_curated_seasonal_playlist(season_key)
+
+        if not track_ids:
+            return jsonify({"success": True, "tracks": []})
+
+        # Fetch track details from discovery pool or seasonal tracks
+        tracks = []
+        with database._get_connection() as conn:
+            cursor = conn.cursor()
+
+            for track_id in track_ids:
+                # Try seasonal_tracks first
+                cursor.execute("""
+                    SELECT
+                        spotify_track_id,
+                        track_name,
+                        artist_name,
+                        album_name,
+                        album_cover_url,
+                        duration_ms,
+                        popularity
+                    FROM seasonal_tracks
+                    WHERE spotify_track_id = ?
+                """, (track_id,))
+
+                result = cursor.fetchone()
+
+                if result:
+                    tracks.append(dict(result))
+                else:
+                    # Try discovery_pool as fallback
+                    cursor.execute("""
+                        SELECT
+                            spotify_track_id,
+                            track_name,
+                            artist_name,
+                            album_name,
+                            album_cover_url,
+                            duration_ms,
+                            popularity
+                        FROM discovery_pool
+                        WHERE spotify_track_id = ?
+                    """, (track_id,))
+
+                    result = cursor.fetchone()
+                    if result:
+                        tracks.append(dict(result))
+
+        config = SEASONAL_CONFIG[season_key]
+
+        return jsonify({
+            "success": True,
+            "season": season_key,
+            "name": config['name'],
+            "description": config['description'],
+            "icon": config['icon'],
+            "tracks": tracks
+        })
+
+    except Exception as e:
+        print(f"Error getting seasonal playlist: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/discover/seasonal/refresh', methods=['POST'])
+def refresh_seasonal_content():
+    """Manually trigger seasonal content refresh (admin function)"""
+    try:
+        from core.seasonal_discovery import get_seasonal_discovery_service
+
+        database = get_database()
+        seasonal_service = get_seasonal_discovery_service(spotify_client, database)
+
+        # Populate all seasons in background thread
+        import threading
+        def populate_all():
+            try:
+                seasonal_service.populate_all_seasons()
+            except Exception as e:
+                print(f"Error in background seasonal population: {e}")
+
+        thread = threading.Thread(target=populate_all, daemon=True)
+        thread.start()
+
+        return jsonify({"success": True, "message": "Seasonal content refresh started"})
+
+    except Exception as e:
+        print(f"Error refreshing seasonal content: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
 @app.route('/api/metadata/start', methods=['POST'])
 def start_metadata_update():
     """Start the metadata update process - EXACT copy of dashboard.py logic"""
