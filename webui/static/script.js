@@ -24704,6 +24704,9 @@ let discoverHeroInterval = null;
 let discoverReleaseRadarTracks = [];
 let discoverWeeklyTracks = [];
 let discoverRecentAlbums = [];
+let discoverSeasonalAlbums = [];
+let discoverSeasonalTracks = [];
+let currentSeasonKey = null;
 
 async function loadDiscoverPage() {
     console.log('Loading discover page...');
@@ -24712,6 +24715,7 @@ async function loadDiscoverPage() {
     await Promise.all([
         loadDiscoverHero(),
         loadDiscoverRecentReleases(),
+        loadSeasonalContent(),  // NEW: Seasonal discovery
         loadDiscoverReleaseRadar(),
         loadDiscoverWeekly(),
         loadMoreForYou()
@@ -25276,6 +25280,240 @@ async function loadMoreForYou() {
             grid.innerHTML = '<div class="discover-empty"><p>Failed to load playlists</p></div>';
         }
     }
+}
+
+// ===============================
+// SEASONAL DISCOVERY
+// ===============================
+
+async function loadSeasonalContent() {
+    try {
+        const response = await fetch('/api/discover/seasonal/current');
+        if (!response.ok) {
+            console.error('Failed to fetch seasonal content');
+            return;
+        }
+
+        const data = await response.json();
+
+        // If no active season, hide seasonal sections
+        if (!data.success || !data.season) {
+            hideSeasonalSections();
+            return;
+        }
+
+        currentSeasonKey = data.season;
+
+        // Load seasonal albums
+        await loadSeasonalAlbums(data);
+
+        // Load seasonal playlist if available
+        if (data.playlist_available) {
+            await loadSeasonalPlaylist(data);
+        }
+
+    } catch (error) {
+        console.error('Error loading seasonal content:', error);
+        hideSeasonalSections();
+    }
+}
+
+async function loadSeasonalAlbums(seasonData) {
+    try {
+        const carousel = document.getElementById('seasonal-albums-carousel');
+        if (!carousel) return;
+
+        // Show seasonal section
+        const seasonalSection = document.getElementById('seasonal-albums-section');
+        if (seasonalSection) {
+            seasonalSection.style.display = 'block';
+        }
+
+        // Update header
+        const seasonalTitle = document.getElementById('seasonal-albums-title');
+        const seasonalSubtitle = document.getElementById('seasonal-albums-subtitle');
+
+        if (seasonalTitle) {
+            seasonalTitle.textContent = `${seasonData.icon} ${seasonData.name}`;
+        }
+        if (seasonalSubtitle) {
+            seasonalSubtitle.textContent = seasonData.description;
+        }
+
+        // Store albums for download functionality
+        discoverSeasonalAlbums = seasonData.albums || [];
+
+        if (discoverSeasonalAlbums.length === 0) {
+            carousel.innerHTML = '<div class="discover-empty"><p>No seasonal albums found</p></div>';
+            return;
+        }
+
+        // Build carousel HTML
+        let html = '';
+        discoverSeasonalAlbums.forEach((album, index) => {
+            const coverUrl = album.album_cover_url || '/static/placeholder-album.png';
+            html += `
+                <div class="discover-card" onclick="openDownloadModalForSeasonalAlbum(${index})" style="cursor: pointer;">
+                    <div class="discover-card-image">
+                        <img src="${coverUrl}" alt="${album.album_name}">
+                    </div>
+                    <div class="discover-card-info">
+                        <h4 class="discover-card-title">${album.album_name}</h4>
+                        <p class="discover-card-subtitle">${album.artist_name}</p>
+                        ${album.release_date ? `<p class="discover-card-meta">${album.release_date}</p>` : ''}
+                    </div>
+                </div>
+            `;
+        });
+
+        carousel.innerHTML = html;
+
+    } catch (error) {
+        console.error('Error loading seasonal albums:', error);
+    }
+}
+
+async function loadSeasonalPlaylist(seasonData) {
+    try {
+        const playlistContainer = document.getElementById('seasonal-playlist');
+        if (!playlistContainer) return;
+
+        // Show seasonal playlist section
+        const seasonalPlaylistSection = document.getElementById('seasonal-playlist-section');
+        if (seasonalPlaylistSection) {
+            seasonalPlaylistSection.style.display = 'block';
+        }
+
+        // Update header
+        const playlistTitle = document.getElementById('seasonal-playlist-title');
+        const playlistSubtitle = document.getElementById('seasonal-playlist-subtitle');
+
+        if (playlistTitle) {
+            playlistTitle.textContent = `${seasonData.icon} ${seasonData.name} Mix`;
+        }
+        if (playlistSubtitle) {
+            playlistSubtitle.textContent = `Curated playlist for ${seasonData.name.toLowerCase()}`;
+        }
+
+        playlistContainer.innerHTML = '<div class="discover-loading"><div class="loading-spinner"></div><p>Loading playlist...</p></div>';
+
+        // Fetch playlist tracks
+        const response = await fetch(`/api/discover/seasonal/${currentSeasonKey}/playlist`);
+        if (!response.ok) {
+            throw new Error('Failed to fetch seasonal playlist');
+        }
+
+        const data = await response.json();
+
+        if (!data.success || !data.tracks || data.tracks.length === 0) {
+            playlistContainer.innerHTML = '<div class="discover-empty"><p>No tracks available yet</p></div>';
+            return;
+        }
+
+        // Store tracks for download/sync functionality
+        discoverSeasonalTracks = data.tracks;
+
+        // Build compact playlist HTML
+        let html = '<div class="discover-playlist-tracks-compact">';
+        data.tracks.forEach((track, index) => {
+            const coverUrl = track.album_cover_url || '/static/placeholder-album.png';
+            const durationMin = Math.floor(track.duration_ms / 60000);
+            const durationSec = Math.floor((track.duration_ms % 60000) / 1000);
+            const duration = `${durationMin}:${durationSec.toString().padStart(2, '0')}`;
+
+            html += `
+                <div class="discover-playlist-track-compact" data-track-index="${index}">
+                    <div class="track-compact-number">${index + 1}</div>
+                    <div class="track-compact-image">
+                        <img src="${coverUrl}" alt="${track.album_name}">
+                    </div>
+                    <div class="track-compact-info">
+                        <div class="track-compact-name">${track.track_name}</div>
+                        <div class="track-compact-artist">${track.artist_name}</div>
+                    </div>
+                    <div class="track-compact-album">${track.album_name}</div>
+                    <div class="track-compact-duration">${duration}</div>
+                </div>
+            `;
+        });
+        html += '</div>';
+
+        playlistContainer.innerHTML = html;
+
+    } catch (error) {
+        console.error('Error loading seasonal playlist:', error);
+        const playlistContainer = document.getElementById('seasonal-playlist');
+        if (playlistContainer) {
+            playlistContainer.innerHTML = '<div class="discover-empty"><p>Failed to load playlist</p></div>';
+        }
+    }
+}
+
+function hideSeasonalSections() {
+    const seasonalAlbumsSection = document.getElementById('seasonal-albums-section');
+    const seasonalPlaylistSection = document.getElementById('seasonal-playlist-section');
+
+    if (seasonalAlbumsSection) {
+        seasonalAlbumsSection.style.display = 'none';
+    }
+    if (seasonalPlaylistSection) {
+        seasonalPlaylistSection.style.display = 'none';
+    }
+}
+
+async function openDownloadModalForSeasonalAlbum(index) {
+    const album = discoverSeasonalAlbums[index];
+    if (!album) return;
+
+    // Fetch album tracks
+    const albumDetails = await fetchAlbumTracks(album.spotify_album_id);
+    if (!albumDetails) return;
+
+    openDownloadMissingModal(albumDetails.tracks, albumDetails.name);
+}
+
+async function openDownloadModalForSeasonalPlaylist() {
+    if (!discoverSeasonalTracks || discoverSeasonalTracks.length === 0) {
+        alert('No seasonal tracks available');
+        return;
+    }
+
+    // Convert to track format expected by modal
+    const tracks = discoverSeasonalTracks.map(track => ({
+        id: track.spotify_track_id,
+        name: track.track_name,
+        artists: [{ name: track.artist_name }],
+        album: { name: track.album_name }
+    }));
+
+    openDownloadMissingModal(tracks, `${currentSeasonKey} Seasonal Mix`);
+}
+
+async function syncSeasonalPlaylist() {
+    if (!currentSeasonKey) {
+        alert('No active season');
+        return;
+    }
+
+    // Use the same sync logic as other discover playlists
+    // Create a virtual playlist ID for tracking
+    const virtualPlaylistId = `discover_seasonal_${currentSeasonKey}`;
+
+    // Build playlist data from seasonal tracks
+    const playlistData = {
+        id: virtualPlaylistId,
+        name: `${currentSeasonKey.charAt(0).toUpperCase() + currentSeasonKey.slice(1)} Mix`,
+        tracks: discoverSeasonalTracks.map(track => ({
+            id: track.spotify_track_id,
+            name: track.track_name,
+            artists: [{ name: track.artist_name }],
+            album: { name: track.album_name },
+            duration_ms: track.duration_ms
+        }))
+    };
+
+    // Trigger sync (reuse existing sync infrastructure)
+    await syncPlaylistToLibrary(playlistData);
 }
 
 // ===============================

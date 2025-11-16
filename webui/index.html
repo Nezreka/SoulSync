@@ -1708,6 +1708,38 @@
                         </div>
                     </div>
 
+                    <!-- Seasonal Albums Section (Auto-shows based on current season) -->
+                    <div class="discover-section" id="seasonal-albums-section" style="display: none;">
+                        <div class="discover-section-header">
+                            <h2 class="discover-section-title" id="seasonal-albums-title">Seasonal</h2>
+                            <p class="discover-section-subtitle" id="seasonal-albums-subtitle">Seasonal music</p>
+                        </div>
+                        <div class="discover-carousel" id="seasonal-albums-carousel">
+                            <!-- Content will be populated dynamically -->
+                        </div>
+                    </div>
+
+                    <!-- Seasonal Playlist Section (Auto-shows based on current season) -->
+                    <div class="discover-section" id="seasonal-playlist-section" style="display: none;">
+                        <div class="discover-section-header">
+                            <div>
+                                <h2 class="discover-section-title" id="seasonal-playlist-title">Seasonal Mix</h2>
+                                <p class="discover-section-subtitle" id="seasonal-playlist-subtitle">Curated seasonal playlist</p>
+                            </div>
+                            <div class="discover-section-actions">
+                                <button class="action-button secondary" onclick="openDownloadModalForSeasonalPlaylist()" title="Download missing tracks">
+                                    <span class="icon">📥</span> Download Missing
+                                </button>
+                                <button class="action-button secondary" onclick="syncSeasonalPlaylist()" title="Sync to library">
+                                    <span class="icon">🔄</span> Sync
+                                </button>
+                            </div>
+                        </div>
+                        <div class="discover-playlist-container compact" id="seasonal-playlist">
+                            <!-- Content will be populated dynamically -->
+                        </div>
+                    </div>
+
                     <!-- Fresh Tape Section -->
                     <div class="discover-section">
                         <div class="discover-section-header">
