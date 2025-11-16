@@ -11606,24 +11606,26 @@ def get_spotify_playlists():
     try:
         playlists = spotify_client.get_user_playlists_metadata_only()
         sync_statuses = _load_sync_status_file()
-        
+
         playlist_data = []
+
+        # Add regular playlists first
         for p in playlists:
             status_info = sync_statuses.get(p.id, {})
             sync_status = "Never Synced"
             # Handle snapshot_id safely - may not exist in core Playlist class
             playlist_snapshot = getattr(p, 'snapshot_id', '')
-            
+
             print(f"🔍 Processing playlist: {p.name} (ID: {p.id})")
             print(f"   - Playlist snapshot: '{playlist_snapshot}'")
             print(f"   - Status info: {status_info}")
-            
+
             if 'last_synced' in status_info:
                 stored_snapshot = status_info.get('snapshot_id')
                 last_sync_time = datetime.fromisoformat(status_info['last_synced']).strftime('%b %d, %H:%M')
                 print(f"   - Stored snapshot: '{stored_snapshot}'")
                 print(f"   - Snapshots match: {playlist_snapshot == stored_snapshot}")
-                
+
                 if playlist_snapshot != stored_snapshot:
                     sync_status = f"Last Sync: {last_sync_time}"
                     print(f"   - Result: Needs Sync (showing: {sync_status})")
@@ -11635,11 +11637,43 @@ def get_spotify_playlists():
 
             playlist_data.append({
                 "id": p.id, "name": p.name, "owner": p.owner,
-                "track_count": p.total_tracks, 
+                "track_count": p.total_tracks,
                 "image_url": getattr(p, 'image_url', None),
-                "sync_status": sync_status, 
+                "sync_status": sync_status,
                 "snapshot_id": playlist_snapshot
             })
+
+        # Add virtual "Liked Songs" playlist at the END (just count, no full fetch)
+        try:
+            liked_songs_count = spotify_client.get_saved_tracks_count()
+            if liked_songs_count > 0:
+                liked_songs_id = "spotify:liked-songs"
+                status_info = sync_statuses.get(liked_songs_id, {})
+                sync_status = "Never Synced"
+
+                if 'last_synced' in status_info:
+                    last_sync_time = datetime.fromisoformat(status_info['last_synced']).strftime('%b %d, %H:%M')
+                    sync_status = f"Synced: {last_sync_time}"
+
+                # Get user info for owner name
+                user_info = spotify_client.get_user_info()
+                owner_name = user_info.get('display_name', 'You') if user_info else 'You'
+
+                # Add Liked Songs as LAST playlist
+                playlist_data.append({
+                    "id": liked_songs_id,
+                    "name": "Liked Songs",
+                    "owner": owner_name,
+                    "track_count": liked_songs_count,
+                    "image_url": None,  # Spotify doesn't provide image for Liked Songs
+                    "sync_status": sync_status,
+                    "snapshot_id": ""  # Liked Songs doesn't have a snapshot_id
+                })
+                print(f"🔍 Added virtual 'Liked Songs' playlist with {liked_songs_count} tracks (count only)")
+        except Exception as liked_error:
+            print(f"⚠️ Failed to add Liked Songs playlist: {liked_error}")
+            # Don't fail the entire request if Liked Songs fails
+
         return jsonify(playlist_data)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -11650,6 +11684,28 @@ def get_playlist_tracks(playlist_id):
     if not spotify_client or not spotify_client.is_authenticated():
         return jsonify({"error": "Spotify not authenticated."}), 401
     try:
+        # Handle special "Liked Songs" virtual playlist
+        if playlist_id == "spotify:liked-songs":
+            saved_tracks = spotify_client.get_saved_tracks()
+            user_info = spotify_client.get_user_info()
+            owner_name = user_info.get('display_name', 'You') if user_info else 'You'
+
+            # Create virtual playlist dict for Liked Songs
+            playlist_dict = {
+                'id': 'spotify:liked-songs',
+                'name': 'Liked Songs',
+                'description': 'Your saved tracks on Spotify',
+                'owner': owner_name,
+                'public': False,
+                'collaborative': False,
+                'track_count': len(saved_tracks),
+                'image_url': None,
+                'snapshot_id': '',
+                'tracks': [{'id': t.id, 'name': t.name, 'artists': t.artists, 'album': t.album, 'duration_ms': t.duration_ms, 'popularity': t.popularity} for t in saved_tracks]
+            }
+            return jsonify(playlist_dict)
+
+        # Handle regular playlists
         # This reuses the robust track fetching logic from your GUI's sync.py
         full_playlist = spotify_client.get_playlist_by_id(playlist_id)
         if not full_playlist:
