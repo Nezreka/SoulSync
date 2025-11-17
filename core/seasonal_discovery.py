@@ -278,8 +278,9 @@ class SeasonalDiscoveryService:
             logger.info(f"Found {len(watchlist_albums)} albums from watchlist artists")
 
             # Source 3: General Spotify search for seasonal content
+            # IMPROVED: Increased limit to 50 for more variety
             logger.info(f"Searching Spotify for {season_key} albums...")
-            spotify_albums = self._search_spotify_seasonal_albums(season_key, limit=20)
+            spotify_albums = self._search_spotify_seasonal_albums(season_key, limit=50)
             for album in spotify_albums:
                 if self._add_seasonal_album(season_key, album):
                     albums_found += 1
@@ -363,15 +364,15 @@ class SeasonalDiscoveryService:
 
             seasonal_albums = []
 
-            # Sample 10 random watchlist artists to avoid API abuse
-            sampled_artists = random.sample(watchlist_artists, min(10, len(watchlist_artists)))
+            # IMPROVED: Sample 20 random watchlist artists (up from 10) for more variety
+            sampled_artists = random.sample(watchlist_artists, min(20, len(watchlist_artists)))
 
             for artist in sampled_artists:
                 try:
-                    # Get artist's albums
+                    # Get artist's albums (including full albums, singles, and EPs)
                     albums = self.spotify_client.get_artist_albums(
                         artist.spotify_artist_id,
-                        album_type='album,single',
+                        album_type='album,single,ep',
                         limit=50
                     )
 
@@ -402,8 +403,12 @@ class SeasonalDiscoveryService:
             logger.error(f"Error searching watchlist seasonal albums: {e}")
             return []
 
-    def _search_spotify_seasonal_albums(self, season_key: str, limit: int = 20) -> List[Dict]:
-        """Search Spotify for seasonal albums using keyword search"""
+    def _search_spotify_seasonal_albums(self, season_key: str, limit: int = 50) -> List[Dict]:
+        """
+        Search Spotify for seasonal albums using keyword search.
+
+        IMPROVED: Searches more broadly for full albums to get larger track pools.
+        """
         try:
             if not self.spotify_client or not self.spotify_client.is_authenticated():
                 return []
@@ -414,11 +419,21 @@ class SeasonalDiscoveryService:
             seasonal_albums = []
             seen_album_ids = set()
 
-            # Search with top 3 keywords
-            for keyword in keywords[:3]:
+            # IMPROVED: Search with top 5 keywords (up from 3) for more variety
+            search_keywords = keywords[:5]
+
+            # Add specific "album" searches to prioritize full albums over singles
+            season_name = config['name'].lower()
+            if 'christmas' in season_name:
+                search_keywords.append('christmas album')
+                search_keywords.append('christmas songs')
+            elif 'halloween' in season_name:
+                search_keywords.append('halloween album')
+
+            for keyword in search_keywords:
                 try:
-                    # Search for albums
-                    search_results = self.spotify_client.search_albums(keyword, limit=10)
+                    # IMPROVED: Get 20 albums per keyword (up from 10)
+                    search_results = self.spotify_client.search_albums(keyword, limit=20)
 
                     for album in search_results:
                         if album.id in seen_album_ids:
@@ -442,7 +457,10 @@ class SeasonalDiscoveryService:
                     logger.debug(f"Error searching Spotify for '{keyword}': {e}")
                     continue
 
-            # Limit total albums
+            logger.info(f"Found {len(seasonal_albums)} seasonal albums from Spotify search")
+
+            # Return up to limit, prioritizing albums with higher popularity
+            seasonal_albums.sort(key=lambda a: a.get('popularity', 0), reverse=True)
             return seasonal_albums[:limit]
 
         except Exception as e:
@@ -610,8 +628,8 @@ class SeasonalDiscoveryService:
                 rows = cursor.fetchall()
                 all_tracks.extend([dict(row) for row in rows])
 
-            # Get tracks from seasonal albums
-            seasonal_albums = self.get_seasonal_albums(season_key, limit=30)
+            # Get tracks from seasonal albums (increased for larger track pool)
+            seasonal_albums = self.get_seasonal_albums(season_key, limit=50)
 
             for album in seasonal_albums:
                 try:

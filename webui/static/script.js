@@ -4201,7 +4201,11 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
     // Generate hero section with dynamic source detection
     const source = playlistName.includes('[Beatport]') ? 'Beatport' :
                    playlistName.includes('[Tidal]') ? 'Tidal' :
-                   virtualPlaylistId.startsWith('discover_') ? 'SoulSync' : 'YouTube';
+                   virtualPlaylistId.startsWith('discover_') ? 'SoulSync' :
+                   virtualPlaylistId.startsWith('seasonal_') ? 'SoulSync' :
+                   virtualPlaylistId.startsWith('build_playlist_') ? 'SoulSync' :
+                   virtualPlaylistId === 'build_playlist_custom' ? 'SoulSync' :
+                   'YouTube';
 
     const heroContext = {
         type: 'playlist',

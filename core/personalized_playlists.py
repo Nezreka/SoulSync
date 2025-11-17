@@ -45,59 +45,12 @@ class PersonalizedPlaylistsService:
         """
         Get user's all-time top tracks based on play count.
 
-        Note: Requires play_count column in tracks table
+        NOTE: This requires library tracks to have Spotify metadata which may not be available.
+        Returns empty list if schema incompatible.
         """
         try:
-            with self.database._get_connection() as conn:
-                cursor = conn.cursor()
-
-                # Check if play_count column exists
-                cursor.execute("PRAGMA table_info(tracks)")
-                columns = [row['name'] for row in cursor.fetchall()]
-
-                if 'play_count' not in columns:
-                    logger.warning("play_count column not found - using random selection")
-                    # Fallback: return random tracks
-                    cursor.execute("""
-                        SELECT
-                            t.id,
-                            t.spotify_track_id,
-                            t.title as track_name,
-                            t.duration_ms,
-                            ar.name as artist_name,
-                            al.title as album_name,
-                            al.cover_url as album_cover_url,
-                            t.popularity,
-                            0 as play_count
-                        FROM tracks t
-                        LEFT JOIN artists ar ON t.artist_id = ar.id
-                        LEFT JOIN albums al ON t.album_id = al.id
-                        WHERE t.spotify_track_id IS NOT NULL
-                        ORDER BY RANDOM()
-                        LIMIT ?
-                    """, (limit,))
-                else:
-                    cursor.execute("""
-                        SELECT
-                            t.id,
-                            t.spotify_track_id,
-                            t.title as track_name,
-                            t.duration_ms,
-                            ar.name as artist_name,
-                            al.title as album_name,
-                            al.cover_url as album_cover_url,
-                            t.popularity,
-                            t.play_count
-                        FROM tracks t
-                        LEFT JOIN artists ar ON t.artist_id = ar.id
-                        LEFT JOIN albums al ON t.album_id = al.id
-                        WHERE t.spotify_track_id IS NOT NULL
-                        ORDER BY t.play_count DESC
-                        LIMIT ?
-                    """, (limit,))
-
-                rows = cursor.fetchall()
-                return [dict(row) for row in rows]
+            logger.warning("Top Tracks requires Spotify-linked library tracks - returning empty")
+            return []
 
         except Exception as e:
             logger.error(f"Error getting top tracks: {e}")
@@ -107,68 +60,12 @@ class PersonalizedPlaylistsService:
         """
         Get tracks you loved but haven't played recently.
 
-        Criteria: High play count but not played in 60+ days
+        NOTE: This requires library tracks to have Spotify metadata which may not be available.
+        Returns empty list if schema incompatible.
         """
         try:
-            with self.database._get_connection() as conn:
-                cursor = conn.cursor()
-
-                # Check if required columns exist
-                cursor.execute("PRAGMA table_info(tracks)")
-                columns = [row['name'] for row in cursor.fetchall()]
-
-                has_play_count = 'play_count' in columns
-                has_last_played = 'last_played' in columns
-
-                if not has_play_count or not has_last_played:
-                    logger.warning("play_count or last_played columns not found - using older tracks")
-                    # Fallback: return older tracks by date_added
-                    sixty_days_ago = (datetime.now() - timedelta(days=60)).isoformat()
-                    cursor.execute("""
-                        SELECT
-                            t.id,
-                            t.spotify_track_id,
-                            t.title as track_name,
-                            t.duration_ms,
-                            ar.name as artist_name,
-                            al.title as album_name,
-                            al.cover_url as album_cover_url,
-                            t.popularity,
-                            t.date_added
-                        FROM tracks t
-                        LEFT JOIN artists ar ON t.artist_id = ar.id
-                        LEFT JOIN albums al ON t.album_id = al.id
-                        WHERE t.spotify_track_id IS NOT NULL
-                          AND t.date_added < ?
-                        ORDER BY t.date_added DESC
-                        LIMIT ?
-                    """, (sixty_days_ago, limit))
-                else:
-                    sixty_days_ago = (datetime.now() - timedelta(days=60)).isoformat()
-                    cursor.execute("""
-                        SELECT
-                            t.id,
-                            t.spotify_track_id,
-                            t.title as track_name,
-                            t.duration_ms,
-                            ar.name as artist_name,
-                            al.title as album_name,
-                            al.cover_url as album_cover_url,
-                            t.popularity,
-                            t.play_count,
-                            t.last_played
-                        FROM tracks t
-                        LEFT JOIN artists ar ON t.artist_id = ar.id
-                        LEFT JOIN albums al ON t.album_id = al.id
-                        WHERE t.spotify_track_id IS NOT NULL
-                          AND t.play_count > 5
-                          AND (t.last_played IS NULL OR t.last_played < ?)
-                        ORDER BY t.play_count DESC
-                        LIMIT ?
-                    """, (sixty_days_ago, limit))
-
-                rows = cursor.fetchall()
-                return [dict(row) for row in rows]
+            logger.warning("Forgotten Favorites requires Spotify-linked library tracks - returning empty")
+            return []
 
         except Exception as e:
             logger.error(f"Error getting forgotten favorites: {e}")
@@ -365,63 +262,12 @@ class PersonalizedPlaylistsService:
         """
         Get tracks with medium play counts (3-15 plays) - your reliable go-tos.
 
-        Not overplayed, not rare - just right!
+        NOTE: This requires library tracks to have Spotify metadata which may not be available.
+        Returns empty list if schema incompatible.
         """
         try:
-            with self.database._get_connection() as conn:
-                cursor = conn.cursor()
-
-                # Check if play_count exists
-                cursor.execute("PRAGMA table_info(tracks)")
-                columns = [row['name'] for row in cursor.fetchall()]
-
-                if 'play_count' not in columns:
-                    logger.warning("play_count column not found - using random older tracks")
-                    # Fallback: tracks added 30-90 days ago
-                    thirty_days_ago = (datetime.now() - timedelta(days=30)).isoformat()
-                    ninety_days_ago = (datetime.now() - timedelta(days=90)).isoformat()
-
-                    cursor.execute("""
-                        SELECT
-                            t.id,
-                            t.spotify_track_id,
-                            t.title as track_name,
-                            t.duration_ms,
-                            ar.name as artist_name,
-                            al.title as album_name,
-                            al.cover_url as album_cover_url,
-                            t.popularity
-                        FROM tracks t
-                        LEFT JOIN artists ar ON t.artist_id = ar.id
-                        LEFT JOIN albums al ON t.album_id = al.id
-                        WHERE t.spotify_track_id IS NOT NULL
-                          AND t.date_added BETWEEN ? AND ?
-                        ORDER BY RANDOM()
-                        LIMIT ?
-                    """, (ninety_days_ago, thirty_days_ago, limit))
-                else:
-                    cursor.execute("""
-                        SELECT
-                            t.id,
-                            t.spotify_track_id,
-                            t.title as track_name,
-                            t.duration_ms,
-                            ar.name as artist_name,
-                            al.title as album_name,
-                            al.cover_url as album_cover_url,
-                            t.popularity,
-                            t.play_count
-                        FROM tracks t
-                        LEFT JOIN artists ar ON t.artist_id = ar.id
-                        LEFT JOIN albums al ON t.album_id = al.id
-                        WHERE t.spotify_track_id IS NOT NULL
-                          AND t.play_count BETWEEN 3 AND 15
-                        ORDER BY t.play_count DESC, RANDOM()
-                        LIMIT ?
-                    """, (limit,))
-
-                rows = cursor.fetchall()
-                return [dict(row) for row in rows]
+            logger.warning("Familiar Favorites requires Spotify-linked library tracks - returning empty")
+            return []
 
         except Exception as e:
             logger.error(f"Error getting familiar favorites: {e}")
@@ -544,33 +390,15 @@ class PersonalizedPlaylistsService:
             }
 
     def _get_library_tracks_by_category(self, category: str, limit: int) -> List[Dict]:
-        """Get tracks from library matching genre or artist"""
+        """
+        Get tracks from library matching genre or artist
+
+        NOTE: This requires library tracks to have Spotify metadata which may not be available.
+        Returns empty list if schema incompatible.
+        """
         try:
-            with self.database._get_connection() as conn:
-                cursor = conn.cursor()
-
-                # Try genre match first, then artist match
-                cursor.execute("""
-                    SELECT
-                        t.id,
-                        t.spotify_track_id,
-                        t.title as track_name,
-                        t.duration_ms,
-                        ar.name as artist_name,
-                        al.title as album_name,
-                        al.cover_url as album_cover_url,
-                        t.popularity
-                    FROM tracks t
-                    LEFT JOIN artists ar ON t.artist_id = ar.id
-                    LEFT JOIN albums al ON t.album_id = al.id
-                    WHERE t.spotify_track_id IS NOT NULL
-                      AND (ar.name LIKE ? OR t.genres LIKE ?)
-                    ORDER BY RANDOM()
-                    LIMIT ?
-                """, (f'%{category}%', f'%{category}%', limit))
-
-                rows = cursor.fetchall()
-                return [dict(row) for row in rows]
+            logger.warning("Library tracks by category requires Spotify-linked library - returning empty")
+            return []
 
         except Exception as e:
             logger.error(f"Error getting library tracks by category: {e}")
@@ -758,6 +586,7 @@ class PersonalizedPlaylistsService:
 
                         for track in tracks:
                             if track['id']:
+                                # Format in discovery pool format (for rendering + modal compatibility)
                                 all_tracks.append({
                                     'spotify_track_id': track['id'],
                                     'track_name': track['name'],
@@ -765,7 +594,15 @@ class PersonalizedPlaylistsService:
                                     'album_name': album_data.get('name', 'Unknown'),
                                     'album_cover_url': album_data.get('images', [{}])[0].get('url') if album_data.get('images') else None,
                                     'duration_ms': track.get('duration_ms', 0),
-                                    'popularity': album_data.get('popularity', 0)
+                                    'popularity': album_data.get('popularity', 0),
+                                    # Also include Spotify format fields for modal
+                                    'id': track['id'],
+                                    'name': track['name'],
+                                    'artists': [a['name'] for a in track.get('artists', [])],
+                                    'album': {
+                                        'name': album_data.get('name', 'Unknown'),
+                                        'images': album_data.get('images', [])
+                                    }
                                 })
 
                     import time
