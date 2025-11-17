@@ -17296,147 +17296,46 @@ body {
 }
 
 /* =======================
-   QUICK PICKS SECTION
+   DECADE BROWSER SECTION - Modern Style matching Recent Releases
    ======================= */
 
-.quick-picks-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-    gap: 20px;
-    margin-top: 16px;
+.decade-card-modern {
+    /* Inherits from .discover-card */
 }
 
-.quick-pick-card {
-    position: relative;
-    padding: 32px 24px;
-    border-radius: 16px;
-    cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    overflow: hidden;
-}
-
-.quick-pick-card::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: inherit;
-    opacity: 0.9;
-    transition: opacity 0.3s ease;
-}
-
-.quick-pick-card:hover::before {
-    opacity: 1;
-}
-
-.quick-pick-card:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
-}
-
-.quick-pick-icon {
-    position: relative;
-    font-size: 48px;
-    margin-bottom: 16px;
-    z-index: 1;
-}
-
-.quick-pick-title {
-    position: relative;
-    font-size: 20px;
-    font-weight: 700;
-    color: #fff;
-    margin: 0 0 8px 0;
-    z-index: 1;
-}
-
-.quick-pick-description {
-    position: relative;
-    font-size: 14px;
-    color: rgba(255, 255, 255, 0.8);
-    margin: 0;
-    z-index: 1;
-}
-
-/* =======================
-   DECADE BROWSER SECTION
-   ======================= */
-
-.decade-card {
-    position: relative;
-    width: 100%;
-    aspect-ratio: 1;
-    border-radius: 16px;
-    overflow: hidden;
-    cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+.decade-card-image {
     background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-}
-
-.decade-card:hover {
-    transform: translateY(-8px) scale(1.02);
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
-}
-
-.decade-card-content {
-    position: relative;
-    width: 100%;
-    height: 100%;
     display: flex;
-    flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 16px;
-    padding: 24px;
-    background: linear-gradient(135deg,
-        rgba(102, 126, 234, 0.15) 0%,
-        rgba(118, 75, 162, 0.15) 100%);
+    position: relative;
+    overflow: hidden;
 }
 
-.decade-card::before {
+.decade-card-image::before {
     content: '';
     position: absolute;
     inset: 0;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    opacity: 0;
+    background: linear-gradient(135deg,
+        rgba(102, 126, 234, 0.1) 0%,
+        rgba(118, 75, 162, 0.1) 100%);
+    opacity: 1;
     transition: opacity 0.3s ease;
 }
 
-.decade-card:hover::before {
-    opacity: 0.2;
+.decade-card-modern:hover .decade-card-image::before {
+    opacity: 0.3;
 }
 
-.decade-icon {
-    position: relative;
-    font-size: 80px;
+.decade-icon-large {
+    font-size: 96px;
     line-height: 1;
+    position: relative;
     z-index: 1;
     transition: transform 0.3s ease;
 }
 
-.decade-card:hover .decade-icon {
-    transform: scale(1.1);
-}
-
-.decade-year {
-    position: relative;
-    font-size: 36px;
-    font-weight: 900;
-    color: #fff;
-    text-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
-    letter-spacing: -1px;
-    z-index: 1;
-}
-
-.decade-title {
-    position: relative;
-    font-size: 16px;
-    font-weight: 600;
-    color: rgba(255, 255, 255, 0.7);
-    text-transform: uppercase;
-    letter-spacing: 2px;
-    z-index: 1;
+.decade-card-modern:hover .decade-icon-large {
+    transform: scale(1.1) rotate(5deg);
 }
 

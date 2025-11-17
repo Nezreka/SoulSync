@@ -24742,8 +24742,7 @@ async function loadDiscoverPage() {
         loadPersonalizedForgottenFavorites(),  // NEW: Forgotten favorites
         loadDiscoveryShuffle(),  // NEW: Discovery Shuffle
         loadFamiliarFavorites(),  // NEW: Familiar Favorites
-        loadDecadeBrowser(),  // Decade browser
-        loadQuickPicks()  // Quick picks action cards
+        loadDecadeBrowser()  // Decade browser
     ]);
 
     // Check for active syncs after page load
@@ -25275,17 +25274,20 @@ async function loadDecadeBrowser() {
             return;
         }
 
-        // Build decade cards from available decades
+        // Build decade cards matching Recent Releases style
         let html = '';
         data.decades.forEach(decade => {
             const icon = getDecadeIcon(decade.year);
             const label = `${decade.year}s`;
             html += `
-                <div class="decade-card" onclick="openDecadePlaylist(${decade.year})">
-                    <div class="decade-card-content">
-                        <div class="decade-icon">${icon}</div>
-                        <div class="decade-year">${label}</div>
-                        <div class="decade-title">${decade.track_count} tracks</div>
+                <div class="discover-card decade-card-modern" onclick="openDecadePlaylist(${decade.year})">
+                    <div class="discover-card-image decade-card-image">
+                        <div class="decade-icon-large">${icon}</div>
+                    </div>
+                    <div class="discover-card-info">
+                        <h4 class="discover-card-title">${label}</h4>
+                        <p class="discover-card-subtitle">${decade.track_count} tracks</p>
+                        <p class="discover-card-meta">Classics</p>
                     </div>
                 </div>
             `;
@@ -25348,87 +25350,6 @@ async function openDecadePlaylist(decade) {
         showToast(`Failed to load ${decade}s playlist`, 'error');
         hideLoadingOverlay();
     }
-}
-
-// ===============================
-// QUICK PICKS
-// ===============================
-
-function loadQuickPicks() {
-    try {
-        const grid = document.getElementById('quick-picks-grid');
-        if (!grid) return;
-
-        const quickPicks = [
-            {
-                icon: '🎲',
-                title: 'Surprise Me',
-                description: 'Shuffle your discovery pool',
-                gradient: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                action: 'scrollToSection("personalized-discovery-shuffle")'
-            },
-            {
-                icon: '🔥',
-                title: 'Trending Now',
-                description: 'High popularity discoveries',
-                gradient: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
-                action: 'scrollToSection("personalized-popular-picks")'
-            },
-            {
-                icon: '💎',
-                title: 'Deep Cuts',
-                description: 'Underground hidden gems',
-                gradient: 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)',
-                action: 'scrollToSection("personalized-hidden-gems")'
-            },
-            {
-                icon: '⏰',
-                title: 'Time Machine',
-                description: 'Browse by decade',
-                gradient: 'linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)',
-                action: 'scrollToSection("decade-browser-carousel")'
-            }
-        ];
-
-        let html = '';
-        quickPicks.forEach(pick => {
-            html += `
-                <div class="quick-pick-card" onclick="${pick.action}" style="background: ${pick.gradient};">
-                    <div class="quick-pick-icon">${pick.icon}</div>
-                    <h3 class="quick-pick-title">${pick.title}</h3>
-                    <p class="quick-pick-description">${pick.description}</p>
-                </div>
-            `;
-        });
-
-        grid.innerHTML = html;
-
-    } catch (error) {
-        console.error('Error loading quick picks:', error);
-    }
-}
-
-function scrollToSection(sectionId) {
-    const section = document.getElementById(sectionId);
-    if (!section) {
-        console.warn(`Section not found: ${sectionId}`);
-        return;
-    }
-
-    // Show section if it's hidden
-    const parentSection = section.closest('.discover-section');
-    if (parentSection) {
-        const currentDisplay = window.getComputedStyle(parentSection).display;
-        if (currentDisplay === 'none') {
-            parentSection.style.display = 'block';
-            console.log(`Showing hidden section: ${sectionId}`);
-        }
-    }
-
-    // Wait a tick for layout, then scroll
-    setTimeout(() => {
-        section.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }, 100);
 }
 
 // ===============================
