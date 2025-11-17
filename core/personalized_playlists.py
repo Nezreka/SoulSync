@@ -17,9 +17,103 @@ logger = get_logger("personalized_playlists")
 class PersonalizedPlaylistsService:
     """Service for generating personalized playlists from library and discovery pool"""
 
+    # Genre consolidation mapping - maps specific Spotify genres to broad parent categories
+    GENRE_MAPPING = {
+        'Electronic/Dance': [
+            'house', 'techno', 'trance', 'edm', 'electro', 'dubstep', 'drum and bass',
+            'breakbeat', 'jungle', 'dnb', 'bass', 'garage', 'uk garage', 'future bass',
+            'trap', 'hardstyle', 'hardcore', 'rave', 'dance', 'electronic', 'electronica',
+            'synth', 'downtempo', 'chillwave', 'vaporwave', 'synthwave', 'idm', 'glitch'
+        ],
+        'Hip Hop/Rap': [
+            'hip hop', 'rap', 'trap', 'drill', 'grime', 'boom bap', 'underground hip hop',
+            'conscious hip hop', 'gangsta rap', 'southern hip hop', 'east coast', 'west coast',
+            'crunk', 'hyphy', 'cloud rap', 'emo rap', 'mumble rap'
+        ],
+        'Rock': [
+            'rock', 'alternative rock', 'indie rock', 'garage rock', 'post-punk', 'punk',
+            'hard rock', 'psychedelic rock', 'progressive rock', 'art rock', 'glam rock',
+            'blues rock', 'southern rock', 'surf rock', 'rockabilly', 'grunge', 'shoegaze',
+            'noise rock', 'post-rock', 'math rock', 'emo', 'screamo'
+        ],
+        'Pop': [
+            'pop', 'dance pop', 'electropop', 'synth pop', 'indie pop', 'chamber pop',
+            'art pop', 'baroque pop', 'dream pop', 'power pop', 'bubblegum pop', 'k-pop',
+            'j-pop', 'hyperpop', 'pop rock', 'teen pop'
+        ],
+        'R&B/Soul': [
+            'r&b', 'soul', 'neo soul', 'contemporary r&b', 'alternative r&b', 'funk',
+            'disco', 'motown', 'northern soul', 'quiet storm', 'new jack swing'
+        ],
+        'Jazz': [
+            'jazz', 'bebop', 'cool jazz', 'hard bop', 'modal jazz', 'free jazz',
+            'fusion', 'jazz fusion', 'smooth jazz', 'contemporary jazz', 'latin jazz',
+            'afro-cuban jazz', 'swing', 'big band', 'ragtime', 'dixieland'
+        ],
+        'Classical': [
+            'classical', 'baroque', 'romantic', 'contemporary classical', 'minimalism',
+            'opera', 'orchestral', 'chamber music', 'choral', 'renaissance', 'medieval'
+        ],
+        'Metal': [
+            'metal', 'heavy metal', 'thrash metal', 'death metal', 'black metal',
+            'doom metal', 'power metal', 'progressive metal', 'metalcore', 'deathcore',
+            'djent', 'nu metal', 'industrial metal', 'symphonic metal', 'gothic metal'
+        ],
+        'Country': [
+            'country', 'bluegrass', 'americana', 'outlaw country', 'country rock',
+            'alt-country', 'contemporary country', 'traditional country', 'honky tonk',
+            'western', 'nashville sound'
+        ],
+        'Folk/Indie': [
+            'folk', 'indie folk', 'folk rock', 'freak folk', 'anti-folk', 'singer-songwriter',
+            'acoustic', 'indie', 'lo-fi', 'bedroom pop', 'slowcore', 'sadcore'
+        ],
+        'Latin': [
+            'latin', 'reggaeton', 'salsa', 'bachata', 'merengue', 'cumbia', 'banda',
+            'regional mexican', 'mariachi', 'ranchera', 'corrido', 'latin pop',
+            'latin trap', 'urbano latino', 'bossa nova', 'samba', 'tango'
+        ],
+        'Reggae/Dancehall': [
+            'reggae', 'dancehall', 'dub', 'roots reggae', 'ska', 'rocksteady',
+            'lovers rock', 'reggae fusion'
+        ],
+        'World': [
+            'afrobeat', 'afropop', 'african', 'world', 'worldbeat', 'ethnic',
+            'traditional', 'folk music', 'celtic', 'klezmer', 'flamenco', 'fado',
+            'indian classical', 'raga', 'qawwali', 'k-indie', 'j-indie'
+        ],
+        'Alternative': [
+            'alternative', 'experimental', 'avant-garde', 'noise', 'ambient',
+            'industrial', 'new wave', 'no wave', 'gothic', 'darkwave', 'coldwave',
+            'witch house', 'trip hop', 'downtempo'
+        ],
+        'Blues': [
+            'blues', 'delta blues', 'chicago blues', 'electric blues', 'blues rock',
+            'rhythm and blues', 'soul blues', 'gospel blues'
+        ],
+        'Funk/Disco': [
+            'funk', 'disco', 'p-funk', 'boogie', 'electro-funk', 'g-funk'
+        ]
+    }
+
     def __init__(self, database, spotify_client=None):
         self.database = database
         self.spotify_client = spotify_client
+
+    @staticmethod
+    def get_parent_genre(spotify_genre: str) -> str:
+        """
+        Map a specific Spotify genre to its parent category.
+        Returns the parent genre or 'Other' if no match found.
+        """
+        spotify_genre_lower = spotify_genre.lower()
+
+        for parent_genre, keywords in PersonalizedPlaylistsService.GENRE_MAPPING.items():
+            for keyword in keywords:
+                if keyword in spotify_genre_lower:
+                    return parent_genre
+
+        return 'Other'
 
     # ========================================
     # LIBRARY-BASED PLAYLISTS
@@ -165,8 +259,9 @@ class PersonalizedPlaylistsService:
 
     def get_available_genres(self) -> List[Dict]:
         """
-        Get list of genres with track counts from discovery pool.
+        Get list of consolidated parent genres with track counts from discovery pool.
         Uses cached artist genres from database (populated during discovery scan).
+        Consolidates specific Spotify genres into broader parent categories.
         """
         try:
             with self.database._get_connection() as conn:
@@ -184,30 +279,38 @@ class PersonalizedPlaylistsService:
                     logger.warning("No genres found in discovery pool - genres may not be populated yet")
                     return []
 
-                # Count tracks per genre
-                genre_track_count = {}  # {genre: count}
+                # Count tracks per PARENT genre (consolidated)
+                parent_genre_track_count = {}  # {parent_genre: count}
 
                 for row in rows:
                     try:
                         artist_genres_json = row[0]
                         if artist_genres_json:
                             genres = json.loads(artist_genres_json)
+                            # Map each Spotify genre to parent and count tracks
+                            mapped_parents = set()  # Use set to avoid double-counting per track
                             for genre in genres:
-                                genre_track_count[genre] = genre_track_count.get(genre, 0) + 1
+                                parent_genre = self.get_parent_genre(genre)
+                                mapped_parents.add(parent_genre)
+
+                            # Add this track to all parent genres
+                            for parent_genre in mapped_parents:
+                                parent_genre_track_count[parent_genre] = parent_genre_track_count.get(parent_genre, 0) + 1
                     except Exception as e:
                         logger.debug(f"Error parsing genres JSON: {e}")
                         continue
 
                 # Filter genres with at least 10 tracks and sort by count
+                # Exclude 'Other' category
                 available_genres = [
                     {'name': genre, 'track_count': count}
-                    for genre, count in genre_track_count.items()
-                    if count >= 10
+                    for genre, count in parent_genre_track_count.items()
+                    if count >= 10 and genre != 'Other'
                 ]
                 available_genres.sort(key=lambda x: x['track_count'], reverse=True)
 
-                logger.info(f"Found {len(available_genres)} genres with 10+ tracks")
-                return available_genres[:20]  # Top 20 genres
+                logger.info(f"Found {len(available_genres)} consolidated genres with 10+ tracks")
+                return available_genres[:20]  # Top 20 parent genres
 
         except Exception as e:
             logger.error(f"Error getting available genres: {e}")
@@ -217,12 +320,13 @@ class PersonalizedPlaylistsService:
         """
         Get tracks from a specific genre with diversity filtering.
         Uses cached artist genres from database (populated during discovery scan).
+        Supports both parent genres (e.g., "Electronic/Dance") and specific genres (e.g., "house").
         """
         try:
             with self.database._get_connection() as conn:
                 cursor = conn.cursor()
 
-                # Get all tracks with this genre (query cached genres)
+                # Get all tracks with genres from discovery pool
                 cursor.execute("""
                     SELECT
                         spotify_track_id,
@@ -238,18 +342,38 @@ class PersonalizedPlaylistsService:
                 """)
                 rows = cursor.fetchall()
 
-                # Filter tracks that match the genre (using partial matching)
+                # Determine if this is a parent genre or specific genre
+                is_parent_genre = genre in self.GENRE_MAPPING
+                search_keywords = []
+
+                if is_parent_genre:
+                    # Use all child genre keywords for matching
+                    search_keywords = self.GENRE_MAPPING[genre]
+                    logger.info(f"Matching parent genre '{genre}' with {len(search_keywords)} child keywords")
+                else:
+                    # Use the genre name itself for partial matching
+                    search_keywords = [genre.lower()]
+                    logger.info(f"Matching specific genre '{genre}' with partial matching")
+
+                # Filter tracks that match the genre
                 matching_tracks = []
-                genre_lower = genre.lower()
 
                 for row in rows:
                     try:
                         artist_genres_json = row[7]  # artist_genres column
                         if artist_genres_json:
                             genres = json.loads(artist_genres_json)
-                            # Partial match: if search genre is in any artist genre
-                            # e.g., "house" matches "electro house", "progressive house", etc.
-                            genre_match = any(genre_lower in g.lower() for g in genres)
+
+                            # Check if any artist genre matches any search keyword
+                            genre_match = False
+                            for artist_genre in genres:
+                                artist_genre_lower = artist_genre.lower()
+                                for keyword in search_keywords:
+                                    if keyword in artist_genre_lower:
+                                        genre_match = True
+                                        break
+                                if genre_match:
+                                    break
 
                             if genre_match:
                                 # Convert row to dict (exclude artist_genres from output)

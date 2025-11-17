@@ -25410,46 +25410,64 @@ async function loadGenreBrowser() {
 function getGenreIcon(genreName) {
     const genre = genreName.toLowerCase();
 
-    // Electronic/Dance
+    // Parent genre exact matches (consolidated categories)
+    if (genre === 'electronic/dance') return '🎹';
+    if (genre === 'hip hop/rap') return '🎤';
+    if (genre === 'rock') return '🎸';
+    if (genre === 'pop') return '🎵';
+    if (genre === 'r&b/soul') return '🎙️';
+    if (genre === 'jazz') return '🎺';
+    if (genre === 'classical') return '🎻';
+    if (genre === 'metal') return '🤘';
+    if (genre === 'country') return '🪕';
+    if (genre === 'folk/indie') return '🎧';
+    if (genre === 'latin') return '💃';
+    if (genre === 'reggae/dancehall') return '🌴';
+    if (genre === 'world') return '🌍';
+    if (genre === 'alternative') return '🎭';
+    if (genre === 'blues') return '🎸';
+    if (genre === 'funk/disco') return '🕺';
+
+    // Fallback: partial matching for specific genres
     if (genre.includes('house') || genre.includes('techno') || genre.includes('edm') ||
-        genre.includes('electro') || genre.includes('trance')) {
+        genre.includes('electro') || genre.includes('trance') || genre.includes('electronic')) {
         return '🎹';
     }
-    // Hip Hop/Rap
     if (genre.includes('hip hop') || genre.includes('rap') || genre.includes('trap')) {
         return '🎤';
     }
-    // Rock
-    if (genre.includes('rock') || genre.includes('metal') || genre.includes('punk')) {
+    if (genre.includes('rock') || genre.includes('punk')) {
         return '🎸';
     }
-    // Jazz/Blues
-    if (genre.includes('jazz') || genre.includes('blues') || genre.includes('soul')) {
+    if (genre.includes('metal')) {
+        return '🤘';
+    }
+    if (genre.includes('jazz') || genre.includes('blues')) {
         return '🎺';
     }
-    // Pop
     if (genre.includes('pop')) {
         return '🎵';
     }
-    // R&B
-    if (genre.includes('r&b') || genre.includes('rnb')) {
+    if (genre.includes('r&b') || genre.includes('soul')) {
         return '🎙️';
     }
-    // Country/Folk
     if (genre.includes('country') || genre.includes('folk')) {
         return '🪕';
     }
-    // Classical
     if (genre.includes('classical') || genre.includes('orchestra')) {
         return '🎻';
     }
-    // Indie/Alternative
     if (genre.includes('indie') || genre.includes('alternative')) {
         return '🎧';
     }
-    // Lo-fi/Chill
-    if (genre.includes('lo-fi') || genre.includes('chill') || genre.includes('ambient')) {
-        return '☁️';
+    if (genre.includes('latin') || genre.includes('reggaeton') || genre.includes('salsa')) {
+        return '💃';
+    }
+    if (genre.includes('reggae') || genre.includes('dancehall')) {
+        return '🌴';
+    }
+    if (genre.includes('funk') || genre.includes('disco')) {
+        return '🕺';
     }
 
     // Default
@@ -25457,10 +25475,13 @@ function getGenreIcon(genreName) {
 }
 
 function capitalizeGenre(genre) {
-    // Capitalize each word in genre
-    return genre.split(' ')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' ');
+    // Capitalize each word in genre, handling both spaces and slashes
+    return genre.split(/(\s|\/)/g)
+        .map(part => {
+            if (part === ' ' || part === '/') return part;
+            return part.charAt(0).toUpperCase() + part.slice(1);
+        })
+        .join('');
 }
 
 function escapeHtml(text) {
