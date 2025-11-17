@@ -323,6 +323,103 @@ class PersonalizedPlaylistsService:
             logger.error(f"Error getting hidden gems: {e}")
             return []
 
+    def get_discovery_shuffle(self, limit: int = 50) -> List[Dict]:
+        """
+        Get random tracks from discovery pool - pure exploration.
+
+        Different every time you call it!
+        """
+        try:
+            with self.database._get_connection() as conn:
+                cursor = conn.cursor()
+
+                cursor.execute("""
+                    SELECT
+                        spotify_track_id,
+                        track_name,
+                        artist_name,
+                        album_name,
+                        album_cover_url,
+                        duration_ms,
+                        popularity
+                    FROM discovery_pool
+                    ORDER BY RANDOM()
+                    LIMIT ?
+                """, (limit,))
+
+                rows = cursor.fetchall()
+                return [dict(row) for row in rows]
+
+        except Exception as e:
+            logger.error(f"Error getting discovery shuffle: {e}")
+            return []
+
+    def get_familiar_favorites(self, limit: int = 50) -> List[Dict]:
+        """
+        Get tracks with medium play counts (3-15 plays) - your reliable go-tos.
+
+        Not overplayed, not rare - just right!
+        """
+        try:
+            with self.database._get_connection() as conn:
+                cursor = conn.cursor()
+
+                # Check if play_count exists
+                cursor.execute("PRAGMA table_info(tracks)")
+                columns = [row['name'] for row in cursor.fetchall()]
+
+                if 'play_count' not in columns:
+                    logger.warning("play_count column not found - using random older tracks")
+                    # Fallback: tracks added 30-90 days ago
+                    thirty_days_ago = (datetime.now() - timedelta(days=30)).isoformat()
+                    ninety_days_ago = (datetime.now() - timedelta(days=90)).isoformat()
+
+                    cursor.execute("""
+                        SELECT
+                            t.id,
+                            t.spotify_track_id,
+                            t.title as track_name,
+                            t.duration_ms,
+                            ar.name as artist_name,
+                            al.title as album_name,
+                            al.cover_url as album_cover_url,
+                            t.popularity
+                        FROM tracks t
+                        LEFT JOIN artists ar ON t.artist_id = ar.id
+                        LEFT JOIN albums al ON t.album_id = al.id
+                        WHERE t.spotify_track_id IS NOT NULL
+                          AND t.date_added BETWEEN ? AND ?
+                        ORDER BY RANDOM()
+                        LIMIT ?
+                    """, (ninety_days_ago, thirty_days_ago, limit))
+                else:
+                    cursor.execute("""
+                        SELECT
+                            t.id,
+                            t.spotify_track_id,
+                            t.title as track_name,
+                            t.duration_ms,
+                            ar.name as artist_name,
+                            al.title as album_name,
+                            al.cover_url as album_cover_url,
+                            t.popularity,
+                            t.play_count
+                        FROM tracks t
+                        LEFT JOIN artists ar ON t.artist_id = ar.id
+                        LEFT JOIN albums al ON t.album_id = al.id
+                        WHERE t.spotify_track_id IS NOT NULL
+                          AND t.play_count BETWEEN 3 AND 15
+                        ORDER BY t.play_count DESC, RANDOM()
+                        LIMIT ?
+                    """, (limit,))
+
+                rows = cursor.fetchall()
+                return [dict(row) for row in rows]
+
+        except Exception as e:
+            logger.error(f"Error getting familiar favorites: {e}")
+            return []
+
     # ========================================
     # DAILY MIX (HYBRID PLAYLISTS)
     # ========================================
@@ -530,6 +627,156 @@ class PersonalizedPlaylistsService:
         except Exception as e:
             logger.error(f"Error getting all daily mixes: {e}")
             return []
+
+    # ========================================
+    # BUILD A PLAYLIST (CUSTOM GENERATOR)
+    # ========================================
+
+    def build_custom_playlist(self, seed_artist_ids: List[str], playlist_size: int = 50) -> Dict[str, Any]:
+        """
+        Build a custom playlist from seed artists.
+
+        Process:
+        1. Get similar artists for each seed artist (max 25 total)
+        2. Get albums from those similar artists
+        3. Select 20 random albums
+        4. Build playlist from tracks in those albums (max 50 tracks)
+
+        Args:
+            seed_artist_ids: List of 1-5 Spotify artist IDs
+            playlist_size: Maximum tracks in final playlist (default: 50)
+
+        Returns:
+            Dict with playlist metadata and tracks
+        """
+        try:
+            if not seed_artist_ids or len(seed_artist_ids) > 5:
+                logger.error(f"Invalid seed artists count: {len(seed_artist_ids)}")
+                return {'tracks': [], 'error': 'Must provide 1-5 seed artists'}
+
+            if not self.spotify_client or not self.spotify_client.is_authenticated():
+                logger.error("Spotify client not available")
+                return {'tracks': [], 'error': 'Spotify not authenticated'}
+
+            logger.info(f"Building custom playlist from {len(seed_artist_ids)} seed artists")
+
+            # Step 1: Get similar artists for each seed
+            all_similar_artists = []
+            seen_artist_ids = set(seed_artist_ids)  # Don't include seed artists themselves
+
+            for seed_artist_id in seed_artist_ids:
+                try:
+                    # Get similar artists from Spotify
+                    similar = self.spotify_client.get_similar_artists(seed_artist_id)
+
+                    if similar:
+                        for artist in similar[:10]:  # Max 10 per seed
+                            if artist.id not in seen_artist_ids:
+                                all_similar_artists.append(artist)
+                                seen_artist_ids.add(artist.id)
+
+                                if len(all_similar_artists) >= 25:
+                                    break
+
+                    if len(all_similar_artists) >= 25:
+                        break
+
+                except Exception as e:
+                    logger.warning(f"Error getting similar artists for {seed_artist_id}: {e}")
+                    continue
+
+            logger.info(f"Found {len(all_similar_artists)} similar artists")
+
+            if not all_similar_artists:
+                return {'tracks': [], 'error': 'No similar artists found'}
+
+            # Limit to 25 similar artists
+            similar_artists_to_use = all_similar_artists[:25]
+
+            # Step 2: Get albums from similar artists
+            all_albums = []
+            for artist in similar_artists_to_use:
+                try:
+                    albums = self.spotify_client.get_artist_albums(
+                        artist.id,
+                        album_type='album,single',
+                        limit=10
+                    )
+
+                    if albums:
+                        all_albums.extend(albums)
+
+                    import time
+                    time.sleep(0.3)  # Rate limiting
+
+                except Exception as e:
+                    logger.warning(f"Error getting albums for {artist.name}: {e}")
+                    continue
+
+            logger.info(f"Found {len(all_albums)} total albums")
+
+            if not all_albums:
+                return {'tracks': [], 'error': 'No albums found'}
+
+            # Step 3: Select 20 random albums
+            random.shuffle(all_albums)
+            selected_albums = all_albums[:20]
+
+            logger.info(f"Selected {len(selected_albums)} random albums")
+
+            # Step 4: Build playlist from tracks in those albums
+            all_tracks = []
+            for album in selected_albums:
+                try:
+                    album_data = self.spotify_client.get_album(album.id)
+
+                    if album_data and 'tracks' in album_data:
+                        tracks = album_data['tracks'].get('items', [])
+
+                        for track in tracks:
+                            if track['id']:
+                                all_tracks.append({
+                                    'spotify_track_id': track['id'],
+                                    'track_name': track['name'],
+                                    'artist_name': ', '.join([a['name'] for a in track.get('artists', [])]),
+                                    'album_name': album_data.get('name', 'Unknown'),
+                                    'album_cover_url': album_data.get('images', [{}])[0].get('url') if album_data.get('images') else None,
+                                    'duration_ms': track.get('duration_ms', 0),
+                                    'popularity': album_data.get('popularity', 0)
+                                })
+
+                    import time
+                    time.sleep(0.3)  # Rate limiting
+
+                except Exception as e:
+                    logger.warning(f"Error getting tracks from album: {e}")
+                    continue
+
+            logger.info(f"Collected {len(all_tracks)} total tracks")
+
+            if not all_tracks:
+                return {'tracks': [], 'error': 'No tracks found'}
+
+            # Shuffle and limit to playlist_size
+            random.shuffle(all_tracks)
+            final_tracks = all_tracks[:playlist_size]
+
+            logger.info(f"Built custom playlist with {len(final_tracks)} tracks")
+
+            return {
+                'name': 'Custom Playlist',
+                'description': f'Built from {len(seed_artist_ids)} seed artists',
+                'track_count': len(final_tracks),
+                'tracks': final_tracks,
+                'similar_artists_count': len(similar_artists_to_use),
+                'albums_used': len(selected_albums)
+            }
+
+        except Exception as e:
+            logger.error(f"Error building custom playlist: {e}")
+            import traceback
+            traceback.print_exc()
+            return {'tracks': [], 'error': str(e)}
 
 
 # Singleton instance

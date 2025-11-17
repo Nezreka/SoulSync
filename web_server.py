@@ -15007,6 +15007,109 @@ def get_daily_mixes():
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
 
+@app.route('/api/discover/personalized/discovery-shuffle', methods=['GET'])
+def get_discovery_shuffle():
+    """Get Discovery Shuffle playlist - random tracks from discovery pool"""
+    try:
+        from core.personalized_playlists import get_personalized_playlists_service
+
+        database = get_database()
+        service = get_personalized_playlists_service(database, spotify_client)
+
+        limit = int(request.args.get('limit', 50))
+        tracks = service.get_discovery_shuffle(limit=limit)
+
+        return jsonify({
+            "success": True,
+            "tracks": tracks
+        })
+
+    except Exception as e:
+        print(f"Error getting discovery shuffle playlist: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/discover/personalized/familiar-favorites', methods=['GET'])
+def get_familiar_favorites():
+    """Get Familiar Favorites playlist - reliable go-to tracks"""
+    try:
+        from core.personalized_playlists import get_personalized_playlists_service
+
+        database = get_database()
+        service = get_personalized_playlists_service(database, spotify_client)
+
+        limit = int(request.args.get('limit', 50))
+        tracks = service.get_familiar_favorites(limit=limit)
+
+        return jsonify({
+            "success": True,
+            "tracks": tracks
+        })
+
+    except Exception as e:
+        print(f"Error getting familiar favorites playlist: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/discover/build-playlist/search-artists', methods=['GET'])
+def search_artists_for_playlist():
+    """Search for artists to use as seeds for custom playlist building"""
+    try:
+        query = request.args.get('query', '').strip()
+        if not query:
+            return jsonify({"success": False, "error": "Query required"}), 400
+
+        # Search Spotify for artists
+        results = spotify_client.sp.search(q=query, type='artist', limit=10)
+
+        artists = []
+        if results and 'artists' in results and 'items' in results['artists']:
+            for artist in results['artists']['items']:
+                artists.append({
+                    'id': artist['id'],
+                    'name': artist['name'],
+                    'image_url': artist['images'][0]['url'] if artist.get('images') else None
+                })
+
+        return jsonify({
+            "success": True,
+            "artists": artists
+        })
+
+    except Exception as e:
+        print(f"Error searching for artists: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/discover/build-playlist/generate', methods=['POST'])
+def generate_custom_playlist():
+    """Generate custom playlist from seed artists"""
+    try:
+        from core.personalized_playlists import get_personalized_playlists_service
+
+        data = request.get_json()
+        seed_artist_ids = data.get('seed_artist_ids', [])
+
+        if not seed_artist_ids or len(seed_artist_ids) < 1 or len(seed_artist_ids) > 5:
+            return jsonify({
+                "success": False,
+                "error": "Please provide between 1 and 5 seed artists"
+            }), 400
+
+        database = get_database()
+        service = get_personalized_playlists_service(database, spotify_client)
+
+        playlist_size = int(data.get('playlist_size', 50))
+        result = service.build_custom_playlist(seed_artist_ids, playlist_size=playlist_size)
+
+        return jsonify({
+            "success": True,
+            "playlist": result
+        })
+
+    except Exception as e:
+        print(f"Error generating custom playlist: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
 @app.route('/api/metadata/start', methods=['POST'])
 def start_metadata_update():
     """Start the metadata update process - EXACT copy of dashboard.py logic"""

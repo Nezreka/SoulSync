@@ -622,10 +622,12 @@ class SeasonalDiscoveryService:
                     album_data = self.spotify_client.get_album(album['spotify_album_id'])
                     if album_data and 'tracks' in album_data:
                         for track in album_data['tracks'].get('items', []):
+                            # Use track's actual artist, not album artist
+                            track_artist = track['artists'][0]['name'] if track.get('artists') else album['artist_name']
                             all_tracks.append({
                                 'spotify_track_id': track['id'],
                                 'track_name': track['name'],
-                                'artist_name': album['artist_name'],
+                                'artist_name': track_artist,
                                 'album_name': album['album_name'],
                                 'popularity': album.get('popularity', 50)
                             })

@@ -17013,3 +17013,213 @@ body {
     color: #666;
     margin: 0;
 }
+
+/* ===============================
+   BUILD A PLAYLIST STYLES
+   =============================== */
+
+.build-playlist-container {
+    background: #1a1a1a;
+    border-radius: 12px;
+    padding: 24px;
+    margin-top: 20px;
+}
+
+.build-playlist-search-section {
+    position: relative;
+    margin-bottom: 24px;
+}
+
+#build-playlist-search {
+    width: 100%;
+    padding: 12px 16px;
+    background: #2a2a2a;
+    border: 1px solid #3a3a3a;
+    border-radius: 8px;
+    color: #fff;
+    font-size: 14px;
+    outline: none;
+    transition: border-color 0.2s ease;
+}
+
+#build-playlist-search:focus {
+    border-color: #1db954;
+}
+
+.build-playlist-search-results {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: #2a2a2a;
+    border: 1px solid #3a3a3a;
+    border-radius: 8px;
+    margin-top: 8px;
+    max-height: 300px;
+    overflow-y: auto;
+    z-index: 1000;
+    display: none;
+}
+
+.build-playlist-search-result {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+    border-bottom: 1px solid #3a3a3a;
+}
+
+.build-playlist-search-result:last-child {
+    border-bottom: none;
+}
+
+.build-playlist-search-result:hover {
+    background-color: #3a3a3a;
+}
+
+.build-playlist-search-result img {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    object-fit: cover;
+}
+
+.build-playlist-search-result span {
+    color: #fff;
+    font-size: 14px;
+}
+
+.build-playlist-no-results {
+    padding: 16px;
+    text-align: center;
+    color: #999;
+    font-size: 14px;
+}
+
+.build-playlist-selected-section {
+    margin-bottom: 24px;
+}
+
+.build-playlist-selected-section h3 {
+    color: #fff;
+    font-size: 16px;
+    margin: 0 0 12px 0;
+}
+
+.build-playlist-selected-artists {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    min-height: 60px;
+}
+
+.build-playlist-selected-artist {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: #2a2a2a;
+    border: 1px solid #3a3a3a;
+    border-radius: 8px;
+    padding: 8px 12px;
+}
+
+.build-playlist-selected-artist img {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    object-fit: cover;
+}
+
+.build-playlist-selected-artist span {
+    color: #fff;
+    font-size: 14px;
+}
+
+.build-playlist-remove-artist {
+    background: none;
+    border: none;
+    color: #ff4444;
+    font-size: 20px;
+    cursor: pointer;
+    padding: 0;
+    margin-left: 4px;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.2s ease;
+}
+
+.build-playlist-remove-artist:hover {
+    color: #ff6666;
+}
+
+.build-playlist-no-selection {
+    color: #999;
+    font-size: 14px;
+    padding: 16px;
+    text-align: center;
+}
+
+.build-playlist-actions {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.build-playlist-generate-btn {
+    background: #1db954;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 12px 24px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.build-playlist-generate-btn:not(:disabled):hover {
+    background: #1ed760;
+    transform: scale(1.02);
+}
+
+.build-playlist-generate-btn:disabled {
+    cursor: not-allowed;
+}
+
+.build-playlist-loading {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.build-playlist-loading p {
+    color: #999;
+    font-size: 14px;
+    margin: 0;
+}
+
+.build-playlist-metadata {
+    background: #2a2a2a;
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 16px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+}
+
+.build-playlist-metadata p {
+    color: #fff;
+    font-size: 13px;
+    margin: 0;
+}
+
+.build-playlist-metadata strong {
+    color: #1db954;
+}

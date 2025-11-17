@@ -24715,6 +24715,9 @@ let personalizedForgottenFavorites = [];
 let personalizedPopularPicks = [];
 let personalizedHiddenGems = [];
 let personalizedDailyMixes = [];
+let personalizedDiscoveryShuffle = [];
+let personalizedFamiliarFavorites = [];
+let buildPlaylistSelectedArtists = [];
 
 async function loadDiscoverPage() {
     console.log('Loading discover page...');
@@ -24732,6 +24735,8 @@ async function loadDiscoverPage() {
         loadPersonalizedHiddenGems(),  // NEW: Hidden gems from discovery pool
         loadPersonalizedTopTracks(),  // NEW: Your top tracks
         loadPersonalizedForgottenFavorites(),  // NEW: Forgotten favorites
+        loadDiscoveryShuffle(),  // NEW: Discovery Shuffle
+        loadFamiliarFavorites(),  // NEW: Familiar Favorites
         loadMoreForYou()
     ]);
 
@@ -24794,6 +24799,33 @@ async function checkForActiveDiscoverSyncs() {
 
                 // Resume polling
                 startDiscoverSyncPolling('discovery_weekly', 'discover_discovery_weekly');
+            }
+        }
+    } catch (error) {
+        // Sync not active, ignore
+    }
+
+    // Check if Seasonal Playlist sync is active
+    try {
+        const seasonalResponse = await fetch('/api/sync/status/discover_seasonal_playlist');
+        if (seasonalResponse.ok) {
+            const data = await seasonalResponse.json();
+            if (data.status === 'syncing' || data.status === 'starting') {
+                console.log('🔄 Resuming Seasonal Playlist sync polling after page refresh');
+
+                const statusDisplay = document.getElementById('seasonal-playlist-sync-status');
+                if (statusDisplay) {
+                    statusDisplay.style.display = 'block';
+                }
+
+                const syncButton = document.getElementById('seasonal-playlist-sync-btn');
+                if (syncButton) {
+                    syncButton.disabled = true;
+                    syncButton.style.opacity = '0.5';
+                    syncButton.style.cursor = 'not-allowed';
+                }
+
+                startDiscoverSyncPolling('seasonal_playlist', 'discover_seasonal_playlist');
             }
         }
     } catch (error) {
@@ -25724,6 +25756,225 @@ function renderCompactPlaylist(container, tracks) {
     container.innerHTML = html;
 }
 
+async function loadDiscoveryShuffle() {
+    try {
+        const container = document.getElementById('personalized-discovery-shuffle');
+        if (!container) return;
+
+        const response = await fetch('/api/discover/personalized/discovery-shuffle?limit=50');
+        if (!response.ok) return;
+
+        const data = await response.json();
+        if (!data.success || !data.tracks || data.tracks.length === 0) {
+            container.closest('.discover-section').style.display = 'none';
+            return;
+        }
+
+        personalizedDiscoveryShuffle = data.tracks;
+        renderCompactPlaylist(container, data.tracks);
+        container.closest('.discover-section').style.display = 'block';
+
+    } catch (error) {
+        console.error('Error loading discovery shuffle:', error);
+    }
+}
+
+async function loadFamiliarFavorites() {
+    try {
+        const container = document.getElementById('personalized-familiar-favorites');
+        if (!container) return;
+
+        const response = await fetch('/api/discover/personalized/familiar-favorites?limit=50');
+        if (!response.ok) return;
+
+        const data = await response.json();
+        if (!data.success || !data.tracks || data.tracks.length === 0) {
+            container.closest('.discover-section').style.display = 'none';
+            return;
+        }
+
+        personalizedFamiliarFavorites = data.tracks;
+        renderCompactPlaylist(container, data.tracks);
+        container.closest('.discover-section').style.display = 'block';
+
+    } catch (error) {
+        console.error('Error loading familiar favorites:', error);
+    }
+}
+
+// ===============================
+// BUILD A PLAYLIST FEATURE
+// ===============================
+
+let buildPlaylistSearchTimeout = null;
+
+async function searchBuildPlaylistArtists() {
+    const searchInput = document.getElementById('build-playlist-search');
+    const resultsContainer = document.getElementById('build-playlist-search-results');
+    const query = searchInput.value.trim();
+
+    if (!query) {
+        resultsContainer.innerHTML = '';
+        resultsContainer.style.display = 'none';
+        return;
+    }
+
+    // Debounce search
+    clearTimeout(buildPlaylistSearchTimeout);
+    buildPlaylistSearchTimeout = setTimeout(async () => {
+        try {
+            const response = await fetch(`/api/discover/build-playlist/search-artists?query=${encodeURIComponent(query)}`);
+            if (!response.ok) return;
+
+            const data = await response.json();
+            if (!data.success || !data.artists || data.artists.length === 0) {
+                resultsContainer.innerHTML = '<div class="build-playlist-no-results">No artists found</div>';
+                resultsContainer.style.display = 'block';
+                return;
+            }
+
+            // Render search results
+            let html = '';
+            data.artists.forEach(artist => {
+                const imageUrl = artist.image_url || '/static/placeholder-album.png';
+                html += `
+                    <div class="build-playlist-search-result" onclick="addBuildPlaylistArtist('${artist.id}', '${artist.name.replace(/'/g, "\\'")}', '${imageUrl}')">
+                        <img src="${imageUrl}" alt="${artist.name}">
+                        <span>${artist.name}</span>
+                    </div>
+                `;
+            });
+
+            resultsContainer.innerHTML = html;
+            resultsContainer.style.display = 'block';
+
+        } catch (error) {
+            console.error('Error searching artists:', error);
+        }
+    }, 300);
+}
+
+function addBuildPlaylistArtist(artistId, artistName, imageUrl) {
+    // Check if already selected
+    if (buildPlaylistSelectedArtists.some(a => a.id === artistId)) {
+        alert('Artist already selected');
+        return;
+    }
+
+    // Check maximum limit
+    if (buildPlaylistSelectedArtists.length >= 5) {
+        alert('Maximum 5 artists allowed');
+        return;
+    }
+
+    // Add to selected artists
+    buildPlaylistSelectedArtists.push({
+        id: artistId,
+        name: artistName,
+        image_url: imageUrl
+    });
+
+    // Update UI
+    renderBuildPlaylistSelectedArtists();
+
+    // Clear search
+    document.getElementById('build-playlist-search').value = '';
+    document.getElementById('build-playlist-search-results').innerHTML = '';
+    document.getElementById('build-playlist-search-results').style.display = 'none';
+}
+
+function removeBuildPlaylistArtist(artistId) {
+    buildPlaylistSelectedArtists = buildPlaylistSelectedArtists.filter(a => a.id !== artistId);
+    renderBuildPlaylistSelectedArtists();
+}
+
+function renderBuildPlaylistSelectedArtists() {
+    const container = document.getElementById('build-playlist-selected-artists');
+    const generateBtn = document.getElementById('build-playlist-generate-btn');
+
+    if (buildPlaylistSelectedArtists.length === 0) {
+        container.innerHTML = '<div class="build-playlist-no-selection">No artists selected. Search and select 1-5 artists.</div>';
+        generateBtn.disabled = true;
+        generateBtn.style.opacity = '0.5';
+        return;
+    }
+
+    let html = '';
+    buildPlaylistSelectedArtists.forEach(artist => {
+        html += `
+            <div class="build-playlist-selected-artist">
+                <img src="${artist.image_url}" alt="${artist.name}">
+                <span>${artist.name}</span>
+                <button onclick="removeBuildPlaylistArtist('${artist.id}')" class="build-playlist-remove-artist">×</button>
+            </div>
+        `;
+    });
+
+    container.innerHTML = html;
+    generateBtn.disabled = false;
+    generateBtn.style.opacity = '1';
+}
+
+async function generateBuildPlaylist() {
+    if (buildPlaylistSelectedArtists.length === 0) {
+        alert('Please select at least 1 artist');
+        return;
+    }
+
+    const generateBtn = document.getElementById('build-playlist-generate-btn');
+    const resultsContainer = document.getElementById('build-playlist-results');
+    const loadingIndicator = document.getElementById('build-playlist-loading');
+
+    // Show loading
+    generateBtn.disabled = true;
+    generateBtn.style.opacity = '0.5';
+    loadingIndicator.style.display = 'block';
+    resultsContainer.innerHTML = '';
+
+    try {
+        const seedIds = buildPlaylistSelectedArtists.map(a => a.id);
+        const response = await fetch('/api/discover/build-playlist/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                seed_artist_ids: seedIds,
+                playlist_size: 50
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error('Failed to generate playlist');
+        }
+
+        const data = await response.json();
+        if (!data.success || !data.playlist || !data.playlist.tracks) {
+            throw new Error('Invalid playlist data');
+        }
+
+        // Render playlist
+        renderCompactPlaylist(resultsContainer, data.playlist.tracks);
+
+        // Show metadata
+        const metadata = data.playlist.metadata;
+        const metadataHtml = `
+            <div class="build-playlist-metadata">
+                <p><strong>Total Tracks:</strong> ${metadata.total_tracks}</p>
+                <p><strong>Similar Artists Used:</strong> ${metadata.similar_artists_count}</p>
+                <p><strong>Albums Sampled:</strong> ${metadata.albums_count}</p>
+            </div>
+        `;
+        resultsContainer.insertAdjacentHTML('beforebegin', metadataHtml);
+
+    } catch (error) {
+        console.error('Error generating playlist:', error);
+        resultsContainer.innerHTML = '<div class="error-message">Failed to generate playlist. Please try again.</div>';
+    } finally {
+        loadingIndicator.style.display = 'none';
+        generateBtn.disabled = false;
+        generateBtn.style.opacity = '1';
+    }
+}
+
 function openDailyMix(mixIndex) {
     const mix = personalizedDailyMixes[mixIndex];
     if (!mix || !mix.tracks) return;
@@ -25746,6 +25997,22 @@ async function openDownloadModalForDiscoverPlaylist(playlistType, playlistName) 
             tracks = discoverReleaseRadarTracks;
         } else if (playlistType === 'discovery_weekly') {
             tracks = discoverWeeklyTracks;
+        } else if (playlistType === 'seasonal_playlist') {
+            tracks = discoverSeasonalTracks;
+        } else if (playlistType === 'popular_picks') {
+            tracks = personalizedPopularPicks;
+        } else if (playlistType === 'hidden_gems') {
+            tracks = personalizedHiddenGems;
+        } else if (playlistType === 'discovery_shuffle') {
+            tracks = personalizedDiscoveryShuffle;
+        } else if (playlistType === 'familiar_favorites') {
+            tracks = personalizedFamiliarFavorites;
+        } else if (playlistType === 'recently_added') {
+            tracks = personalizedRecentlyAdded;
+        } else if (playlistType === 'top_tracks') {
+            tracks = personalizedTopTracks;
+        } else if (playlistType === 'forgotten_favorites') {
+            tracks = personalizedForgottenFavorites;
         }
 
         if (!tracks || tracks.length === 0) {
