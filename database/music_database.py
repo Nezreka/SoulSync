@@ -521,6 +521,14 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_recent_albums_date ON discovery_recent_albums (release_date)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_recent_albums_artist ON discovery_recent_albums (artist_spotify_id)")
 
+            # Add genres column to discovery_pool if it doesn't exist (migration)
+            cursor.execute("PRAGMA table_info(discovery_pool)")
+            discovery_pool_columns = [column[1] for column in cursor.fetchall()]
+
+            if 'artist_genres' not in discovery_pool_columns:
+                cursor.execute("ALTER TABLE discovery_pool ADD COLUMN artist_genres TEXT")
+                logger.info("Added artist_genres column to discovery_pool table")
+
             logger.info("Discovery tables created successfully")
 
         except Exception as e:
@@ -2589,12 +2597,16 @@ class MusicDatabase:
                 if cursor.fetchone()['count'] > 0:
                     return True  # Already in pool
 
+                # Get artist genres if available
+                artist_genres = track_data.get('artist_genres')
+                artist_genres_json = json.dumps(artist_genres) if artist_genres else None
+
                 cursor.execute("""
                     INSERT INTO discovery_pool
                     (spotify_track_id, spotify_album_id, spotify_artist_id, track_name, artist_name,
                      album_name, album_cover_url, duration_ms, popularity, release_date,
-                     is_new_release, track_data_json, added_date)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                     is_new_release, track_data_json, artist_genres, added_date)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 """, (
                     track_data['spotify_track_id'],
                     track_data['spotify_album_id'],
@@ -2607,7 +2619,8 @@ class MusicDatabase:
                     track_data.get('popularity', 0),
                     track_data['release_date'],
                     track_data.get('is_new_release', False),
-                    json.dumps(track_data['track_data_json'])
+                    json.dumps(track_data['track_data_json']),
+                    artist_genres_json
                 ))
 
                 conn.commit()

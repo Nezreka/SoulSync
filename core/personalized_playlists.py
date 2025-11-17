@@ -9,6 +9,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime, timedelta
 from collections import Counter
 import random
+import json
 from utils.logging_config import get_logger
 
 logger = get_logger("personalized_playlists")
@@ -160,6 +161,170 @@ class PersonalizedPlaylistsService:
 
         except Exception as e:
             logger.error(f"Error getting decade playlist for {decade}s: {e}")
+            return []
+
+    def get_available_genres(self) -> List[Dict]:
+        """
+        Get list of genres with track counts from discovery pool.
+        Uses cached artist genres from database (populated during discovery scan).
+        """
+        try:
+            with self.database._get_connection() as conn:
+                cursor = conn.cursor()
+
+                # Get all tracks with genres from discovery pool
+                cursor.execute("""
+                    SELECT artist_genres
+                    FROM discovery_pool
+                    WHERE artist_genres IS NOT NULL
+                """)
+                rows = cursor.fetchall()
+
+                if not rows:
+                    logger.warning("No genres found in discovery pool - genres may not be populated yet")
+                    return []
+
+                # Count tracks per genre
+                genre_track_count = {}  # {genre: count}
+
+                for row in rows:
+                    try:
+                        artist_genres_json = row[0]
+                        if artist_genres_json:
+                            genres = json.loads(artist_genres_json)
+                            for genre in genres:
+                                genre_track_count[genre] = genre_track_count.get(genre, 0) + 1
+                    except Exception as e:
+                        logger.debug(f"Error parsing genres JSON: {e}")
+                        continue
+
+                # Filter genres with at least 10 tracks and sort by count
+                available_genres = [
+                    {'name': genre, 'track_count': count}
+                    for genre, count in genre_track_count.items()
+                    if count >= 10
+                ]
+                available_genres.sort(key=lambda x: x['track_count'], reverse=True)
+
+                logger.info(f"Found {len(available_genres)} genres with 10+ tracks")
+                return available_genres[:20]  # Top 20 genres
+
+        except Exception as e:
+            logger.error(f"Error getting available genres: {e}")
+            return []
+
+    def get_genre_playlist(self, genre: str, limit: int = 50) -> List[Dict]:
+        """
+        Get tracks from a specific genre with diversity filtering.
+        Uses cached artist genres from database (populated during discovery scan).
+        """
+        try:
+            with self.database._get_connection() as conn:
+                cursor = conn.cursor()
+
+                # Get all tracks with this genre (query cached genres)
+                cursor.execute("""
+                    SELECT
+                        spotify_track_id,
+                        track_name,
+                        artist_name,
+                        album_name,
+                        album_cover_url,
+                        duration_ms,
+                        popularity,
+                        artist_genres
+                    FROM discovery_pool
+                    WHERE artist_genres IS NOT NULL
+                """)
+                rows = cursor.fetchall()
+
+                # Filter tracks that match the genre (using partial matching)
+                matching_tracks = []
+                genre_lower = genre.lower()
+
+                for row in rows:
+                    try:
+                        artist_genres_json = row[7]  # artist_genres column
+                        if artist_genres_json:
+                            genres = json.loads(artist_genres_json)
+                            # Partial match: if search genre is in any artist genre
+                            # e.g., "house" matches "electro house", "progressive house", etc.
+                            genre_match = any(genre_lower in g.lower() for g in genres)
+
+                            if genre_match:
+                                # Convert row to dict (exclude artist_genres from output)
+                                track_dict = {
+                                    'spotify_track_id': row[0],
+                                    'track_name': row[1],
+                                    'artist_name': row[2],
+                                    'album_name': row[3],
+                                    'album_cover_url': row[4],
+                                    'duration_ms': row[5],
+                                    'popularity': row[6]
+                                }
+                                matching_tracks.append(track_dict)
+                    except Exception as e:
+                        logger.debug(f"Error parsing genres for track: {e}")
+                        continue
+
+                if not matching_tracks:
+                    logger.warning(f"No tracks found for genre: {genre}")
+                    return []
+
+                # Shuffle before limiting for better variety
+                random.shuffle(matching_tracks)
+
+                # Limit to 10x for diversity filtering
+                all_tracks = matching_tracks[:limit * 10] if len(matching_tracks) > limit * 10 else matching_tracks
+
+                if not all_tracks:
+                    return []
+
+                # Apply adaptive diversity filtering (relaxed for genres)
+                unique_artists = len(set(track['artist_name'] for track in all_tracks))
+
+                if unique_artists >= 20:
+                    max_per_album = 3
+                    max_per_artist = 5
+                elif unique_artists >= 10:
+                    max_per_album = 4
+                    max_per_artist = 10
+                elif unique_artists >= 5:
+                    max_per_album = 6
+                    max_per_artist = 15
+                else:
+                    # Very limited artist pool - be more lenient
+                    max_per_album = 8
+                    max_per_artist = 25
+
+                logger.info(f"Genre '{genre}' has {unique_artists} artists, {len(all_tracks)} total tracks - limits: {max_per_album}/album, {max_per_artist}/artist")
+
+                # Shuffle and apply diversity
+                random.shuffle(all_tracks)
+                tracks_by_album = {}
+                tracks_by_artist = {}
+                diverse_tracks = []
+
+                for track in all_tracks:
+                    album = track['album_name']
+                    artist = track['artist_name']
+
+                    album_count = tracks_by_album.get(album, 0)
+                    artist_count = tracks_by_artist.get(artist, 0)
+
+                    if album_count < max_per_album and artist_count < max_per_artist:
+                        diverse_tracks.append(track)
+                        tracks_by_album[album] = album_count + 1
+                        tracks_by_artist[artist] = artist_count + 1
+
+                        if len(diverse_tracks) >= limit:
+                            break
+
+                logger.info(f"Found {len(diverse_tracks)} tracks for genre '{genre}'")
+                return diverse_tracks[:limit]
+
+        except Exception as e:
+            logger.error(f"Error getting genre playlist for {genre}: {e}")
             return []
 
     # ========================================
