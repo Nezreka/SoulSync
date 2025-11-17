@@ -31,9 +31,12 @@ COPY . .
 RUN mkdir -p /app/config /app/database /app/logs /app/downloads /app/Transfer && \
     chown -R soulsync:soulsync /app
 
-# Copy example config as default config.json and set proper ownership
-RUN cp /app/config/config.example.json /app/config/config.json && \
-    chown soulsync:soulsync /app/config/config.json
+# Create defaults directory and copy template files
+# These will be used by entrypoint.sh to initialize empty volumes
+RUN mkdir -p /defaults && \
+    cp /app/config/config.example.json /defaults/config.json && \
+    cp /app/config/settings.py /defaults/settings.py && \
+    chmod 644 /defaults/config.json /defaults/settings.py
 
 # Create volume mount points
 VOLUME ["/app/config", "/app/database", "/app/logs", "/app/downloads", "/app/Transfer"]

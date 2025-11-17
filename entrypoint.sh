@@ -46,6 +46,31 @@ fi
 echo "🎭 Setting UMASK to $UMASK"
 umask "$UMASK"
 
+# Initialize config files if they don't exist (first-time setup)
+echo "🔍 Checking for configuration files..."
+
+if [ ! -f "/app/config/config.json" ]; then
+    echo "   📄 Creating default config.json..."
+    cp /defaults/config.json /app/config/config.json
+    chown soulsync:soulsync /app/config/config.json
+else
+    echo "   ✅ config.json already exists"
+fi
+
+if [ ! -f "/app/config/settings.py" ]; then
+    echo "   📄 Creating default settings.py..."
+    cp /defaults/settings.py /app/config/settings.py
+    chown soulsync:soulsync /app/config/settings.py
+else
+    echo "   ✅ settings.py already exists"
+fi
+
+# Ensure all directories exist and have proper permissions
+mkdir -p /app/config /app/database /app/logs /app/downloads /app/Transfer
+chown -R soulsync:soulsync /app/config /app/database /app/logs /app/downloads /app/Transfer
+
+echo "✅ Configuration initialized successfully"
+
 # Display final user info
 echo "👤 Running as:"
 echo "   User: $(id -u soulsync):$(id -g soulsync) ($(id -un soulsync):$(id -gn soulsync))"
