@@ -1466,9 +1466,8 @@ async function loadSettingsData() {
         // Populate Soulseek settings
         document.getElementById('soulseek-url').value = settings.soulseek?.slskd_url || '';
         document.getElementById('soulseek-api-key').value = settings.soulseek?.api_key || '';
-        
+
         // Populate Download settings (right column)
-        document.getElementById('preferred-quality').value = settings.settings?.audio_quality || 'flac';
         document.getElementById('download-path').value = settings.soulseek?.download_path || './downloads';
         document.getElementById('transfer-path').value = settings.soulseek?.transfer_path || './Transfer';
         
@@ -1775,9 +1774,6 @@ async function saveSettings() {
             api_key: document.getElementById('soulseek-api-key').value,
             download_path: document.getElementById('download-path').value,
             transfer_path: document.getElementById('transfer-path').value
-        },
-        settings: {
-            audio_quality: document.getElementById('preferred-quality').value
         },
         database: {
             max_workers: parseInt(document.getElementById('max-workers').value)

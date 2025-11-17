@@ -140,11 +140,7 @@ class ConfigManager:
         validation['jellyfin'] = bool(self.get('jellyfin.base_url')) and bool(self.get('jellyfin.api_key'))
         validation['navidrome'] = bool(self.get('navidrome.base_url')) and bool(self.get('navidrome.username')) and bool(self.get('navidrome.password'))
         validation['active_media_server'] = active_server
-        
+
         return validation
-    
-    def get_quality_preference(self) -> str:
-        """Get the user's preferred audio quality setting"""
-        return self.get('settings.audio_quality', 'flac')
 
 config_manager = ConfigManager()

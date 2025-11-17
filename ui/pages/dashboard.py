@@ -1323,22 +1323,18 @@ class SimpleWishlistDownloadWorker(QRunnable):
         try:
             # Update status: Starting search
             self.signals.status_updated.emit(self.download_index, "🔍 Searching...")
-            
-            # Get quality preference
-            from config.settings import config_manager
-            quality_preference = config_manager.get_quality_preference()
-            
+
             # Use async method in sync context
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            
+
             try:
                 # Update status: Found candidates, analyzing
                 self.signals.status_updated.emit(self.download_index, "🔎 Analyzing results...")
-                
+
                 # Use the enhanced search method that provides more feedback
                 results = loop.run_until_complete(
-                    self._search_with_progress(self.query, quality_preference)
+                    self._search_with_progress(self.query)
                 )
                 
                 if results and len(results) > 0:
@@ -1369,35 +1365,33 @@ class SimpleWishlistDownloadWorker(QRunnable):
         except Exception as e:
             self.signals.download_failed.emit(self.download_index, str(e))
     
-    async def _search_with_progress(self, query, quality_preference):
+    async def _search_with_progress(self, query):
         """Search for tracks with progress updates"""
         try:
             # Emit search progress
             self.signals.status_updated.emit(self.download_index, "🌐 Searching network...")
-            
+
             # Perform the search (this would ideally use the soulseek client's search methods)
             # For now, we'll use the existing search_and_download_best method
             # but in a real implementation, you'd want to separate search from download
-            
+
             # This is a simplified version - in practice you'd want to:
             # 1. Search for candidates
-            # 2. Filter by quality
+            # 2. Filter by quality profile
             # 3. Return the results for manual download
-            
+
             # For now, let's use a direct approach
             from core.soulseek_client import SoulseekClient
             if hasattr(self.soulseek_client, 'search_tracks'):
                 results = await self.soulseek_client.search_tracks(query)
-                
+
                 if results:
-                    # Filter by quality preference if needed
-                    filtered_results = self.soulseek_client.filter_results_by_quality_preference(
-                        results, quality_preference
-                    )
+                    # Filter by quality profile
+                    filtered_results = self.soulseek_client.filter_results_by_quality_preference(results)
                     return filtered_results
-            
+
             return []
-            
+
         except Exception as e:
             logger.error(f"Error in search with progress: {e}")
             return []
@@ -4149,10 +4143,6 @@ class AutoWishlistProcessorWorker(QRunnable):
     def run(self):
         """Run automatic wishlist processing"""
         try:
-            # Get quality preference
-            from config.settings import config_manager
-            quality_preference = config_manager.get_quality_preference()
-            
             # Get all wishlist tracks (no limit - process everything)
             wishlist_tracks = self.wishlist_service.get_wishlist_tracks_for_download()
             
@@ -4188,9 +4178,9 @@ class AutoWishlistProcessorWorker(QRunnable):
                     
                     try:
                         download_id = loop.run_until_complete(
-                            self.soulseek_client.search_and_download_best(query, quality_preference)
+                            self.soulseek_client.search_and_download_best(query)
                         )
-                        
+
                         track_id = track_data.get('spotify_track_id')
                         
                         if download_id and track_id:

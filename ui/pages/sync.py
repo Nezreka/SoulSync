@@ -3068,40 +3068,9 @@ class SyncOptionsPanel(QFrame):
                 border: 2px solid #1db954;
             }
         """)
-        
-        # Quality selection
-        quality_layout = QHBoxLayout()
-        quality_label = QLabel("Preferred Quality:")
-        quality_label.setStyleSheet("color: #b3b3b3; font-size: 11px;")
-        
-        self.quality_combo = QComboBox()
-        self.quality_combo.addItems(["FLAC", "320 kbps MP3", "256 kbps MP3", "Any"])
-        self.quality_combo.setCurrentText("FLAC")
-        self.quality_combo.setStyleSheet("""
-            QComboBox {
-                background: #404040;
-                border: 1px solid #606060;
-                border-radius: 4px;
-                padding: 5px;
-                color: #ffffff;
-                font-size: 11px;
-            }
-            QComboBox::drop-down {
-                border: none;
-            }
-            QComboBox::down-arrow {
-                image: none;
-                border: none;
-            }
-        """)
-        
-        quality_layout.addWidget(quality_label)
-        quality_layout.addWidget(self.quality_combo)
-        quality_layout.addStretch()
-        
+
         layout.addWidget(title_label)
         layout.addWidget(self.download_missing)
-        layout.addLayout(quality_layout)
 
 class SyncPage(QWidget):
     # Signals for dashboard activity tracking
@@ -8935,21 +8904,17 @@ class DownloadMissingTracksModal(QDialog):
                 print(f"❌ Artist '{spotify_artist_name}' NOT found in path: '{slskd_full_path}'. Discarding candidate.")
 
         if verified_candidates:
-            # Apply quality preference filtering before returning
-            from config.settings import config_manager
-            quality_preference = config_manager.get_quality_preference()
-            
-            # Filter candidates by quality preference with smart fallback
+            # Apply quality profile filtering before returning
             if hasattr(self.parent_page, 'soulseek_client'):
                 quality_filtered = self.parent_page.soulseek_client.filter_results_by_quality_preference(
-                    verified_candidates, quality_preference
+                    verified_candidates
                 )
-                
+
                 if quality_filtered:
                     verified_candidates = quality_filtered
-                    print(f"🎯 Applied quality filtering ({quality_preference}): {len(verified_candidates)} candidates remain")
+                    print(f"🎯 Applied quality profile filtering: {len(verified_candidates)} candidates remain")
                 else:
-                    print(f"⚠️ Quality filtering ({quality_preference}) removed all candidates, keeping originals")
+                    print(f"⚠️ Quality profile filtering removed all candidates, keeping originals")
             
             best_confidence = verified_candidates[0].confidence
             best_version = getattr(verified_candidates[0], 'version_type', 'unknown')
