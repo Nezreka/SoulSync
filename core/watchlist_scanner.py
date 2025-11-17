@@ -871,8 +871,8 @@ class WatchlistScanner:
                     cursor = conn.cursor()
                     cursor.execute("""
                         SELECT DISTINCT a.title, ar.name as artist_name
-                        FROM albums_new a
-                        JOIN artists_new ar ON a.artist_id = ar.id
+                        FROM albums a
+                        JOIN artists ar ON a.artist_id = ar.id
                         ORDER BY RANDOM()
                         LIMIT 5
                     """)
@@ -1301,12 +1301,16 @@ class WatchlistScanner:
                         balanced_tracks.append(track['id'])
                         balanced_track_data.append(track)
 
-                # IMPROVED: Sort by score first, then shuffle within score tiers for variety
+                # IMPROVED: Sort by score first, then shuffle for variety
                 balanced_track_data.sort(key=lambda t: t['score'], reverse=True)
 
-                # Take top 50
-                release_radar_tracks = [track['id'] for track in balanced_track_data[:50]]
-                release_radar_track_data = balanced_track_data[:50]
+                # Take top 75, then shuffle for final randomization (prevents album grouping)
+                top_tracks = balanced_track_data[:75]
+                random.shuffle(top_tracks)
+
+                # Take final 50 tracks
+                release_radar_tracks = [track['id'] for track in top_tracks[:50]]
+                release_radar_track_data = top_tracks[:50]
 
                 # Add Release Radar tracks to discovery pool so they're available for fast lookup
                 logger.info(f"Adding {len(release_radar_track_data)} Release Radar tracks to discovery pool...")

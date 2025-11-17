@@ -25507,15 +25507,62 @@ function hideSeasonalSections() {
     }
 }
 
-async function openDownloadModalForSeasonalAlbum(index) {
-    const album = discoverSeasonalAlbums[index];
-    if (!album) return;
+async function openDownloadModalForSeasonalAlbum(albumIndex) {
+    const album = discoverSeasonalAlbums[albumIndex];
+    if (!album) {
+        showToast('Album data not found', 'error');
+        return;
+    }
 
-    // Fetch album tracks
-    const albumDetails = await fetchAlbumTracks(album.spotify_album_id);
-    if (!albumDetails) return;
+    console.log(`📥 Opening Download Missing Tracks modal for album: ${album.album_name}`);
+    showLoadingOverlay(`Loading tracks for ${album.album_name}...`);
 
-    openDownloadMissingModal(albumDetails.tracks, albumDetails.name);
+    try {
+        // Fetch album tracks from Spotify API via backend
+        const response = await fetch(`/api/spotify/album/${album.spotify_album_id}`);
+        if (!response.ok) {
+            throw new Error('Failed to fetch album tracks');
+        }
+
+        const albumData = await response.json();
+        if (!albumData.tracks || albumData.tracks.length === 0) {
+            throw new Error('No tracks found in album');
+        }
+
+        // Convert to expected format
+        const spotifyTracks = albumData.tracks.map(track => {
+            // Normalize artists to array of strings
+            let artists = track.artists || [{ name: album.artist_name }];
+            if (Array.isArray(artists)) {
+                artists = artists.map(a => a.name || a);
+            }
+
+            return {
+                id: track.id,
+                name: track.name,
+                artists: artists,
+                album: {
+                    name: album.album_name,
+                    images: album.album_cover_url ? [{ url: album.album_cover_url }] : []
+                },
+                duration_ms: track.duration_ms || 0
+            };
+        });
+
+        // Create virtual playlist ID
+        const virtualPlaylistId = `seasonal_album_${album.spotify_album_id}`;
+        const playlistName = `${album.album_name} - ${album.artist_name}`;
+
+        // Open download modal (same as Recent Releases)
+        await openDownloadMissingModalForYouTube(virtualPlaylistId, playlistName, spotifyTracks);
+
+        hideLoadingOverlay();
+
+    } catch (error) {
+        console.error(`Error loading seasonal album: ${error.message}`);
+        hideLoadingOverlay();
+        showToast(`Failed to load album tracks: ${error.message}`, 'error');
+    }
 }
 
 async function openDownloadModalForSeasonalPlaylist() {
@@ -25915,6 +25962,8 @@ function renderBuildPlaylistSelectedArtists() {
     generateBtn.style.opacity = '1';
 }
 
+let buildPlaylistTracks = [];
+
 async function generateBuildPlaylist() {
     if (buildPlaylistSelectedArtists.length === 0) {
         alert('Please select at least 1 artist');
@@ -25923,12 +25972,17 @@ async function generateBuildPlaylist() {
 
     const generateBtn = document.getElementById('build-playlist-generate-btn');
     const resultsContainer = document.getElementById('build-playlist-results');
+    const resultsWrapper = document.getElementById('build-playlist-results-wrapper');
     const loadingIndicator = document.getElementById('build-playlist-loading');
+    const metadataDisplay = document.getElementById('build-playlist-metadata-display');
+    const titleEl = document.getElementById('build-playlist-results-title');
+    const subtitleEl = document.getElementById('build-playlist-results-subtitle');
 
     // Show loading
     generateBtn.disabled = true;
     generateBtn.style.opacity = '0.5';
-    loadingIndicator.style.display = 'block';
+    loadingIndicator.style.display = 'flex';
+    resultsWrapper.style.display = 'none';
     resultsContainer.innerHTML = '';
 
     try {
@@ -25951,19 +26005,29 @@ async function generateBuildPlaylist() {
             throw new Error('Invalid playlist data');
         }
 
-        // Render playlist
-        renderCompactPlaylist(resultsContainer, data.playlist.tracks);
+        // Store tracks globally
+        buildPlaylistTracks = data.playlist.tracks;
 
-        // Show metadata
+        // Update title and subtitle
+        const artistNames = buildPlaylistSelectedArtists.map(a => a.name).join(', ');
+        titleEl.textContent = 'Custom Playlist';
+        subtitleEl.textContent = `Based on: ${artistNames}`;
+
+        // Render metadata
         const metadata = data.playlist.metadata;
-        const metadataHtml = `
+        metadataDisplay.innerHTML = `
             <div class="build-playlist-metadata">
                 <p><strong>Total Tracks:</strong> ${metadata.total_tracks}</p>
                 <p><strong>Similar Artists Used:</strong> ${metadata.similar_artists_count}</p>
                 <p><strong>Albums Sampled:</strong> ${metadata.albums_count}</p>
             </div>
         `;
-        resultsContainer.insertAdjacentHTML('beforebegin', metadataHtml);
+
+        // Render playlist
+        renderCompactPlaylist(resultsContainer, data.playlist.tracks);
+
+        // Show results wrapper
+        resultsWrapper.style.display = 'block';
 
     } catch (error) {
         console.error('Error generating playlist:', error);
@@ -25973,6 +26037,20 @@ async function generateBuildPlaylist() {
         generateBtn.disabled = false;
         generateBtn.style.opacity = '1';
     }
+}
+
+async function openDownloadModalForBuildPlaylist() {
+    if (!buildPlaylistTracks || buildPlaylistTracks.length === 0) {
+        showToast('No playlist tracks available', 'warning');
+        return;
+    }
+
+    const artistNames = buildPlaylistSelectedArtists.map(a => a.name).join(', ');
+    const playlistName = `Custom Playlist - ${artistNames}`;
+    const virtualPlaylistId = 'build_playlist_custom';
+
+    // Open download modal
+    await openDownloadMissingModalForYouTube(virtualPlaylistId, playlistName, buildPlaylistTracks);
 }
 
 function openDailyMix(mixIndex) {
@@ -26013,6 +26091,8 @@ async function openDownloadModalForDiscoverPlaylist(playlistType, playlistName) 
             tracks = personalizedTopTracks;
         } else if (playlistType === 'forgotten_favorites') {
             tracks = personalizedForgottenFavorites;
+        } else if (playlistType === 'build_playlist') {
+            tracks = buildPlaylistTracks;
         }
 
         if (!tracks || tracks.length === 0) {

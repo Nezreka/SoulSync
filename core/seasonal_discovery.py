@@ -624,13 +624,21 @@ class SeasonalDiscoveryService:
                         for track in album_data['tracks'].get('items', []):
                             # Use track's actual artist, not album artist
                             track_artist = track['artists'][0]['name'] if track.get('artists') else album['artist_name']
-                            all_tracks.append({
+
+                            track_data = {
                                 'spotify_track_id': track['id'],
                                 'track_name': track['name'],
                                 'artist_name': track_artist,
                                 'album_name': album['album_name'],
-                                'popularity': album.get('popularity', 50)
-                            })
+                                'popularity': album.get('popularity', 50),
+                                'album_cover_url': album.get('album_cover_url'),
+                                'duration_ms': track.get('duration_ms', 0)
+                            }
+
+                            all_tracks.append(track_data)
+
+                            # Also save track to seasonal_tracks table for later retrieval
+                            self._add_seasonal_track(season_key, track_data)
 
                     import time
                     time.sleep(0.3)  # Rate limiting
