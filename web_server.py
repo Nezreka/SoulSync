@@ -14708,8 +14708,8 @@ def get_current_seasonal_content():
         from core.seasonal_discovery import SEASONAL_CONFIG
         config = SEASONAL_CONFIG[current_season]
 
-        # Get albums
-        albums = seasonal_service.get_seasonal_albums(current_season, limit=20)
+        # Get albums (increased limit for more variety)
+        albums = seasonal_service.get_seasonal_albums(current_season, limit=40)
 
         # Check if playlist is curated
         playlist_track_ids = seasonal_service.get_curated_seasonal_playlist(current_season)
@@ -14740,7 +14740,7 @@ def get_seasonal_albums(season_key):
         database = get_database()
         seasonal_service = get_seasonal_discovery_service(spotify_client, database)
 
-        albums = seasonal_service.get_seasonal_albums(season_key, limit=20)
+        albums = seasonal_service.get_seasonal_albums(season_key, limit=40)
         config = SEASONAL_CONFIG[season_key]
 
         return jsonify({
