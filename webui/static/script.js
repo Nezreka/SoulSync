@@ -4204,6 +4204,7 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
                    virtualPlaylistId.startsWith('discover_') ? 'SoulSync' :
                    virtualPlaylistId.startsWith('seasonal_') ? 'SoulSync' :
                    virtualPlaylistId.startsWith('build_playlist_') ? 'SoulSync' :
+                   virtualPlaylistId.startsWith('decade_') ? 'SoulSync' :
                    virtualPlaylistId === 'build_playlist_custom' ? 'SoulSync' :
                    'YouTube';
 
@@ -24741,7 +24742,8 @@ async function loadDiscoverPage() {
         loadPersonalizedForgottenFavorites(),  // NEW: Forgotten favorites
         loadDiscoveryShuffle(),  // NEW: Discovery Shuffle
         loadFamiliarFavorites(),  // NEW: Familiar Favorites
-        loadMoreForYou()
+        loadDecadeBrowser(),  // Decade browser
+        loadQuickPicks()  // Quick picks action cards
     ]);
 
     // Check for active syncs after page load
@@ -24878,6 +24880,7 @@ async function loadDiscoverHero() {
 function displayDiscoverHeroArtist(artist) {
     const titleEl = document.getElementById('discover-hero-title');
     const subtitleEl = document.getElementById('discover-hero-subtitle');
+    const metaEl = document.getElementById('discover-hero-meta');
     const imageEl = document.getElementById('discover-hero-image');
     const bgEl = document.getElementById('discover-hero-bg');
 
@@ -24893,14 +24896,37 @@ function displayDiscoverHeroArtist(artist) {
         } else {
             subtitle = 'Similar to an artist in your watchlist';
         }
+        subtitleEl.textContent = subtitle;
+    }
 
-        // Add genre context if available
-        if (artist.genres && artist.genres.length > 0) {
-            const topGenres = artist.genres.slice(0, 2).join(', ');
-            subtitle += ` • ${topGenres}`;
+    // Build metadata section with popularity and genres
+    if (metaEl) {
+        let metaHTML = '<div class="discover-hero-meta-content">';
+
+        // Add popularity indicator
+        if (artist.popularity !== undefined && artist.popularity > 0) {
+            const popularityClass = artist.popularity >= 80 ? 'high' :
+                                    artist.popularity >= 50 ? 'medium' : 'low';
+            metaHTML += `
+                <div class="hero-meta-item hero-popularity ${popularityClass}">
+                    <span class="meta-icon">⭐</span>
+                    <span class="meta-value">${artist.popularity}/100</span>
+                    <span class="meta-label">Popularity</span>
+                </div>
+            `;
         }
 
-        subtitleEl.textContent = subtitle;
+        // Add genre tags
+        if (artist.genres && artist.genres.length > 0) {
+            metaHTML += '<div class="hero-meta-item hero-genres">';
+            artist.genres.slice(0, 3).forEach(genre => {
+                metaHTML += `<span class="genre-tag">${genre}</span>`;
+            });
+            metaHTML += '</div>';
+        }
+
+        metaHTML += '</div>';
+        metaEl.innerHTML = metaHTML;
     }
 
     if (imageEl && artist.image_url) {
@@ -25225,98 +25251,152 @@ async function loadDiscoverWeekly() {
     }
 }
 
-async function loadMoreForYou() {
+// ===============================
+// DECADE BROWSER
+// ===============================
+
+let selectedDecade = null;
+let decadeTracks = [];
+
+async function loadDecadeBrowser() {
     try {
-        const grid = document.getElementById('more-playlists-grid');
-        if (!grid) return;
+        const carousel = document.getElementById('decade-browser-carousel');
+        if (!carousel) return;
 
-        grid.innerHTML = '<div class="discover-loading"><div class="loading-spinner"></div><p>Loading playlists...</p></div>';
-
-        // Fetch discovery pool tracks to create curated playlists
-        const response = await fetch('/api/discover/weekly');
+        // Fetch available decades from backend
+        const response = await fetch('/api/discover/decades/available');
         if (!response.ok) {
-            throw new Error('Failed to fetch tracks for playlists');
+            throw new Error('Failed to fetch available decades');
+        }
+
+        const data = await response.json();
+        if (!data.success || !data.decades || data.decades.length === 0) {
+            carousel.innerHTML = '<div class="discover-empty"><p>No decade content available yet. Run a watchlist scan to populate your discovery pool!</p></div>';
+            return;
+        }
+
+        // Build decade cards from available decades
+        let html = '';
+        data.decades.forEach(decade => {
+            const icon = getDecadeIcon(decade.year);
+            const label = `${decade.year}s`;
+            html += `
+                <div class="decade-card" onclick="openDecadePlaylist(${decade.year})">
+                    <div class="decade-card-content">
+                        <div class="decade-icon">${icon}</div>
+                        <div class="decade-year">${label}</div>
+                        <div class="decade-title">${decade.track_count} tracks</div>
+                    </div>
+                </div>
+            `;
+        });
+
+        carousel.innerHTML = html;
+
+    } catch (error) {
+        console.error('Error loading decade browser:', error);
+        const carousel = document.getElementById('decade-browser-carousel');
+        if (carousel) {
+            carousel.innerHTML = '<div class="discover-empty"><p>Failed to load decades</p></div>';
+        }
+    }
+}
+
+function getDecadeIcon(year) {
+    const icons = {
+        1950: '🎺',
+        1960: '🎸',
+        1970: '🕺',
+        1980: '📻',
+        1990: '💿',
+        2000: '📱',
+        2010: '🎧',
+        2020: '🌐'
+    };
+    return icons[year] || '🎵';
+}
+
+async function openDecadePlaylist(decade) {
+    try {
+        showLoadingOverlay(`Loading ${decade}s playlist...`);
+
+        const response = await fetch(`/api/discover/decade/${decade}`);
+        if (!response.ok) {
+            throw new Error('Failed to fetch decade playlist');
         }
 
         const data = await response.json();
         if (!data.success || !data.tracks || data.tracks.length === 0) {
-            grid.innerHTML = '<div class="discover-empty"><p>No playlists available yet</p></div>';
+            const message = data.message || `No tracks found for the ${decade}s`;
+            showToast(message, 'info');
+            hideLoadingOverlay();
             return;
         }
 
-        const tracks = data.tracks;
+        selectedDecade = decade;
+        decadeTracks = data.tracks;
 
-        // Create curated playlists
-        const playlists = [];
+        // Open download modal
+        const playlistName = `${decade}s Classics`;
+        const virtualPlaylistId = `decade_${decade}`;
 
-        // 1. Popular Picks (by popularity score)
-        const popularTracks = [...tracks].sort((a, b) => b.popularity - a.popularity).slice(0, 20);
-        if (popularTracks.length > 0) {
-            playlists.push({
-                name: 'Popular Picks',
-                description: 'Trending tracks from similar artists',
-                track_count: popularTracks.length,
-                cover: popularTracks[0].album_cover_url
-            });
-        }
+        await openDownloadMissingModalForYouTube(virtualPlaylistId, playlistName, data.tracks);
+        hideLoadingOverlay();
 
-        // 2. Deep Cuts (lower popularity, hidden gems)
-        const deepCuts = [...tracks].filter(t => t.popularity < 50).slice(0, 20);
-        if (deepCuts.length > 0) {
-            playlists.push({
-                name: 'Deep Cuts',
-                description: 'Hidden gems you might have missed',
-                track_count: deepCuts.length,
-                cover: deepCuts[0].album_cover_url
-            });
-        }
+    } catch (error) {
+        console.error(`Error opening ${decade}s playlist:`, error);
+        showToast(`Failed to load ${decade}s playlist`, 'error');
+        hideLoadingOverlay();
+    }
+}
 
-        // 3. Fresh Finds (newest additions to pool)
-        const freshFinds = [...tracks].slice(0, 20);
-        if (freshFinds.length > 0) {
-            playlists.push({
-                name: 'Fresh Finds',
-                description: 'Recently added to your discovery pool',
-                track_count: freshFinds.length,
-                cover: freshFinds[0].album_cover_url
-            });
-        }
+// ===============================
+// QUICK PICKS
+// ===============================
 
-        // 4. Artist Mix (group by artist diversity)
-        const artistMap = {};
-        tracks.forEach(track => {
-            if (!artistMap[track.artist_name]) {
-                artistMap[track.artist_name] = [];
+function loadQuickPicks() {
+    try {
+        const grid = document.getElementById('quick-picks-grid');
+        if (!grid) return;
+
+        const quickPicks = [
+            {
+                icon: '🎲',
+                title: 'Surprise Me',
+                description: 'Shuffle your discovery pool',
+                gradient: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                action: 'scrollToSection("personalized-discovery-shuffle")'
+            },
+            {
+                icon: '🔥',
+                title: 'Trending Now',
+                description: 'High popularity discoveries',
+                gradient: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
+                action: 'scrollToSection("personalized-popular-picks")'
+            },
+            {
+                icon: '💎',
+                title: 'Deep Cuts',
+                description: 'Underground hidden gems',
+                gradient: 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)',
+                action: 'scrollToSection("personalized-hidden-gems")'
+            },
+            {
+                icon: '⏰',
+                title: 'Time Machine',
+                description: 'Browse by decade',
+                gradient: 'linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)',
+                action: 'scrollToSection("decade-browser-carousel")'
             }
-            if (artistMap[track.artist_name].length < 3) {
-                artistMap[track.artist_name].push(track);
-            }
-        });
-        const mixTracks = Object.values(artistMap).flat().slice(0, 25);
-        if (mixTracks.length > 0) {
-            playlists.push({
-                name: 'Artist Mix',
-                description: 'Diverse selection from multiple artists',
-                track_count: mixTracks.length,
-                cover: mixTracks[0].album_cover_url
-            });
-        }
+        ];
 
-        // Build playlist grid HTML
         let html = '';
-        playlists.forEach(playlist => {
-            const coverUrl = playlist.cover || '/static/placeholder-album.png';
+        quickPicks.forEach(pick => {
             html += `
-                <div class="discover-playlist-card">
-                    <div class="discover-playlist-cover">
-                        <img src="${coverUrl}" alt="${playlist.name}">
-                        <div class="playlist-play-overlay">▶</div>
-                    </div>
-                    <div class="discover-playlist-info">
-                        <h4 class="discover-playlist-name">${playlist.name}</h4>
-                        <p class="discover-playlist-description">${playlist.description}</p>
-                        <p class="discover-playlist-count">${playlist.track_count} tracks</p>
-                    </div>
+                <div class="quick-pick-card" onclick="${pick.action}" style="background: ${pick.gradient};">
+                    <div class="quick-pick-icon">${pick.icon}</div>
+                    <h3 class="quick-pick-title">${pick.title}</h3>
+                    <p class="quick-pick-description">${pick.description}</p>
                 </div>
             `;
         });
@@ -25324,12 +25404,31 @@ async function loadMoreForYou() {
         grid.innerHTML = html;
 
     } catch (error) {
-        console.error('Error loading more for you:', error);
-        const grid = document.getElementById('more-playlists-grid');
-        if (grid) {
-            grid.innerHTML = '<div class="discover-empty"><p>Failed to load playlists</p></div>';
+        console.error('Error loading quick picks:', error);
+    }
+}
+
+function scrollToSection(sectionId) {
+    const section = document.getElementById(sectionId);
+    if (!section) {
+        console.warn(`Section not found: ${sectionId}`);
+        return;
+    }
+
+    // Show section if it's hidden
+    const parentSection = section.closest('.discover-section');
+    if (parentSection) {
+        const currentDisplay = window.getComputedStyle(parentSection).display;
+        if (currentDisplay === 'none') {
+            parentSection.style.display = 'block';
+            console.log(`Showing hidden section: ${sectionId}`);
         }
     }
+
+    // Wait a tick for layout, then scroll
+    setTimeout(() => {
+        section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 100);
 }
 
 // ===============================

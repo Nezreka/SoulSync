@@ -14538,11 +14538,17 @@ def get_discover_hero():
     try:
         database = get_database()
 
-        # Get top similar artists (by occurrence count)
-        similar_artists = database.get_top_similar_artists(limit=10)
+        # Get top similar artists (by occurrence count) - get 20 for variety
+        similar_artists = database.get_top_similar_artists(limit=20)
 
         if not similar_artists:
             return jsonify({"success": True, "artists": []})
+
+        # Shuffle for variety and take top 10
+        import random
+        shuffled = list(similar_artists)
+        random.shuffle(shuffled)
+        similar_artists = shuffled[:10]
 
         # Convert to JSON format with Spotify data enrichment
         hero_artists = []
@@ -15106,6 +15112,91 @@ def generate_custom_playlist():
 
     except Exception as e:
         print(f"Error generating custom playlist: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/discover/decades/available', methods=['GET'])
+def get_available_decades():
+    """Get list of decades that have content in discovery pool"""
+    try:
+        database = get_database()
+
+        with database._get_connection() as conn:
+            cursor = conn.cursor()
+
+            # Get distinct decades from discovery pool
+            cursor.execute("""
+                SELECT DISTINCT
+                    (CAST(SUBSTR(release_date, 1, 4) AS INTEGER) / 10) * 10 as decade,
+                    COUNT(*) as track_count
+                FROM discovery_pool
+                WHERE release_date IS NOT NULL
+                  AND CAST(SUBSTR(release_date, 1, 4) AS INTEGER) >= 1950
+                  AND CAST(SUBSTR(release_date, 1, 4) AS INTEGER) <= 2029
+                GROUP BY decade
+                HAVING track_count >= 10
+                ORDER BY decade ASC
+            """)
+
+            rows = cursor.fetchall()
+            decades = []
+            for row in rows:
+                decades.append({
+                    'year': row[0],
+                    'track_count': row[1]
+                })
+
+            return jsonify({
+                "success": True,
+                "decades": decades
+            })
+
+    except Exception as e:
+        print(f"Error getting available decades: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/discover/decade/<int:decade>', methods=['GET'])
+def get_discover_decade_playlist(decade):
+    """Get tracks from a specific decade for discovery page"""
+    try:
+        from core.personalized_playlists import get_personalized_playlists_service
+
+        database = get_database()
+        service = get_personalized_playlists_service(database, spotify_client)
+
+        tracks = service.get_decade_playlist(decade, limit=50)
+
+        if not tracks:
+            return jsonify({
+                "success": True,
+                "tracks": [],
+                "decade": decade,
+                "message": f"No tracks found for the {decade}s"
+            }), 200
+
+        # Convert to Spotify format for modal compatibility
+        spotify_tracks = []
+        for track in tracks:
+            spotify_tracks.append({
+                'id': track.get('spotify_track_id', track.get('id')),
+                'name': track.get('track_name', track.get('name')),
+                'artists': [track.get('artist_name', 'Unknown')],
+                'album': {
+                    'name': track.get('album_name', 'Unknown'),
+                    'images': [{'url': track.get('album_cover_url')}] if track.get('album_cover_url') else []
+                },
+                'duration_ms': track.get('duration_ms', 0)
+            })
+
+        return jsonify({
+            "success": True,
+            "tracks": spotify_tracks,
+            "decade": decade
+        })
+
+    except Exception as e:
+        print(f"Error getting decade playlist: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500

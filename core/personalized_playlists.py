@@ -73,7 +73,7 @@ class PersonalizedPlaylistsService:
 
     def get_decade_playlist(self, decade: int, limit: int = 100) -> List[Dict]:
         """
-        Get tracks from a specific decade.
+        Get tracks from a specific decade from discovery pool with diversity filtering.
 
         Args:
             decade: Decade year (e.g., 2020 for 2020s, 2010 for 2010s)
@@ -86,56 +86,59 @@ class PersonalizedPlaylistsService:
             with self.database._get_connection() as conn:
                 cursor = conn.cursor()
 
-                # Check if release_year column exists
-                cursor.execute("PRAGMA table_info(tracks)")
-                columns = [row['name'] for row in cursor.fetchall()]
-
-                if 'release_year' in columns:
-                    cursor.execute("""
-                        SELECT
-                            t.id,
-                            t.spotify_track_id,
-                            t.title as track_name,
-                            t.duration_ms,
-                            ar.name as artist_name,
-                            al.title as album_name,
-                            al.cover_url as album_cover_url,
-                            t.popularity,
-                            t.release_year
-                        FROM tracks t
-                        LEFT JOIN artists ar ON t.artist_id = ar.id
-                        LEFT JOIN albums al ON t.album_id = al.id
-                        WHERE t.spotify_track_id IS NOT NULL
-                          AND t.release_year BETWEEN ? AND ?
-                        ORDER BY t.popularity DESC
-                        LIMIT ?
-                    """, (start_year, end_year, limit))
-                else:
-                    # Try to extract year from album release_date
-                    logger.warning("release_year column not found - using album release_date")
-                    cursor.execute("""
-                        SELECT
-                            t.id,
-                            t.spotify_track_id,
-                            t.title as track_name,
-                            t.duration_ms,
-                            ar.name as artist_name,
-                            al.title as album_name,
-                            al.cover_url as album_cover_url,
-                            t.popularity,
-                            al.release_date
-                        FROM tracks t
-                        LEFT JOIN artists ar ON t.artist_id = ar.id
-                        LEFT JOIN albums al ON t.album_id = al.id
-                        WHERE t.spotify_track_id IS NOT NULL
-                          AND al.release_date IS NOT NULL
-                          AND CAST(SUBSTR(al.release_date, 1, 4) AS INTEGER) BETWEEN ? AND ?
-                        ORDER BY t.popularity DESC
-                        LIMIT ?
-                    """, (start_year, end_year, limit))
+                # Query discovery_pool - get 10x more for diversity filtering
+                cursor.execute("""
+                    SELECT
+                        spotify_track_id,
+                        track_name,
+                        artist_name,
+                        album_name,
+                        album_cover_url,
+                        duration_ms,
+                        popularity,
+                        release_date
+                    FROM discovery_pool
+                    WHERE release_date IS NOT NULL
+                      AND CAST(SUBSTR(release_date, 1, 4) AS INTEGER) BETWEEN ? AND ?
+                    ORDER BY RANDOM()
+                    LIMIT ?
+                """, (start_year, end_year, limit * 10))
 
                 rows = cursor.fetchall()
-                return [dict(row) for row in rows]
+                all_tracks = [dict(row) for row in rows]
+
+                if not all_tracks:
+                    logger.warning(f"No tracks found for {decade}s")
+                    return []
+
+                # Apply diversity constraint: max 3 tracks per album, max 4 per artist
+                # Shuffle first for randomness
+                import random
+                random.shuffle(all_tracks)
+
+                tracks_by_album = {}
+                tracks_by_artist = {}
+                diverse_tracks = []
+
+                for track in all_tracks:
+                    album = track['album_name']
+                    artist = track['artist_name']
+
+                    # Count current tracks for this album/artist
+                    album_count = tracks_by_album.get(album, 0)
+                    artist_count = tracks_by_artist.get(artist, 0)
+
+                    # Apply more lenient limits: max 3 per album, max 4 per artist
+                    if album_count < 3 and artist_count < 4:
+                        diverse_tracks.append(track)
+                        tracks_by_album[album] = album_count + 1
+                        tracks_by_artist[artist] = artist_count + 1
+
+                        if len(diverse_tracks) >= limit:
+                            break
+
+                logger.info(f"Found {len(diverse_tracks)} tracks from {decade}s in discovery pool (with diversity filtering)")
+                return diverse_tracks[:limit]
 
         except Exception as e:
             logger.error(f"Error getting decade playlist for {decade}s: {e}")
