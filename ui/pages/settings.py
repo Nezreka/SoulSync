@@ -1258,23 +1258,7 @@ class SettingsPage(QWidget):
             
             if hasattr(self, 'log_path_display'):
                 self.log_path_display.setText(logging_config.get('path', 'logs/app.log'))
-            
-            # Load quality preference
-            if hasattr(self, 'quality_combo'):
-                audio_quality = config_manager.get('settings.audio_quality', 'FLAC')
-                # Map config values to combo box text
-                quality_mapping = {
-                    'flac': 'FLAC',
-                    'mp3_320': '320 kbps MP3',
-                    'mp3_256': '256 kbps MP3', 
-                    'mp3_192': '192 kbps MP3',
-                    'any': 'Any'
-                }
-                display_quality = quality_mapping.get(audio_quality.lower(), audio_quality)
-                index = self.quality_combo.findText(display_quality)
-                if index >= 0:
-                    self.quality_combo.setCurrentIndex(index)
-                
+
             # Load metadata enhancement settings
             metadata_config = config_manager.get('metadata_enhancement', {})
             if hasattr(self, 'metadata_enabled_checkbox'):
@@ -1329,21 +1313,7 @@ class SettingsPage(QWidget):
             if hasattr(self, 'max_workers_combo'):
                 max_workers = int(self.max_workers_combo.currentText())
                 config_manager.set('database.max_workers', max_workers)
-            
-            # Save Quality preference
-            if hasattr(self, 'quality_combo'):
-                quality_text = self.quality_combo.currentText()
-                # Map combo box text to config values
-                config_mapping = {
-                    'FLAC': 'flac',
-                    '320 kbps MP3': 'mp3_320',
-                    '256 kbps MP3': 'mp3_256',
-                    '192 kbps MP3': 'mp3_192',
-                    'Any': 'any'
-                }
-                config_value = config_mapping.get(quality_text, 'flac')
-                config_manager.set('settings.audio_quality', config_value)
-            
+
             # Emit signals for path changes to update other pages immediately
             self.settings_changed.emit('soulseek.download_path', self.download_path_input.text())
             self.settings_changed.emit('soulseek.transfer_path', self.transfer_path_input.text())
@@ -2721,22 +2691,7 @@ class SettingsPage(QWidget):
         download_layout = QVBoxLayout(download_group)
         download_layout.setContentsMargins(16, 20, 16, 16)
         download_layout.setSpacing(12)
-        
-        # Quality preference
-        quality_layout = QHBoxLayout()
-        quality_label = QLabel("Preferred Quality:")
-        quality_label.setStyleSheet(self.get_label_style(12))
-        
-        self.quality_combo = QComboBox()
-        self.quality_combo.addItems(["FLAC", "320 kbps MP3", "256 kbps MP3", "192 kbps MP3", "Any"])
-        self.quality_combo.setCurrentText("FLAC")
-        self.quality_combo.setStyleSheet(self.get_combo_style())
-        self.quality_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.form_inputs['settings.audio_quality'] = self.quality_combo
-        
-        quality_layout.addWidget(quality_label)
-        quality_layout.addWidget(self.quality_combo)
-        
+
         # Download path
         path_container = QVBoxLayout()
         path_label = QLabel("Slskd Download Dir:")
@@ -2776,8 +2731,7 @@ class SettingsPage(QWidget):
         transfer_input_layout.addWidget(self.transfer_path_input)
         transfer_input_layout.addWidget(transfer_browse_btn)
         transfer_path_container.addLayout(transfer_input_layout)
-        
-        download_layout.addLayout(quality_layout)
+
         download_layout.addLayout(path_container)
         download_layout.addLayout(transfer_path_container)
         

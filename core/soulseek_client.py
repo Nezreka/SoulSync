@@ -1246,25 +1246,25 @@ class SoulseekClient:
             logger.error(f"Error during search history buffer maintenance: {e}")
             return False
     
-    async def search_and_download_best(self, query: str, preferred_quality: str = 'flac') -> Optional[str]:
+    async def search_and_download_best(self, query: str) -> Optional[str]:
         results = await self.search(query)
-        
+
         if not results:
             logger.warning(f"No results found for: {query}")
             return None
-        
-        # Use the new quality filtering
-        filtered_results = self.filter_results_by_quality_preference(results, preferred_quality)
-        
+
+        # Use quality profile filtering
+        filtered_results = self.filter_results_by_quality_preference(results)
+
         if not filtered_results:
             logger.warning(f"No suitable quality results found for: {query}")
             return None
-            
+
         best_result = filtered_results[0]
         quality_info = f"{best_result.quality.upper()}"
         if best_result.bitrate:
             quality_info += f" {best_result.bitrate}kbps"
-            
+
         logger.info(f"Downloading: {best_result.filename} ({quality_info}) from {best_result.username}")
         return await self.download(best_result.username, best_result.filename, best_result.size)
     
@@ -1280,73 +1280,131 @@ class SoulseekClient:
             logger.debug(f"Connection check failed: {e}")
             return False
     
-    def filter_results_by_quality_preference(self, results: List[TrackResult], preferred_quality: str) -> List[TrackResult]:
+    def filter_results_by_quality_preference(self, results: List[TrackResult]) -> List[TrackResult]:
         """
-        Filter and sort results by quality preference with smart fallback.
-        Prefers exact match, then higher quality, then lower quality.
+        Filter candidates based on user's quality profile with file size constraints.
+        Uses priority waterfall logic: tries highest priority quality first, falls back to lower priorities.
+        Returns candidates matching quality profile constraints, sorted by confidence and size.
         """
+        from database.music_database import MusicDatabase
+
         if not results:
             return []
-        
-        # Normalize preference to match our quality strings
-        quality_map = {
-            'flac': 'flac',
-            'mp3_320': ('mp3', 320),
-            'mp3_256': ('mp3', 256), 
-            'mp3_192': ('mp3', 192),
-            'any': 'any'
+
+        # Get quality profile from database
+        db = MusicDatabase()
+        profile = db.get_quality_profile()
+
+        logger.debug(f"Quality Filter: Using profile preset '{profile.get('preset', 'custom')}', filtering {len(results)} candidates")
+
+        # Categorize candidates by quality with file size constraints
+        quality_buckets = {
+            'flac': [],
+            'mp3_320': [],
+            'mp3_256': [],
+            'mp3_192': [],
+            'other': []
         }
-        
-        if preferred_quality not in quality_map:
-            return results  # Return all if unknown preference
-            
-        if preferred_quality == 'any':
-            # Sort by quality score for "any" preference
-            return sorted(results, key=lambda x: x.quality_score, reverse=True)
-        
-        # Separate results by quality categories
-        exact_matches = []
-        higher_quality = []
-        lower_quality = []
-        
-        if preferred_quality == 'flac':
-            for result in results:
-                if result.quality.lower() == 'flac':
-                    exact_matches.append(result)
-                elif result.quality.lower() == 'mp3' and result.bitrate and result.bitrate >= 320:
-                    higher_quality.append(result)  # High-quality MP3 as fallback
+
+        # Track all candidates that pass size checks (for fallback)
+        size_filtered_all = []
+
+        for candidate in results:
+            if not candidate.quality:
+                quality_buckets['other'].append(candidate)
+                continue
+
+            track_format = candidate.quality.lower()
+            track_bitrate = candidate.bitrate or 0
+            file_size_mb = candidate.size / (1024 * 1024)  # Convert bytes to MB
+
+            # Categorize and apply file size constraints
+            if track_format == 'flac':
+                quality_config = profile['qualities'].get('flac', {})
+                min_mb = quality_config.get('min_mb', 0)
+                max_mb = quality_config.get('max_mb', 999)
+
+                # Check if within size range
+                if min_mb <= file_size_mb <= max_mb:
+                    # Add to bucket if enabled
+                    if quality_config.get('enabled', False):
+                        quality_buckets['flac'].append(candidate)
+                    # Always track for fallback
+                    size_filtered_all.append(candidate)
                 else:
-                    lower_quality.append(result)
+                    logger.debug(f"Quality Filter: FLAC file rejected - {file_size_mb:.1f}MB outside range {min_mb}-{max_mb}MB")
+
+            elif track_format == 'mp3':
+                # Determine MP3 quality tier based on bitrate
+                if track_bitrate >= 320:
+                    quality_key = 'mp3_320'
+                elif track_bitrate >= 256:
+                    quality_key = 'mp3_256'
+                elif track_bitrate >= 192:
+                    quality_key = 'mp3_192'
+                else:
+                    quality_buckets['other'].append(candidate)
+                    continue
+
+                quality_config = profile['qualities'].get(quality_key, {})
+                min_mb = quality_config.get('min_mb', 0)
+                max_mb = quality_config.get('max_mb', 999)
+
+                # Check if within size range
+                if min_mb <= file_size_mb <= max_mb:
+                    # Add to bucket if enabled
+                    if quality_config.get('enabled', False):
+                        quality_buckets[quality_key].append(candidate)
+                    # Always track for fallback
+                    size_filtered_all.append(candidate)
+                else:
+                    logger.debug(f"Quality Filter: {quality_key.upper()} file rejected - {file_size_mb:.1f}MB outside range {min_mb}-{max_mb}MB")
+            else:
+                quality_buckets['other'].append(candidate)
+
+        # Sort each bucket by quality score and size
+        for bucket in quality_buckets.values():
+            bucket.sort(key=lambda x: (x.quality_score, x.size), reverse=True)
+
+        # Debug logging
+        for quality, bucket in quality_buckets.items():
+            if bucket:
+                logger.debug(f"Quality Filter: Found {len(bucket)} '{quality}' candidates (after size filtering)")
+
+        # Waterfall priority logic: try qualities in priority order
+        # Build priority list from enabled qualities
+        quality_priorities = []
+        for quality_name, quality_config in profile['qualities'].items():
+            if quality_config.get('enabled', False):
+                priority = quality_config.get('priority', 999)
+                quality_priorities.append((priority, quality_name))
+
+        # Sort by priority (lower number = higher priority)
+        quality_priorities.sort()
+
+        # Try each quality in priority order
+        for priority, quality_name in quality_priorities:
+            candidates_for_quality = quality_buckets.get(quality_name, [])
+            if candidates_for_quality:
+                logger.info(f"Quality Filter: Returning {len(candidates_for_quality)} '{quality_name}' candidates (priority {priority})")
+                return candidates_for_quality
+
+        # If no enabled qualities matched, check if fallback is enabled
+        if profile.get('fallback_enabled', True):
+            logger.warning(f"Quality Filter: No enabled qualities matched, falling back to size-filtered candidates")
+            # Return candidates that passed size checks (even if quality disabled)
+            # This respects file size constraints while allowing any quality
+            if size_filtered_all:
+                size_filtered_all.sort(key=lambda x: (x.quality_score, x.size), reverse=True)
+                logger.info(f"Quality Filter: Returning {len(size_filtered_all)} fallback candidates (size-filtered, any quality)")
+                return size_filtered_all
+            else:
+                # All candidates failed size checks - respect user's constraints and fail
+                logger.warning(f"Quality Filter: All candidates failed size checks, returning empty (respecting size constraints)")
+                return []
         else:
-            # MP3 preference with specific bitrate
-            pref_format, pref_bitrate = quality_map[preferred_quality]
-            
-            for result in results:
-                if result.quality.lower() == 'flac':
-                    higher_quality.append(result)  # FLAC is always higher quality
-                elif result.quality.lower() == pref_format:
-                    if result.bitrate:
-                        if result.bitrate == pref_bitrate:
-                            exact_matches.append(result)
-                        elif result.bitrate > pref_bitrate:
-                            higher_quality.append(result)
-                        else:
-                            lower_quality.append(result)
-                    else:
-                        exact_matches.append(result)  # Unknown bitrate, assume match
-                else:
-                    lower_quality.append(result)
-        
-        # Sort each category by quality score and upload speed
-        def sort_key(result):
-            return (result.quality_score, result.upload_speed)
-        
-        exact_matches.sort(key=sort_key, reverse=True)
-        higher_quality.sort(key=sort_key, reverse=True) 
-        lower_quality.sort(key=sort_key, reverse=True)
-        
-        # Return in preference order: exact > higher > lower
-        return exact_matches + higher_quality + lower_quality
+            logger.warning(f"Quality Filter: No enabled qualities matched and fallback is disabled, returning empty")
+            return []
     
     async def get_session_info(self) -> Optional[Dict[str, Any]]:
         """Get slskd session information including version"""

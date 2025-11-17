@@ -3039,21 +3039,17 @@ class DownloadMissingAlbumTracksModal(QDialog):
                 print(f"❌ Artist '{spotify_artist_name}' NOT found in path: '{slskd_full_path}'. Discarding candidate.")
 
         if verified_candidates:
-            # Apply quality preference filtering before returning
-            from config.settings import config_manager
-            quality_preference = config_manager.get_quality_preference()
-            
-            # Filter candidates by quality preference with smart fallback
+            # Apply quality profile filtering before returning
             if hasattr(self.parent_artists_page, 'soulseek_client'):
                 quality_filtered = self.parent_artists_page.soulseek_client.filter_results_by_quality_preference(
-                    verified_candidates, quality_preference
+                    verified_candidates
                 )
-                
+
                 if quality_filtered:
                     verified_candidates = quality_filtered
-                    print(f"🎯 Applied quality filtering ({quality_preference}): {len(verified_candidates)} candidates remain")
+                    print(f"🎯 Applied quality profile filtering: {len(verified_candidates)} candidates remain")
                 else:
-                    print(f"⚠️ Quality filtering ({quality_preference}) removed all candidates, keeping originals")
+                    print(f"⚠️ Quality profile filtering removed all candidates, keeping originals")
             
             best_confidence = verified_candidates[0].confidence
             best_version = getattr(verified_candidates[0], 'version_type', 'unknown')
