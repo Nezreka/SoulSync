@@ -111,11 +111,30 @@ class PersonalizedPlaylistsService:
                     logger.warning(f"No tracks found for {decade}s")
                     return []
 
-                # Apply diversity constraint: max 3 tracks per album, max 4 per artist
                 # Shuffle first for randomness
                 import random
                 random.shuffle(all_tracks)
 
+                # Count unique artists to determine diversity level
+                unique_artists = len(set(track['artist_name'] for track in all_tracks))
+
+                # Adaptive diversity limits based on artist variety
+                if unique_artists >= 20:
+                    # Good variety - apply diversity constraints
+                    max_per_album = 3
+                    max_per_artist = 5
+                elif unique_artists >= 10:
+                    # Moderate variety - more lenient
+                    max_per_album = 4
+                    max_per_artist = 8
+                else:
+                    # Low variety - very lenient to hit 50 tracks
+                    max_per_album = 5
+                    max_per_artist = 12
+
+                logger.info(f"{decade}s has {unique_artists} unique artists - using limits: {max_per_album} per album, {max_per_artist} per artist")
+
+                # Apply diversity constraints
                 tracks_by_album = {}
                 tracks_by_artist = {}
                 diverse_tracks = []
@@ -128,8 +147,7 @@ class PersonalizedPlaylistsService:
                     album_count = tracks_by_album.get(album, 0)
                     artist_count = tracks_by_artist.get(artist, 0)
 
-                    # Apply more lenient limits: max 3 per album, max 4 per artist
-                    if album_count < 3 and artist_count < 4:
+                    if album_count < max_per_album and artist_count < max_per_artist:
                         diverse_tracks.append(track)
                         tracks_by_album[album] = album_count + 1
                         tracks_by_artist[artist] = artist_count + 1
@@ -137,7 +155,7 @@ class PersonalizedPlaylistsService:
                         if len(diverse_tracks) >= limit:
                             break
 
-                logger.info(f"Found {len(diverse_tracks)} tracks from {decade}s in discovery pool (with diversity filtering)")
+                logger.info(f"Found {len(diverse_tracks)} tracks from {decade}s in discovery pool (adaptive diversity)")
                 return diverse_tracks[:limit]
 
         except Exception as e:
