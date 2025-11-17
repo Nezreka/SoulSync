@@ -24742,7 +24742,8 @@ async function loadDiscoverPage() {
         loadPersonalizedForgottenFavorites(),  // NEW: Forgotten favorites
         loadDiscoveryShuffle(),  // NEW: Discovery Shuffle
         loadFamiliarFavorites(),  // NEW: Familiar Favorites
-        loadDecadeBrowser()  // Decade browser
+        loadDecadeBrowser(),  // Decade browser
+        loadGenreBrowser()  // Genre browser
     ]);
 
     // Check for active syncs after page load
@@ -25348,6 +25349,156 @@ async function openDecadePlaylist(decade) {
     } catch (error) {
         console.error(`Error opening ${decade}s playlist:`, error);
         showToast(`Failed to load ${decade}s playlist`, 'error');
+        hideLoadingOverlay();
+    }
+}
+
+// ===============================
+// GENRE BROWSER
+// ===============================
+
+let selectedGenre = null;
+let genreTracks = [];
+
+async function loadGenreBrowser() {
+    try {
+        const carousel = document.getElementById('genre-browser-carousel');
+        if (!carousel) return;
+
+        // Fetch available genres from backend
+        const response = await fetch('/api/discover/genres/available');
+        if (!response.ok) {
+            throw new Error('Failed to fetch available genres');
+        }
+
+        const data = await response.json();
+        if (!data.success || !data.genres || data.genres.length === 0) {
+            carousel.innerHTML = '<div class="discover-empty"><p>No genre content available yet. Run a watchlist scan to populate your discovery pool!</p></div>';
+            return;
+        }
+
+        // Build genre cards matching Recent Releases style
+        let html = '';
+        data.genres.forEach(genre => {
+            const icon = getGenreIcon(genre.name);
+            const displayName = capitalizeGenre(genre.name);
+            html += `
+                <div class="discover-card genre-card-modern" onclick="openGenrePlaylist('${escapeHtml(genre.name)}')">
+                    <div class="discover-card-image genre-card-image">
+                        <div class="genre-icon-large">${icon}</div>
+                    </div>
+                    <div class="discover-card-info">
+                        <h4 class="discover-card-title">${displayName}</h4>
+                        <p class="discover-card-subtitle">${genre.track_count} tracks</p>
+                        <p class="discover-card-meta">Curated</p>
+                    </div>
+                </div>
+            `;
+        });
+
+        carousel.innerHTML = html;
+
+    } catch (error) {
+        console.error('Error loading genre browser:', error);
+        const carousel = document.getElementById('genre-browser-carousel');
+        if (carousel) {
+            carousel.innerHTML = '<div class="discover-empty"><p>Failed to load genres</p></div>';
+        }
+    }
+}
+
+function getGenreIcon(genreName) {
+    const genre = genreName.toLowerCase();
+
+    // Electronic/Dance
+    if (genre.includes('house') || genre.includes('techno') || genre.includes('edm') ||
+        genre.includes('electro') || genre.includes('trance')) {
+        return '🎹';
+    }
+    // Hip Hop/Rap
+    if (genre.includes('hip hop') || genre.includes('rap') || genre.includes('trap')) {
+        return '🎤';
+    }
+    // Rock
+    if (genre.includes('rock') || genre.includes('metal') || genre.includes('punk')) {
+        return '🎸';
+    }
+    // Jazz/Blues
+    if (genre.includes('jazz') || genre.includes('blues') || genre.includes('soul')) {
+        return '🎺';
+    }
+    // Pop
+    if (genre.includes('pop')) {
+        return '🎵';
+    }
+    // R&B
+    if (genre.includes('r&b') || genre.includes('rnb')) {
+        return '🎙️';
+    }
+    // Country/Folk
+    if (genre.includes('country') || genre.includes('folk')) {
+        return '🪕';
+    }
+    // Classical
+    if (genre.includes('classical') || genre.includes('orchestra')) {
+        return '🎻';
+    }
+    // Indie/Alternative
+    if (genre.includes('indie') || genre.includes('alternative')) {
+        return '🎧';
+    }
+    // Lo-fi/Chill
+    if (genre.includes('lo-fi') || genre.includes('chill') || genre.includes('ambient')) {
+        return '☁️';
+    }
+
+    // Default
+    return '🎶';
+}
+
+function capitalizeGenre(genre) {
+    // Capitalize each word in genre
+    return genre.split(' ')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ');
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+async function openGenrePlaylist(genre) {
+    try {
+        showLoadingOverlay(`Loading ${capitalizeGenre(genre)} playlist...`);
+
+        const response = await fetch(`/api/discover/genre/${encodeURIComponent(genre)}`);
+        if (!response.ok) {
+            throw new Error('Failed to fetch genre playlist');
+        }
+
+        const data = await response.json();
+        if (!data.success || !data.tracks || data.tracks.length === 0) {
+            const message = data.message || `No tracks found for ${genre}`;
+            showToast(message, 'info');
+            hideLoadingOverlay();
+            return;
+        }
+
+        selectedGenre = genre;
+        genreTracks = data.tracks;
+
+        // Open download modal
+        const playlistName = `${capitalizeGenre(genre)} Mix`;
+        const virtualPlaylistId = `genre_${genre.replace(/\s+/g, '_')}`;
+
+        await openDownloadMissingModalForYouTube(virtualPlaylistId, playlistName, data.tracks);
+        hideLoadingOverlay();
+
+    } catch (error) {
+        console.error(`Error opening ${genre} playlist:`, error);
+        showToast(`Failed to load ${genre} playlist`, 'error');
         hideLoadingOverlay();
     }
 }

@@ -763,6 +763,15 @@ class WatchlistScanner:
                         logger.debug(f"No albums found for {similar_artist.similar_artist_name}")
                         continue
 
+                    # Fetch artist genres once for all tracks of this artist
+                    artist_genres = []
+                    try:
+                        artist_data = self.spotify_client.get_artist(similar_artist.similar_artist_spotify_id)
+                        if artist_data and 'genres' in artist_data:
+                            artist_genres = artist_data['genres']
+                    except Exception as e:
+                        logger.debug(f"Could not fetch genres for {similar_artist.similar_artist_name}: {e}")
+
                     # IMPROVED: Smart selection mixing albums, singles, and EPs
                     # Prioritize recent releases and popular content
 
@@ -833,7 +842,8 @@ class WatchlistScanner:
                                         'popularity': album_data.get('popularity', 0),
                                         'release_date': album_data.get('release_date', ''),
                                         'is_new_release': is_new,
-                                        'track_data_json': track  # Store full Spotify track object
+                                        'track_data_json': track,  # Store full Spotify track object
+                                        'artist_genres': artist_genres  # Add cached genres
                                     }
 
                                     # Add to discovery pool
@@ -893,6 +903,17 @@ class WatchlistScanner:
                                 if album_data and 'tracks' in album_data:
                                     tracks = album_data['tracks'].get('items', [])
 
+                                    # Fetch artist genres
+                                    artist_genres = []
+                                    try:
+                                        if album_data.get('artists') and len(album_data['artists']) > 0:
+                                            artist_id = album_data['artists'][0]['id']
+                                            artist_data = self.spotify_client.get_artist(artist_id)
+                                            if artist_data and 'genres' in artist_data:
+                                                artist_genres = artist_data['genres']
+                                    except Exception as e:
+                                        logger.debug(f"Could not fetch genres for album artist: {e}")
+
                                     # Check if new release
                                     is_new = False
                                     try:
@@ -918,7 +939,8 @@ class WatchlistScanner:
                                                 'popularity': album_data.get('popularity', 0),
                                                 'release_date': album_data.get('release_date', ''),
                                                 'is_new_release': is_new,
-                                                'track_data_json': track
+                                                'track_data_json': track,
+                                                'artist_genres': artist_genres
                                             }
 
                                             if self.database.add_to_discovery_pool(track_data):
@@ -1010,6 +1032,15 @@ class WatchlistScanner:
                     if not recent_releases:
                         continue
 
+                    # Fetch artist genres once for all tracks of this artist
+                    artist_genres = []
+                    try:
+                        artist_data = self.spotify_client.get_artist(artist.spotify_artist_id)
+                        if artist_data and 'genres' in artist_data:
+                            artist_genres = artist_data['genres']
+                    except Exception as e:
+                        logger.debug(f"Could not fetch genres for {artist.artist_name}: {e}")
+
                     for release in recent_releases:
                         try:
                             # Check if release is within cutoff
@@ -1050,7 +1081,8 @@ class WatchlistScanner:
                                         'popularity': album_data.get('popularity', 0),
                                         'release_date': album_data.get('release_date', ''),
                                         'is_new_release': is_new,
-                                        'track_data_json': track
+                                        'track_data_json': track,
+                                        'artist_genres': artist_genres
                                     }
 
                                     if self.database.add_to_discovery_pool(track_data):
@@ -1314,8 +1346,28 @@ class WatchlistScanner:
 
                 # Add Release Radar tracks to discovery pool so they're available for fast lookup
                 logger.info(f"Adding {len(release_radar_track_data)} Release Radar tracks to discovery pool...")
+
+                # Cache genres by artist_id to avoid duplicate API calls
+                artist_genres_cache = {}
+
                 for track_data in release_radar_track_data:
                     try:
+                        # Fetch artist genres (with caching)
+                        artist_genres = []
+                        if track_data['artists'] and len(track_data['artists']) > 0:
+                            artist_id = track_data['artists'][0]['id']
+
+                            if artist_id in artist_genres_cache:
+                                artist_genres = artist_genres_cache[artist_id]
+                            else:
+                                try:
+                                    artist_data = self.spotify_client.get_artist(artist_id)
+                                    if artist_data and 'genres' in artist_data:
+                                        artist_genres = artist_data['genres']
+                                        artist_genres_cache[artist_id] = artist_genres
+                                except Exception as e:
+                                    logger.debug(f"Could not fetch genres for artist {artist_id}: {e}")
+
                         # Format track data for discovery pool (expects specific structure)
                         formatted_track = {
                             'spotify_track_id': track_data['id'],
@@ -1329,7 +1381,8 @@ class WatchlistScanner:
                             'popularity': track_data.get('popularity', 0),
                             'release_date': track_data['album'].get('release_date', ''),
                             'is_new_release': True,
-                            'track_data_json': track_data
+                            'track_data_json': track_data,
+                            'artist_genres': artist_genres
                         }
                         self.database.add_to_discovery_pool(formatted_track)
                     except Exception as e:

@@ -17339,3 +17339,47 @@ body {
     transform: scale(1.1) rotate(5deg);
 }
 
+/* =======================
+   Genre Browser Cards
+   ======================= */
+
+.genre-card-modern {
+    /* Inherits from .discover-card */
+}
+
+.genre-card-image {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    overflow: hidden;
+}
+
+.genre-card-image::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg,
+        rgba(102, 126, 234, 0.1) 0%,
+        rgba(118, 75, 162, 0.1) 100%);
+    opacity: 1;
+    transition: opacity 0.3s ease;
+}
+
+.genre-card-modern:hover .genre-card-image::before {
+    opacity: 0.3;
+}
+
+.genre-icon-large {
+    font-size: 96px;
+    line-height: 1;
+    position: relative;
+    z-index: 1;
+    transition: transform 0.3s ease;
+}
+
+.genre-card-modern:hover .genre-icon-large {
+    transform: scale(1.1) rotate(5deg);
+}
+
