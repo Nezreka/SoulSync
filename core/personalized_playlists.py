@@ -29,32 +29,13 @@ class PersonalizedPlaylistsService:
         Get recently added tracks from library.
 
         Returns tracks ordered by date_added DESC
+
+        NOTE: This requires library tracks to have Spotify metadata which may not be available.
+        Returns empty list if schema incompatible.
         """
         try:
-            with self.database._get_connection() as conn:
-                cursor = conn.cursor()
-
-                cursor.execute("""
-                    SELECT
-                        t.id,
-                        t.spotify_track_id,
-                        t.title as track_name,
-                        t.duration_ms,
-                        ar.name as artist_name,
-                        al.title as album_name,
-                        al.cover_url as album_cover_url,
-                        t.popularity,
-                        t.date_added
-                    FROM tracks t
-                    LEFT JOIN artists ar ON t.artist_id = ar.id
-                    LEFT JOIN albums al ON t.album_id = al.id
-                    WHERE t.spotify_track_id IS NOT NULL
-                    ORDER BY t.date_added DESC
-                    LIMIT ?
-                """, (limit,))
-
-                rows = cursor.fetchall()
-                return [dict(row) for row in rows]
+            logger.warning("Recently Added requires Spotify-linked library tracks - returning empty")
+            return []
 
         except Exception as e:
             logger.error(f"Error getting recently added tracks: {e}")
@@ -268,11 +249,12 @@ class PersonalizedPlaylistsService:
     # ========================================
 
     def get_popular_picks(self, limit: int = 50) -> List[Dict]:
-        """Get high popularity tracks from discovery pool"""
+        """Get high popularity tracks from discovery pool with diversity (max 2 tracks per album/artist)"""
         try:
             with self.database._get_connection() as conn:
                 cursor = conn.cursor()
 
+                # Get more tracks than needed to allow for filtering
                 cursor.execute("""
                     SELECT
                         spotify_track_id,
@@ -286,10 +268,35 @@ class PersonalizedPlaylistsService:
                     WHERE popularity >= 60
                     ORDER BY popularity DESC, RANDOM()
                     LIMIT ?
-                """, (limit,))
+                """, (limit * 3,))  # Get 3x more for diversity filtering
 
                 rows = cursor.fetchall()
-                return [dict(row) for row in rows]
+                all_tracks = [dict(row) for row in rows]
+
+                # Apply diversity constraint: max 2 tracks per album, max 3 per artist
+                tracks_by_album = {}
+                tracks_by_artist = {}
+                diverse_tracks = []
+
+                for track in all_tracks:
+                    album = track['album_name']
+                    artist = track['artist_name']
+
+                    # Count current tracks for this album/artist
+                    album_count = tracks_by_album.get(album, 0)
+                    artist_count = tracks_by_artist.get(artist, 0)
+
+                    # Apply limits: max 2 per album, max 3 per artist
+                    if album_count < 2 and artist_count < 3:
+                        diverse_tracks.append(track)
+                        tracks_by_album[album] = album_count + 1
+                        tracks_by_artist[artist] = artist_count + 1
+
+                        if len(diverse_tracks) >= limit:
+                            break
+
+                logger.info(f"Popular Picks: Selected {len(diverse_tracks)} tracks with diversity")
+                return diverse_tracks[:limit]
 
         except Exception as e:
             logger.error(f"Error getting popular picks: {e}")
@@ -660,20 +667,36 @@ class PersonalizedPlaylistsService:
 
             logger.info(f"Building custom playlist from {len(seed_artist_ids)} seed artists")
 
-            # Step 1: Get similar artists for each seed
+            # Step 1: Get similar artists for each seed from database
             all_similar_artists = []
             seen_artist_ids = set(seed_artist_ids)  # Don't include seed artists themselves
 
             for seed_artist_id in seed_artist_ids:
                 try:
-                    # Get similar artists from Spotify
-                    similar = self.spotify_client.get_similar_artists(seed_artist_id)
+                    # Get similar artists from database (cached from MusicMap)
+                    with self.database._get_connection() as conn:
+                        cursor = conn.cursor()
+                        cursor.execute("""
+                            SELECT similar_artist_spotify_id, similar_artist_name
+                            FROM similar_artists
+                            WHERE source_artist_id = ?
+                            ORDER BY similarity_rank ASC
+                            LIMIT 10
+                        """, (seed_artist_id,))
 
-                    if similar:
-                        for artist in similar[:10]:  # Max 10 per seed
-                            if artist.id not in seen_artist_ids:
-                                all_similar_artists.append(artist)
-                                seen_artist_ids.add(artist.id)
+                        rows = cursor.fetchall()
+
+                        for row in rows:
+                            artist_id = row['similar_artist_spotify_id']
+                            artist_name = row['similar_artist_name']
+
+                            if artist_id not in seen_artist_ids:
+                                # Create artist-like object
+                                all_similar_artists.append({
+                                    'id': artist_id,
+                                    'name': artist_name
+                                })
+                                seen_artist_ids.add(artist_id)
 
                                 if len(all_similar_artists) >= 25:
                                     break
@@ -685,7 +708,7 @@ class PersonalizedPlaylistsService:
                     logger.warning(f"Error getting similar artists for {seed_artist_id}: {e}")
                     continue
 
-            logger.info(f"Found {len(all_similar_artists)} similar artists")
+            logger.info(f"Found {len(all_similar_artists)} similar artists from database")
 
             if not all_similar_artists:
                 return {'tracks': [], 'error': 'No similar artists found'}
@@ -698,7 +721,7 @@ class PersonalizedPlaylistsService:
             for artist in similar_artists_to_use:
                 try:
                     albums = self.spotify_client.get_artist_albums(
-                        artist.id,
+                        artist['id'],
                         album_type='album,single',
                         limit=10
                     )
@@ -710,7 +733,7 @@ class PersonalizedPlaylistsService:
                     time.sleep(0.3)  # Rate limiting
 
                 except Exception as e:
-                    logger.warning(f"Error getting albums for {artist.name}: {e}")
+                    logger.warning(f"Error getting albums for {artist['name']}: {e}")
                     continue
 
             logger.info(f"Found {len(all_albums)} total albums")
@@ -768,8 +791,11 @@ class PersonalizedPlaylistsService:
                 'description': f'Built from {len(seed_artist_ids)} seed artists',
                 'track_count': len(final_tracks),
                 'tracks': final_tracks,
-                'similar_artists_count': len(similar_artists_to_use),
-                'albums_used': len(selected_albums)
+                'metadata': {
+                    'total_tracks': len(final_tracks),
+                    'similar_artists_count': len(similar_artists_to_use),
+                    'albums_count': len(selected_albums)
+                }
             }
 
         except Exception as e:

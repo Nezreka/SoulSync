@@ -2024,8 +2024,32 @@
                             </div>
 
                             <!-- Generated Playlist Results -->
-                            <div id="build-playlist-results" class="discover-playlist-container compact">
-                                <!-- Generated playlist will appear here -->
+                            <div id="build-playlist-results-wrapper" style="display: none;">
+                                <!-- Playlist Header with Actions -->
+                                <div class="discover-section-header" style="margin-top: 20px;">
+                                    <div>
+                                        <h3 id="build-playlist-results-title" style="margin: 0; color: #fff; font-size: 18px;">Generated Playlist</h3>
+                                        <p id="build-playlist-results-subtitle" style="margin: 4px 0 0 0; color: #999; font-size: 13px;"></p>
+                                    </div>
+                                    <div class="discover-section-actions">
+                                        <button class="action-button secondary" onclick="openDownloadModalForBuildPlaylist()" title="Download missing tracks">
+                                            <span class="button-icon">↓</span>
+                                            <span class="button-text">Download</span>
+                                        </button>
+                                        <button class="action-button primary" id="build-playlist-sync-btn" onclick="startDiscoverPlaylistSync('build_playlist', 'Custom Playlist')" title="Sync to media server">
+                                            <span class="button-icon">⟳</span>
+                                            <span class="button-text">Sync</span>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <!-- Metadata Display -->
+                                <div id="build-playlist-metadata-display"></div>
+
+                                <!-- Track List -->
+                                <div id="build-playlist-results" class="discover-playlist-container compact">
+                                    <!-- Generated playlist will appear here -->
+                                </div>
                             </div>
                         </div>
                     </div>
