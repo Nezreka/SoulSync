@@ -17463,6 +17463,19 @@ body {
    LISTENBRAINZ PLAYLIST CARDS
    =============================== */
 
+.listenbrainz-tabs {
+    margin-top: 20px;
+    margin-bottom: 20px;
+}
+
+.listenbrainz-tab-content .discover-section-subsection {
+    margin-bottom: 40px;
+}
+
+.listenbrainz-tab-content .discover-section-subsection:not(:first-child) {
+    margin-top: 60px;
+}
+
 .listenbrainz-playlist-card {
     background: linear-gradient(135deg, #eb743b 0%, #d26230 100%);
     display: flex;

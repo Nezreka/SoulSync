@@ -15300,12 +15300,18 @@ def get_listenbrainz_playlist_tracks(playlist_mbid):
             extension = track.get('extension', {})
             mb_data = extension.get('https://musicbrainz.org/doc/jspf#track', {})
 
+            # Extract album cover from extension if available
+            album_cover_url = None
+            if mb_data and 'album_cover_url' in mb_data:
+                album_cover_url = mb_data['album_cover_url']
+
             track_data = {
-                'title': track.get('title', 'Unknown Track'),
-                'creator': track.get('creator', 'Unknown Artist'),
-                'album': track.get('album', 'Unknown Album'),
+                'track_name': track.get('title', 'Unknown Track'),
+                'artist_name': track.get('creator', 'Unknown Artist'),
+                'album_name': track.get('album', 'Unknown Album'),
                 'duration_ms': track.get('duration', 0),
-                'recording_mbid': recording_mbid,
+                'mbid': recording_mbid,
+                'album_cover_url': album_cover_url,
                 'additional_metadata': mb_data
             }
 
@@ -15313,13 +15319,8 @@ def get_listenbrainz_playlist_tracks(playlist_mbid):
 
         return jsonify({
             "success": True,
-            "playlist": {
-                "identifier": playlist.get('identifier'),
-                "title": playlist.get('title'),
-                "creator": playlist.get('creator'),
-                "tracks": tracks,
-                "track_count": len(tracks)
-            }
+            "tracks": tracks,
+            "track_count": len(tracks)
         })
 
     except Exception as e:
