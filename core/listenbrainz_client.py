@@ -2,6 +2,7 @@ import requests
 from typing import Dict, List, Optional, Any
 from utils.logging_config import get_logger
 from config.settings import config_manager
+import time
 
 logger = get_logger("listenbrainz_client")
 
@@ -13,18 +14,49 @@ class ListenBrainzClient:
         self.token = config_manager.get("listenbrainz.token", "")
         self.username = None
 
+        # Create a session for connection pooling
+        self.session = requests.Session()
+        self.session.headers.update({
+            'User-Agent': 'SoulSync/1.0'
+        })
+
         if self.token:
             # Validate token and get username
             self._validate_and_get_username()
+
+    def _make_request_with_retry(self, method: str, url: str, max_retries: int = 3, **kwargs):
+        """Make HTTP request with retry logic"""
+        for attempt in range(max_retries):
+            try:
+                if method.lower() == 'get':
+                    response = self.session.get(url, **kwargs)
+                elif method.lower() == 'post':
+                    response = self.session.post(url, **kwargs)
+                else:
+                    response = self.session.request(method, url, **kwargs)
+
+                return response
+            except (requests.exceptions.ConnectionError,
+                    requests.exceptions.Timeout,
+                    ConnectionResetError) as e:
+                if attempt < max_retries - 1:
+                    wait_time = (attempt + 1) * 2  # Exponential backoff
+                    logger.warning(f"Connection error (attempt {attempt + 1}/{max_retries}), retrying in {wait_time}s: {e}")
+                    time.sleep(wait_time)
+                else:
+                    logger.error(f"Failed after {max_retries} attempts: {e}")
+                    raise
+
+        return None
 
     def _validate_and_get_username(self):
         """Validate token and retrieve username"""
         try:
             url = f"{self.base_url}/validate-token"
             headers = {'Authorization': f'Token {self.token}'}
-            response = requests.get(url, headers=headers, timeout=5)
+            response = self._make_request_with_retry('get', url, headers=headers, timeout=10)
 
-            if response.status_code == 200:
+            if response and response.status_code == 200:
                 data = response.json()
                 if data.get('valid'):
                     self.username = data.get('user_name')
@@ -57,18 +89,19 @@ class ListenBrainzClient:
                 'offset': offset
             }
 
-            response = requests.get(url, params=params, timeout=10)
+            response = self._make_request_with_retry('get', url, params=params, timeout=15)
 
-            if response.status_code == 200:
+            if response and response.status_code == 200:
                 data = response.json()
                 playlists = data.get('playlists', [])
                 logger.info(f"📋 Fetched {len(playlists)} playlists created for {self.username}")
                 return playlists
-            elif response.status_code == 404:
+            elif response and response.status_code == 404:
                 logger.warning(f"User {self.username} not found")
                 return []
             else:
-                logger.error(f"Failed to fetch created-for playlists: {response.status_code}")
+                status = response.status_code if response else 'No response'
+                logger.error(f"Failed to fetch created-for playlists: {status}")
                 return []
 
         except Exception as e:
@@ -92,18 +125,19 @@ class ListenBrainzClient:
                 'offset': offset
             }
 
-            response = requests.get(url, headers=headers, params=params, timeout=10)
+            response = self._make_request_with_retry('get', url, headers=headers, params=params, timeout=15)
 
-            if response.status_code == 200:
+            if response and response.status_code == 200:
                 data = response.json()
                 playlists = data.get('playlists', [])
                 logger.info(f"📋 Fetched {len(playlists)} user playlists for {self.username}")
                 return playlists
-            elif response.status_code == 404:
+            elif response and response.status_code == 404:
                 logger.warning(f"User {self.username} not found")
                 return []
             else:
-                logger.error(f"Failed to fetch user playlists: {response.status_code}")
+                status = response.status_code if response else 'No response'
+                logger.error(f"Failed to fetch user playlists: {status}")
                 return []
 
         except Exception as e:
@@ -127,18 +161,19 @@ class ListenBrainzClient:
                 'offset': offset
             }
 
-            response = requests.get(url, headers=headers, params=params, timeout=10)
+            response = self._make_request_with_retry('get', url, headers=headers, params=params, timeout=15)
 
-            if response.status_code == 200:
+            if response and response.status_code == 200:
                 data = response.json()
                 playlists = data.get('playlists', [])
                 logger.info(f"📋 Fetched {len(playlists)} collaborative playlists for {self.username}")
                 return playlists
-            elif response.status_code == 404:
+            elif response and response.status_code == 404:
                 logger.warning(f"User {self.username} not found")
                 return []
             else:
-                logger.error(f"Failed to fetch collaborative playlists: {response.status_code}")
+                status = response.status_code if response else 'No response'
+                logger.error(f"Failed to fetch collaborative playlists: {status}")
                 return []
 
         except Exception as e:
@@ -165,22 +200,23 @@ class ListenBrainzClient:
             if self.token:
                 headers['Authorization'] = f'Token {self.token}'
 
-            response = requests.get(url, headers=headers, params=params, timeout=10)
+            response = self._make_request_with_retry('get', url, headers=headers, params=params, timeout=20)
 
-            if response.status_code == 200:
+            if response and response.status_code == 200:
                 data = response.json()
                 playlist = data.get('playlist', {})
                 track_count = len(playlist.get('track', []))
                 logger.info(f"📋 Fetched playlist '{playlist.get('title')}' with {track_count} tracks")
                 return playlist
-            elif response.status_code == 404:
+            elif response and response.status_code == 404:
                 logger.warning(f"Playlist {playlist_mbid} not found")
                 return None
-            elif response.status_code == 401:
+            elif response and response.status_code == 401:
                 logger.warning(f"Unauthorized to access playlist {playlist_mbid}")
                 return None
             else:
-                logger.error(f"Failed to fetch playlist: {response.status_code}")
+                status = response.status_code if response else 'No response'
+                logger.error(f"Failed to fetch playlist: {status}")
                 return None
 
         except Exception as e:
