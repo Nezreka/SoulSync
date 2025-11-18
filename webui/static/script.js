@@ -24744,6 +24744,9 @@ async function loadDiscoverPage() {
         loadPersonalizedForgottenFavorites(),  // NEW: Forgotten favorites
         loadDiscoveryShuffle(),  // NEW: Discovery Shuffle
         loadFamiliarFavorites(),  // NEW: Familiar Favorites
+        loadListenBrainzCreatedFor(),  // ListenBrainz recommendations
+        loadListenBrainzUserPlaylists(),  // ListenBrainz user playlists
+        loadListenBrainzCollaborative(),  // ListenBrainz collaborative playlists
         loadDecadeBrowserTabs(),  // Time Machine (tabbed by decade)
         loadGenreBrowserTabs()  // Browse by Genre (tabbed by genre)
     ]);
@@ -26258,6 +26261,249 @@ async function openDownloadModalForGenre(genreName) {
     const virtualPlaylistId = `genre_${genreName.replace(/\s+/g, '_')}`;
 
     await openDownloadMissingModalForYouTube(virtualPlaylistId, playlistName, spotifyTracks);
+}
+
+// ===============================
+// LISTENBRAINZ PLAYLISTS
+// ===============================
+
+async function loadListenBrainzCreatedFor() {
+    try {
+        const carousel = document.getElementById('listenbrainz-created-for-carousel');
+        if (!carousel) return;
+
+        const response = await fetch('/api/discover/listenbrainz/created-for');
+        if (!response.ok) {
+            if (response.status === 401) {
+                carousel.innerHTML = '<div class="discover-empty"><p>Please configure ListenBrainz token in Settings to view recommendations</p></div>';
+                return;
+            }
+            throw new Error('Failed to fetch ListenBrainz recommendations');
+        }
+
+        const data = await response.json();
+        if (!data.success || !data.playlists || data.playlists.length === 0) {
+            carousel.innerHTML = '<div class="discover-empty"><p>No ListenBrainz recommendations available yet</p></div>';
+            return;
+        }
+
+        // Build playlist cards
+        let html = '';
+        data.playlists.forEach(playlist => {
+            // JSPF structure: playlist.playlist contains the actual data
+            const playlistData = playlist.playlist || playlist;
+            const identifier = playlistData.identifier?.split('/').pop() || '';
+            const title = playlistData.title || 'Untitled Playlist';
+            const creator = playlistData.creator || 'ListenBrainz';
+
+            // Track count - default to 50 if not available or 0
+            let trackCount = 50; // Default
+            if (playlistData.annotation?.track_count && playlistData.annotation.track_count > 0) {
+                trackCount = playlistData.annotation.track_count;
+            } else if (playlistData.track && Array.isArray(playlistData.track) && playlistData.track.length > 0) {
+                trackCount = playlistData.track.length;
+            }
+
+            html += `
+                <div class="discover-card" onclick="openListenBrainzPlaylist('${identifier}', '${escapeHtml(title)}')">
+                    <div class="discover-card-image listenbrainz-playlist-card">
+                        <div class="listenbrainz-icon">🧠</div>
+                    </div>
+                    <div class="discover-card-info">
+                        <h4 class="discover-card-title">${title}</h4>
+                        <p class="discover-card-subtitle">by ${creator}</p>
+                        <p class="discover-card-meta">${trackCount} tracks</p>
+                    </div>
+                </div>
+            `;
+        });
+
+        carousel.innerHTML = html;
+
+    } catch (error) {
+        console.error('Error loading ListenBrainz created-for playlists:', error);
+        const carousel = document.getElementById('listenbrainz-created-for-carousel');
+        if (carousel) {
+            carousel.innerHTML = '<div class="discover-empty"><p>Failed to load recommendations</p></div>';
+        }
+    }
+}
+
+async function loadListenBrainzUserPlaylists() {
+    try {
+        const carousel = document.getElementById('listenbrainz-user-playlists-carousel');
+        if (!carousel) return;
+
+        const response = await fetch('/api/discover/listenbrainz/user-playlists');
+        if (!response.ok) {
+            if (response.status === 401) {
+                carousel.innerHTML = '<div class="discover-empty"><p>Please configure ListenBrainz token in Settings to view your playlists</p></div>';
+                return;
+            }
+            throw new Error('Failed to fetch ListenBrainz user playlists');
+        }
+
+        const data = await response.json();
+
+        if (!data.success || !data.playlists || data.playlists.length === 0) {
+            carousel.innerHTML = '<div class="discover-empty"><p>No playlists found. <a href="https://listenbrainz.org/playlists/" target="_blank" style="color: #eb743b; text-decoration: underline;">Create your first playlist on ListenBrainz!</a></p></div>';
+            return;
+        }
+
+        // Build playlist cards
+        let html = '';
+        data.playlists.forEach(playlist => {
+            // JSPF structure: playlist.playlist contains the actual data
+            const playlistData = playlist.playlist || playlist;
+            const identifier = playlistData.identifier?.split('/').pop() || '';
+            const title = playlistData.title || 'Untitled Playlist';
+            const creator = playlistData.creator || 'You';
+
+            // Track count - default to 50 if not available or 0
+            let trackCount = 50; // Default
+            if (playlistData.annotation?.track_count && playlistData.annotation.track_count > 0) {
+                trackCount = playlistData.annotation.track_count;
+            } else if (playlistData.track && Array.isArray(playlistData.track) && playlistData.track.length > 0) {
+                trackCount = playlistData.track.length;
+            }
+
+            const isPublic = playlistData.annotation?.public !== false;
+
+            html += `
+                <div class="discover-card" onclick="openListenBrainzPlaylist('${identifier}', '${escapeHtml(title)}')">
+                    <div class="discover-card-image listenbrainz-playlist-card">
+                        <div class="listenbrainz-icon">${isPublic ? '📚' : '🔒'}</div>
+                    </div>
+                    <div class="discover-card-info">
+                        <h4 class="discover-card-title">${title}</h4>
+                        <p class="discover-card-subtitle">by ${creator}</p>
+                        <p class="discover-card-meta">${trackCount} tracks • ${isPublic ? 'Public' : 'Private'}</p>
+                    </div>
+                </div>
+            `;
+        });
+
+        carousel.innerHTML = html;
+
+    } catch (error) {
+        console.error('Error loading ListenBrainz user playlists:', error);
+        const carousel = document.getElementById('listenbrainz-user-playlists-carousel');
+        if (carousel) {
+            carousel.innerHTML = '<div class="discover-empty"><p>Failed to load your playlists</p></div>';
+        }
+    }
+}
+
+async function loadListenBrainzCollaborative() {
+    try {
+        const carousel = document.getElementById('listenbrainz-collaborative-carousel');
+        if (!carousel) return;
+
+        const response = await fetch('/api/discover/listenbrainz/collaborative');
+        if (!response.ok) {
+            if (response.status === 401) {
+                carousel.innerHTML = '<div class="discover-empty"><p>Please configure ListenBrainz token in Settings to view collaborative playlists</p></div>';
+                return;
+            }
+            throw new Error('Failed to fetch ListenBrainz collaborative playlists');
+        }
+
+        const data = await response.json();
+
+        if (!data.success || !data.playlists || data.playlists.length === 0) {
+            carousel.innerHTML = '<div class="discover-empty"><p>You\'re not collaborating on any playlists yet. Join or create collaborative playlists on <a href="https://listenbrainz.org/playlists/" target="_blank" style="color: #eb743b; text-decoration: underline;">ListenBrainz</a>!</p></div>';
+            return;
+        }
+
+        // Build playlist cards
+        let html = '';
+        data.playlists.forEach(playlist => {
+            // JSPF structure: playlist.playlist contains the actual data
+            const playlistData = playlist.playlist || playlist;
+            const identifier = playlistData.identifier?.split('/').pop() || '';
+            const title = playlistData.title || 'Untitled Playlist';
+            const creator = playlistData.creator || 'Unknown';
+
+            // Track count - default to 50 if not available or 0
+            let trackCount = 50; // Default
+            if (playlistData.annotation?.track_count && playlistData.annotation.track_count > 0) {
+                trackCount = playlistData.annotation.track_count;
+            } else if (playlistData.track && Array.isArray(playlistData.track) && playlistData.track.length > 0) {
+                trackCount = playlistData.track.length;
+            }
+
+            html += `
+                <div class="discover-card" onclick="openListenBrainzPlaylist('${identifier}', '${escapeHtml(title)}')">
+                    <div class="discover-card-image listenbrainz-playlist-card">
+                        <div class="listenbrainz-icon">🤝</div>
+                    </div>
+                    <div class="discover-card-info">
+                        <h4 class="discover-card-title">${title}</h4>
+                        <p class="discover-card-subtitle">by ${creator}</p>
+                        <p class="discover-card-meta">${trackCount} tracks • Collaborative</p>
+                    </div>
+                </div>
+            `;
+        });
+
+        carousel.innerHTML = html;
+
+    } catch (error) {
+        console.error('Error loading ListenBrainz collaborative playlists:', error);
+        const carousel = document.getElementById('listenbrainz-collaborative-carousel');
+        if (carousel) {
+            carousel.innerHTML = '<div class="discover-empty"><p>Failed to load collaborative playlists</p></div>';
+        }
+    }
+}
+
+async function openListenBrainzPlaylist(playlistMbid, playlistName) {
+    try {
+        showLoadingOverlay(`Loading ${playlistName}...`);
+
+        const response = await fetch(`/api/discover/listenbrainz/playlist/${playlistMbid}`);
+        if (!response.ok) {
+            throw new Error('Failed to fetch playlist');
+        }
+
+        const data = await response.json();
+        if (!data.success || !data.playlist) {
+            showToast('Failed to load playlist', 'error');
+            hideLoadingOverlay();
+            return;
+        }
+
+        const playlist = data.playlist;
+        const tracks = playlist.tracks || [];
+
+        if (tracks.length === 0) {
+            showToast('This playlist is empty', 'info');
+            hideLoadingOverlay();
+            return;
+        }
+
+        // Convert to Spotify-like format for compatibility with download modal
+        const spotifyTracks = tracks.map(track => ({
+            id: track.recording_mbid || '',
+            name: track.title || 'Unknown',
+            artists: [track.creator || 'Unknown'],
+            album: {
+                name: track.album || 'Unknown Album',
+                images: []
+            },
+            duration_ms: track.duration_ms || 0,
+            listenbrainz_metadata: track.additional_metadata
+        }));
+
+        const virtualPlaylistId = `listenbrainz_${playlistMbid}`;
+        await openDownloadMissingModalForYouTube(virtualPlaylistId, playlistName, spotifyTracks);
+        hideLoadingOverlay();
+
+    } catch (error) {
+        console.error(`Error opening ListenBrainz playlist:`, error);
+        showToast(`Failed to load playlist`, 'error');
+        hideLoadingOverlay();
+    }
 }
 
 // ===============================
