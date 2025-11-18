@@ -1361,6 +1361,34 @@ def run_service_test(service, test_config):
                 return True, "Successfully connected to slskd."
             else:
                 return False, "Could not connect to slskd. Check URL and API Key."
+        elif service == "listenbrainz":
+            token = test_config.get('token', '')
+
+            if not token:
+                return False, "Missing ListenBrainz user token."
+
+            try:
+                # Test ListenBrainz API by validating the token
+                url = "https://api.listenbrainz.org/1/validate-token"
+                headers = {
+                    'Authorization': f'Token {token}'
+                }
+                response = requests.get(url, headers=headers, timeout=5)
+
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get('valid'):
+                        username = data.get('user_name', 'Unknown')
+                        return True, f"Successfully connected to ListenBrainz! Connected as: {username}"
+                    else:
+                        return False, "Invalid ListenBrainz token."
+                elif response.status_code == 401:
+                    return False, "Invalid ListenBrainz token (unauthorized)."
+                else:
+                    return False, f"Could not connect to ListenBrainz (HTTP {response.status_code})"
+
+            except Exception as e:
+                return False, f"ListenBrainz connection error: {str(e)}"
         return False, "Unknown service."
     except AttributeError as e:
         # This specifically catches the error you reported for Jellyfin
@@ -2048,6 +2076,8 @@ def test_connection_endpoint():
         elif service == 'soulseek':
             # Soulseek doesn't use cache, but update anyway for consistency
             print("✅ Soulseek test successful")
+        elif service == 'listenbrainz':
+            print("✅ ListenBrainz test successful")
 
     # Add activity for connection test
     if success:
