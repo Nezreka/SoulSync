@@ -1745,12 +1745,13 @@
                             <div class="sync-status-content">
                                 <div class="sync-status-label">
                                     <span class="sync-icon">⟳</span>
-                                    <span class="sync-text">Syncing Seasonal Mix...</span>
+                                    <span>Syncing to media server...</span>
                                 </div>
-                                <div class="sync-status-progress">
-                                    <div class="sync-progress-text">
-                                        <span id="seasonal-playlist-sync-progress">0/0 tracks</span>
-                                    </div>
+                                <div class="sync-status-stats">
+                                    <span class="sync-stat">✓ <span id="seasonal-playlist-sync-completed">0</span></span>
+                                    <span class="sync-stat">⏳ <span id="seasonal-playlist-sync-pending">0</span></span>
+                                    <span class="sync-stat">✗ <span id="seasonal-playlist-sync-failed">0</span></span>
+                                    <span class="sync-stat">(<span id="seasonal-playlist-sync-percentage">0</span>%)</span>
                                 </div>
                             </div>
                         </div>
@@ -1887,6 +1888,21 @@
                                 </button>
                             </div>
                         </div>
+                        <!-- Sync Status Display -->
+                        <div class="discover-sync-status" id="popular-picks-sync-status" style="display: none;">
+                            <div class="sync-status-content">
+                                <div class="sync-status-label">
+                                    <span class="sync-icon">⟳</span>
+                                    <span>Syncing to media server...</span>
+                                </div>
+                                <div class="sync-status-stats">
+                                    <span class="sync-stat">✓ <span id="popular-picks-sync-completed">0</span></span>
+                                    <span class="sync-stat">⏳ <span id="popular-picks-sync-pending">0</span></span>
+                                    <span class="sync-stat">✗ <span id="popular-picks-sync-failed">0</span></span>
+                                    <span class="sync-stat">(<span id="popular-picks-sync-percentage">0</span>%)</span>
+                                </div>
+                            </div>
+                        </div>
                         <div class="discover-playlist-container compact" id="personalized-popular-picks">
                             <!-- Content will be populated dynamically -->
                         </div>
@@ -1908,6 +1924,21 @@
                                     <span class="button-icon">⟳</span>
                                     <span class="button-text">Sync</span>
                                 </button>
+                            </div>
+                        </div>
+                        <!-- Sync Status Display -->
+                        <div class="discover-sync-status" id="hidden-gems-sync-status" style="display: none;">
+                            <div class="sync-status-content">
+                                <div class="sync-status-label">
+                                    <span class="sync-icon">⟳</span>
+                                    <span>Syncing to media server...</span>
+                                </div>
+                                <div class="sync-status-stats">
+                                    <span class="sync-stat">✓ <span id="hidden-gems-sync-completed">0</span></span>
+                                    <span class="sync-stat">⏳ <span id="hidden-gems-sync-pending">0</span></span>
+                                    <span class="sync-stat">✗ <span id="hidden-gems-sync-failed">0</span></span>
+                                    <span class="sync-stat">(<span id="hidden-gems-sync-percentage">0</span>%)</span>
+                                </div>
                             </div>
                         </div>
                         <div class="discover-playlist-container compact" id="personalized-hidden-gems">
@@ -1955,6 +1986,21 @@
                                 </button>
                             </div>
                         </div>
+                        <!-- Sync Status Display -->
+                        <div class="discover-sync-status" id="discovery-shuffle-sync-status" style="display: none;">
+                            <div class="sync-status-content">
+                                <div class="sync-status-label">
+                                    <span class="sync-icon">⟳</span>
+                                    <span>Syncing to media server...</span>
+                                </div>
+                                <div class="sync-status-stats">
+                                    <span class="sync-stat">✓ <span id="discovery-shuffle-sync-completed">0</span></span>
+                                    <span class="sync-stat">⏳ <span id="discovery-shuffle-sync-pending">0</span></span>
+                                    <span class="sync-stat">✗ <span id="discovery-shuffle-sync-failed">0</span></span>
+                                    <span class="sync-stat">(<span id="discovery-shuffle-sync-percentage">0</span>%)</span>
+                                </div>
+                            </div>
+                        </div>
                         <div class="discover-playlist-container compact" id="personalized-discovery-shuffle">
                             <!-- Content will be populated dynamically -->
                         </div>
@@ -1976,6 +2022,21 @@
                                     <span class="button-icon">⟳</span>
                                     <span class="button-text">Sync</span>
                                 </button>
+                            </div>
+                        </div>
+                        <!-- Sync Status Display -->
+                        <div class="discover-sync-status" id="familiar-favorites-sync-status" style="display: none;">
+                            <div class="sync-status-content">
+                                <div class="sync-status-label">
+                                    <span class="sync-icon">⟳</span>
+                                    <span>Syncing to media server...</span>
+                                </div>
+                                <div class="sync-status-stats">
+                                    <span class="sync-stat">✓ <span id="familiar-favorites-sync-completed">0</span></span>
+                                    <span class="sync-stat">⏳ <span id="familiar-favorites-sync-pending">0</span></span>
+                                    <span class="sync-stat">✗ <span id="familiar-favorites-sync-failed">0</span></span>
+                                    <span class="sync-stat">(<span id="familiar-favorites-sync-percentage">0</span>%)</span>
+                                </div>
                             </div>
                         </div>
                         <div class="discover-playlist-container compact" id="personalized-familiar-favorites">
@@ -2043,6 +2104,22 @@
                                             <span class="button-icon">⟳</span>
                                             <span class="button-text">Sync</span>
                                         </button>
+                                    </div>
+                                </div>
+
+                                <!-- Sync Status Display -->
+                                <div class="discover-sync-status" id="build-playlist-sync-status" style="display: none;">
+                                    <div class="sync-status-content">
+                                        <div class="sync-status-label">
+                                            <span class="sync-icon">⟳</span>
+                                            <span>Syncing to media server...</span>
+                                        </div>
+                                        <div class="sync-status-stats">
+                                            <span class="sync-stat">✓ <span id="build-playlist-sync-completed">0</span></span>
+                                            <span class="sync-stat">⏳ <span id="build-playlist-sync-pending">0</span></span>
+                                            <span class="sync-stat">✗ <span id="build-playlist-sync-failed">0</span></span>
+                                            <span class="sync-stat">(<span id="build-playlist-sync-percentage">0</span>%)</span>
+                                        </div>
                                     </div>
                                 </div>
 
