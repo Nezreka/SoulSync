@@ -26394,6 +26394,18 @@ async function startDiscoverPlaylistSync(playlistType, playlistName) {
         tracks = discoverReleaseRadarTracks;
     } else if (playlistType === 'discovery_weekly') {
         tracks = discoverWeeklyTracks;
+    } else if (playlistType === 'seasonal_playlist') {
+        tracks = discoverSeasonalTracks;
+    } else if (playlistType === 'popular_picks') {
+        tracks = personalizedPopularPicks;
+    } else if (playlistType === 'hidden_gems') {
+        tracks = personalizedHiddenGems;
+    } else if (playlistType === 'discovery_shuffle') {
+        tracks = personalizedDiscoveryShuffle;
+    } else if (playlistType === 'familiar_favorites') {
+        tracks = personalizedFamiliarFavorites;
+    } else if (playlistType === 'build_playlist') {
+        tracks = buildPlaylistTracks;
     }
 
     if (!tracks || tracks.length === 0) {
@@ -26448,15 +26460,15 @@ async function startDiscoverPlaylistSync(playlistType, playlistName) {
         spotifyPlaylists.push(virtualPlaylist);
     }
 
-    // Show sync status display
-    const statusId = playlistType === 'release_radar' ? 'release-radar-sync-status' : 'discovery-weekly-sync-status';
+    // Show sync status display (convert underscores to hyphens for ID)
+    const statusId = playlistType.replace(/_/g, '-') + '-sync-status';
     const statusDisplay = document.getElementById(statusId);
     if (statusDisplay) {
         statusDisplay.style.display = 'block';
     }
 
-    // Disable sync button to prevent duplicate syncs
-    const buttonId = playlistType === 'release_radar' ? 'release-radar-sync-btn' : 'discovery-weekly-sync-btn';
+    // Disable sync button to prevent duplicate syncs (convert underscores to hyphens for ID)
+    const buttonId = playlistType.replace(/_/g, '-') + '-sync-btn';
     const syncButton = document.getElementById(buttonId);
     if (syncButton) {
         syncButton.disabled = true;
@@ -26495,11 +26507,12 @@ function startDiscoverSyncPolling(playlistType, virtualPlaylistId) {
             console.log(`📊 Sync status for ${playlistType}:`, data);
 
             // Update UI with progress (data structure: {status: ..., progress: {...}})
-            const prefix = playlistType === 'release_radar' ? 'release-radar' : 'discovery-weekly';
+            // Convert underscores to hyphens for HTML IDs
+            const prefix = playlistType.replace(/_/g, '-');
             const progress = data.progress || {};
 
-            const totalEl = document.getElementById(`${prefix}-sync-total`);
-            const matchedEl = document.getElementById(`${prefix}-sync-matched`);
+            const completedEl = document.getElementById(`${prefix}-sync-completed`);
+            const pendingEl = document.getElementById(`${prefix}-sync-pending`);
             const failedEl = document.getElementById(`${prefix}-sync-failed`);
             const percentageEl = document.getElementById(`${prefix}-sync-percentage`);
 
@@ -26507,10 +26520,11 @@ function startDiscoverSyncPolling(playlistType, virtualPlaylistId) {
             const matched = progress.matched_tracks || 0;
             const failed = progress.failed_tracks || 0;
             const processed = matched + failed;
+            const pending = total - processed;
             const completionPercentage = total > 0 ? Math.round((processed / total) * 100) : 0;
 
-            if (totalEl) totalEl.textContent = total;
-            if (matchedEl) matchedEl.textContent = matched;
+            if (completedEl) completedEl.textContent = matched;
+            if (pendingEl) pendingEl.textContent = pending;
             if (failedEl) failedEl.textContent = failed;
             if (percentageEl) percentageEl.textContent = completionPercentage;
 
@@ -26521,7 +26535,7 @@ function startDiscoverSyncPolling(playlistType, virtualPlaylistId) {
                 delete discoverSyncPollers[playlistType];
 
                 // Re-enable sync button
-                const buttonId = playlistType === 'release_radar' ? 'release-radar-sync-btn' : 'discovery-weekly-sync-btn';
+                const buttonId = playlistType.replace(/_/g, '-') + '-sync-btn';
                 const syncButton = document.getElementById(buttonId);
                 if (syncButton) {
                     syncButton.disabled = false;
@@ -26529,8 +26543,19 @@ function startDiscoverSyncPolling(playlistType, virtualPlaylistId) {
                     syncButton.style.cursor = 'pointer';
                 }
 
-                // Show completion toast
-                showToast(`${playlistType === 'release_radar' ? 'Fresh Tape' : 'The Archives'} sync complete!`, 'success');
+                // Show completion toast with playlist name
+                const playlistNames = {
+                    'release_radar': 'Fresh Tape',
+                    'discovery_weekly': 'The Archives',
+                    'seasonal_playlist': 'Seasonal Mix',
+                    'popular_picks': 'Popular Picks',
+                    'hidden_gems': 'Hidden Gems',
+                    'discovery_shuffle': 'Discovery Shuffle',
+                    'familiar_favorites': 'Familiar Favorites',
+                    'build_playlist': 'Custom Playlist'
+                };
+                const displayName = playlistNames[playlistType] || playlistType;
+                showToast(`${displayName} sync complete!`, 'success');
 
                 // Hide status display after 3 seconds
                 setTimeout(() => {
