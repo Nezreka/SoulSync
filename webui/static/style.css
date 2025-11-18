@@ -17383,3 +17383,74 @@ body {
     transform: scale(1.1) rotate(5deg);
 }
 
+/* ===============================
+   TIME MACHINE (DECADE TABS)
+   =============================== */
+
+.decade-tabs,
+.genre-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 20px;
+    border-bottom: 2px solid rgba(255, 255, 255, 0.1);
+    padding-bottom: 0;
+    flex-wrap: wrap;
+}
+
+.decade-tab,
+.genre-tab {
+    background: transparent;
+    border: none;
+    color: #999;
+    padding: 12px 20px;
+    font-size: 15px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    border-bottom: 3px solid transparent;
+    position: relative;
+    bottom: -2px;
+    white-space: nowrap;
+}
+
+.decade-tab:hover,
+.genre-tab:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.decade-tab.active,
+.genre-tab.active {
+    color: #fff;
+    border-bottom-color: #667eea;
+}
+
+.decade-tab-content,
+.genre-tab-content {
+    display: none;
+}
+
+.decade-tab-content.active,
+.genre-tab-content.active {
+    display: block;
+}
+
+.decade-actions,
+.genre-actions {
+    margin-bottom: 20px;
+}
+
+/* Responsive adjustments for Decade/Genre tabs */
+@media (max-width: 768px) {
+    .decade-tabs,
+    .genre-tabs {
+        gap: 4px;
+    }
+
+    .decade-tab,
+    .genre-tab {
+        padding: 10px 14px;
+        font-size: 13px;
+    }
+}
+
