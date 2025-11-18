@@ -508,6 +508,40 @@ class MusicDatabase:
                 )
             """)
 
+            # ListenBrainz Playlists - cache playlists from ListenBrainz
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS listenbrainz_playlists (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    playlist_mbid TEXT NOT NULL UNIQUE,
+                    title TEXT NOT NULL,
+                    creator TEXT,
+                    playlist_type TEXT NOT NULL,
+                    track_count INTEGER DEFAULT 0,
+                    annotation_data TEXT,
+                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    cached_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # ListenBrainz Tracks - cache tracks for each playlist
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS listenbrainz_tracks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    playlist_id INTEGER NOT NULL,
+                    position INTEGER NOT NULL,
+                    track_name TEXT NOT NULL,
+                    artist_name TEXT NOT NULL,
+                    album_name TEXT NOT NULL,
+                    duration_ms INTEGER DEFAULT 0,
+                    recording_mbid TEXT,
+                    release_mbid TEXT,
+                    album_cover_url TEXT,
+                    additional_metadata TEXT,
+                    FOREIGN KEY (playlist_id) REFERENCES listenbrainz_playlists (id) ON DELETE CASCADE,
+                    UNIQUE(playlist_id, position)
+                )
+            """)
+
             # Create indexes for performance
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_similar_artists_source ON similar_artists (source_artist_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_similar_artists_spotify ON similar_artists (similar_artist_spotify_id)")
@@ -519,6 +553,10 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_recent_releases_watchlist ON recent_releases (watchlist_artist_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_recent_releases_date ON recent_releases (release_date)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_recent_albums_date ON discovery_recent_albums (release_date)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_listenbrainz_playlists_type ON listenbrainz_playlists (playlist_type)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_listenbrainz_playlists_mbid ON listenbrainz_playlists (playlist_mbid)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_listenbrainz_tracks_playlist ON listenbrainz_tracks (playlist_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_listenbrainz_tracks_position ON listenbrainz_tracks (playlist_id, position)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_recent_albums_artist ON discovery_recent_albums (artist_spotify_id)")
 
             # Add genres column to discovery_pool if it doesn't exist (migration)
