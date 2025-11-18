@@ -1467,6 +1467,9 @@ async function loadSettingsData() {
         document.getElementById('soulseek-url').value = settings.soulseek?.slskd_url || '';
         document.getElementById('soulseek-api-key').value = settings.soulseek?.api_key || '';
 
+        // Populate ListenBrainz settings
+        document.getElementById('listenbrainz-token').value = settings.listenbrainz?.token || '';
+
         // Populate Download settings (right column)
         document.getElementById('download-path').value = settings.soulseek?.download_path || './downloads';
         document.getElementById('transfer-path').value = settings.soulseek?.transfer_path || './Transfer';
@@ -1774,6 +1777,9 @@ async function saveSettings() {
             api_key: document.getElementById('soulseek-api-key').value,
             download_path: document.getElementById('download-path').value,
             transfer_path: document.getElementById('transfer-path').value
+        },
+        listenbrainz: {
+            token: document.getElementById('listenbrainz-token').value
         },
         database: {
             max_workers: parseInt(document.getElementById('max-workers').value)

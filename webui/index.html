@@ -2248,12 +2248,25 @@
                                         <input type="password" id="soulseek-api-key" placeholder="Slskd API Key">
                                     </div>
                                 </div>
-                                
+
+                                <!-- ListenBrainz Settings -->
+                                <div class="api-service-frame">
+                                    <h4 class="service-title listenbrainz-title">ListenBrainz</h4>
+                                    <div class="form-group">
+                                        <label>User Token:</label>
+                                        <input type="password" id="listenbrainz-token" placeholder="ListenBrainz User Token">
+                                    </div>
+                                    <div class="callback-info">
+                                        <div class="callback-help">Get your token from <a href="https://listenbrainz.org/profile/" target="_blank" style="color: #eb743b;">ListenBrainz Settings</a></div>
+                                    </div>
+                                </div>
+
                                 <!-- Test Connection Buttons -->
                                 <div class="api-test-buttons">
                                     <button class="test-button" onclick="testConnection('spotify')">Test Spotify</button>
                                     <button class="test-button" onclick="testConnection('tidal')">Test Tidal</button>
                                     <button class="test-button" onclick="testConnection('soulseek')">Test Soulseek</button>
+                                    <button class="test-button" onclick="testConnection('listenbrainz')">Test ListenBrainz</button>
                                 </div>
                             </div>
                             
