@@ -26787,6 +26787,72 @@ async function openListenBrainzPlaylist(playlistMbid, playlistName) {
     }
 }
 
+async function refreshListenBrainzPlaylists() {
+    const button = document.getElementById('listenbrainz-refresh-btn');
+    if (!button) return;
+
+    try {
+        // Show loading state on button
+        const originalContent = button.innerHTML;
+        button.disabled = true;
+        button.innerHTML = '<span class="button-icon">⏳</span><span class="button-text">Refreshing...</span>';
+
+        console.log('🔄 Refreshing ListenBrainz playlists...');
+        showToast('Refreshing ListenBrainz playlists...', 'info');
+
+        const response = await fetch('/api/discover/listenbrainz/refresh', {
+            method: 'POST'
+        });
+
+        if (!response.ok) {
+            throw new Error(`Failed to refresh: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+
+        if (data.success) {
+            const summary = data.summary || {};
+            let message = 'ListenBrainz playlists refreshed!';
+
+            // Build summary message
+            const updates = [];
+            for (const [type, stats] of Object.entries(summary)) {
+                const total = (stats.new || 0) + (stats.updated || 0);
+                if (total > 0) {
+                    updates.push(`${total} ${type}`);
+                }
+            }
+
+            if (updates.length > 0) {
+                message += ` Updated: ${updates.join(', ')}`;
+            } else {
+                message = 'All playlists are up to date';
+            }
+
+            console.log('✅ Refresh complete:', data.summary);
+            showToast(message, 'success');
+
+            // Reload the tabs to show updated data
+            await initializeListenBrainzTabs();
+
+        } else {
+            throw new Error(data.error || 'Unknown error');
+        }
+
+        // Restore button
+        button.disabled = false;
+        button.innerHTML = originalContent;
+
+    } catch (error) {
+        console.error('Error refreshing ListenBrainz playlists:', error);
+        showToast(`Failed to refresh: ${error.message}`, 'error');
+
+        // Restore button
+        button.disabled = false;
+        button.innerHTML = '<span class="button-icon">🔄</span><span class="button-text">Refresh</span>';
+    }
+}
+
 // ===============================
 // SEASONAL DISCOVERY
 // ===============================

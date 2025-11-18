@@ -14087,6 +14087,23 @@ def start_watchlist_scan():
                     import traceback
                     traceback.print_exc()
 
+                # Update ListenBrainz playlists cache
+                print("🧠 Starting ListenBrainz playlists update...")
+                watchlist_scan_state['current_phase'] = 'updating_listenbrainz'
+                try:
+                    from core.listenbrainz_manager import ListenBrainzManager
+                    lb_manager = ListenBrainzManager("database/music_library.db")
+                    lb_result = lb_manager.update_all_playlists()
+                    if lb_result.get('success'):
+                        summary = lb_result.get('summary', {})
+                        print(f"✅ ListenBrainz update complete: {summary}")
+                    else:
+                        print(f"⚠️ ListenBrainz update skipped: {lb_result.get('error')}")
+                except Exception as lb_error:
+                    print(f"⚠️ Error updating ListenBrainz: {lb_error}")
+                    import traceback
+                    traceback.print_exc()
+
             except Exception as e:
                 print(f"Error during watchlist scan: {e}")
                 watchlist_scan_state['status'] = 'error'
@@ -15184,91 +15201,204 @@ def get_discover_genre_playlist(genre_name):
 
 @app.route('/api/discover/listenbrainz/created-for', methods=['GET'])
 def get_listenbrainz_created_for():
-    """Get playlists created for the user by ListenBrainz"""
+    """Get playlists created for the user by ListenBrainz (from cache)"""
     try:
-        from core.listenbrainz_client import ListenBrainzClient
+        from core.listenbrainz_manager import ListenBrainzManager
 
-        client = ListenBrainzClient()
+        lb_manager = ListenBrainzManager("database/music_library.db")
 
-        if not client.is_authenticated():
-            return jsonify({
-                "success": False,
-                "error": "Not authenticated with ListenBrainz"
-            }), 401
+        # Check if cache is empty - if so, populate it on first load
+        if not lb_manager.has_cached_playlists():
+            # Check if authenticated
+            if not lb_manager.client.is_authenticated():
+                return jsonify({
+                    "success": False,
+                    "error": "Not authenticated",
+                    "playlists": [],
+                    "count": 0
+                })
 
-        playlists = client.get_playlists_created_for_user(count=25)
+            # Populate cache on first load
+            print("📦 Cache empty, populating ListenBrainz playlists...")
+            lb_manager.update_all_playlists()
+
+        playlists = lb_manager.get_cached_playlists('created_for')
+
+        # Convert to JSPF-like format for frontend compatibility
+        formatted_playlists = []
+        for playlist in playlists:
+            formatted_playlists.append({
+                "playlist": {
+                    "identifier": f"https://listenbrainz.org/playlist/{playlist['playlist_mbid']}",
+                    "title": playlist['title'],
+                    "creator": playlist['creator'],
+                    "annotation": playlist.get('annotation', {}),
+                    "track": []  # Track count is in annotation
+                }
+            })
 
         return jsonify({
             "success": True,
-            "playlists": playlists,
-            "count": len(playlists)
+            "playlists": formatted_playlists,
+            "count": len(formatted_playlists)
         })
 
     except Exception as e:
-        print(f"Error getting ListenBrainz created-for playlists: {e}")
+        print(f"Error getting cached ListenBrainz created-for playlists: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/discover/listenbrainz/user-playlists', methods=['GET'])
 def get_listenbrainz_user_playlists():
-    """Get user's own ListenBrainz playlists"""
+    """Get user's own ListenBrainz playlists (from cache)"""
     try:
-        from core.listenbrainz_client import ListenBrainzClient
+        from core.listenbrainz_manager import ListenBrainzManager
 
-        client = ListenBrainzClient()
+        lb_manager = ListenBrainzManager("database/music_library.db")
 
-        if not client.is_authenticated():
-            return jsonify({
-                "success": False,
-                "error": "Not authenticated with ListenBrainz"
-            }), 401
+        # Check if cache is empty - if so, populate it on first load
+        if not lb_manager.has_cached_playlists():
+            # Check if authenticated
+            if not lb_manager.client.is_authenticated():
+                return jsonify({
+                    "success": False,
+                    "error": "Not authenticated",
+                    "playlists": [],
+                    "count": 0
+                })
 
-        playlists = client.get_user_playlists(count=25)
+            # Populate cache on first load
+            print("📦 Cache empty, populating ListenBrainz playlists...")
+            lb_manager.update_all_playlists()
+
+        playlists = lb_manager.get_cached_playlists('user')
+
+        # Convert to JSPF-like format for frontend compatibility
+        formatted_playlists = []
+        for playlist in playlists:
+            formatted_playlists.append({
+                "playlist": {
+                    "identifier": f"https://listenbrainz.org/playlist/{playlist['playlist_mbid']}",
+                    "title": playlist['title'],
+                    "creator": playlist['creator'],
+                    "annotation": playlist.get('annotation', {}),
+                    "track": []
+                }
+            })
 
         return jsonify({
             "success": True,
-            "playlists": playlists,
-            "count": len(playlists)
+            "playlists": formatted_playlists,
+            "count": len(formatted_playlists)
         })
 
     except Exception as e:
-        print(f"Error getting ListenBrainz user playlists: {e}")
+        print(f"Error getting cached ListenBrainz user playlists: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/discover/listenbrainz/collaborative', methods=['GET'])
 def get_listenbrainz_collaborative():
-    """Get collaborative ListenBrainz playlists"""
+    """Get collaborative ListenBrainz playlists (from cache)"""
     try:
-        from core.listenbrainz_client import ListenBrainzClient
+        from core.listenbrainz_manager import ListenBrainzManager
 
-        client = ListenBrainzClient()
+        lb_manager = ListenBrainzManager("database/music_library.db")
 
-        if not client.is_authenticated():
-            return jsonify({
-                "success": False,
-                "error": "Not authenticated with ListenBrainz"
-            }), 401
+        # Check if cache is empty - if so, populate it on first load
+        if not lb_manager.has_cached_playlists():
+            # Check if authenticated
+            if not lb_manager.client.is_authenticated():
+                return jsonify({
+                    "success": False,
+                    "error": "Not authenticated",
+                    "playlists": [],
+                    "count": 0
+                })
 
-        playlists = client.get_collaborative_playlists(count=25)
+            # Populate cache on first load
+            print("📦 Cache empty, populating ListenBrainz playlists...")
+            lb_manager.update_all_playlists()
+
+        playlists = lb_manager.get_cached_playlists('collaborative')
+
+        # Convert to JSPF-like format for frontend compatibility
+        formatted_playlists = []
+        for playlist in playlists:
+            formatted_playlists.append({
+                "playlist": {
+                    "identifier": f"https://listenbrainz.org/playlist/{playlist['playlist_mbid']}",
+                    "title": playlist['title'],
+                    "creator": playlist['creator'],
+                    "annotation": playlist.get('annotation', {}),
+                    "track": []
+                }
+            })
 
         return jsonify({
             "success": True,
-            "playlists": playlists,
-            "count": len(playlists)
+            "playlists": formatted_playlists,
+            "count": len(formatted_playlists)
         })
 
     except Exception as e:
-        print(f"Error getting ListenBrainz collaborative playlists: {e}")
+        print(f"Error getting cached ListenBrainz collaborative playlists: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/discover/listenbrainz/playlist/<playlist_mbid>', methods=['GET'])
 def get_listenbrainz_playlist_tracks(playlist_mbid):
-    """Get tracks from a specific ListenBrainz playlist"""
+    """Get tracks from a specific ListenBrainz playlist (from cache)"""
+    try:
+        from core.listenbrainz_manager import ListenBrainzManager
+
+        lb_manager = ListenBrainzManager("database/music_library.db")
+        tracks = lb_manager.get_cached_tracks(playlist_mbid)
+
+        if not tracks:
+            return jsonify({
+                "success": False,
+                "error": "Playlist not found in cache"
+            }), 404
+
+        return jsonify({
+            "success": True,
+            "tracks": tracks,
+            "track_count": len(tracks)
+        })
+
+    except Exception as e:
+        print(f"Error getting cached ListenBrainz playlist tracks: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# Manual refresh endpoint for ListenBrainz
+@app.route('/api/discover/listenbrainz/refresh', methods=['POST'])
+def refresh_listenbrainz():
+    """Manually refresh ListenBrainz playlists cache"""
+    try:
+        from core.listenbrainz_manager import ListenBrainzManager
+
+        lb_manager = ListenBrainzManager("database/music_library.db")
+        result = lb_manager.update_all_playlists()
+
+        return jsonify(result)
+
+    except Exception as e:
+        print(f"Error refreshing ListenBrainz: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# OLD ENDPOINT - REMOVE ALL THE CODE BELOW FOR THE OLD IMPLEMENTATION
+def _old_get_listenbrainz_playlist_tracks_DEPRECATED(playlist_mbid):
+    """DEPRECATED - Old implementation that fetches from API"""
     try:
         from core.listenbrainz_client import ListenBrainzClient
 
