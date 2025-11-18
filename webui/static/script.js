@@ -24738,8 +24738,8 @@ async function loadDiscoverPage() {
         loadPersonalizedForgottenFavorites(),  // NEW: Forgotten favorites
         loadDiscoveryShuffle(),  // NEW: Discovery Shuffle
         loadFamiliarFavorites(),  // NEW: Familiar Favorites
-        loadDecadeBrowser(),  // Decade browser
-        loadGenreBrowser()  // Genre browser
+        loadDecadeBrowserTabs(),  // Time Machine (tabbed by decade)
+        loadGenreBrowserTabs()  // Browse by Genre (tabbed by genre)
     ]);
 
     // Check for active syncs after page load
@@ -25518,6 +25518,740 @@ async function openGenrePlaylist(genre) {
         showToast(`Failed to load ${genre} playlist`, 'error');
         hideLoadingOverlay();
     }
+}
+
+// ===============================
+// TIME MACHINE (TABBED BY DECADE)
+// ===============================
+
+let decadeTracksCache = {}; // Store tracks for each decade
+let activeDecade = null;
+
+async function loadDecadeBrowserTabs() {
+    try {
+        const tabsContainer = document.getElementById('decade-tabs');
+        const contentsContainer = document.getElementById('decade-tab-contents');
+
+        if (!tabsContainer || !contentsContainer) return;
+
+        // Fetch available decades from backend
+        const response = await fetch('/api/discover/decades/available');
+        if (!response.ok) {
+            throw new Error('Failed to fetch available decades');
+        }
+
+        const data = await response.json();
+        if (!data.success || !data.decades || data.decades.length === 0) {
+            tabsContainer.innerHTML = '<div class="discover-empty"><p>No decade content available yet. Run a watchlist scan to populate your discovery pool!</p></div>';
+            return;
+        }
+
+        // Build decade tabs
+        let tabsHTML = '';
+        let contentsHTML = '';
+
+        data.decades.forEach((decade, index) => {
+            const isActive = index === 0;
+            const icon = getDecadeIcon(decade.year);
+            const tabId = `decade-${decade.year}`;
+
+            // Tab button
+            tabsHTML += `
+                <button class="decade-tab ${isActive ? 'active' : ''}"
+                        data-decade="${decade.year}"
+                        onclick="switchDecadeTab(${decade.year})">
+                    ${icon} ${decade.year}s
+                </button>
+            `;
+
+            // Tab content
+            contentsHTML += `
+                <div class="decade-tab-content ${isActive ? 'active' : ''}" id="${tabId}-content">
+                    <!-- Action Buttons -->
+                    <div class="decade-actions">
+                        <div class="discover-section-header">
+                            <div>
+                                <h3 style="margin: 0; color: #fff; font-size: 18px;">${decade.year}s Classics</h3>
+                                <p id="${tabId}-subtitle" style="margin: 4px 0 0 0; color: #999; font-size: 13px;">${decade.track_count} tracks</p>
+                            </div>
+                            <div class="discover-section-actions">
+                                <button class="action-button secondary" onclick="openDownloadModalForDecade(${decade.year})" title="Download missing tracks">
+                                    <span class="button-icon">↓</span>
+                                    <span class="button-text">Download</span>
+                                </button>
+                                <button class="action-button primary" id="${tabId}-sync-btn" onclick="startDecadeSync(${decade.year})" title="Sync to media server">
+                                    <span class="button-icon">⟳</span>
+                                    <span class="button-text">Sync</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Sync Status Display -->
+                        <div class="discover-sync-status" id="${tabId}-sync-status" style="display: none;">
+                            <div class="sync-status-content">
+                                <div class="sync-status-label">
+                                    <span class="sync-icon">⟳</span>
+                                    <span>Syncing to media server...</span>
+                                </div>
+                                <div class="sync-status-stats">
+                                    <span class="sync-stat">✓ <span id="${tabId}-sync-completed">0</span></span>
+                                    <span class="sync-stat">⏳ <span id="${tabId}-sync-pending">0</span></span>
+                                    <span class="sync-stat">✗ <span id="${tabId}-sync-failed">0</span></span>
+                                    <span class="sync-stat">(<span id="${tabId}-sync-percentage">0</span>%)</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Track List -->
+                    <div class="discover-playlist-container compact" id="${tabId}-playlist">
+                        <div class="discover-loading"><div class="loading-spinner"></div><p>Loading ${decade.year}s tracks...</p></div>
+                    </div>
+                </div>
+            `;
+        });
+
+        tabsContainer.innerHTML = tabsHTML;
+        contentsContainer.innerHTML = contentsHTML;
+
+        // Load first decade's tracks
+        if (data.decades.length > 0) {
+            await loadDecadeTracks(data.decades[0].year);
+        }
+
+    } catch (error) {
+        console.error('Error loading decade browser tabs:', error);
+        const tabsContainer = document.getElementById('decade-tabs');
+        if (tabsContainer) {
+            tabsContainer.innerHTML = '<div class="discover-empty"><p>Failed to load decades</p></div>';
+        }
+    }
+}
+
+function switchDecadeTab(decade) {
+    // Update tab buttons
+    const tabs = document.querySelectorAll('.decade-tab');
+    tabs.forEach(tab => {
+        if (parseInt(tab.getAttribute('data-decade')) === decade) {
+            tab.classList.add('active');
+        } else {
+            tab.classList.remove('active');
+        }
+    });
+
+    // Update tab content
+    const tabContents = document.querySelectorAll('.decade-tab-content');
+    tabContents.forEach(content => {
+        if (content.id === `decade-${decade}-content`) {
+            content.classList.add('active');
+        } else {
+            content.classList.remove('active');
+        }
+    });
+
+    // Load tracks if not already loaded
+    if (!decadeTracksCache[decade]) {
+        loadDecadeTracks(decade);
+    }
+}
+
+async function loadDecadeTracks(decade) {
+    try {
+        const playlistContainer = document.getElementById(`decade-${decade}-playlist`);
+        if (!playlistContainer) return;
+
+        const response = await fetch(`/api/discover/decade/${decade}`);
+        if (!response.ok) {
+            throw new Error('Failed to fetch decade playlist');
+        }
+
+        const data = await response.json();
+        if (!data.success || !data.tracks || data.tracks.length === 0) {
+            playlistContainer.innerHTML = '<div class="discover-empty"><p>No tracks found for the ' + decade + 's</p></div>';
+            return;
+        }
+
+        // Store tracks in cache
+        decadeTracksCache[decade] = data.tracks;
+        activeDecade = decade;
+
+        // Build compact playlist HTML
+        let html = '<div class="discover-playlist-tracks-compact">';
+        data.tracks.forEach((track, index) => {
+            // Extract track data from track_data_json if available
+            let trackData = track;
+            if (track.track_data_json) {
+                trackData = track.track_data_json;
+            }
+
+            // Get track properties with fallbacks
+            const trackName = trackData.name || trackData.track_name || track.track_name || 'Unknown Track';
+            const artistName = trackData.artists?.[0]?.name || trackData.artists?.[0] || trackData.artist_name || track.artist_name || 'Unknown Artist';
+            const albumName = trackData.album?.name || trackData.album_name || track.album_name || 'Unknown Album';
+            const coverUrl = trackData.album?.images?.[0]?.url || track.album_cover_url || '/static/placeholder-album.png';
+            const durationMs = trackData.duration_ms || track.duration_ms || 0;
+
+            const durationMin = Math.floor(durationMs / 60000);
+            const durationSec = Math.floor((durationMs % 60000) / 1000);
+            const duration = `${durationMin}:${durationSec.toString().padStart(2, '0')}`;
+
+            html += `
+                <div class="discover-playlist-track-compact" data-track-index="${index}">
+                    <div class="track-compact-number">${index + 1}</div>
+                    <div class="track-compact-image">
+                        <img src="${coverUrl}" alt="${albumName}">
+                    </div>
+                    <div class="track-compact-info">
+                        <div class="track-compact-name">${trackName}</div>
+                        <div class="track-compact-artist">${artistName}</div>
+                    </div>
+                    <div class="track-compact-album">${albumName}</div>
+                    <div class="track-compact-duration">${duration}</div>
+                </div>
+            `;
+        });
+        html += '</div>';
+
+        playlistContainer.innerHTML = html;
+
+    } catch (error) {
+        console.error('Error loading decade tracks:', error);
+        const playlistContainer = document.getElementById(`decade-${decade}-playlist`);
+        if (playlistContainer) {
+            playlistContainer.innerHTML = '<div class="discover-empty"><p>Failed to load decade tracks</p></div>';
+        }
+    }
+}
+
+async function startDecadeSync(decade) {
+    const tracks = decadeTracksCache[decade];
+    if (!tracks || tracks.length === 0) {
+        showToast('No tracks available for this decade', 'warning');
+        return;
+    }
+
+    // Convert to format expected by sync API
+    const spotifyTracks = tracks.map(track => {
+        // Extract track data from track_data_json if available
+        let trackData = track;
+        if (track.track_data_json) {
+            trackData = track.track_data_json;
+        }
+
+        // Build properly formatted Spotify track object
+        let spotifyTrack = {
+            id: trackData.id || track.spotify_track_id,
+            name: trackData.name || trackData.track_name || track.track_name,
+            artists: trackData.artists || [{ name: trackData.artist_name || track.artist_name }],
+            album: trackData.album || {
+                name: trackData.album_name || track.album_name,
+                images: trackData.album?.images || (track.album_cover_url ? [{ url: track.album_cover_url }] : [])
+            },
+            duration_ms: trackData.duration_ms || track.duration_ms || 0
+        };
+
+        // Normalize artists to array of strings for sync compatibility
+        if (spotifyTrack.artists && Array.isArray(spotifyTrack.artists)) {
+            spotifyTrack.artists = spotifyTrack.artists.map(a => a.name || a);
+        }
+
+        return spotifyTrack;
+    });
+
+    const virtualPlaylistId = `discover_decade_${decade}`;
+    playlistTrackCache[virtualPlaylistId] = spotifyTracks;
+
+    const virtualPlaylist = {
+        id: virtualPlaylistId,
+        name: `${decade}s Classics`,
+        track_count: spotifyTracks.length
+    };
+
+    if (!spotifyPlaylists.find(p => p.id === virtualPlaylistId)) {
+        spotifyPlaylists.push(virtualPlaylist);
+    }
+
+    // Show sync status display
+    const statusDisplay = document.getElementById(`decade-${decade}-sync-status`);
+    if (statusDisplay) statusDisplay.style.display = 'block';
+
+    // Disable sync button
+    const syncButton = document.getElementById(`decade-${decade}-sync-btn`);
+    if (syncButton) {
+        syncButton.disabled = true;
+        syncButton.style.opacity = '0.5';
+        syncButton.style.cursor = 'not-allowed';
+    }
+
+    // Start sync
+    await startPlaylistSync(virtualPlaylistId);
+
+    // Start polling
+    startDecadeSyncPolling(decade, virtualPlaylistId);
+}
+
+function startDecadeSyncPolling(decade, virtualPlaylistId) {
+    const pollerId = `decade_${decade}`;
+
+    if (discoverSyncPollers[pollerId]) {
+        clearInterval(discoverSyncPollers[pollerId]);
+    }
+
+    discoverSyncPollers[pollerId] = setInterval(async () => {
+        try {
+            const response = await fetch(`/api/sync/status/${virtualPlaylistId}`);
+            if (!response.ok) return;
+
+            const data = await response.json();
+            const progress = data.progress || {};
+
+            const completedEl = document.getElementById(`decade-${decade}-sync-completed`);
+            const pendingEl = document.getElementById(`decade-${decade}-sync-pending`);
+            const failedEl = document.getElementById(`decade-${decade}-sync-failed`);
+            const percentageEl = document.getElementById(`decade-${decade}-sync-percentage`);
+
+            const total = progress.total_tracks || 0;
+            const matched = progress.matched_tracks || 0;
+            const failed = progress.failed_tracks || 0;
+            const processed = matched + failed;
+            const pending = total - processed;
+            const completionPercentage = total > 0 ? Math.round((processed / total) * 100) : 0;
+
+            if (completedEl) completedEl.textContent = matched;
+            if (pendingEl) pendingEl.textContent = pending;
+            if (failedEl) failedEl.textContent = failed;
+            if (percentageEl) percentageEl.textContent = completionPercentage;
+
+            if (data.status === 'finished') {
+                clearInterval(discoverSyncPollers[pollerId]);
+                delete discoverSyncPollers[pollerId];
+
+                const syncButton = document.getElementById(`decade-${decade}-sync-btn`);
+                if (syncButton) {
+                    syncButton.disabled = false;
+                    syncButton.style.opacity = '1';
+                    syncButton.style.cursor = 'pointer';
+                }
+
+                showToast(`${decade}s Classics sync complete!`, 'success');
+
+                setTimeout(() => {
+                    const statusDisplay = document.getElementById(`decade-${decade}-sync-status`);
+                    if (statusDisplay) statusDisplay.style.display = 'none';
+                }, 3000);
+            }
+        } catch (error) {
+            console.error(`Error polling sync status for decade ${decade}:`, error);
+        }
+    }, 500);
+}
+
+async function openDownloadModalForDecade(decade) {
+    const tracks = decadeTracksCache[decade];
+    if (!tracks || tracks.length === 0) {
+        showToast('No tracks available for this decade', 'warning');
+        return;
+    }
+
+    // Convert to format expected by download modal
+    const spotifyTracks = tracks.map(track => {
+        // Extract track data from track_data_json if available
+        let trackData = track;
+        if (track.track_data_json) {
+            trackData = track.track_data_json;
+        }
+
+        // Build properly formatted Spotify track object
+        let spotifyTrack = {
+            id: trackData.id || track.spotify_track_id,
+            name: trackData.name || trackData.track_name || track.track_name,
+            artists: trackData.artists || [{ name: trackData.artist_name || track.artist_name }],
+            album: trackData.album || {
+                name: trackData.album_name || track.album_name,
+                images: trackData.album?.images || (track.album_cover_url ? [{ url: track.album_cover_url }] : [])
+            },
+            duration_ms: trackData.duration_ms || track.duration_ms || 0
+        };
+
+        return spotifyTrack;
+    });
+
+    const playlistName = `${decade}s Classics`;
+    const virtualPlaylistId = `decade_${decade}`;
+
+    await openDownloadMissingModalForYouTube(virtualPlaylistId, playlistName, spotifyTracks);
+}
+
+// ===============================
+// BROWSE BY GENRE (TABBED BY GENRE)
+// ===============================
+
+let genreTracksCache = {}; // Store tracks for each genre
+let activeGenre = null;
+let availableGenres = [];
+
+async function loadGenreBrowserTabs() {
+    try {
+        const tabsContainer = document.getElementById('genre-tabs');
+        const contentsContainer = document.getElementById('genre-tab-contents');
+
+        if (!tabsContainer || !contentsContainer) return;
+
+        // Fetch available genres from backend
+        const response = await fetch('/api/discover/genres/available');
+        if (!response.ok) {
+            throw new Error('Failed to fetch available genres');
+        }
+
+        const data = await response.json();
+        if (!data.success || !data.genres || data.genres.length === 0) {
+            tabsContainer.innerHTML = '<div class="discover-empty"><p>No genre content available yet. Run a watchlist scan to populate your discovery pool!</p></div>';
+            return;
+        }
+
+        availableGenres = data.genres;
+
+        // Build genre tabs (limit to first 8-10 to avoid overcrowding)
+        const displayGenres = data.genres.slice(0, 10);
+        let tabsHTML = '';
+        let contentsHTML = '';
+
+        displayGenres.forEach((genre, index) => {
+            const isActive = index === 0;
+            const icon = getGenreIcon(genre.name);
+            const genreName = genre.name;
+            const genreId = genreName.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-]/g, '');
+            const tabId = `genre-${genreId}`;
+
+            // Tab button
+            tabsHTML += `
+                <button class="genre-tab ${isActive ? 'active' : ''}"
+                        data-genre="${escapeHtml(genreName)}"
+                        onclick="switchGenreTab('${escapeHtml(genreName)}')">
+                    ${icon} ${capitalizeGenre(genreName)}
+                </button>
+            `;
+
+            // Tab content
+            contentsHTML += `
+                <div class="genre-tab-content ${isActive ? 'active' : ''}" id="${tabId}-content" data-genre="${escapeHtml(genreName)}">
+                    <!-- Action Buttons -->
+                    <div class="genre-actions">
+                        <div class="discover-section-header">
+                            <div>
+                                <h3 style="margin: 0; color: #fff; font-size: 18px;">${capitalizeGenre(genreName)} Mix</h3>
+                                <p id="${tabId}-subtitle" style="margin: 4px 0 0 0; color: #999; font-size: 13px;">${genre.track_count} tracks</p>
+                            </div>
+                            <div class="discover-section-actions">
+                                <button class="action-button secondary" onclick="openDownloadModalForGenre('${escapeHtml(genreName)}')" title="Download missing tracks">
+                                    <span class="button-icon">↓</span>
+                                    <span class="button-text">Download</span>
+                                </button>
+                                <button class="action-button primary" id="${tabId}-sync-btn" onclick="startGenreSync('${escapeHtml(genreName)}')" title="Sync to media server">
+                                    <span class="button-icon">⟳</span>
+                                    <span class="button-text">Sync</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Sync Status Display -->
+                        <div class="discover-sync-status" id="${tabId}-sync-status" style="display: none;">
+                            <div class="sync-status-content">
+                                <div class="sync-status-label">
+                                    <span class="sync-icon">⟳</span>
+                                    <span>Syncing to media server...</span>
+                                </div>
+                                <div class="sync-status-stats">
+                                    <span class="sync-stat">✓ <span id="${tabId}-sync-completed">0</span></span>
+                                    <span class="sync-stat">⏳ <span id="${tabId}-sync-pending">0</span></span>
+                                    <span class="sync-stat">✗ <span id="${tabId}-sync-failed">0</span></span>
+                                    <span class="sync-stat">(<span id="${tabId}-sync-percentage">0</span>%)</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Track List -->
+                    <div class="discover-playlist-container compact" id="${tabId}-playlist">
+                        <div class="discover-loading"><div class="loading-spinner"></div><p>Loading ${capitalizeGenre(genreName)} tracks...</p></div>
+                    </div>
+                </div>
+            `;
+        });
+
+        tabsContainer.innerHTML = tabsHTML;
+        contentsContainer.innerHTML = contentsHTML;
+
+        // Load first genre's tracks
+        if (displayGenres.length > 0) {
+            await loadGenreTracks(displayGenres[0].name);
+        }
+
+    } catch (error) {
+        console.error('Error loading genre browser tabs:', error);
+        const tabsContainer = document.getElementById('genre-tabs');
+        if (tabsContainer) {
+            tabsContainer.innerHTML = '<div class="discover-empty"><p>Failed to load genres</p></div>';
+        }
+    }
+}
+
+function switchGenreTab(genreName) {
+    // Update tab buttons
+    const tabs = document.querySelectorAll('.genre-tab');
+    tabs.forEach(tab => {
+        if (tab.getAttribute('data-genre') === genreName) {
+            tab.classList.add('active');
+        } else {
+            tab.classList.remove('active');
+        }
+    });
+
+    // Update tab content
+    const tabContents = document.querySelectorAll('.genre-tab-content');
+    tabContents.forEach(content => {
+        if (content.getAttribute('data-genre') === genreName) {
+            content.classList.add('active');
+        } else {
+            content.classList.remove('active');
+        }
+    });
+
+    // Load tracks if not already loaded
+    if (!genreTracksCache[genreName]) {
+        loadGenreTracks(genreName);
+    }
+}
+
+async function loadGenreTracks(genreName) {
+    try {
+        const genreId = genreName.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-]/g, '');
+        const playlistContainer = document.getElementById(`genre-${genreId}-playlist`);
+        if (!playlistContainer) return;
+
+        const response = await fetch(`/api/discover/genre/${encodeURIComponent(genreName)}`);
+        if (!response.ok) {
+            throw new Error('Failed to fetch genre playlist');
+        }
+
+        const data = await response.json();
+        if (!data.success || !data.tracks || data.tracks.length === 0) {
+            playlistContainer.innerHTML = `<div class="discover-empty"><p>No tracks found for ${capitalizeGenre(genreName)}</p></div>`;
+            return;
+        }
+
+        // Store tracks in cache
+        genreTracksCache[genreName] = data.tracks;
+        activeGenre = genreName;
+
+        // Build compact playlist HTML
+        let html = '<div class="discover-playlist-tracks-compact">';
+        data.tracks.forEach((track, index) => {
+            // Extract track data from track_data_json if available
+            let trackData = track;
+            if (track.track_data_json) {
+                trackData = track.track_data_json;
+            }
+
+            // Get track properties with fallbacks
+            const trackName = trackData.name || trackData.track_name || track.track_name || 'Unknown Track';
+            const artistName = trackData.artists?.[0]?.name || trackData.artists?.[0] || trackData.artist_name || track.artist_name || 'Unknown Artist';
+            const albumName = trackData.album?.name || trackData.album_name || track.album_name || 'Unknown Album';
+            const coverUrl = trackData.album?.images?.[0]?.url || track.album_cover_url || '/static/placeholder-album.png';
+            const durationMs = trackData.duration_ms || track.duration_ms || 0;
+
+            const durationMin = Math.floor(durationMs / 60000);
+            const durationSec = Math.floor((durationMs % 60000) / 1000);
+            const duration = `${durationMin}:${durationSec.toString().padStart(2, '0')}`;
+
+            html += `
+                <div class="discover-playlist-track-compact" data-track-index="${index}">
+                    <div class="track-compact-number">${index + 1}</div>
+                    <div class="track-compact-image">
+                        <img src="${coverUrl}" alt="${albumName}">
+                    </div>
+                    <div class="track-compact-info">
+                        <div class="track-compact-name">${trackName}</div>
+                        <div class="track-compact-artist">${artistName}</div>
+                    </div>
+                    <div class="track-compact-album">${albumName}</div>
+                    <div class="track-compact-duration">${duration}</div>
+                </div>
+            `;
+        });
+        html += '</div>';
+
+        playlistContainer.innerHTML = html;
+
+    } catch (error) {
+        console.error('Error loading genre tracks:', error);
+        const genreId = genreName.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-]/g, '');
+        const playlistContainer = document.getElementById(`genre-${genreId}-playlist`);
+        if (playlistContainer) {
+            playlistContainer.innerHTML = '<div class="discover-empty"><p>Failed to load genre tracks</p></div>';
+        }
+    }
+}
+
+async function startGenreSync(genreName) {
+    const tracks = genreTracksCache[genreName];
+    if (!tracks || tracks.length === 0) {
+        showToast('No tracks available for this genre', 'warning');
+        return;
+    }
+
+    const genreId = genreName.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-]/g, '');
+
+    // Convert to format expected by sync API
+    const spotifyTracks = tracks.map(track => {
+        // Extract track data from track_data_json if available
+        let trackData = track;
+        if (track.track_data_json) {
+            trackData = track.track_data_json;
+        }
+
+        // Build properly formatted Spotify track object
+        let spotifyTrack = {
+            id: trackData.id || track.spotify_track_id,
+            name: trackData.name || trackData.track_name || track.track_name,
+            artists: trackData.artists || [{ name: trackData.artist_name || track.artist_name }],
+            album: trackData.album || {
+                name: trackData.album_name || track.album_name,
+                images: trackData.album?.images || (track.album_cover_url ? [{ url: track.album_cover_url }] : [])
+            },
+            duration_ms: trackData.duration_ms || track.duration_ms || 0
+        };
+
+        // Normalize artists to array of strings for sync compatibility
+        if (spotifyTrack.artists && Array.isArray(spotifyTrack.artists)) {
+            spotifyTrack.artists = spotifyTrack.artists.map(a => a.name || a);
+        }
+
+        return spotifyTrack;
+    });
+
+    const virtualPlaylistId = `discover_genre_${genreName.replace(/\s+/g, '_')}`;
+    playlistTrackCache[virtualPlaylistId] = spotifyTracks;
+
+    const virtualPlaylist = {
+        id: virtualPlaylistId,
+        name: `${capitalizeGenre(genreName)} Mix`,
+        track_count: spotifyTracks.length
+    };
+
+    if (!spotifyPlaylists.find(p => p.id === virtualPlaylistId)) {
+        spotifyPlaylists.push(virtualPlaylist);
+    }
+
+    // Show sync status display
+    const statusDisplay = document.getElementById(`genre-${genreId}-sync-status`);
+    if (statusDisplay) statusDisplay.style.display = 'block';
+
+    // Disable sync button
+    const syncButton = document.getElementById(`genre-${genreId}-sync-btn`);
+    if (syncButton) {
+        syncButton.disabled = true;
+        syncButton.style.opacity = '0.5';
+        syncButton.style.cursor = 'not-allowed';
+    }
+
+    // Start sync
+    await startPlaylistSync(virtualPlaylistId);
+
+    // Start polling
+    startGenreSyncPolling(genreName, genreId, virtualPlaylistId);
+}
+
+function startGenreSyncPolling(genreName, genreId, virtualPlaylistId) {
+    const pollerId = `genre_${genreId}`;
+
+    if (discoverSyncPollers[pollerId]) {
+        clearInterval(discoverSyncPollers[pollerId]);
+    }
+
+    discoverSyncPollers[pollerId] = setInterval(async () => {
+        try {
+            const response = await fetch(`/api/sync/status/${virtualPlaylistId}`);
+            if (!response.ok) return;
+
+            const data = await response.json();
+            const progress = data.progress || {};
+
+            const completedEl = document.getElementById(`genre-${genreId}-sync-completed`);
+            const pendingEl = document.getElementById(`genre-${genreId}-sync-pending`);
+            const failedEl = document.getElementById(`genre-${genreId}-sync-failed`);
+            const percentageEl = document.getElementById(`genre-${genreId}-sync-percentage`);
+
+            const total = progress.total_tracks || 0;
+            const matched = progress.matched_tracks || 0;
+            const failed = progress.failed_tracks || 0;
+            const processed = matched + failed;
+            const pending = total - processed;
+            const completionPercentage = total > 0 ? Math.round((processed / total) * 100) : 0;
+
+            if (completedEl) completedEl.textContent = matched;
+            if (pendingEl) pendingEl.textContent = pending;
+            if (failedEl) failedEl.textContent = failed;
+            if (percentageEl) percentageEl.textContent = completionPercentage;
+
+            if (data.status === 'finished') {
+                clearInterval(discoverSyncPollers[pollerId]);
+                delete discoverSyncPollers[pollerId];
+
+                const syncButton = document.getElementById(`genre-${genreId}-sync-btn`);
+                if (syncButton) {
+                    syncButton.disabled = false;
+                    syncButton.style.opacity = '1';
+                    syncButton.style.cursor = 'pointer';
+                }
+
+                showToast(`${capitalizeGenre(genreName)} Mix sync complete!`, 'success');
+
+                setTimeout(() => {
+                    const statusDisplay = document.getElementById(`genre-${genreId}-sync-status`);
+                    if (statusDisplay) statusDisplay.style.display = 'none';
+                }, 3000);
+            }
+        } catch (error) {
+            console.error(`Error polling sync status for genre ${genreName}:`, error);
+        }
+    }, 500);
+}
+
+async function openDownloadModalForGenre(genreName) {
+    const tracks = genreTracksCache[genreName];
+    if (!tracks || tracks.length === 0) {
+        showToast('No tracks available for this genre', 'warning');
+        return;
+    }
+
+    // Convert to format expected by download modal
+    const spotifyTracks = tracks.map(track => {
+        // Extract track data from track_data_json if available
+        let trackData = track;
+        if (track.track_data_json) {
+            trackData = track.track_data_json;
+        }
+
+        // Build properly formatted Spotify track object
+        let spotifyTrack = {
+            id: trackData.id || track.spotify_track_id,
+            name: trackData.name || trackData.track_name || track.track_name,
+            artists: trackData.artists || [{ name: trackData.artist_name || track.artist_name }],
+            album: trackData.album || {
+                name: trackData.album_name || track.album_name,
+                images: trackData.album?.images || (track.album_cover_url ? [{ url: track.album_cover_url }] : [])
+            },
+            duration_ms: trackData.duration_ms || track.duration_ms || 0
+        };
+
+        return spotifyTrack;
+    });
+
+    const playlistName = `${capitalizeGenre(genreName)} Mix`;
+    const virtualPlaylistId = `genre_${genreName.replace(/\s+/g, '_')}`;
+
+    await openDownloadMissingModalForYouTube(virtualPlaylistId, playlistName, spotifyTracks);
 }
 
 // ===============================
