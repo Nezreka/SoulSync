@@ -15178,6 +15178,156 @@ def get_discover_genre_playlist(genre_name):
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
 
+# ===============================
+# LISTENBRAINZ DISCOVER ENDPOINTS
+# ===============================
+
+@app.route('/api/discover/listenbrainz/created-for', methods=['GET'])
+def get_listenbrainz_created_for():
+    """Get playlists created for the user by ListenBrainz"""
+    try:
+        from core.listenbrainz_client import ListenBrainzClient
+
+        client = ListenBrainzClient()
+
+        if not client.is_authenticated():
+            return jsonify({
+                "success": False,
+                "error": "Not authenticated with ListenBrainz"
+            }), 401
+
+        playlists = client.get_playlists_created_for_user(count=25)
+
+        return jsonify({
+            "success": True,
+            "playlists": playlists,
+            "count": len(playlists)
+        })
+
+    except Exception as e:
+        print(f"Error getting ListenBrainz created-for playlists: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/discover/listenbrainz/user-playlists', methods=['GET'])
+def get_listenbrainz_user_playlists():
+    """Get user's own ListenBrainz playlists"""
+    try:
+        from core.listenbrainz_client import ListenBrainzClient
+
+        client = ListenBrainzClient()
+
+        if not client.is_authenticated():
+            return jsonify({
+                "success": False,
+                "error": "Not authenticated with ListenBrainz"
+            }), 401
+
+        playlists = client.get_user_playlists(count=25)
+
+        return jsonify({
+            "success": True,
+            "playlists": playlists,
+            "count": len(playlists)
+        })
+
+    except Exception as e:
+        print(f"Error getting ListenBrainz user playlists: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/discover/listenbrainz/collaborative', methods=['GET'])
+def get_listenbrainz_collaborative():
+    """Get collaborative ListenBrainz playlists"""
+    try:
+        from core.listenbrainz_client import ListenBrainzClient
+
+        client = ListenBrainzClient()
+
+        if not client.is_authenticated():
+            return jsonify({
+                "success": False,
+                "error": "Not authenticated with ListenBrainz"
+            }), 401
+
+        playlists = client.get_collaborative_playlists(count=25)
+
+        return jsonify({
+            "success": True,
+            "playlists": playlists,
+            "count": len(playlists)
+        })
+
+    except Exception as e:
+        print(f"Error getting ListenBrainz collaborative playlists: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/discover/listenbrainz/playlist/<playlist_mbid>', methods=['GET'])
+def get_listenbrainz_playlist_tracks(playlist_mbid):
+    """Get tracks from a specific ListenBrainz playlist"""
+    try:
+        from core.listenbrainz_client import ListenBrainzClient
+
+        client = ListenBrainzClient()
+
+        playlist = client.get_playlist_details(playlist_mbid, fetch_metadata=True)
+
+        if not playlist:
+            return jsonify({
+                "success": False,
+                "error": "Playlist not found or not accessible"
+            }), 404
+
+        # Extract tracks from JSPF format
+        jspf_tracks = playlist.get('track', [])
+
+        # Convert to our standard format
+        tracks = []
+        for track in jspf_tracks:
+            # Get recording MBID from identifier
+            recording_mbid = None
+            identifiers = track.get('identifier', [])
+            for identifier in identifiers:
+                if 'musicbrainz.org/recording/' in identifier:
+                    recording_mbid = identifier.split('/')[-1]
+                    break
+
+            # Get extension data (has MusicBrainz metadata)
+            extension = track.get('extension', {})
+            mb_data = extension.get('https://musicbrainz.org/doc/jspf#track', {})
+
+            track_data = {
+                'title': track.get('title', 'Unknown Track'),
+                'creator': track.get('creator', 'Unknown Artist'),
+                'album': track.get('album', 'Unknown Album'),
+                'duration_ms': track.get('duration', 0),
+                'recording_mbid': recording_mbid,
+                'additional_metadata': mb_data
+            }
+
+            tracks.append(track_data)
+
+        return jsonify({
+            "success": True,
+            "playlist": {
+                "identifier": playlist.get('identifier'),
+                "title": playlist.get('title'),
+                "creator": playlist.get('creator'),
+                "tracks": tracks,
+                "track_count": len(tracks)
+            }
+        })
+
+    except Exception as e:
+        print(f"Error getting ListenBrainz playlist tracks: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
 @app.route('/api/metadata/start', methods=['POST'])
 def start_metadata_update():
     """Start the metadata update process - EXACT copy of dashboard.py logic"""
