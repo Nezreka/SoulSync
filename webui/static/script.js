@@ -26590,54 +26590,52 @@ async function startListenBrainzPlaylistSync(identifier, title, playlistId) {
 
         console.log(`✅ Found ${tracks.length} tracks to sync`);
 
-        // Show sync status
-        const statusDisplay = document.getElementById(`${playlistId}-sync-status`);
-        const syncButton = document.getElementById(`${playlistId}-sync-btn`);
-
-        console.log('UI Elements:', {
-            statusDisplay: !!statusDisplay,
-            syncButton: !!syncButton
-        });
-
-        if (statusDisplay) statusDisplay.style.display = 'block';
-        if (syncButton) syncButton.disabled = true;
-
-        // Prepare tracks for sync
-        const tracksForSync = tracks.map(track => ({
+        // Convert ListenBrainz tracks to Spotify format (same as other discover playlists)
+        const spotifyTracks = tracks.map(track => ({
+            id: null, // No Spotify ID for ListenBrainz tracks
             name: track.track_name,
-            artist: track.artist_name,
-            album: track.album_name,
-            mbid: track.mbid || null,
-            duration_ms: track.duration_ms || 0
+            artists: [track.artist_name], // Array of strings for sync compatibility
+            album: {
+                name: track.album_name,
+                images: track.album_cover_url ? [{ url: track.album_cover_url }] : []
+            },
+            duration_ms: track.duration_ms || 0,
+            mbid: track.mbid // Include MusicBrainz ID for matching
         }));
 
         const virtualPlaylistId = `discover_lb_${identifier}`;
         console.log(`🆔 Virtual playlist ID: ${virtualPlaylistId}`);
 
-        // Start sync
-        console.log('📤 Sending sync request...');
-        const response = await fetch('/api/sync/start', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                virtual_playlist_id: virtualPlaylistId,
-                playlist_name: title,
-                tracks: tracksForSync
-            })
-        });
+        // Store in cache for sync function (CRITICAL - same as other discover playlists)
+        playlistTrackCache[virtualPlaylistId] = spotifyTracks;
 
-        console.log(`📡 Response status: ${response.status}`);
-        const result = await response.json();
-        console.log('📋 Response data:', result);
+        // Create virtual playlist object (CRITICAL - same as other discover playlists)
+        const virtualPlaylist = {
+            id: virtualPlaylistId,
+            name: title,
+            track_count: spotifyTracks.length
+        };
 
-        if (!result.success) {
-            throw new Error(result.error || 'Failed to start sync');
+        // Add to spotify playlists array if not already there (CRITICAL)
+        if (!spotifyPlaylists.find(p => p.id === virtualPlaylistId)) {
+            spotifyPlaylists.push(virtualPlaylist);
         }
 
-        console.log(`✅ Sync started successfully for ${title}`);
-        showToast(`Syncing "${title}" to media server`, 'success');
+        // Show sync status display
+        const statusDisplay = document.getElementById(`${playlistId}-sync-status`);
+        const syncButton = document.getElementById(`${playlistId}-sync-btn`);
 
-        // Start polling for status
+        if (statusDisplay) statusDisplay.style.display = 'block';
+        if (syncButton) {
+            syncButton.disabled = true;
+            syncButton.style.opacity = '0.5';
+            syncButton.style.cursor = 'not-allowed';
+        }
+
+        // Use the same sync function as all other discover playlists
+        await startPlaylistSync(virtualPlaylistId);
+
+        // Start polling for progress updates (using discover playlist pattern)
         startListenBrainzSyncPolling(playlistId, virtualPlaylistId);
 
     } catch (error) {
@@ -26647,7 +26645,11 @@ async function startListenBrainzPlaylistSync(identifier, title, playlistId) {
         const statusDisplay = document.getElementById(`${playlistId}-sync-status`);
         const syncButton = document.getElementById(`${playlistId}-sync-btn`);
         if (statusDisplay) statusDisplay.style.display = 'none';
-        if (syncButton) syncButton.disabled = false;
+        if (syncButton) {
+            syncButton.disabled = false;
+            syncButton.style.opacity = '1';
+            syncButton.style.cursor = 'pointer';
+        }
     }
 }
 

@@ -15285,9 +15285,13 @@ def get_listenbrainz_playlist_tracks(playlist_mbid):
         # Extract tracks from JSPF format
         jspf_tracks = playlist.get('track', [])
 
-        # Convert to our standard format
+        # Convert to our standard format - prepare tracks first without cover art
         tracks = []
-        for track in jspf_tracks:
+        print(f"🎵 Processing {len(jspf_tracks)} tracks from playlist")
+
+        # First pass: extract all track data without cover art
+        track_data_list = []
+        for idx, track in enumerate(jspf_tracks):
             # Get recording MBID from identifier
             recording_mbid = None
             identifiers = track.get('identifier', [])
@@ -15300,10 +15304,23 @@ def get_listenbrainz_playlist_tracks(playlist_mbid):
             extension = track.get('extension', {})
             mb_data = extension.get('https://musicbrainz.org/doc/jspf#track', {})
 
-            # Extract album cover from extension if available
-            album_cover_url = None
-            if mb_data and 'album_cover_url' in mb_data:
-                album_cover_url = mb_data['album_cover_url']
+            if idx == 0:
+                print(f"📋 Sample track extension data: {extension}")
+                print(f"📋 Sample mb_data keys: {mb_data.keys() if mb_data else 'None'}")
+
+            # Extract release MBID for cover art
+            release_mbid = None
+            if mb_data:
+                # Check in additional_metadata first
+                additional_metadata = mb_data.get('additional_metadata', {})
+                if 'caa_release_mbid' in additional_metadata:
+                    release_mbid = additional_metadata['caa_release_mbid']
+                # Fallback to top-level release_mbid
+                elif 'release_mbid' in mb_data:
+                    release_mbid = mb_data['release_mbid']
+
+            if idx == 0:
+                print(f"🆔 First track release_mbid: {release_mbid}")
 
             track_data = {
                 'track_name': track.get('title', 'Unknown Track'),
@@ -15311,11 +15328,66 @@ def get_listenbrainz_playlist_tracks(playlist_mbid):
                 'album_name': track.get('album', 'Unknown Album'),
                 'duration_ms': track.get('duration', 0),
                 'mbid': recording_mbid,
-                'album_cover_url': album_cover_url,
+                'release_mbid': release_mbid,
+                'album_cover_url': None,  # Will be fetched in parallel
                 'additional_metadata': mb_data
             }
 
-            tracks.append(track_data)
+            track_data_list.append(track_data)
+
+        # Second pass: fetch cover art in parallel using threading (much faster)
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        import time
+
+        def fetch_cover_art(track_data):
+            """Fetch cover art for a single track"""
+            release_mbid = track_data.get('release_mbid')
+            if not release_mbid:
+                return None
+
+            try:
+                cover_art_url = f"https://coverartarchive.org/release/{release_mbid}"
+                cover_response = requests.get(cover_art_url, timeout=3)
+
+                if cover_response.status_code == 200:
+                    cover_data = cover_response.json()
+                    images = cover_data.get('images', [])
+
+                    # Get front cover
+                    for img in images:
+                        if img.get('front'):
+                            return img.get('thumbnails', {}).get('small') or img.get('image')
+
+                    # Fallback to first image
+                    if images:
+                        return images[0].get('thumbnails', {}).get('small') or images[0].get('image')
+            except:
+                pass
+
+            return None
+
+        print(f"🎨 Fetching cover art for {len(track_data_list)} tracks in parallel...")
+        start_time = time.time()
+
+        # Fetch up to 10 covers at a time
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            future_to_track = {executor.submit(fetch_cover_art, track): idx
+                             for idx, track in enumerate(track_data_list)}
+
+            for future in as_completed(future_to_track):
+                idx = future_to_track[future]
+                try:
+                    cover_url = future.result()
+                    if cover_url:
+                        track_data_list[idx]['album_cover_url'] = cover_url
+                except Exception as e:
+                    pass
+
+        elapsed = time.time() - start_time
+        covers_found = sum(1 for t in track_data_list if t.get('album_cover_url'))
+        print(f"✅ Fetched {covers_found}/{len(track_data_list)} covers in {elapsed:.2f}s")
+
+        tracks = track_data_list
 
         return jsonify({
             "success": True,
