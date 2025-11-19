@@ -7112,18 +7112,22 @@ function formatArtists(artists) {
     if (!artists || !Array.isArray(artists)) {
         return 'Unknown Artist';
     }
-    
+
     // Handle both string arrays and object arrays with 'name' property
     const artistNames = artists.map(artist => {
+        let artistName;
         if (typeof artist === 'string') {
-            return artist;
+            artistName = artist;
         } else if (artist && typeof artist === 'object' && artist.name) {
-            return artist.name;
+            artistName = artist.name;
         } else {
-            return 'Unknown Artist';
+            artistName = 'Unknown Artist';
         }
+
+        // Clean featured artists from the name
+        return cleanArtistName(artistName);
     });
-    
+
     return artistNames.join(', ') || 'Unknown Artist';
 }
 
@@ -26661,6 +26665,31 @@ async function loadListenBrainzPlaylistTracks(identifier, playlistId) {
     }
 }
 
+/**
+ * Clean artist name by removing featured artists
+ * e.g., "Blackstreet feat. Dr. Dre & Queen Pen" -> "Blackstreet"
+ */
+function cleanArtistName(artistName) {
+    if (!artistName) return artistName;
+
+    // Remove everything after common featuring patterns (case insensitive)
+    const patterns = [
+        /\s+feat\.?\s+.*/i,      // "feat." or "feat"
+        /\s+featuring\s+.*/i,    // "featuring"
+        /\s+ft\.?\s+.*/i,        // "ft." or "ft"
+        /\s+with\s+.*/i,         // "with"
+        /\s+\&\s+.*/,            // " & " (if it appears without feat/ft)
+        /\s+x\s+.*/i             // " x " (common in collaborations)
+    ];
+
+    let cleaned = artistName;
+    for (const pattern of patterns) {
+        cleaned = cleaned.replace(pattern, '');
+    }
+
+    return cleaned.trim();
+}
+
 function displayListenBrainzTracks(tracks, playlistId) {
     const playlistContainer = document.getElementById(`${playlistId}-playlist`);
     if (!playlistContainer) return;
@@ -26700,7 +26729,7 @@ function displayListenBrainzTracks(tracks, playlistId) {
                 </div>
                 <div class="track-compact-info">
                     <div class="track-compact-name">${escapeHtml(track.track_name || 'Unknown Track')}</div>
-                    <div class="track-compact-artist">${escapeHtml(track.artist_name || 'Unknown Artist')}</div>
+                    <div class="track-compact-artist">${escapeHtml(cleanArtistName(track.artist_name) || 'Unknown Artist')}</div>
                 </div>
                 <div class="track-compact-album">${albumName}</div>
                 <div class="track-compact-duration">${duration}</div>
@@ -26731,7 +26760,7 @@ async function startListenBrainzPlaylistSync(identifier, title, playlistId) {
         const spotifyTracks = tracks.map(track => ({
             id: null, // No Spotify ID for ListenBrainz tracks
             name: track.track_name,
-            artists: [track.artist_name], // Array of strings for sync compatibility
+            artists: [cleanArtistName(track.artist_name)], // Clean featured artists, array of strings for sync compatibility
             album: {
                 name: track.album_name,
                 images: track.album_cover_url ? [{ url: track.album_cover_url }] : []
@@ -26867,7 +26896,7 @@ async function openDownloadModalForListenBrainzPlaylist(identifier, title) {
         const spotifyTracks = tracks.map(track => ({
             id: null, // No Spotify ID for ListenBrainz tracks
             name: track.track_name,
-            artists: [track.artist_name],
+            artists: [cleanArtistName(track.artist_name)], // Clean featured artists
             album: {
                 name: track.album_name,
                 images: track.album_cover_url ? [{ url: track.album_cover_url }] : []
@@ -26916,7 +26945,7 @@ async function openListenBrainzPlaylist(playlistMbid, playlistName) {
         const spotifyTracks = tracks.map(track => ({
             id: track.recording_mbid || '',
             name: track.title || 'Unknown',
-            artists: [track.creator || 'Unknown'],
+            artists: [cleanArtistName(track.creator || 'Unknown')], // Clean featured artists
             album: {
                 name: track.album || 'Unknown Album',
                 images: []
@@ -28514,7 +28543,7 @@ async function rehydrateDiscoverDownloadModal(playlistId) {
             const spotifyTracks = tracks.map(track => ({
                 id: null,
                 name: track.track_name,
-                artists: [track.artist_name],
+                artists: [cleanArtistName(track.artist_name)], // Clean featured artists
                 album: {
                     name: track.album_name,
                     images: track.album_cover_url ? [{ url: track.album_cover_url }] : []
