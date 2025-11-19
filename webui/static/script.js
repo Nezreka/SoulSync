@@ -365,7 +365,7 @@ function initializeWatchlist() {
 
 function navigateToPage(pageId) {
     if (pageId === currentPage) return;
-    
+
     // Update navigation buttons (only if there's a nav button for this page)
     document.querySelectorAll('.nav-button').forEach(btn => {
         btn.classList.remove('active');
@@ -374,15 +374,33 @@ function navigateToPage(pageId) {
     if (navButton) {
         navButton.classList.add('active');
     }
-    
+
     // Update pages
     document.querySelectorAll('.page').forEach(page => {
         page.classList.remove('active');
     });
     document.getElementById(`${pageId}-page`).classList.add('active');
-    
+
     currentPage = pageId;
-    
+
+    // Show/hide discover download sidebar based on page
+    const downloadSidebar = document.getElementById('discover-download-sidebar');
+    if (downloadSidebar) {
+        if (pageId === 'discover') {
+            // Show sidebar on discover page if there are active downloads
+            const activeDownloads = Object.keys(discoverDownloads || {}).length;
+            console.log(`📊 [NAVIGATE] Discover page - ${activeDownloads} active downloads`);
+            if (activeDownloads > 0) {
+                // Update the sidebar UI to render the bubbles
+                console.log(`🔄 [NAVIGATE] Updating discover download bar UI`);
+                updateDiscoverDownloadBar();
+            }
+        } else {
+            // Always hide sidebar on other pages
+            downloadSidebar.classList.add('hidden');
+        }
+    }
+
     // Load page-specific data
     loadPageData(pageId);
 }
@@ -2190,7 +2208,10 @@ async function loadInitialData() {
     try {
         // Load artist bubble state first
         await hydrateArtistBubblesFromSnapshot();
-        
+
+        // Load discover download state
+        await hydrateDiscoverDownloadsFromSnapshot();
+
         // Load dashboard data by default
         await loadDashboardData();
     } catch (error) {
@@ -2359,12 +2380,95 @@ async function rehydrateDiscoverPlaylistModal(virtualPlaylistId, playlistName, b
     try {
         console.log(`💧 Rehydrating discover playlist modal: ${virtualPlaylistId} (${playlistName})`);
 
+        // Handle album downloads from Recent Releases
+        if (virtualPlaylistId.startsWith('discover_album_')) {
+            const albumId = virtualPlaylistId.replace('discover_album_', '');
+            console.log(`💧 Album download - fetching album ${albumId}...`);
+
+            try {
+                const albumResponse = await fetch(`/api/spotify/album/${albumId}`);
+                if (!albumResponse.ok) {
+                    console.error(`❌ Failed to fetch album: ${albumResponse.status}`);
+                    return;
+                }
+
+                const albumData = await albumResponse.json();
+                if (!albumData.tracks || albumData.tracks.length === 0) {
+                    console.error(`❌ No tracks in album`);
+                    return;
+                }
+
+                // Convert tracks to expected format
+                const spotifyTracks = albumData.tracks.map(track => {
+                    let artists = track.artists || [];
+                    if (Array.isArray(artists)) {
+                        artists = artists.map(a => a.name || a);
+                    }
+
+                    return {
+                        id: track.id,
+                        name: track.name,
+                        artists: artists,
+                        album: {
+                            name: albumData.name || playlistName.split(' - ')[0],
+                            images: albumData.images || []
+                        },
+                        duration_ms: track.duration_ms || 0
+                    };
+                });
+
+                console.log(`✅ Retrieved ${spotifyTracks.length} tracks for album`);
+
+                // Create modal
+                await openDownloadMissingModalForYouTube(virtualPlaylistId, playlistName, spotifyTracks);
+
+                // Update process
+                const process = activeDownloadProcesses[virtualPlaylistId];
+                if (process) {
+                    process.status = 'running';
+                    process.batchId = batchId;
+                    const beginBtn = document.getElementById(`begin-analysis-btn-${virtualPlaylistId}`);
+                    const cancelBtn = document.getElementById(`cancel-all-btn-${virtualPlaylistId}`);
+                    if (beginBtn) beginBtn.style.display = 'none';
+                    if (cancelBtn) cancelBtn.style.display = 'inline-block';
+
+                    // Hide modal for background rehydration
+                    if (process.modalElement) {
+                        process.modalElement.style.display = 'none';
+                        console.log(`🔍 Hiding rehydrated modal for background processing: ${playlistName}`);
+                    }
+
+                    console.log(`✅ Rehydrated album modal: ${playlistName}`);
+                }
+                return;
+
+            } catch (error) {
+                console.error(`❌ Error fetching album:`, error);
+                return;
+            }
+        }
+
         // Determine API endpoint based on playlist ID
         let apiEndpoint;
         if (virtualPlaylistId === 'discover_release_radar') {
             apiEndpoint = '/api/discover/release-radar';
         } else if (virtualPlaylistId === 'discover_discovery_weekly') {
             apiEndpoint = '/api/discover/discovery-weekly';
+        } else if (virtualPlaylistId === 'discover_seasonal_playlist') {
+            apiEndpoint = '/api/discover/seasonal-playlist';
+        } else if (virtualPlaylistId === 'discover_popular_picks') {
+            apiEndpoint = '/api/discover/popular-picks';
+        } else if (virtualPlaylistId === 'discover_hidden_gems') {
+            apiEndpoint = '/api/discover/hidden-gems';
+        } else if (virtualPlaylistId === 'discover_discovery_shuffle') {
+            apiEndpoint = '/api/discover/discovery-shuffle';
+        } else if (virtualPlaylistId === 'discover_familiar_favorites') {
+            apiEndpoint = '/api/discover/familiar-favorites';
+        } else if (virtualPlaylistId === 'build_playlist_custom') {
+            apiEndpoint = '/api/discover/build-playlist';
+        } else if (virtualPlaylistId.startsWith('discover_lb_')) {
+            console.log(`💧 ListenBrainz playlist - skipping (no automatic rehydration for ListenBrainz)`);
+            return;
         } else {
             console.error(`❌ Unknown discover playlist type: ${virtualPlaylistId}`);
             return;
@@ -4210,6 +4314,23 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
                    virtualPlaylistId === 'build_playlist_custom' ? 'SoulSync' :
                    'YouTube';
 
+    // Store metadata for discover download sidebar (will be added when Begin Analysis is clicked)
+    if (source === 'SoulSync' || virtualPlaylistId.startsWith('discover_lb_')) {
+        // Extract image URL from first track's album cover
+        let imageUrl = null;
+        if (spotifyTracks && spotifyTracks.length > 0) {
+            const firstTrack = spotifyTracks[0];
+            if (firstTrack.album && firstTrack.album.images && firstTrack.album.images.length > 0) {
+                imageUrl = firstTrack.album.images[0].url;
+            }
+        }
+        // Store in process for later use when Begin Analysis is clicked
+        activeDownloadProcesses[virtualPlaylistId].discoverMetadata = {
+            imageUrl: imageUrl,
+            type: 'album'
+        };
+    }
+
     const heroContext = {
         type: 'playlist',
         playlist: { name: playlistName, owner: source },
@@ -4492,6 +4613,13 @@ async function closeDownloadMissingModal(playlistId) {
             console.log(`🧹 [MODAL CLOSE] Cleaning up artist download for completed modal: ${playlistId}`);
             cleanupArtistDownload(playlistId);
             console.log(`✅ [MODAL CLOSE] Artist download cleanup completed for: ${playlistId}`);
+        }
+
+        // Remove from discover download sidebar if this is a discover page download
+        if (discoverDownloads && discoverDownloads[playlistId]) {
+            console.log(`🧹 [MODAL CLOSE] Removing discover download bubble: ${playlistId}`);
+            removeDiscoverDownload(playlistId);
+            console.log(`✅ [MODAL CLOSE] Discover download bubble removed for: ${playlistId}`);
         }
 
         // Automatic cleanup and server operations after successful downloads
@@ -4818,6 +4946,15 @@ async function startMissingTracksProcess(playlistId) {
         }
         document.getElementById(`begin-analysis-btn-${playlistId}`).style.display = 'none';
         document.getElementById(`cancel-all-btn-${playlistId}`).style.display = 'inline-block';
+
+        // Add to discover download sidebar if this is a discover page download
+        if (process.discoverMetadata) {
+            const playlistName = process.playlist.name;
+            const imageUrl = process.discoverMetadata.imageUrl;
+            const type = process.discoverMetadata.type;
+            addDiscoverDownload(playlistId, playlistName, type, imageUrl);
+            console.log(`📥 [BEGIN ANALYSIS] Added discover download: ${playlistName}`);
+        }
 
         // Check if force download toggle is enabled
         const forceDownloadCheckbox = document.getElementById(`force-download-all-${playlistId}`);
@@ -26635,6 +26772,18 @@ async function startListenBrainzPlaylistSync(identifier, title, playlistId) {
         // Use the same sync function as all other discover playlists
         await startPlaylistSync(virtualPlaylistId);
 
+        // Extract image URL from first track for download bar bubble
+        let imageUrl = null;
+        if (spotifyTracks && spotifyTracks.length > 0) {
+            const firstTrack = spotifyTracks[0];
+            if (firstTrack.album && firstTrack.album.images && firstTrack.album.images.length > 0) {
+                imageUrl = firstTrack.album.images[0].url;
+            }
+        }
+
+        // Add to discover download bar
+        addDiscoverDownload(virtualPlaylistId, title, 'listenbrainz', imageUrl);
+
         // Start polling for progress updates (using discover playlist pattern)
         startListenBrainzSyncPolling(playlistId, virtualPlaylistId);
 
@@ -27812,6 +27961,18 @@ async function startDiscoverPlaylistSync(playlistType, playlistName) {
     // Start sync using existing function
     await startPlaylistSync(virtualPlaylistId);
 
+    // Extract image URL from first track for download bar bubble
+    let imageUrl = null;
+    if (spotifyTracks && spotifyTracks.length > 0) {
+        const firstTrack = spotifyTracks[0];
+        if (firstTrack.album && firstTrack.album.images && firstTrack.album.images.length > 0) {
+            imageUrl = firstTrack.album.images[0].url;
+        }
+    }
+
+    // Add to discover download bar
+    addDiscoverDownload(virtualPlaylistId, playlistName, playlistType, imageUrl);
+
     // Start polling for progress updates
     startDiscoverSyncPolling(playlistType, virtualPlaylistId);
 }
@@ -27961,4 +28122,623 @@ async function openDownloadModalForRecentAlbum(albumIndex) {
         showToast(`Failed to load album: ${error.message}`, 'error');
         hideLoadingOverlay();
     }
+}
+
+// ===============================
+// DISCOVER DOWNLOAD BAR
+// ===============================
+
+// Track discover page downloads
+let discoverDownloads = {}; // playlistId -> { name, type, status, virtualPlaylistId, startTime }
+
+/**
+ * Add a download to the discover download bar
+ */
+function addDiscoverDownload(playlistId, playlistName, playlistType, imageUrl = null) {
+    console.log(`📥 [DOWNLOAD SIDEBAR] Adding discover download: ${playlistName} (${playlistId}) type: ${playlistType}, image: ${imageUrl}`);
+
+    // Check if download sidebar exists
+    const downloadSidebar = document.getElementById('discover-download-sidebar');
+    if (!downloadSidebar) {
+        console.warn('⚠️ [DOWNLOAD SIDEBAR] Download sidebar element not found - user might not be on discover page');
+        return;
+    }
+
+    discoverDownloads[playlistId] = {
+        name: playlistName,
+        type: playlistType,
+        status: 'in_progress',
+        virtualPlaylistId: playlistId,
+        imageUrl: imageUrl,
+        startTime: new Date()
+    };
+
+    console.log(`📊 [DOWNLOAD SIDEBAR] Active downloads:`, Object.keys(discoverDownloads));
+    updateDiscoverDownloadBar();
+    monitorDiscoverDownload(playlistId);
+}
+
+/**
+ * Monitor a discover download for completion
+ */
+function monitorDiscoverDownload(playlistId) {
+    let notFoundCount = 0;
+    const maxNotFoundAttempts = 5; // Give sync 10 seconds to start (5 checks * 2 seconds)
+
+    const checkInterval = setInterval(async () => {
+        try {
+            // Check if download still exists
+            if (!discoverDownloads[playlistId]) {
+                clearInterval(checkInterval);
+                return;
+            }
+
+            // First check if there's an active download process (modal-based downloads)
+            const activeProcess = activeDownloadProcesses[playlistId];
+            if (activeProcess) {
+                console.log(`📂 [DOWNLOAD BAR] Found active process for ${playlistId}, status: ${activeProcess.status}`);
+
+                if (activeProcess.status === 'complete') {
+                    console.log(`✅ [DOWNLOAD BAR] Process completed: ${discoverDownloads[playlistId].name}`);
+                    discoverDownloads[playlistId].status = 'completed';
+                    updateDiscoverDownloadBar();
+                    clearInterval(checkInterval);
+
+                    // Auto-remove completed downloads after 30 seconds
+                    setTimeout(() => {
+                        if (discoverDownloads[playlistId] && discoverDownloads[playlistId].status === 'completed') {
+                            removeDiscoverDownload(playlistId);
+                        }
+                    }, 30000);
+                }
+                return; // Continue monitoring
+            }
+
+            // Check sync status API (for sync-based downloads)
+            const response = await fetch(`/api/sync/status/${playlistId}`);
+            if (response.ok) {
+                const data = await response.json();
+                notFoundCount = 0; // Reset counter if found
+
+                console.log(`🔄 [DOWNLOAD BAR] Sync status for ${playlistId}: ${data.status}`);
+
+                if (data.status === 'complete') {
+                    console.log(`✅ [DOWNLOAD BAR] Sync completed: ${discoverDownloads[playlistId].name}`);
+                    discoverDownloads[playlistId].status = 'completed';
+                    updateDiscoverDownloadBar();
+                    clearInterval(checkInterval);
+
+                    // Auto-remove completed downloads after 30 seconds
+                    setTimeout(() => {
+                        if (discoverDownloads[playlistId] && discoverDownloads[playlistId].status === 'completed') {
+                            removeDiscoverDownload(playlistId);
+                        }
+                    }, 30000);
+                }
+            } else if (response.status === 404) {
+                notFoundCount++;
+                console.log(`🔍 [DOWNLOAD BAR] Sync not found for ${playlistId} (attempt ${notFoundCount}/${maxNotFoundAttempts})`);
+
+                // Only remove after multiple attempts (give it time to start)
+                if (notFoundCount >= maxNotFoundAttempts) {
+                    console.log(`⏹️ [DOWNLOAD BAR] Sync not found after ${maxNotFoundAttempts} attempts, removing`);
+                    clearInterval(checkInterval);
+                    removeDiscoverDownload(playlistId);
+                }
+            }
+        } catch (error) {
+            console.error(`❌ [DOWNLOAD BAR] Error monitoring ${playlistId}:`, error);
+        }
+    }, 2000); // Check every 2 seconds
+}
+
+/**
+ * Remove a download from the bar
+ */
+function removeDiscoverDownload(playlistId) {
+    console.log(`🗑️ Removing discover download: ${playlistId}`);
+    delete discoverDownloads[playlistId];
+    updateDiscoverDownloadBar();
+    saveDiscoverDownloadSnapshot(); // Save state after removal
+}
+
+/**
+ * Update the discover download sidebar UI
+ */
+function updateDiscoverDownloadBar() {
+    const downloadSidebar = document.getElementById('discover-download-sidebar');
+    const bubblesContainer = document.getElementById('discover-download-bubbles');
+    const countElement = document.getElementById('discover-download-count');
+
+    console.log(`🔄 [DOWNLOAD SIDEBAR] Updating sidebar - found elements:`, {
+        downloadSidebar: !!downloadSidebar,
+        bubblesContainer: !!bubblesContainer,
+        countElement: !!countElement
+    });
+
+    if (!downloadSidebar || !bubblesContainer || !countElement) {
+        console.warn('⚠️ [DOWNLOAD SIDEBAR] Missing elements, cannot update');
+        return;
+    }
+
+    const activeDownloads = Object.keys(discoverDownloads);
+    const count = activeDownloads.length;
+
+    console.log(`📊 [DOWNLOAD SIDEBAR] Updating with ${count} active downloads`);
+
+    // Update count
+    countElement.textContent = count;
+
+    // Show/hide sidebar
+    if (count === 0) {
+        console.log(`👁️ [DOWNLOAD SIDEBAR] No downloads, hiding sidebar`);
+        downloadSidebar.classList.add('hidden');
+        return;
+    } else {
+        console.log(`👁️ [DOWNLOAD SIDEBAR] ${count} downloads, showing sidebar`);
+        downloadSidebar.classList.remove('hidden');
+    }
+
+    // Update bubbles
+    bubblesContainer.innerHTML = activeDownloads.map(playlistId => {
+        const download = discoverDownloads[playlistId];
+        const isCompleted = download.status === 'completed';
+        const icon = isCompleted ? '✅' : '⏳';
+
+        // Use image if available, otherwise gradient background
+        const imageUrl = download.imageUrl || '';
+        const backgroundStyle = imageUrl ?
+            `background-image: url('${imageUrl}');` :
+            `background: linear-gradient(135deg, rgba(29, 185, 84, 0.3) 0%, rgba(24, 156, 71, 0.2) 100%);`;
+
+        return `
+            <div class="discover-download-bubble">
+                <div class="discover-download-bubble-card ${isCompleted ? 'completed' : ''}"
+                     onclick="openDiscoverDownloadModal('${playlistId}')"
+                     title="${escapeHtml(download.name)} - Click to view">
+                    <div class="discover-download-bubble-image" style="${backgroundStyle}"></div>
+                    <div class="discover-download-bubble-overlay"></div>
+                    <div class="discover-download-bubble-content">
+                        <span class="discover-download-bubble-icon">${icon}</span>
+                    </div>
+                </div>
+                <div class="discover-download-bubble-name">${escapeHtml(download.name)}</div>
+            </div>
+        `;
+    }).join('');
+
+    console.log(`📊 Updated discover download sidebar: ${count} active downloads`);
+
+    // Save snapshot after UI update
+    saveDiscoverDownloadSnapshot();
+}
+
+/**
+ * Open download modal for a discover playlist
+ */
+async function openDiscoverDownloadModal(playlistId) {
+    console.log(`📂 [DOWNLOAD BAR] Opening download modal for: ${playlistId}`);
+
+    // Check if there's an active download process with modal
+    let process = activeDownloadProcesses[playlistId];
+
+    console.log(`📋 [DOWNLOAD BAR] Process found:`, {
+        exists: !!process,
+        hasModalElement: !!(process && process.modalElement),
+        hasModalId: !!(process && process.modalId)
+    });
+
+    if (process) {
+        // Try modalElement first (album downloads)
+        if (process.modalElement) {
+            console.log(`✅ [DOWNLOAD BAR] Opening modal via modalElement`);
+            process.modalElement.style.display = 'flex';
+            return;
+        }
+
+        // Try modalId (sync downloads)
+        if (process.modalId) {
+            const modal = document.getElementById(process.modalId);
+            if (modal) {
+                console.log(`✅ [DOWNLOAD BAR] Opening modal via modalId: ${process.modalId}`);
+                modal.style.display = 'flex';
+                return;
+            }
+        }
+    }
+
+    // If no process found, try to rehydrate from backend
+    console.log(`💧 [DOWNLOAD BAR] No modal found, attempting to rehydrate from backend...`);
+    const rehydrated = await rehydrateDiscoverDownloadModal(playlistId);
+
+    if (rehydrated) {
+        console.log(`✅ [DOWNLOAD BAR] Successfully rehydrated modal, opening it...`);
+        // Try again after rehydration
+        process = activeDownloadProcesses[playlistId];
+        if (process && process.modalElement) {
+            process.modalElement.style.display = 'flex';
+            return;
+        }
+    }
+
+    // Fallback: show toast
+    const download = discoverDownloads[playlistId];
+    if (download) {
+        console.log(`ℹ️ [DOWNLOAD BAR] No modal found after rehydration attempt, showing toast`);
+        showToast(`Download: ${download.name} - ${download.status}`, 'info');
+    } else {
+        console.warn(`⚠️ [DOWNLOAD BAR] No download or process found for: ${playlistId}`);
+    }
+}
+
+/**
+ * Initialize discover download sidebar on page load
+ */
+function initializeDiscoverDownloadBar() {
+    console.log('🎵 Initializing discover download sidebar...');
+
+    // Start with sidebar hidden (will be shown if downloads exist after hydration)
+    const downloadSidebar = document.getElementById('discover-download-sidebar');
+    if (downloadSidebar) {
+        downloadSidebar.classList.add('hidden');
+    }
+}
+
+// --- Discover Download Modal Rehydration ---
+
+async function rehydrateDiscoverDownloadModal(playlistId) {
+    /**
+     * Rehydrates a discover download modal from backend process data.
+     * Fetches tracks from backend API and recreates the modal (user-requested).
+     */
+    try {
+        console.log(`💧 [REHYDRATE] Attempting to rehydrate modal for: ${playlistId}`);
+
+        // Check if there's an active backend process for this playlist
+        const batchResponse = await fetch(`/api/playlists/batch_info`);
+        if (!batchResponse.ok) {
+            console.log(`⚠️ [REHYDRATE] Failed to fetch batch info`);
+            return false;
+        }
+
+        const batchData = await batchResponse.json();
+        const batches = batchData.batches || [];
+
+        // Find the batch for this playlist
+        const batch = batches.find(b => b.playlist_id === playlistId);
+
+        if (!batch) {
+            console.log(`⚠️ [REHYDRATE] No active batch found for ${playlistId}`);
+            return false;
+        }
+
+        console.log(`✅ [REHYDRATE] Found active batch for ${playlistId}:`, batch);
+
+        // Get the download metadata from discoverDownloads
+        const downloadData = discoverDownloads[playlistId];
+        if (!downloadData) {
+            console.log(`⚠️ [REHYDRATE] No download metadata found for ${playlistId}`);
+            return false;
+        }
+
+        // Handle album downloads from Recent Releases
+        if (playlistId.startsWith('discover_album_')) {
+            const albumId = playlistId.replace('discover_album_', '');
+            console.log(`💧 [REHYDRATE] Album download - fetching album ${albumId}...`);
+
+            try {
+                const albumResponse = await fetch(`/api/spotify/album/${albumId}`);
+                if (!albumResponse.ok) {
+                    console.error(`❌ [REHYDRATE] Failed to fetch album: ${albumResponse.status}`);
+                    return false;
+                }
+
+                const albumData = await albumResponse.json();
+                if (!albumData.tracks || albumData.tracks.length === 0) {
+                    console.error(`❌ [REHYDRATE] No tracks in album`);
+                    return false;
+                }
+
+                // Convert tracks to expected format
+                const spotifyTracks = albumData.tracks.map(track => {
+                    let artists = track.artists || [];
+                    if (Array.isArray(artists)) {
+                        artists = artists.map(a => a.name || a);
+                    }
+
+                    return {
+                        id: track.id,
+                        name: track.name,
+                        artists: artists,
+                        album: {
+                            name: albumData.name || downloadData.name.split(' - ')[0],
+                            images: downloadData.imageUrl ? [{ url: downloadData.imageUrl }] : []
+                        },
+                        duration_ms: track.duration_ms || 0
+                    };
+                });
+
+                console.log(`✅ [REHYDRATE] Retrieved ${spotifyTracks.length} tracks for album`);
+
+                // Create modal
+                await openDownloadMissingModalForYouTube(playlistId, downloadData.name, spotifyTracks);
+
+                // Update process
+                const process = activeDownloadProcesses[playlistId];
+                if (process) {
+                    process.status = 'running';
+                    process.batchId = batch.batch_id;
+                    const beginBtn = document.getElementById(`begin-analysis-btn-${playlistId}`);
+                    const cancelBtn = document.getElementById(`cancel-all-btn-${playlistId}`);
+                    if (beginBtn) beginBtn.style.display = 'none';
+                    if (cancelBtn) cancelBtn.style.display = 'inline-block';
+                    console.log(`✅ [REHYDRATE] Successfully rehydrated album modal`);
+                    return true;
+                }
+                return false;
+
+            } catch (error) {
+                console.error(`❌ [REHYDRATE] Error fetching album:`, error);
+                return false;
+            }
+        }
+
+        // Determine API endpoint based on playlist ID
+        let apiEndpoint;
+        if (playlistId === 'discover_release_radar') {
+            apiEndpoint = '/api/discover/release-radar';
+        } else if (playlistId === 'discover_discovery_weekly') {
+            apiEndpoint = '/api/discover/discovery-weekly';
+        } else if (playlistId === 'discover_seasonal_playlist') {
+            apiEndpoint = '/api/discover/seasonal-playlist';
+        } else if (playlistId === 'discover_popular_picks') {
+            apiEndpoint = '/api/discover/popular-picks';
+        } else if (playlistId === 'discover_hidden_gems') {
+            apiEndpoint = '/api/discover/hidden-gems';
+        } else if (playlistId === 'discover_discovery_shuffle') {
+            apiEndpoint = '/api/discover/discovery-shuffle';
+        } else if (playlistId === 'discover_familiar_favorites') {
+            apiEndpoint = '/api/discover/familiar-favorites';
+        } else if (playlistId === 'build_playlist_custom') {
+            apiEndpoint = '/api/discover/build-playlist';
+        } else if (playlistId.startsWith('discover_lb_')) {
+            // ListenBrainz playlist - fetch from cache
+            const identifier = playlistId.replace('discover_lb_', '');
+            const tracks = listenbrainzTracksCache[identifier];
+            if (!tracks || tracks.length === 0) {
+                console.log(`⚠️ [REHYDRATE] No ListenBrainz tracks in cache for ${identifier}`);
+                return false;
+            }
+
+            // Convert to Spotify format
+            const spotifyTracks = tracks.map(track => ({
+                id: null,
+                name: track.track_name,
+                artists: [track.artist_name],
+                album: {
+                    name: track.album_name,
+                    images: track.album_cover_url ? [{ url: track.album_cover_url }] : []
+                },
+                duration_ms: track.duration_ms || 0,
+                mbid: track.mbid
+            }));
+
+            // Create modal and update process
+            await openDownloadMissingModalForYouTube(playlistId, downloadData.name, spotifyTracks);
+            const process = activeDownloadProcesses[playlistId];
+            if (process) {
+                process.status = 'running';
+                process.batchId = batch.batch_id;
+                const beginBtn = document.getElementById(`begin-analysis-btn-${playlistId}`);
+                const cancelBtn = document.getElementById(`cancel-all-btn-${playlistId}`);
+                if (beginBtn) beginBtn.style.display = 'none';
+                if (cancelBtn) cancelBtn.style.display = 'inline-block';
+                console.log(`✅ [REHYDRATE] Successfully rehydrated ListenBrainz modal`);
+                return true;
+            }
+            return false;
+        } else {
+            console.error(`❌ [REHYDRATE] Unknown discover playlist type: ${playlistId}`);
+            return false;
+        }
+
+        // Fetch tracks from API
+        console.log(`📡 [REHYDRATE] Fetching tracks from ${apiEndpoint}...`);
+        const response = await fetch(apiEndpoint);
+        if (!response.ok) {
+            console.error(`❌ [REHYDRATE] Failed to fetch tracks: ${response.status}`);
+            return false;
+        }
+
+        const data = await response.json();
+        if (!data.success || !data.tracks) {
+            console.error(`❌ [REHYDRATE] Invalid track data:`, data);
+            return false;
+        }
+
+        const tracks = data.tracks;
+        console.log(`✅ [REHYDRATE] Retrieved ${tracks.length} tracks`);
+
+        // Transform tracks to Spotify format
+        const spotifyTracks = tracks.map(track => {
+            let spotifyTrack;
+            if (track.track_data_json) {
+                spotifyTrack = track.track_data_json;
+            } else {
+                spotifyTrack = {
+                    id: track.spotify_track_id,
+                    name: track.track_name,
+                    artists: [{ name: track.artist_name }],
+                    album: {
+                        name: track.album_name,
+                        images: track.album_cover_url ? [{ url: track.album_cover_url }] : []
+                    },
+                    duration_ms: track.duration_ms || 0
+                };
+            }
+            if (spotifyTrack.artists && Array.isArray(spotifyTrack.artists)) {
+                spotifyTrack.artists = spotifyTrack.artists.map(a => a.name || a);
+            }
+            return spotifyTrack;
+        });
+
+        // Create the modal
+        await openDownloadMissingModalForYouTube(playlistId, downloadData.name, spotifyTracks);
+
+        // Update process with batch info
+        const process = activeDownloadProcesses[playlistId];
+        if (process) {
+            process.status = 'running';
+            process.batchId = batch.batch_id;
+
+            // Update button states
+            const beginBtn = document.getElementById(`begin-analysis-btn-${playlistId}`);
+            const cancelBtn = document.getElementById(`cancel-all-btn-${playlistId}`);
+            if (beginBtn) beginBtn.style.display = 'none';
+            if (cancelBtn) cancelBtn.style.display = 'inline-block';
+
+            // Don't hide the modal - user clicked to open it
+            console.log(`✅ [REHYDRATE] Successfully rehydrated modal for ${downloadData.name}`);
+            return true;
+        } else {
+            console.error(`❌ [REHYDRATE] Failed to find rehydrated process for ${playlistId}`);
+            return false;
+        }
+
+    } catch (error) {
+        console.error(`❌ [REHYDRATE] Error rehydrating discover download modal:`, error);
+        return false;
+    }
+}
+
+// --- Discover Download Snapshot System ---
+
+let discoverSnapshotSaveTimeout = null; // Debounce snapshot saves
+
+async function saveDiscoverDownloadSnapshot() {
+    /**
+     * Saves current discoverDownloads state to backend for persistence.
+     * Debounced to prevent excessive backend calls.
+     */
+
+    // Clear any existing timeout
+    if (discoverSnapshotSaveTimeout) {
+        clearTimeout(discoverSnapshotSaveTimeout);
+    }
+
+    // Debounce the actual save
+    discoverSnapshotSaveTimeout = setTimeout(async () => {
+        try {
+            const downloadCount = Object.keys(discoverDownloads).length;
+
+            // Don't save empty state
+            if (downloadCount === 0) {
+                console.log('📸 Skipping discover snapshot save - no downloads to save');
+                return;
+            }
+
+            console.log(`📸 Saving discover download snapshot: ${downloadCount} downloads`);
+
+            // Prepare snapshot data (clean format)
+            const cleanDownloads = {};
+            for (const [playlistId, downloadData] of Object.entries(discoverDownloads)) {
+                cleanDownloads[playlistId] = {
+                    name: downloadData.name,
+                    type: downloadData.type,
+                    status: downloadData.status,
+                    virtualPlaylistId: downloadData.virtualPlaylistId,
+                    imageUrl: downloadData.imageUrl,
+                    startTime: downloadData.startTime instanceof Date ? downloadData.startTime.toISOString() : downloadData.startTime
+                };
+            }
+
+            const response = await fetch('/api/discover_downloads/snapshot', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    downloads: cleanDownloads
+                })
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                console.log(`✅ Discover download snapshot saved: ${downloadCount} downloads`);
+            } else {
+                console.error('❌ Failed to save discover download snapshot:', data.error);
+            }
+
+        } catch (error) {
+            console.error('❌ Error saving discover download snapshot:', error);
+        }
+    }, 1000); // 1 second debounce
+}
+
+async function hydrateDiscoverDownloadsFromSnapshot() {
+    /**
+     * Hydrates discover downloads from backend snapshot with live status.
+     * Called on page load to restore download state.
+     */
+    try {
+        console.log('🔄 Loading discover download snapshot from backend...');
+
+        const response = await fetch('/api/discover_downloads/hydrate');
+        const data = await response.json();
+
+        if (!data.success) {
+            console.error('❌ Failed to load discover download snapshot:', data.error);
+            return;
+        }
+
+        const downloads = data.downloads || {};
+        const stats = data.stats || {};
+
+        console.log(`🔄 Loaded discover snapshot: ${stats.total_downloads || 0} downloads, ${stats.active_downloads || 0} active, ${stats.completed_downloads || 0} completed`);
+
+        if (Object.keys(downloads).length === 0) {
+            console.log('ℹ️ No discover downloads to hydrate');
+            return;
+        }
+
+        // Clear existing state
+        discoverDownloads = {};
+
+        // Restore discoverDownloads with hydrated data
+        for (const [playlistId, downloadData] of Object.entries(downloads)) {
+            discoverDownloads[playlistId] = {
+                name: downloadData.name,
+                type: downloadData.type,
+                status: downloadData.status, // Live status from backend
+                virtualPlaylistId: downloadData.virtualPlaylistId,
+                imageUrl: downloadData.imageUrl,
+                startTime: new Date(downloadData.startTime)
+            };
+
+            console.log(`🔄 Hydrated download: ${downloadData.name} (${downloadData.status})`);
+
+            // Start monitoring for any in-progress downloads
+            if (downloadData.status === 'in_progress') {
+                console.log(`📡 Starting monitoring for: ${downloadData.name}`);
+                monitorDiscoverDownload(playlistId);
+            }
+        }
+
+        // Don't update UI here - it will be updated when user navigates to discover page
+        // This allows hydration to work even if page loads on a different tab
+
+        const totalDownloads = Object.keys(discoverDownloads).length;
+        console.log(`✅ Successfully hydrated ${totalDownloads} discover downloads (UI will update on discover page navigation)`);
+
+    } catch (error) {
+        console.error('❌ Error hydrating discover downloads from snapshot:', error);
+    }
+}
+
+// Initialize on page load
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initializeDiscoverDownloadBar);
+} else {
+    initializeDiscoverDownloadBar();
 }

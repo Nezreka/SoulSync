@@ -17091,6 +17091,225 @@ body {
 }
 
 /* ===============================
+   DISCOVER DOWNLOAD BAR
+   =============================== */
+
+/* Fixed bottom download bar */
+/* ===============================
+   DISCOVER DOWNLOAD SIDEBAR
+   Right sidebar for active downloads
+   =============================== */
+
+.discover-download-sidebar {
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: 140px;
+    height: 100vh;
+    background: linear-gradient(270deg,
+        rgba(18, 18, 18, 0.98) 0%,
+        rgba(12, 12, 12, 0.99) 100%);
+    border-left: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 20px 12px;
+    z-index: 9999;
+    transform: translateX(0);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                opacity 0.3s ease;
+    box-shadow: -4px 0 20px rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(20px);
+    opacity: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+/* Hidden state */
+.discover-download-sidebar.hidden {
+    transform: translateX(100%);
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* Sidebar header */
+.discover-download-sidebar-header {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.discover-download-sidebar-icon {
+    font-size: 20px;
+    animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.7; transform: scale(1.1); }
+}
+
+.discover-download-sidebar-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.9);
+    font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
+    text-align: center;
+}
+
+.discover-download-sidebar-count {
+    background: linear-gradient(135deg, #1db954 0%, #1ed760 100%);
+    color: white;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 12px;
+    min-width: 20px;
+    text-align: center;
+}
+
+/* Download bubbles container */
+.discover-download-bubbles {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    align-items: center;
+}
+
+/* Individual download bubble - 100x100px circular */
+.discover-download-bubble {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+}
+
+.discover-download-bubble-card {
+    position: relative;
+    width: 100px;
+    height: 100px;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    flex-shrink: 0;
+    background: linear-gradient(135deg,
+        rgba(26, 26, 26, 0.95) 0%,
+        rgba(18, 18, 18, 0.98) 100%);
+    border: 2px solid rgba(29, 185, 84, 0.3);
+    box-shadow:
+        0 4px 12px rgba(0, 0, 0, 0.4),
+        0 0 0 1px rgba(29, 185, 84, 0.05),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    overflow: hidden;
+}
+
+.discover-download-bubble-card:hover {
+    transform: scale(1.08);
+    border-color: rgba(29, 185, 84, 0.5);
+    box-shadow:
+        0 8px 20px rgba(0, 0, 0, 0.5),
+        0 0 0 1px rgba(29, 185, 84, 0.2),
+        0 0 15px rgba(29, 185, 84, 0.15),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.discover-download-bubble-card.completed {
+    border-color: rgba(34, 197, 94, 0.4);
+}
+
+.discover-download-bubble-card.completed:hover {
+    border-color: rgba(34, 197, 94, 0.6);
+    box-shadow:
+        0 8px 20px rgba(0, 0, 0, 0.5),
+        0 0 0 1px rgba(34, 197, 94, 0.3),
+        0 0 15px rgba(34, 197, 94, 0.15),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+/* Bubble card background image */
+.discover-download-bubble-image {
+    position: absolute;
+    inset: 0;
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    border-radius: 50%;
+}
+
+/* Bubble card overlay */
+.discover-download-bubble-overlay {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg,
+        rgba(0, 0, 0, 0.2) 0%,
+        rgba(0, 0, 0, 0.5) 100%);
+    border-radius: 50%;
+}
+
+/* Bubble card content (icon/status) */
+.discover-download-bubble-content {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 2;
+    padding: 8px;
+}
+
+.discover-download-bubble-icon {
+    font-size: 28px;
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.8));
+}
+
+/* Bubble name (below the card) */
+.discover-download-bubble-name {
+    font-size: 10px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.95);
+    text-align: center;
+    line-height: 1.2;
+    width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+}
+
+/* Bubble status text (optional, below name) */
+.discover-download-bubble-status {
+    font-size: 8px;
+    color: rgba(255, 255, 255, 0.7);
+    text-align: center;
+    margin-top: 2px;
+}
+
+/* Scrollbar styling */
+.discover-download-sidebar::-webkit-scrollbar {
+    width: 4px;
+}
+
+.discover-download-sidebar::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.discover-download-sidebar::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 2px;
+}
+
+.discover-download-sidebar::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+/* ===============================
    BUILD A PLAYLIST STYLES
    =============================== */
 
