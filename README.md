@@ -80,7 +80,7 @@ docker run -d -p 8008:8008 boulderbadgedad/soulsync:latest
    - **App Name**: `SoulSync` (or whatever you want)
    - **App Description**: `Music library sync`
    - **Website**: `http://localhost` (or leave blank)
-   - **Redirect URI**: `http://localhost:8888/callback`
+   - **Redirect URI**: `http://127.0.0.1:8888/callback`
 4. Click **"Save"** 
 5. Click **"Settings"** on your new app
 6. Copy the **Client ID** and **Client Secret**
@@ -91,7 +91,7 @@ docker run -d -p 8008:8008 boulderbadgedad/soulsync:latest
 3. Fill out the form:
    - **App Name**: `SoulSync`
    - **Description**: `Music library sync`
-   - **Redirect URI**: `http://localhost:8889/callback`
+   - **Redirect URI**: `http://127.0.0.1:8889/callback`
    - **Scopes**: Select `user.read` and `playlists.read`
 4. Click **"Save"**
 5. Copy the **Client ID** and **Client Secret**
