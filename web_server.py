@@ -7823,15 +7823,23 @@ def get_wishlist_tracks():
     """Endpoint to get wishlist tracks for display in modal."""
     try:
         from core.wishlist_service import get_wishlist_service
+        from database.music_database import MusicDatabase
+
+        # Clean duplicates before fetching (runs automatically on every fetch)
+        db = MusicDatabase()
+        duplicates_removed = db.remove_wishlist_duplicates()
+        if duplicates_removed > 0:
+            print(f"🧹 Cleaned {duplicates_removed} duplicate tracks from wishlist")
+
         wishlist_service = get_wishlist_service()
         raw_tracks = wishlist_service.get_wishlist_tracks_for_download()
-        
+
         # SANITIZE: Ensure consistent data format for frontend
         sanitized_tracks = []
         for track in raw_tracks:
             sanitized_track = _sanitize_track_data_for_processing(track)
             sanitized_tracks.append(sanitized_track)
-        
+
         return jsonify({"tracks": sanitized_tracks})
     except Exception as e:
         print(f"Error getting wishlist tracks: {e}")
