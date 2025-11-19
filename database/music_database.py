@@ -2243,36 +2243,64 @@ class MusicDatabase:
 
     # Wishlist management methods
     
-    def add_to_wishlist(self, spotify_track_data: Dict[str, Any], failure_reason: str = "Download failed", 
+    def add_to_wishlist(self, spotify_track_data: Dict[str, Any], failure_reason: str = "Download failed",
                        source_type: str = "unknown", source_info: Dict[str, Any] = None) -> bool:
         """Add a failed track to the wishlist for retry"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                
+
                 # Use Spotify track ID as unique identifier
                 track_id = spotify_track_data.get('id')
                 if not track_id:
                     logger.error("Cannot add track to wishlist: missing Spotify track ID")
                     return False
-                
+
+                track_name = spotify_track_data.get('name', 'Unknown Track')
+                artists = spotify_track_data.get('artists', [])
+                artist_name = artists[0].get('name', 'Unknown Artist') if artists else 'Unknown Artist'
+
+                # Check for duplicates by track name + artist (not just Spotify ID)
+                # This prevents adding the same track multiple times with different IDs or edge cases
+                cursor.execute("""
+                    SELECT id, spotify_track_id, spotify_data FROM wishlist_tracks
+                """)
+
+                existing_tracks = cursor.fetchall()
+
+                # Check if any existing track has matching name AND artist
+                for existing in existing_tracks:
+                    try:
+                        existing_data = json.loads(existing['spotify_data'])
+                        existing_name = existing_data.get('name', '')
+                        existing_artists = existing_data.get('artists', [])
+                        existing_artist = existing_artists[0].get('name', '') if existing_artists else ''
+
+                        # Case-insensitive comparison of track name and primary artist
+                        if (existing_name.lower() == track_name.lower() and
+                            existing_artist.lower() == artist_name.lower()):
+                            logger.info(f"Skipping duplicate wishlist entry: '{track_name}' by {artist_name} (already exists as ID: {existing['id']})")
+                            return False  # Already exists, don't add duplicate
+                    except Exception as parse_error:
+                        logger.warning(f"Error parsing existing wishlist track data: {parse_error}")
+                        continue
+
                 # Convert data to JSON strings
                 spotify_json = json.dumps(spotify_track_data)
                 source_json = json.dumps(source_info or {})
-                
+
+                # No duplicate found, insert the track
                 cursor.execute("""
-                    INSERT OR REPLACE INTO wishlist_tracks 
+                    INSERT OR REPLACE INTO wishlist_tracks
                     (spotify_track_id, spotify_data, failure_reason, source_type, source_info, date_added)
                     VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 """, (track_id, spotify_json, failure_reason, source_type, source_json))
-                
+
                 conn.commit()
-                
-                track_name = spotify_track_data.get('name', 'Unknown Track')
-                artist_name = spotify_track_data.get('artists', [{}])[0].get('name', 'Unknown Artist')
+
                 logger.info(f"Added track to wishlist: '{track_name}' by {artist_name}")
                 return True
-                
+
         except Exception as e:
             logger.error(f"Error adding track to wishlist: {e}")
             return False
@@ -2392,6 +2420,61 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error clearing wishlist: {e}")
             return False
+
+    def remove_wishlist_duplicates(self) -> int:
+        """Remove duplicate tracks from wishlist based on track name + artist.
+        Keeps the oldest entry (by date_added) for each duplicate set.
+        Returns the number of duplicates removed."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                # Get all wishlist tracks
+                cursor.execute("""
+                    SELECT id, spotify_track_id, spotify_data, date_added
+                    FROM wishlist_tracks
+                    ORDER BY date_added ASC
+                """)
+                all_tracks = cursor.fetchall()
+
+                # Track seen tracks and duplicates to remove
+                seen_tracks = {}  # Key: (track_name, artist_name), Value: track_id to keep
+                duplicates_to_remove = []
+
+                for track in all_tracks:
+                    try:
+                        track_data = json.loads(track['spotify_data'])
+                        track_name = track_data.get('name', '').lower()
+                        artists = track_data.get('artists', [])
+                        artist_name = artists[0].get('name', '').lower() if artists else 'unknown'
+
+                        key = (track_name, artist_name)
+
+                        if key in seen_tracks:
+                            # Duplicate found - mark for removal
+                            duplicates_to_remove.append(track['id'])
+                            logger.info(f"Found duplicate: '{track_name}' by {artist_name} (ID: {track['id']}, keeping ID: {seen_tracks[key]})")
+                        else:
+                            # First occurrence - keep this one
+                            seen_tracks[key] = track['id']
+
+                    except Exception as parse_error:
+                        logger.warning(f"Error parsing wishlist track {track['id']}: {parse_error}")
+                        continue
+
+                # Remove all duplicates
+                removed_count = 0
+                for duplicate_id in duplicates_to_remove:
+                    cursor.execute("DELETE FROM wishlist_tracks WHERE id = ?", (duplicate_id,))
+                    removed_count += 1
+
+                conn.commit()
+                logger.info(f"Removed {removed_count} duplicate tracks from wishlist")
+                return removed_count
+
+        except Exception as e:
+            logger.error(f"Error removing wishlist duplicates: {e}")
+            return 0
 
     # Watchlist operations
     def add_artist_to_watchlist(self, spotify_artist_id: str, artist_name: str) -> bool:

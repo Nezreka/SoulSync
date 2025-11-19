@@ -5343,12 +5343,23 @@ function processModalStatusUpdate(playlistId, data) {
         const missingCount = missingTracks.length;
         let completedCount = 0;
         let failedOrCancelledCount = 0;
-        
+
         // Verify modal exists before processing tasks
         const modal = document.getElementById(`download-missing-modal-${playlistId}`);
         if (!modal) {
             console.error(`❌ [Status Update] Modal not found: download-missing-modal-${playlistId}`);
             return;
+        }
+
+        // Update download progress text immediately when entering downloading phase
+        // This handles the case where tasks array is empty or still being populated
+        const downloadProgressText = document.getElementById(`download-progress-text-${playlistId}`);
+        if (data.phase === 'downloading' && missingCount > 0 && (!data.tasks || data.tasks.length === 0)) {
+            // No tasks yet, but we're in downloading phase with missing tracks
+            if (downloadProgressText) {
+                downloadProgressText.textContent = 'Preparing downloads...';
+                console.log(`📥 [Download Phase] Preparing ${missingCount} downloads...`);
+            }
         }
 
         (data.tasks || []).forEach(task => {
