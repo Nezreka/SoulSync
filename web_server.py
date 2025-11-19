@@ -13586,6 +13586,179 @@ def test_database_access():
             "message": "Database access test failed"
         }), 500
 
+# --- Discover Download Snapshot System ---
+
+@app.route('/api/discover_downloads/snapshot', methods=['POST'])
+def save_discover_download_snapshot():
+    """
+    Saves a snapshot of current discover download state for persistence across page refreshes.
+    """
+    try:
+        import os
+        import json
+        from datetime import datetime
+
+        data = request.json
+        if not data or 'downloads' not in data:
+            return jsonify({'success': False, 'error': 'No download data provided'}), 400
+
+        downloads = data['downloads']
+
+        # Create snapshot with timestamp
+        snapshot = {
+            'downloads': downloads,
+            'timestamp': datetime.now().isoformat(),
+            'snapshot_id': datetime.now().strftime('%Y%m%d_%H%M%S')
+        }
+
+        # Save to file
+        snapshot_file = os.path.join(os.path.dirname(__file__), 'discover_download_snapshots.json')
+        with open(snapshot_file, 'w') as f:
+            json.dump(snapshot, f, indent=2)
+
+        download_count = len(downloads)
+        print(f"📸 Saved discover download snapshot: {download_count} downloads")
+
+        return jsonify({
+            'success': True,
+            'message': f'Snapshot saved with {download_count} downloads',
+            'timestamp': snapshot['timestamp']
+        })
+
+    except Exception as e:
+        print(f"❌ Error saving discover download snapshot: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/discover_downloads/hydrate', methods=['GET'])
+def hydrate_discover_downloads():
+    """
+    Loads discover downloads with live status by cross-referencing snapshots with active processes.
+    """
+    try:
+        import os
+        import json
+        from datetime import datetime, timedelta
+
+        snapshot_file = os.path.join(os.path.dirname(__file__), 'discover_download_snapshots.json')
+
+        # Load snapshot if it exists
+        if not os.path.exists(snapshot_file):
+            return jsonify({
+                'success': True,
+                'downloads': {},
+                'message': 'No snapshots found'
+            })
+
+        with open(snapshot_file, 'r') as f:
+            snapshot_data = json.load(f)
+
+        saved_downloads = snapshot_data.get('downloads', {})
+        snapshot_time = snapshot_data.get('timestamp', '')
+
+        # Clean up old snapshots (older than 48 hours)
+        try:
+            if snapshot_time:
+                snapshot_dt = datetime.fromisoformat(snapshot_time.replace('Z', '+00:00'))
+                cutoff = datetime.now() - timedelta(hours=48)
+                if snapshot_dt < cutoff:
+                    print(f"🧹 Cleaning up old discover download snapshot from {snapshot_time}")
+                    os.remove(snapshot_file)
+                    return jsonify({
+                        'success': True,
+                        'downloads': {},
+                        'message': 'Old snapshot cleaned up'
+                    })
+        except (ValueError, OSError) as e:
+            print(f"⚠️ Error checking discover snapshot age: {e}")
+
+        # Get current active download processes for live status
+        current_processes = {}
+        try:
+            with tasks_lock:
+                for batch_id, batch_data in download_batches.items():
+                    if batch_data.get('phase') not in ['complete', 'error', 'cancelled']:
+                        playlist_id = batch_data.get('playlist_id')
+                        if playlist_id:
+                            current_processes[playlist_id] = {
+                                'status': 'in_progress' if batch_data.get('phase') == 'downloading' else 'analyzing',
+                                'batch_id': batch_id,
+                                'phase': batch_data.get('phase')
+                            }
+        except Exception as e:
+            print(f"⚠️ Error fetching active processes for discover download hydration: {e}")
+
+        # If no active processes exist, the app likely restarted - clean up snapshots
+        if not current_processes:
+            print(f"🧹 No active processes found - app likely restarted, cleaning up discover download snapshot")
+            try:
+                os.remove(snapshot_file)
+                return jsonify({
+                    'success': True,
+                    'downloads': {},
+                    'message': 'Snapshot cleaned up after app restart'
+                })
+            except OSError as e:
+                print(f"⚠️ Error removing discover snapshot file: {e}")
+
+            return jsonify({
+                'success': True,
+                'downloads': {},
+                'message': 'No active processes - returning empty downloads'
+            })
+
+        # Update download statuses with live data
+        hydrated_downloads = {}
+        for playlist_id, download_data in saved_downloads.items():
+            # Determine current live status
+            if playlist_id in current_processes:
+                process_info = current_processes[playlist_id]
+                live_status = 'in_progress'
+                print(f"🔄 Found active process for discover download {playlist_id}: {process_info['phase']}")
+            else:
+                # No active process - likely completed
+                live_status = 'completed'
+                print(f"✅ No active process for discover download {playlist_id} - marking as completed")
+
+            # Create updated download entry
+            hydrated_downloads[playlist_id] = {
+                'name': download_data.get('name'),
+                'type': download_data.get('type'),
+                'status': live_status,
+                'virtualPlaylistId': playlist_id,
+                'imageUrl': download_data.get('imageUrl'),
+                'startTime': download_data.get('startTime', datetime.now().isoformat())
+            }
+
+        download_count = len(hydrated_downloads)
+        active_count = sum(1 for d in hydrated_downloads.values() if d['status'] == 'in_progress')
+        completed_count = sum(1 for d in hydrated_downloads.values() if d['status'] == 'completed')
+
+        print(f"✅ Hydrated {download_count} discover downloads: {active_count} active, {completed_count} completed")
+
+        return jsonify({
+            'success': True,
+            'downloads': hydrated_downloads,
+            'stats': {
+                'total_downloads': download_count,
+                'active_downloads': active_count,
+                'completed_downloads': completed_count
+            }
+        })
+
+    except Exception as e:
+        print(f"❌ Error hydrating discover downloads: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 # --- Artist Bubble Snapshot System ---
 
 @app.route('/api/artist_bubbles/snapshot', methods=['POST'])
