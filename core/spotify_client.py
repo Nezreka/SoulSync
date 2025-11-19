@@ -519,14 +519,37 @@ class SpotifyClient:
     
     @rate_limited
     def get_album_tracks(self, album_id: str) -> Optional[Dict[str, Any]]:
-        """Get album tracks"""
+        """Get album tracks with pagination to fetch all tracks"""
         if not self.is_authenticated():
             return None
-        
+
         try:
-            tracks_data = self.sp.album_tracks(album_id)
-            return tracks_data
-            
+            # Get first page of tracks
+            first_page = self.sp.album_tracks(album_id)
+            if not first_page or 'items' not in first_page:
+                return None
+
+            # Collect all tracks starting with first page
+            all_tracks = first_page['items'][:]
+
+            # Fetch remaining pages if they exist
+            next_page = first_page
+            while next_page.get('next'):
+                next_page = self.sp.next(next_page)
+                if next_page and 'items' in next_page:
+                    all_tracks.extend(next_page['items'])
+
+            # Log success
+            logger.info(f"Retrieved {len(all_tracks)} tracks for album {album_id}")
+
+            # Return structure with all tracks
+            result = first_page.copy()
+            result['items'] = all_tracks
+            result['next'] = None  # No more pages
+            result['limit'] = len(all_tracks)  # Update to reflect all tracks fetched
+
+            return result
+
         except Exception as e:
             logger.error(f"Error fetching album tracks: {e}")
             return None
