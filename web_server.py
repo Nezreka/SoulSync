@@ -7825,11 +7825,21 @@ def get_wishlist_tracks():
         from core.wishlist_service import get_wishlist_service
         from database.music_database import MusicDatabase
 
-        # Clean duplicates before fetching (runs automatically on every fetch)
-        db = MusicDatabase()
-        duplicates_removed = db.remove_wishlist_duplicates()
-        if duplicates_removed > 0:
-            print(f"🧹 Cleaned {duplicates_removed} duplicate tracks from wishlist")
+        # Clean duplicates ONLY if no active wishlist download is running
+        # This prevents count mismatches during active downloads
+        with tasks_lock:
+            wishlist_batch_active = any(
+                batch.get('playlist_id') == 'wishlist' and batch.get('phase') in ['analysis', 'downloading']
+                for batch in download_batches.values()
+            )
+
+        if not wishlist_batch_active:
+            db = MusicDatabase()
+            duplicates_removed = db.remove_wishlist_duplicates()
+            if duplicates_removed > 0:
+                print(f"🧹 Cleaned {duplicates_removed} duplicate tracks from wishlist")
+        else:
+            print(f"⏸️ Skipping wishlist duplicate cleanup - download in progress")
 
         wishlist_service = get_wishlist_service()
         raw_tracks = wishlist_service.get_wishlist_tracks_for_download()
