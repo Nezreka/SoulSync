@@ -22,7 +22,8 @@ class SyncResult:
     failed_tracks: int
     sync_time: datetime
     errors: List[str]
-    
+    wishlist_added_count: int = 0
+
     @property
     def success_rate(self) -> float:
         if self.total_tracks == 0:
@@ -252,7 +253,53 @@ class PlaylistSyncService:
                                 total_tracks=total_tracks,
                                 matched_tracks=len(matched_tracks),
                                 failed_tracks=failed_tracks)
-            
+
+            # Auto-add unmatched tracks to wishlist
+            wishlist_added_count = 0
+            if unmatched_tracks:
+                try:
+                    from core.wishlist_service import get_wishlist_service
+                    wishlist_service = get_wishlist_service()
+
+                    logger.info(f"Auto-adding {len(unmatched_tracks)} unmatched tracks to wishlist")
+
+                    for match_result in unmatched_tracks:
+                        spotify_track = match_result.spotify_track
+
+                        # Convert SpotifyTrack to dict format expected by wishlist service
+                        spotify_track_data = {
+                            'id': spotify_track.id,
+                            'name': spotify_track.name,
+                            'artists': [{'name': a} if isinstance(a, str) else a for a in spotify_track.artists],
+                            'album': {'name': spotify_track.album},
+                            'duration_ms': spotify_track.duration_ms,
+                            'popularity': getattr(spotify_track, 'popularity', 0),
+                            'preview_url': getattr(spotify_track, 'preview_url', None),
+                            'external_urls': getattr(spotify_track, 'external_urls', {})
+                        }
+
+                        # Add to wishlist with source context
+                        success = wishlist_service.add_spotify_track_to_wishlist(
+                            spotify_track_data=spotify_track_data,
+                            failure_reason='Missing from media server after sync',
+                            source_type='playlist',
+                            source_context={
+                                'playlist_name': playlist.name,
+                                'playlist_id': playlist.id,
+                                'sync_type': 'automatic_sync',
+                                'timestamp': datetime.now().isoformat()
+                            }
+                        )
+
+                        if success:
+                            wishlist_added_count += 1
+
+                    logger.info(f"Successfully added {wishlist_added_count}/{len(unmatched_tracks)} tracks to wishlist")
+
+                except Exception as e:
+                    logger.warning(f"Failed to auto-add tracks to wishlist: {e}")
+                    # Don't fail the sync if wishlist add fails
+
             result = SyncResult(
                 playlist_name=playlist.name,
                 total_tracks=len(playlist.tracks),
@@ -261,9 +308,10 @@ class PlaylistSyncService:
                 downloaded_tracks=downloaded_tracks,
                 failed_tracks=failed_tracks,
                 sync_time=datetime.now(),
-                errors=errors
+                errors=errors,
+                wishlist_added_count=wishlist_added_count
             )
-            
+
             logger.info(f"Sync completed: {result.success_rate:.1f}% success rate")
             return result
             
@@ -437,7 +485,8 @@ class PlaylistSyncService:
             downloaded_tracks=0,
             failed_tracks=0,
             sync_time=datetime.now(),
-            errors=errors
+            errors=errors,
+            wishlist_added_count=0
         )
     
     def get_sync_preview(self, playlist_name: str) -> Dict[str, Any]:

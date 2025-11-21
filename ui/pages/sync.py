@@ -3750,10 +3750,18 @@ class SyncPage(QWidget):
         
         # Show toast notification for sync completion
         if hasattr(self, 'toast_manager') and self.toast_manager:
+            wishlist_count = getattr(result, 'wishlist_added_count', 0)
+
             if result.failed_tracks > 0:
-                self.toast_manager.show_toast(f"Sync completed: {result.matched_tracks}/{result.total_tracks} tracks added, {result.failed_tracks} failed", ToastType.WARNING)
+                msg = f"Sync completed: {result.matched_tracks}/{result.total_tracks} tracks added, {result.failed_tracks} failed"
+                if wishlist_count > 0:
+                    msg += f". {wishlist_count} track{'s' if wishlist_count > 1 else ''} added to wishlist"
+                self.toast_manager.show_toast(msg, ToastType.WARNING)
             else:
-                self.toast_manager.show_toast(f"Sync completed: {result.matched_tracks} tracks added to queue", ToastType.SUCCESS)
+                msg = f"Sync completed: {result.matched_tracks} tracks added to queue"
+                if wishlist_count > 0:
+                    msg += f". {wishlist_count} missing track{'s' if wishlist_count > 1 else ''} added to wishlist"
+                self.toast_manager.show_toast(msg, ToastType.SUCCESS)
 
         # Continue sequential sync if in progress
         if self.is_sequential_syncing:
