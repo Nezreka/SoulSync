@@ -5363,7 +5363,7 @@ function processModalStatusUpdate(playlistId, data) {
         }
 
         (data.tasks || []).forEach(task => {
-            const row = document.querySelector(`#download-missing-modal-${playlistId} tr[data-track-index="${task.track_index}"]`);
+            const row = document.querySelector(`#download-missing-modal-${CSS.escape(playlistId)} tr[data-track-index="${task.track_index}"]`);
             if (!row) {
                 console.debug(`❌ [Status Update] Row not found for playlistId: ${playlistId}, track_index: ${task.track_index}`);
                 return;
@@ -5872,7 +5872,7 @@ async function cancelTrackDownloadV2(playlistId, trackIndex) {
         return;
     }
 
-    const row = document.querySelector(`#download-missing-modal-${playlistId} tr[data-track-index="${trackIndex}"]`);
+    const row = document.querySelector(`#download-missing-modal-${CSS.escape(playlistId)} tr[data-track-index="${trackIndex}"]`);
     if (!row) {
         console.warn(`❌ [Cancel V2] No row found for track index: ${trackIndex}`);
         return;
@@ -5959,7 +5959,7 @@ async function cancelTrackDownload(playlistId, trackIndex) {
     const process = activeDownloadProcesses[playlistId];
     if (!process) return;
 
-    const row = document.querySelector(`#download-missing-modal-${playlistId} tr[data-track-index="${trackIndex}"]`);
+    const row = document.querySelector(`#download-missing-modal-${CSS.escape(playlistId)} tr[data-track-index="${trackIndex}"]`);
     if (!row) return;
 
     // Prevent double cancellation
@@ -9771,7 +9771,7 @@ function resetWishlistModalToIdleState() {
         if (downloadBar) downloadBar.style.width = '0%';
         
         // Reset all track rows to pending state
-        const trackRows = document.querySelectorAll(`#download-missing-modal-${playlistId} tr[data-track-index]`);
+        const trackRows = document.querySelectorAll(`#download-missing-modal-${CSS.escape(playlistId)} tr[data-track-index]`);
         trackRows.forEach((row, index) => {
             const matchCell = row.querySelector(`#match-${playlistId}-${index}`);
             const downloadCell = row.querySelector(`#download-${playlistId}-${index}`);
@@ -10422,7 +10422,7 @@ function updateCompletedModalResults(playlistId, downloadData) {
         let failedOrCancelledCount = 0;
 
         (downloadData.tasks || []).forEach(task => {
-            const row = document.querySelector(`#download-missing-modal-${playlistId} tr[data-track-index="${task.track_index}"]`);
+            const row = document.querySelector(`#download-missing-modal-${CSS.escape(playlistId)} tr[data-track-index="${task.track_index}"]`);
             if (!row) return;
             
             row.dataset.taskId = task.task_id;
