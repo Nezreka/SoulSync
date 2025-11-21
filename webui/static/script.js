@@ -6283,7 +6283,16 @@ function updateCardToDefault(playlistId, finalState = null) {
         if (finalState.status === 'finished') {
             statusEl.textContent = `Synced: Just now`;
             statusEl.className = 'playlist-card-status status-synced';
-            showToast(`Sync complete for "${card.querySelector('.playlist-card-name').textContent}"`, 'success');
+
+            // Check if any tracks were added to wishlist
+            const wishlistCount = finalState.progress?.wishlist_added_count || finalState.result?.wishlist_added_count || 0;
+            const playlistName = card.querySelector('.playlist-card-name').textContent;
+
+            if (wishlistCount > 0) {
+                showToast(`Sync complete for "${playlistName}". Added ${wishlistCount} missing track${wishlistCount > 1 ? 's' : ''} to wishlist.`, 'success');
+            } else {
+                showToast(`Sync complete for "${playlistName}"`, 'success');
+            }
         } else {
             statusEl.textContent = `Sync Failed`;
             statusEl.className = 'playlist-card-status status-needs-sync'; // Or a new error class
