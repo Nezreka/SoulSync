@@ -869,19 +869,31 @@ class JellyfinClient:
             return False
         
         try:
-            # Convert tracks to Jellyfin track IDs
+            # Convert tracks to Jellyfin/Emby track IDs
             track_ids = []
+            invalid_tracks = []
+
             for track in tracks:
+                track_id = None
                 if hasattr(track, 'ratingKey'):
-                    track_ids.append(str(track.ratingKey))
+                    track_id = str(track.ratingKey)
                 elif hasattr(track, 'id'):
-                    track_ids.append(str(track.id))
-            
+                    track_id = str(track.id)
+
+                # Validate that track_id is not empty and looks like a valid GUID
+                if track_id and track_id.strip():
+                    track_ids.append(track_id.strip())
+                else:
+                    invalid_tracks.append(track)
+
+            if invalid_tracks:
+                logger.warning(f"Found {len(invalid_tracks)} tracks with invalid/empty IDs - these will be skipped")
+
             if not track_ids:
                 logger.warning(f"No valid tracks provided for playlist '{name}'")
                 return False
-            
-            logger.info(f"Creating Jellyfin playlist '{name}' with {len(track_ids)} tracks")
+
+            logger.info(f"Creating Jellyfin/Emby playlist '{name}' with {len(track_ids)} valid track IDs (filtered {len(invalid_tracks)} invalid)")
             
             # For large playlists, create empty playlist first then add tracks in batches
             if True:
@@ -958,20 +970,34 @@ class JellyfinClient:
             for i in range(0, len(track_ids), batch_size):
                 batch = track_ids[i:i + batch_size]
                 batch_num = (i // batch_size) + 1
-                
+
                 logger.info(f"Adding batch {batch_num}/{total_batches} ({len(batch)} tracks) to playlist '{name}'")
-                
+
                 # Add tracks to playlist using POST to /Playlists/{id}/Items
+                # IMPORTANT: Filter out any invalid/empty IDs to prevent GUID parse errors in Emby
+                valid_batch = [track_id for track_id in batch if track_id and track_id.strip()]
+
+                if not valid_batch:
+                    logger.warning(f"Batch {batch_num} has no valid track IDs, skipping")
+                    continue
+
                 add_url = f"{self.base_url}/Playlists/{playlist_id}/Items"
+
+                # Use URL query parameters (required by Jellyfin/Emby API)
+                # The Ids parameter must be comma-separated GUIDs
                 add_params = {
-                    'Ids': ','.join(batch),
+                    'Ids': ','.join(valid_batch),
                     'UserId': self.user_id
                 }
-                
+
                 add_response = requests.post(add_url, params=add_params, headers={'X-Emby-Token': self.api_key}, timeout=30)
-                
+
                 if add_response.status_code not in [200, 204]:
-                    logger.warning(f"Failed to add batch {batch_num} to playlist: {add_response.status_code} - {add_response.text}")
+                    logger.error(f"Failed to add batch {batch_num} to playlist '{name}': HTTP {add_response.status_code}")
+                    logger.error(f"  Response body: {add_response.text}")
+                    logger.error(f"  Track IDs in batch (first 5): {valid_batch[:5]}")
+                    logger.error(f"  Request URL: {add_url}")
+                    logger.error(f"  Request params: Ids={add_params['Ids'][:200]}... (truncated)")
                     # Continue with other batches even if one fails
                     
             logger.info(f"✅ Created large Jellyfin playlist '{name}' with {len(track_ids)} tracks in {total_batches} batches")
