@@ -8794,9 +8794,14 @@ def get_valid_candidates(results, spotify_track, query):
     from core.soulseek_client import SoulseekClient
     temp_client = SoulseekClient()
     quality_filtered_candidates = temp_client.filter_results_by_quality_preference(initial_candidates)
+
+    # IMPORTANT: Respect empty results from quality filter
+    # If user has strict quality requirements (e.g., FLAC-only with fallback disabled),
+    # and no results match, we should fail the download rather than force a fallback.
+    # The quality filter already has its own fallback logic controlled by the user's settings.
     if not quality_filtered_candidates:
-        # If no candidates match profile, fall back to all candidates
-        quality_filtered_candidates = initial_candidates
+        print(f"⚠️ [Quality Filter] No candidates match quality profile - download will fail per user preferences")
+        return []
 
     verified_candidates = []
     spotify_artist_name = spotify_track.artists[0] if spotify_track.artists else ""
