@@ -19733,17 +19733,11 @@ async function handleMediaScanButtonClick() {
         const result = await response.json();
 
         if (result.success) {
-            // Update UI to show scan in progress
-            phaseLabel.textContent = 'Scan in progress...';
-            progressBar.style.width = '100%';
-
-            if (result.scan_info && result.scan_info.delay_seconds) {
-                progressLabel.textContent = `Scan scheduled (${result.scan_info.delay_seconds}s delay)`;
-                showToast(`📡 Media scan scheduled (${result.scan_info.delay_seconds}s delay)`, 'success', 5000);
-            } else {
-                progressLabel.textContent = 'Scan initiated successfully';
-                showToast('📡 Media scan initiated successfully', 'success', 3000);
-            }
+            // Get delay from API response (graceful fallback to 60 if not provided)
+            const delaySeconds = (result.scan_info && result.scan_info.delay_seconds) || 60;
+            let remainingSeconds = delaySeconds;
+            let countdownInterval = null;
+            let pollInterval = null;
 
             // Show auto database update message
             if (result.auto_database_update) {
@@ -19757,50 +19751,83 @@ async function handleMediaScanButtonClick() {
                 lastTimeEl.textContent = now.toLocaleTimeString();
             }
 
-            // Poll scan status for ~30 seconds
-            let pollCount = 0;
-            const pollInterval = setInterval(async () => {
-                pollCount++;
+            // Start countdown timer (visual feedback during delay)
+            phaseLabel.textContent = 'Scan scheduled...';
+            progressBar.style.width = '0%';
 
-                if (pollCount > 15) { // Stop after 30 seconds (15 * 2s)
-                    clearInterval(pollInterval);
-                    // Reset UI
-                    button.disabled = false;
-                    phaseLabel.textContent = 'Scan completed';
-                    progressBar.style.width = '0%';
-                    progressLabel.textContent = 'Ready for next scan';
-                    statusValue.textContent = 'Idle';
-                    statusValue.style.color = '#b3b3b3';
-                    return;
+            countdownInterval = setInterval(() => {
+                remainingSeconds--;
+
+                // Update progress bar (0% -> 100% over delay period)
+                const progress = ((delaySeconds - remainingSeconds) / delaySeconds) * 100;
+                progressBar.style.width = `${progress}%`;
+
+                // Update progress label with countdown
+                if (remainingSeconds > 0) {
+                    progressLabel.textContent = `Starting scan in ${remainingSeconds}s...`;
+                } else {
+                    progressLabel.textContent = 'Scan starting now...';
                 }
 
-                try {
-                    const statusResponse = await fetch('/api/scan/status');
-                    const statusData = await statusResponse.json();
+                // When countdown reaches 0, start polling
+                if (remainingSeconds <= 0) {
+                    clearInterval(countdownInterval);
 
-                    if (statusData.success && statusData.status) {
-                        const status = statusData.status;
+                    // Transition to scanning phase
+                    phaseLabel.textContent = 'Scan in progress...';
+                    progressBar.style.width = '100%';
+                    progressLabel.textContent = 'Media server is scanning library...';
+                    showToast('📡 Media scan started', 'success', 3000);
 
-                        // Update status display
-                        if (status.is_scanning) {
-                            phaseLabel.textContent = 'Plex is scanning library...';
-                            progressLabel.textContent = status.progress_message || 'Scan in progress';
-                        } else {
-                            // Scan complete
+                    // Start polling for scan completion (5 minutes = 150 polls × 2s)
+                    let pollCount = 0;
+                    const maxPolls = 150; // 5 minutes
+
+                    pollInterval = setInterval(async () => {
+                        pollCount++;
+
+                        if (pollCount > maxPolls) {
+                            // Polling timeout after 5 minutes
                             clearInterval(pollInterval);
                             button.disabled = false;
-                            phaseLabel.textContent = 'Scan completed successfully';
+                            phaseLabel.textContent = 'Scan completed';
                             progressBar.style.width = '0%';
                             progressLabel.textContent = 'Ready for next scan';
                             statusValue.textContent = 'Idle';
                             statusValue.style.color = '#b3b3b3';
                             showToast('✅ Media scan completed', 'success', 3000);
+                            return;
                         }
-                    }
-                } catch (pollError) {
-                    console.debug('Scan status poll error:', pollError);
+
+                        try {
+                            const statusResponse = await fetch('/api/scan/status');
+                            const statusData = await statusResponse.json();
+
+                            if (statusData.success && statusData.status) {
+                                const status = statusData.status;
+
+                                // Update status display
+                                if (status.is_scanning) {
+                                    phaseLabel.textContent = 'Media server scanning...';
+                                    progressLabel.textContent = status.progress_message || 'Scan in progress';
+                                } else if (status.status === 'idle') {
+                                    // Scan completed
+                                    clearInterval(pollInterval);
+                                    button.disabled = false;
+                                    phaseLabel.textContent = 'Scan completed successfully';
+                                    progressBar.style.width = '0%';
+                                    progressLabel.textContent = 'Ready for next scan';
+                                    statusValue.textContent = 'Idle';
+                                    statusValue.style.color = '#b3b3b3';
+                                    showToast('✅ Media scan completed', 'success', 3000);
+                                }
+                            }
+                        } catch (pollError) {
+                            console.debug('Scan status poll error:', pollError);
+                        }
+                    }, 2000); // Poll every 2 seconds
                 }
-            }, 2000); // Poll every 2 seconds
+            }, 1000); // Update countdown every second
 
         } else {
             // Error occurred
