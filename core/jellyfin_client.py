@@ -198,16 +198,47 @@ class JellyfinClient:
                 server_name = response.get('ServerName', 'Unknown')
                 logger.info(f"Successfully connected to Jellyfin server: {server_name}")
                 
-                # Get the first user (admin user typically)
+                # Get all users
                 users_response = self._make_request('/Users')
-                if users_response and len(users_response) > 0:
-                    self.user_id = users_response[0]['Id']
-                    logger.info(f"Using user: {users_response[0].get('Name', 'Unknown')}")
-                    
-                    # Find music library
-                    self._find_music_library()
-                else:
+                
+                if not users_response:
                     logger.error("No users found on Jellyfin server")
+                    return
+
+                # LOGIC CHANGE: Iterate through users instead of blindly picking the first one
+                valid_user_found = False
+
+                for user in users_response:
+                    candidate_id = user['Id']
+                    candidate_name = user.get('Name', 'Unknown')
+
+                    try:
+                        # Check this specific user's views (libraries)
+                        views_response = self._make_request(f'/Users/{candidate_id}/Views')
+                        
+                        if views_response:
+                            for view in views_response.get('Items', []):
+                                # Check if they have a 'music' collection (case-insensitive safe check)
+                                collection_type = (view.get('CollectionType') or '').lower()
+                                
+                                if collection_type == 'music':
+                                    # Found a winner! Set the class variables.
+                                    self.user_id = candidate_id
+                                    self.music_library_id = view['Id']
+                                    logger.info(f"Using user: {candidate_name} (Music Library: {view.get('Name')})")
+                                    valid_user_found = True
+                                    break
+                    except Exception as e:
+                        # If this user fails (e.g. permission error), just log it and try the next user
+                        logger.debug(f"Skipping user {candidate_name} due to error: {e}")
+                        continue
+                    
+                    # If we found a valid user, stop looping
+                    if valid_user_found:
+                        break
+                
+                if not valid_user_found:
+                    logger.error("Connected to Jellyfin, but could not find any user with access to a Music library")
                     
         except Exception as e:
             logger.error(f"Failed to connect to Jellyfin server: {e}")
