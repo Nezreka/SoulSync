@@ -911,11 +911,13 @@ class JellyfinClient:
                 elif hasattr(track, 'id'):
                     track_id = str(track.id)
 
-                # Validate that track_id is not empty and looks like a valid GUID
-                if track_id and track_id.strip():
+                # Validate that track_id is a properly formatted GUID
+                if track_id and self._is_valid_guid(track_id):
                     track_ids.append(track_id.strip())
                 else:
                     invalid_tracks.append(track)
+                    if track_id:
+                        logger.debug(f"Rejected invalid GUID format: '{track_id}'")
 
             if invalid_tracks:
                 logger.warning(f"Found {len(invalid_tracks)} tracks with invalid/empty IDs - these will be skipped")
@@ -965,6 +967,31 @@ class JellyfinClient:
             logger.error(f"Error creating Jellyfin playlist '{name}': {e}")
             return False
     
+    def _is_valid_guid(self, guid: str) -> bool:
+        """Validate that a string is a properly formatted GUID for Emby/Jellyfin"""
+        if not guid or not isinstance(guid, str):
+            return False
+
+        guid = guid.strip()
+
+        # Check length (GUIDs are typically 32 hex chars + 4 hyphens = 36 chars, or 32 without hyphens)
+        if len(guid) not in [32, 36]:
+            return False
+
+        # Remove hyphens for validation
+        guid_no_hyphens = guid.replace('-', '')
+
+        # Must be exactly 32 hex characters
+        if len(guid_no_hyphens) != 32:
+            return False
+
+        # All characters must be hexadecimal
+        try:
+            int(guid_no_hyphens, 16)
+            return True
+        except ValueError:
+            return False
+
     def _create_large_playlist(self, name: str, track_ids: List[str]) -> bool:
         """Create a large playlist by first creating empty playlist, then adding tracks in batches"""
         try:
@@ -976,14 +1003,20 @@ class JellyfinClient:
                 'X-Emby-Token': self.api_key,
                 'Content-Type': 'application/json'
             }
+            # Don't include 'Ids' field for empty playlist - Emby doesn't handle empty arrays
             data = {
                 'Name': name,
                 'UserId': self.user_id,
-                'MediaType': 'Audio',
-                'Ids': []  # Empty playlist
+                'MediaType': 'Audio'
             }
-            
+
+            logger.debug(f"Creating empty playlist with data: {data}")
             response = requests.post(url, json=data, headers=headers, timeout=10)
+
+            if response.status_code >= 400:
+                logger.error(f"Failed to create empty playlist: HTTP {response.status_code}")
+                logger.error(f"Response body: {response.text}")
+
             response.raise_for_status()
             
             result = response.json()
@@ -1006,7 +1039,7 @@ class JellyfinClient:
 
                 # Add tracks to playlist using POST to /Playlists/{id}/Items
                 # IMPORTANT: Filter out any invalid/empty IDs to prevent GUID parse errors in Emby
-                valid_batch = [track_id for track_id in batch if track_id and track_id.strip()]
+                valid_batch = [track_id for track_id in batch if track_id and self._is_valid_guid(track_id)]
 
                 if not valid_batch:
                     logger.warning(f"Batch {batch_num} has no valid track IDs, skipping")
