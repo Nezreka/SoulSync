@@ -1,0 +1,41 @@
+{
+  "bubbles": {
+    "165ZgPlLkK7bf5bDoFc6Sb": {
+      "artist": {
+        "id": "165ZgPlLkK7bf5bDoFc6Sb",
+        "name": "Limp Bizkit",
+        "image_url": "https://i.scdn.co/image/4654955890cb62a6abe9daadfd2b3ecdee8036e4",
+        "genres": [
+          "nu metal",
+          "rap metal",
+          "alternative metal",
+          "rap rock"
+        ],
+        "popularity": 79,
+        "confidence": 0.21052631578947367
+      },
+      "downloads": [
+        {
+          "virtualPlaylistId": "artist_album_165ZgPlLkK7bf5bDoFc6Sb_5mi7FKaWE5CtcOjdyxScA7",
+          "album": {
+            "album_type": "album",
+            "external_urls": {
+              "spotify": "https://open.spotify.com/album/5mi7FKaWE5CtcOjdyxScA7"
+            },
+            "id": "5mi7FKaWE5CtcOjdyxScA7",
+            "image_url": "https://i.scdn.co/image/ab67616d0000b2734a31b146c7cf07705d912efe",
+            "name": "Chocolate Starfish And The Hot Dog Flavored Water",
+            "release_date": "2000-10-17",
+            "total_tracks": 15
+          },
+          "albumType": "albums",
+          "status": "in_progress",
+          "startTime": "2025-11-23T21:24:21.696Z"
+        }
+      ],
+      "hasCompletedDownloads": false
+    }
+  },
+  "timestamp": "2025-11-23T13:24:22.715644",
+  "snapshot_id": "20251123_132422"
+}

@@ -2349,9 +2349,11 @@ async function rehydrateArtistAlbumModal(virtualPlaylistId, playlistName, batchI
                 // Update button states to reflect running status
                 const beginBtn = document.getElementById(`begin-analysis-btn-${virtualPlaylistId}`);
                 const cancelBtn = document.getElementById(`cancel-all-btn-${virtualPlaylistId}`);
+                const wishlistBtn = document.getElementById(`add-to-wishlist-btn-${virtualPlaylistId}`);
                 if (beginBtn) beginBtn.style.display = 'none';
                 if (cancelBtn) cancelBtn.style.display = 'inline-block';
-                
+                if (wishlistBtn) wishlistBtn.style.display = 'none';
+
                 // Hide the modal - this is background rehydration, not user-requested
                 if (process.modalElement) {
                     process.modalElement.style.display = 'none';
@@ -2668,6 +2670,10 @@ async function rehydrateModal(processInfo, userRequested = false) {
 
     document.getElementById(`begin-analysis-btn-${playlist_id}`).style.display = 'none';
     document.getElementById(`cancel-all-btn-${playlist_id}`).style.display = 'inline-block';
+
+    // Hide wishlist button if it exists
+    const wishlistBtn = document.getElementById(`add-to-wishlist-btn-${playlist_id}`);
+    if (wishlistBtn) wishlistBtn.style.display = 'none';
 
     startModalDownloadPolling(playlist_id);
 
@@ -4078,6 +4084,9 @@ async function openDownloadMissingModal(playlistId) {
                     <button class="download-control-btn primary" id="begin-analysis-btn-${playlistId}" onclick="startMissingTracksProcess('${playlistId}')">
                         Begin Analysis
                     </button>
+                    <button class="download-control-btn" id="add-to-wishlist-btn-${playlistId}" onclick="addModalTracksToWishlist('${playlistId}')" style="background-color: #9333ea; color: white;">
+                        Add to Wishlist
+                    </button>
                     <button class="download-control-btn danger" id="cancel-all-btn-${playlistId}" onclick="cancelAllOperations('${playlistId}')" style="display: none;">
                         Cancel All
                     </button>
@@ -4435,6 +4444,9 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
                     </div>
                     <button class="download-control-btn primary" id="begin-analysis-btn-${virtualPlaylistId}" onclick="startMissingTracksProcess('${virtualPlaylistId}')">
                         Begin Analysis
+                    </button>
+                    <button class="download-control-btn" id="add-to-wishlist-btn-${virtualPlaylistId}" onclick="addModalTracksToWishlist('${virtualPlaylistId}')" style="background-color: #9333ea; color: white;">
+                        Add to Wishlist
                     </button>
                     <button class="download-control-btn danger" id="cancel-all-btn-${virtualPlaylistId}" onclick="cancelAllOperations('${virtualPlaylistId}')" style="display: none;">
                         Cancel All
@@ -4947,6 +4959,12 @@ async function startMissingTracksProcess(playlistId) {
         document.getElementById(`begin-analysis-btn-${playlistId}`).style.display = 'none';
         document.getElementById(`cancel-all-btn-${playlistId}`).style.display = 'inline-block';
 
+        // Hide wishlist button if it exists (only for non-wishlist modals)
+        const wishlistBtn = document.getElementById(`add-to-wishlist-btn-${playlistId}`);
+        if (wishlistBtn) {
+            wishlistBtn.style.display = 'none';
+        }
+
         // Add to discover download sidebar if this is a discover page download
         if (process.discoverMetadata) {
             const playlistName = process.playlist.name;
@@ -5036,6 +5054,21 @@ async function startMissingTracksProcess(playlistId) {
     } catch (error) {
         showToast(`Failed to start process: ${error.message}`, 'error');
         process.status = 'cancelled';
+
+        // Reset button states on error
+        const beginBtn = document.getElementById(`begin-analysis-btn-${playlistId}`);
+        const cancelBtn = document.getElementById(`cancel-all-btn-${playlistId}`);
+        const wishlistBtn = document.getElementById(`add-to-wishlist-btn-${playlistId}`);
+        if (beginBtn) beginBtn.style.display = 'inline-block';
+        if (cancelBtn) cancelBtn.style.display = 'none';
+        if (wishlistBtn) wishlistBtn.style.display = 'inline-block';
+
+        // Show the force download toggle again
+        const forceToggleContainer = document.querySelector(`#force-download-all-${playlistId}`)?.closest('.force-download-toggle-container');
+        if (forceToggleContainer) {
+            forceToggleContainer.style.display = 'flex';
+        }
+
         cleanupDownloadProcess(playlistId);
     }
 }
@@ -8258,6 +8291,128 @@ function closeAddToWishlistModal() {
 }
 
 /**
+ * Add all tracks from any download modal to the wishlist
+ * Universal handler for all modal types (artist albums, playlists, YouTube, Tidal, etc.)
+ */
+async function addModalTracksToWishlist(playlistId) {
+    const process = activeDownloadProcesses[playlistId];
+    if (!process) {
+        console.error('❌ No active process found for:', playlistId);
+        showToast('Error: Could not find playlist data', 'error');
+        return;
+    }
+
+    // Verify we have tracks
+    if (!process.tracks || process.tracks.length === 0) {
+        console.error('❌ No tracks found in process:', process);
+        showToast('Error: No tracks to add', 'error');
+        return;
+    }
+
+    const tracks = process.tracks;
+    // Get artist/album context if available (for artist album downloads)
+    const artist = process.artist || { name: 'Unknown Artist', id: null };
+    const album = process.album || process.playlist || { name: 'Playlist', id: playlistId };
+
+    console.log(`🔄 Adding ${tracks.length} tracks from "${album.name}" to wishlist`);
+
+    // Disable the button to prevent double-clicks
+    const wishlistBtn = document.getElementById(`add-to-wishlist-btn-${playlistId}`);
+    if (wishlistBtn) {
+        wishlistBtn.disabled = true;
+        wishlistBtn.classList.add('loading');
+        wishlistBtn.textContent = 'Adding...';
+    }
+
+    try {
+        let successCount = 0;
+        let errorCount = 0;
+
+        // Add each track to wishlist individually
+        for (const track of tracks) {
+            try {
+                // Format artists field to match backend expectations
+                let formattedArtists = track.artists;
+                if (typeof track.artists === 'string') {
+                    formattedArtists = [{ name: track.artists }];
+                } else if (Array.isArray(track.artists)) {
+                    formattedArtists = track.artists.map(artistItem => {
+                        if (typeof artistItem === 'string') {
+                            return { name: artistItem };
+                        } else if (typeof artistItem === 'object' && artistItem !== null) {
+                            return artistItem;
+                        } else {
+                            return { name: 'Unknown Artist' };
+                        }
+                    });
+                } else {
+                    formattedArtists = [{ name: artist.name }];
+                }
+
+                const formattedTrack = {
+                    ...track,
+                    artists: formattedArtists
+                };
+
+                const response = await fetch('/api/add-album-to-wishlist', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        track: formattedTrack,
+                        artist: artist,
+                        album: album,
+                        source_type: 'album',
+                        source_context: {
+                            album_name: album.name,
+                            artist_name: artist.name,
+                            album_type: album.album_type || 'album'
+                        }
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    successCount++;
+                } else {
+                    errorCount++;
+                    console.error(`❌ Failed to add "${track.name}" to wishlist: ${result.error}`);
+                }
+            } catch (error) {
+                errorCount++;
+                console.error(`❌ Error adding "${track.name}" to wishlist:`, error);
+            }
+        }
+
+        // Show result toast
+        if (successCount > 0) {
+            const message = errorCount > 0
+                ? `Added ${successCount}/${tracks.length} tracks to wishlist (${errorCount} failed)`
+                : `Added ${successCount} tracks to wishlist`;
+            showToast(message, 'success');
+
+            // Close the modal on success
+            await closeDownloadMissingModal(playlistId);
+        } else {
+            showToast('Failed to add any tracks to wishlist', 'error');
+        }
+
+    } catch (error) {
+        console.error('❌ Error in addModalTracksToWishlist:', error);
+        showToast(`Error adding to wishlist: ${error.message}`, 'error');
+    } finally {
+        // Re-enable button if still on screen (in case of error)
+        if (wishlistBtn) {
+            wishlistBtn.disabled = false;
+            wishlistBtn.classList.remove('loading');
+            wishlistBtn.textContent = 'Add to Wishlist';
+        }
+    }
+}
+
+/**
  * Format duration from milliseconds to MM:SS format
  */
 function formatDuration(durationMs) {
@@ -8290,6 +8445,7 @@ window.handleWishlistButtonClick = handleWishlistButtonClick;
 window.openAddToWishlistModal = openAddToWishlistModal;
 window.closeAddToWishlistModal = closeAddToWishlistModal;
 window.handleAddToWishlist = handleAddToWishlist;
+window.addModalTracksToWishlist = addModalTracksToWishlist;
 
 // Helper functions
 window.escapeHtml = escapeHtml;
@@ -11387,6 +11543,9 @@ async function openDownloadMissingModalForTidal(virtualPlaylistId, playlistName,
                     </div>
                     <button class="download-control-btn primary" id="begin-analysis-btn-${virtualPlaylistId}" onclick="startMissingTracksProcess('${virtualPlaylistId}')">
                         Begin Analysis
+                    </button>
+                    <button class="download-control-btn" id="add-to-wishlist-btn-${virtualPlaylistId}" onclick="addModalTracksToWishlist('${virtualPlaylistId}')" style="background-color: #9333ea; color: white;">
+                        Add to Wishlist
                     </button>
                     <button class="download-control-btn danger" id="cancel-all-btn-${virtualPlaylistId}" onclick="cancelAllOperations('${virtualPlaylistId}')" style="display: none;">
                         Cancel All
@@ -17821,6 +17980,9 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
                     </div>
                     <button class="download-control-btn primary" id="begin-analysis-btn-${virtualPlaylistId}" onclick="startMissingTracksProcess('${virtualPlaylistId}')">
                         Begin Analysis
+                    </button>
+                    <button class="download-control-btn" id="add-to-wishlist-btn-${virtualPlaylistId}" onclick="addModalTracksToWishlist('${virtualPlaylistId}')" style="background-color: #9333ea; color: white;">
+                        Add to Wishlist
                     </button>
                     <button class="download-control-btn danger" id="cancel-all-btn-${virtualPlaylistId}" onclick="cancelAllOperations('${virtualPlaylistId}')" style="display: none;">
                         Cancel All
