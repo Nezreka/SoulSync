@@ -191,7 +191,8 @@ class PersonalizedPlaylistsService:
                         album_cover_url,
                         duration_ms,
                         popularity,
-                        release_date
+                        release_date,
+                        track_data_json
                     FROM discovery_pool
                     WHERE release_date IS NOT NULL
                       AND CAST(SUBSTR(release_date, 1, 4) AS INTEGER) BETWEEN ? AND ?
@@ -200,7 +201,17 @@ class PersonalizedPlaylistsService:
                 """, (start_year, end_year, limit * 10))
 
                 rows = cursor.fetchall()
-                all_tracks = [dict(row) for row in rows]
+                all_tracks = []
+                for row in rows:
+                    track_dict = dict(row)
+                    # Parse track_data_json if available
+                    if track_dict.get('track_data_json'):
+                        try:
+                            import json
+                            track_dict['track_data_json'] = json.loads(track_dict['track_data_json'])
+                        except:
+                            pass
+                    all_tracks.append(track_dict)
 
                 if not all_tracks:
                     logger.warning(f"No tracks found for {decade}s")
@@ -336,7 +347,8 @@ class PersonalizedPlaylistsService:
                         album_cover_url,
                         duration_ms,
                         popularity,
-                        artist_genres
+                        artist_genres,
+                        track_data_json
                     FROM discovery_pool
                     WHERE artist_genres IS NOT NULL
                 """)
@@ -386,6 +398,12 @@ class PersonalizedPlaylistsService:
                                     'duration_ms': row[5],
                                     'popularity': row[6]
                                 }
+                                # Parse track_data_json if available
+                                if row[8]:  # track_data_json column
+                                    try:
+                                        track_dict['track_data_json'] = json.loads(row[8])
+                                    except:
+                                        pass
                                 matching_tracks.append(track_dict)
                     except Exception as e:
                         logger.debug(f"Error parsing genres for track: {e}")
@@ -470,7 +488,8 @@ class PersonalizedPlaylistsService:
                         album_name,
                         album_cover_url,
                         duration_ms,
-                        popularity
+                        popularity,
+                        track_data_json
                     FROM discovery_pool
                     WHERE popularity >= 60
                     ORDER BY popularity DESC, RANDOM()
@@ -478,7 +497,17 @@ class PersonalizedPlaylistsService:
                 """, (limit * 3,))  # Get 3x more for diversity filtering
 
                 rows = cursor.fetchall()
-                all_tracks = [dict(row) for row in rows]
+                all_tracks = []
+                for row in rows:
+                    track_dict = dict(row)
+                    # Parse track_data_json if available
+                    if track_dict.get('track_data_json'):
+                        try:
+                            import json
+                            track_dict['track_data_json'] = json.loads(track_dict['track_data_json'])
+                        except:
+                            pass
+                    all_tracks.append(track_dict)
 
                 # Apply diversity constraint: max 2 tracks per album, max 3 per artist
                 tracks_by_album = {}
@@ -523,7 +552,8 @@ class PersonalizedPlaylistsService:
                         album_name,
                         album_cover_url,
                         duration_ms,
-                        popularity
+                        popularity,
+                        track_data_json
                     FROM discovery_pool
                     WHERE popularity < 40
                     ORDER BY RANDOM()
@@ -531,7 +561,18 @@ class PersonalizedPlaylistsService:
                 """, (limit,))
 
                 rows = cursor.fetchall()
-                return [dict(row) for row in rows]
+                tracks = []
+                for row in rows:
+                    track_dict = dict(row)
+                    # Parse track_data_json if available
+                    if track_dict.get('track_data_json'):
+                        try:
+                            import json
+                            track_dict['track_data_json'] = json.loads(track_dict['track_data_json'])
+                        except:
+                            pass
+                    tracks.append(track_dict)
+                return tracks
 
         except Exception as e:
             logger.error(f"Error getting hidden gems: {e}")
@@ -555,14 +596,26 @@ class PersonalizedPlaylistsService:
                         album_name,
                         album_cover_url,
                         duration_ms,
-                        popularity
+                        popularity,
+                        track_data_json
                     FROM discovery_pool
                     ORDER BY RANDOM()
                     LIMIT ?
                 """, (limit,))
 
                 rows = cursor.fetchall()
-                return [dict(row) for row in rows]
+                tracks = []
+                for row in rows:
+                    track_dict = dict(row)
+                    # Parse track_data_json if available
+                    if track_dict.get('track_data_json'):
+                        try:
+                            import json
+                            track_dict['track_data_json'] = json.loads(track_dict['track_data_json'])
+                        except:
+                            pass
+                    tracks.append(track_dict)
+                return tracks
 
         except Exception as e:
             logger.error(f"Error getting discovery shuffle: {e}")
@@ -728,7 +781,8 @@ class PersonalizedPlaylistsService:
                         album_name,
                         album_cover_url,
                         duration_ms,
-                        popularity
+                        popularity,
+                        track_data_json
                     FROM discovery_pool
                     WHERE artist_name LIKE ? OR track_name LIKE ?
                     ORDER BY RANDOM()
@@ -736,7 +790,18 @@ class PersonalizedPlaylistsService:
                 """, (f'%{category}%', f'%{category}%', limit))
 
                 rows = cursor.fetchall()
-                return [dict(row) for row in rows]
+                tracks = []
+                for row in rows:
+                    track_dict = dict(row)
+                    # Parse track_data_json if available
+                    if track_dict.get('track_data_json'):
+                        try:
+                            import json
+                            track_dict['track_data_json'] = json.loads(track_dict['track_data_json'])
+                        except:
+                            pass
+                    tracks.append(track_dict)
+                return tracks
 
         except Exception as e:
             logger.error(f"Error getting discovery tracks by category: {e}")
