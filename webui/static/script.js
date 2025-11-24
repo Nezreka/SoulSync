@@ -4754,10 +4754,20 @@ async function openWishlistOverviewModal() {
                 </div>
 
                 <div class="playlist-modal-footer">
-                    <button class="playlist-modal-btn playlist-modal-btn-secondary" onclick="closeWishlistOverviewModal()">Close</button>
-                    <button id="wishlist-download-btn" class="playlist-modal-btn playlist-modal-btn-primary" style="display: none;" onclick="downloadSelectedCategory()">
-                        Download Selection
-                    </button>
+                    <div class="playlist-modal-footer-left">
+                        <button class="playlist-modal-btn playlist-modal-btn-danger" onclick="clearEntireWishlist()">
+                            🗑️ Clear Wishlist
+                        </button>
+                        <button class="playlist-modal-btn playlist-modal-btn-warning" onclick="cleanupWishlistOverview()">
+                            🧹 Cleanup Wishlist
+                        </button>
+                    </div>
+                    <div class="playlist-modal-footer-right">
+                        <button class="playlist-modal-btn playlist-modal-btn-secondary" onclick="closeWishlistOverviewModal()">Close</button>
+                        <button id="wishlist-download-btn" class="playlist-modal-btn playlist-modal-btn-primary" style="display: none;" onclick="downloadSelectedCategory()">
+                            Download Selection
+                        </button>
+                    </div>
                 </div>
             </div>
         `;
@@ -4773,11 +4783,118 @@ async function openWishlistOverviewModal() {
 }
 
 function closeWishlistOverviewModal() {
+    console.log('🚪 closeWishlistOverviewModal() called');
     const modal = document.getElementById('wishlist-overview-modal');
+    console.log('Modal element:', modal);
     if (modal) {
         modal.style.display = 'none';
+        console.log('Modal display set to none');
+        // Also remove from DOM to ensure clean state
+        modal.remove();
+        console.log('Modal removed from DOM');
+    } else {
+        console.warn('Modal element not found');
     }
     window.selectedWishlistCategory = null;
+    console.log('✅ Modal closed');
+}
+
+async function cleanupWishlistOverview() {
+    console.log('🧹 cleanupWishlistOverview() called');
+
+    if (!confirm('This will remove all tracks from the wishlist that already exist in your library. Continue?')) {
+        return;
+    }
+
+    try {
+        showLoadingOverlay('Cleaning up wishlist...');
+
+        const response = await fetch('/api/wishlist/cleanup', {
+            method: 'POST'
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            const removedCount = result.removed_count || 0;
+
+            if (removedCount > 0) {
+                showToast(`Cleanup complete! Removed ${removedCount} tracks that already exist in your library`, 'success');
+            } else {
+                showToast('No tracks needed to be removed', 'info');
+            }
+
+            // Check if wishlist is now empty
+            const statsResponse = await fetch('/api/wishlist/stats');
+            const statsData = await statsResponse.json();
+
+            if (statsData.total === 0) {
+                // Wishlist is empty, just close the modal
+                closeWishlistOverviewModal();
+                await updateWishlistCount();
+            } else {
+                // Wishlist still has items, refresh the modal to show updated counts
+                closeWishlistOverviewModal();
+                await openWishlistOverviewModal();
+            }
+        } else {
+            showToast(`Failed to cleanup wishlist: ${result.error || 'Unknown error'}`, 'error');
+        }
+
+        hideLoadingOverlay();
+
+    } catch (error) {
+        console.error('Error cleaning up wishlist:', error);
+        showToast(`Failed to cleanup wishlist: ${error.message}`, 'error');
+        hideLoadingOverlay();
+    }
+}
+
+async function clearEntireWishlist() {
+    console.log('🗑️ clearEntireWishlist() called');
+
+    if (!confirm('⚠️ WARNING: This will permanently delete ALL tracks from your wishlist.\n\nThis action cannot be undone.\n\nAre you sure you want to continue?')) {
+        console.log('User cancelled confirmation');
+        return;
+    }
+
+    console.log('User confirmed, proceeding with clear...');
+
+    try {
+        showLoadingOverlay('Clearing wishlist...');
+        console.log('Loading overlay shown');
+
+        const response = await fetch('/api/wishlist/clear', {
+            method: 'POST'
+        });
+        console.log('API response received:', response.status);
+
+        const result = await response.json();
+        console.log('Clear wishlist response:', result);
+
+        hideLoadingOverlay();
+        console.log('Loading overlay hidden');
+
+        if (result.success) {
+            console.log('Clear was successful, showing toast...');
+            showToast('Wishlist cleared successfully', 'success');
+
+            console.log('Updating wishlist button count...');
+            await updateWishlistCount();
+
+            console.log('Closing modal...');
+            closeWishlistOverviewModal();
+            console.log('Modal should be closed now');
+        } else {
+            console.error('Clear failed:', result.error);
+            showToast(`Failed to clear wishlist: ${result.error || 'Unknown error'}`, 'error');
+        }
+
+    } catch (error) {
+        console.error('Error clearing wishlist:', error);
+        hideLoadingOverlay();
+        showToast(`Failed to clear wishlist: ${error.message}`, 'error');
+    }
 }
 
 async function selectWishlistCategory(category) {

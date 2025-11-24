@@ -7425,7 +7425,18 @@ body {
     border-top: 1px solid rgba(255, 255, 255, 0.08);
     display: flex;
     gap: 12px;
-    justify-content: flex-end;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.playlist-modal-footer-left {
+    display: flex;
+    gap: 12px;
+}
+
+.playlist-modal-footer-right {
+    display: flex;
+    gap: 12px;
 }
 
 .playlist-modal-btn {
@@ -7473,6 +7484,32 @@ body {
     background: #505050;
     border-color: #777777;
     transform: translateY(-1px);
+}
+
+.playlist-modal-btn-danger {
+    background: linear-gradient(135deg, #dc2626, #ef4444);
+    color: #ffffff;
+    font-weight: 700;
+    box-shadow: 0 4px 16px rgba(220, 38, 38, 0.3);
+}
+
+.playlist-modal-btn-danger:hover {
+    background: linear-gradient(135deg, #b91c1c, #dc2626);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(220, 38, 38, 0.4);
+}
+
+.playlist-modal-btn-warning {
+    background: linear-gradient(135deg, #f59e0b, #fbbf24);
+    color: #000000;
+    font-weight: 700;
+    box-shadow: 0 4px 16px rgba(245, 158, 11, 0.3);
+}
+
+.playlist-modal-btn-warning:hover {
+    background: linear-gradient(135deg, #d97706, #f59e0b);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(245, 158, 11, 0.4);
 }
 
 /* Watchlist Modal Styles */
