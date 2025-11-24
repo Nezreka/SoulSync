@@ -11983,9 +11983,37 @@ def get_playlist_tracks(playlist_id):
     try:
         # Handle special "Liked Songs" virtual playlist
         if playlist_id == "spotify:liked-songs":
-            saved_tracks = spotify_client.get_saved_tracks()
             user_info = spotify_client.get_user_info()
             owner_name = user_info.get('display_name', 'You') if user_info else 'You'
+
+            # Fetch raw saved tracks with full album data
+            tracks = []
+            limit = 50
+            offset = 0
+
+            while True:
+                results = spotify_client.sp.current_user_saved_tracks(limit=limit, offset=offset)
+
+                if not results or 'items' not in results:
+                    break
+
+                for item in results['items']:
+                    if item['track'] and item['track']['id']:
+                        track_data = item['track']
+                        tracks.append({
+                            'id': track_data['id'],
+                            'name': track_data['name'],
+                            'artists': [artist['name'] for artist in track_data['artists']],
+                            'album': track_data['album'],  # Full album object
+                            'duration_ms': track_data['duration_ms'],
+                            'popularity': track_data.get('popularity', 0),
+                            'spotify_track_id': track_data['id']
+                        })
+
+                if len(results['items']) < limit or not results.get('next'):
+                    break
+
+                offset += limit
 
             # Create virtual playlist dict for Liked Songs
             playlist_dict = {
@@ -11995,31 +12023,49 @@ def get_playlist_tracks(playlist_id):
                 'owner': owner_name,
                 'public': False,
                 'collaborative': False,
-                'track_count': len(saved_tracks),
+                'track_count': len(tracks),
                 'image_url': None,
                 'snapshot_id': '',
-                'tracks': [{'id': t.id, 'name': t.name, 'artists': t.artists, 'album': t.album, 'duration_ms': t.duration_ms, 'popularity': t.popularity} for t in saved_tracks]
+                'tracks': tracks
             }
             return jsonify(playlist_dict)
 
         # Handle regular playlists
-        # This reuses the robust track fetching logic from your GUI's sync.py
-        full_playlist = spotify_client.get_playlist_by_id(playlist_id)
-        if not full_playlist:
-            return jsonify({})
+        # Fetch raw playlist data to preserve full album objects
+        playlist_data = spotify_client.sp.playlist(playlist_id)
 
-        # Convert playlist to dict manually since core class doesn't have to_dict method
+        # Fetch all tracks with full album data
+        tracks = []
+        results = spotify_client.sp.playlist_tracks(playlist_id, limit=100)
+
+        while results:
+            for item in results['items']:
+                if item['track'] and item['track']['id']:
+                    track_data = item['track']
+                    tracks.append({
+                        'id': track_data['id'],
+                        'name': track_data['name'],
+                        'artists': [artist['name'] for artist in track_data['artists']],
+                        'album': track_data['album'],  # Full album object with album_type, total_tracks, etc.
+                        'duration_ms': track_data['duration_ms'],
+                        'popularity': track_data.get('popularity', 0),
+                        'spotify_track_id': track_data['id']  # Also include as spotify_track_id for consistency
+                    })
+
+            results = spotify_client.sp.next(results) if results['next'] else None
+
+        # Convert playlist to dict
         playlist_dict = {
-            'id': full_playlist.id,
-            'name': full_playlist.name,
-            'description': full_playlist.description,
-            'owner': full_playlist.owner,
-            'public': full_playlist.public,
-            'collaborative': full_playlist.collaborative,
-            'track_count': full_playlist.total_tracks,
-            'image_url': getattr(full_playlist, 'image_url', None),
-            'snapshot_id': getattr(full_playlist, 'snapshot_id', ''),
-            'tracks': [{'id': t.id, 'name': t.name, 'artists': t.artists, 'album': t.album, 'duration_ms': t.duration_ms, 'popularity': t.popularity} for t in full_playlist.tracks]
+            'id': playlist_data['id'],
+            'name': playlist_data['name'],
+            'description': playlist_data.get('description', ''),
+            'owner': playlist_data['owner']['display_name'],
+            'public': playlist_data.get('public', False),
+            'collaborative': playlist_data.get('collaborative', False),
+            'track_count': len(tracks),
+            'image_url': playlist_data['images'][0]['url'] if playlist_data.get('images') else None,
+            'snapshot_id': playlist_data.get('snapshot_id', ''),
+            'tracks': tracks
         }
         return jsonify(playlist_dict)
     except Exception as e:
@@ -12049,6 +12095,21 @@ def get_album_tracks(album_id):
             'tracks': tracks
         }
         return jsonify(album_dict)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/spotify/track/<track_id>', methods=['GET'])
+def get_spotify_track(track_id):
+    """Fetches full track details including album data for a specific track."""
+    if not spotify_client or not spotify_client.is_authenticated():
+        return jsonify({"error": "Spotify not authenticated."}), 401
+    try:
+        track_data = spotify_client.get_track_details(track_id)
+        if not track_data:
+            return jsonify({"error": "Track not found"}), 404
+
+        return jsonify(track_data)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

@@ -8808,15 +8808,38 @@ async function addModalTracksToWishlist(playlistId) {
                 };
 
                 // Use track's own album data if available (has correct album_type)
-                // Don't fall back to process album/playlist if track has no album
-                // (better to skip than add with wrong data)
-                if (!track.album || !track.album.name) {
-                    console.warn(`⚠️ Skipping track "${track.name}" - missing album data`);
-                    continue;
-                }
+                // If missing, fetch from Spotify using track ID
+                let trackAlbum = track.album;
+                let trackAlbumType = track.album?.album_type || 'album';
 
-                const trackAlbum = track.album;
-                const trackAlbumType = track.album.album_type || 'album';
+                if (!trackAlbum || !trackAlbum.name) {
+                    // Try to fetch track data from Spotify to get album info
+                    if (track.spotify_track_id || track.id) {
+                        try {
+                            const spotifyTrackId = track.spotify_track_id || track.id;
+                            const trackInfoResponse = await fetch(`/api/spotify/track/${spotifyTrackId}`);
+                            const trackInfo = await trackInfoResponse.json();
+
+                            if (trackInfo && trackInfo.album) {
+                                trackAlbum = trackInfo.album;
+                                trackAlbumType = trackInfo.album.album_type || 'album';
+                                console.log(`✅ Fetched album data for "${track.name}"`);
+                            } else {
+                                console.warn(`⚠️ Skipping track "${track.name}" - could not fetch album data`);
+                                errorCount++;
+                                continue;
+                            }
+                        } catch (fetchError) {
+                            console.error(`❌ Error fetching track data for "${track.name}":`, fetchError);
+                            errorCount++;
+                            continue;
+                        }
+                    } else {
+                        console.warn(`⚠️ Skipping track "${track.name}" - missing album data and track ID`);
+                        errorCount++;
+                        continue;
+                    }
+                }
 
                 const response = await fetch('/api/add-album-to-wishlist', {
                     method: 'POST',
