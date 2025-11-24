@@ -5,7 +5,7 @@ Watchlist Scanner Service - Monitors watched artists for new releases
 """
 
 from typing import List, Dict, Any, Optional
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass
 import re
 import time
@@ -336,39 +336,76 @@ class WatchlistScanner:
     def get_artist_discography(self, spotify_artist_id: str, last_scan_timestamp: Optional[datetime] = None) -> Optional[List]:
         """
         Get artist's discography from Spotify, optionally filtered by release date.
-        
+
         Args:
             spotify_artist_id: Spotify artist ID
             last_scan_timestamp: Only return releases after this date (for incremental scans)
+                                If None, uses lookback period setting from database
         """
         try:
             # Get all artist albums (albums + singles) - this is rate limited in spotify_client
             logger.debug(f"Fetching discography for artist {spotify_artist_id}")
             albums = self.spotify_client.get_artist_albums(spotify_artist_id, album_type='album,single', limit=50)
-            
+
             if not albums:
                 logger.warning(f"No albums found for artist {spotify_artist_id}")
                 return []
-            
+
             # Add small delay after fetching artist discography to be extra safe
             time.sleep(0.3)  # 300ms breathing room
-            
-            # Filter by release date if we have a last scan timestamp
-            if last_scan_timestamp:
+
+            # Determine cutoff date for filtering
+            cutoff_timestamp = last_scan_timestamp
+
+            # If no last scan timestamp, use lookback period setting
+            if cutoff_timestamp is None:
+                lookback_period = self._get_lookback_period_setting()
+                if lookback_period != 'all':
+                    # Convert period to days and create cutoff date (use UTC)
+                    days = int(lookback_period)
+                    cutoff_timestamp = datetime.now(timezone.utc) - timedelta(days=days)
+                    logger.info(f"Using lookback period: {lookback_period} days (cutoff: {cutoff_timestamp})")
+
+            # Filter by release date if we have a cutoff timestamp
+            if cutoff_timestamp:
                 filtered_albums = []
                 for album in albums:
-                    if self.is_album_after_timestamp(album, last_scan_timestamp):
+                    if self.is_album_after_timestamp(album, cutoff_timestamp):
                         filtered_albums.append(album)
-                
-                logger.info(f"Filtered {len(albums)} albums to {len(filtered_albums)} released after {last_scan_timestamp}")
+
+                logger.info(f"Filtered {len(albums)} albums to {len(filtered_albums)} released after {cutoff_timestamp}")
                 return filtered_albums
-            
+
+            # Return all albums if no cutoff (lookback_period = 'all')
             return albums
             
         except Exception as e:
             logger.error(f"Error getting discography for artist {spotify_artist_id}: {e}")
             return None
-    
+
+    def _get_lookback_period_setting(self) -> str:
+        """
+        Get the discovery lookback period setting from database.
+
+        Returns:
+            str: Period value ('7', '30', '90', '180', or 'all')
+        """
+        try:
+            with self.database._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT value FROM metadata WHERE key = 'discovery_lookback_period'")
+                row = cursor.fetchone()
+
+                if row:
+                    return row['value']
+                else:
+                    # Default to 30 days if not set
+                    return '30'
+
+        except Exception as e:
+            logger.warning(f"Error getting lookback period setting, defaulting to 30 days: {e}")
+            return '30'
+
     def is_album_after_timestamp(self, album, timestamp: datetime) -> bool:
         """Check if album was released after the given timestamp"""
         try:
@@ -485,12 +522,14 @@ class WatchlistScanner:
                 album_id = album.get('id', '')
                 album_release_date = album.get('release_date', '')
                 album_images = album.get('images', [])
+                album_type = album.get('album_type', 'album')  # 'album', 'single', or 'ep'
             else:
                 album_name = album.name
                 album_id = album.id
                 album_release_date = album.release_date
                 album_images = album.images if hasattr(album, 'images') else []
-            
+                album_type = album.album_type if hasattr(album, 'album_type') else 'album'
+
             # Create Spotify track data structure
             spotify_track_data = {
                 'id': track_id,
@@ -500,7 +539,8 @@ class WatchlistScanner:
                     'name': album_name,
                     'id': album_id,
                     'release_date': album_release_date,
-                    'images': album_images
+                    'images': album_images,
+                    'album_type': album_type  # Store album type for category filtering
                 },
                 'duration_ms': track_duration,
                 'explicit': track_explicit,
@@ -829,6 +869,19 @@ class WatchlistScanner:
                             # Add each track to discovery pool
                             for track in tracks:
                                 try:
+                                    # Enhance track object with full album data (including album_type)
+                                    enhanced_track = {
+                                        **track,
+                                        'album': {
+                                            'id': album_data['id'],
+                                            'name': album_data.get('name', 'Unknown Album'),
+                                            'images': album_data.get('images', []),
+                                            'release_date': album_data.get('release_date', ''),
+                                            'album_type': album_data.get('album_type', 'album'),
+                                            'total_tracks': album_data.get('total_tracks', 0)
+                                        }
+                                    }
+
                                     # Build track data for discovery pool
                                     track_data = {
                                         'spotify_track_id': track['id'],
@@ -842,7 +895,7 @@ class WatchlistScanner:
                                         'popularity': album_data.get('popularity', 0),
                                         'release_date': album_data.get('release_date', ''),
                                         'is_new_release': is_new,
-                                        'track_data_json': track,  # Store full Spotify track object
+                                        'track_data_json': enhanced_track,  # Store enhanced track with full album data
                                         'artist_genres': artist_genres  # Add cached genres
                                     }
 
@@ -927,6 +980,19 @@ class WatchlistScanner:
 
                                     for track in tracks:
                                         try:
+                                            # Enhance track object with full album data (including album_type)
+                                            enhanced_track = {
+                                                **track,
+                                                'album': {
+                                                    'id': album_data['id'],
+                                                    'name': album_row['title'],
+                                                    'images': album_data.get('images', []),
+                                                    'release_date': album_data.get('release_date', ''),
+                                                    'album_type': album_data.get('album_type', 'album'),
+                                                    'total_tracks': album_data.get('total_tracks', 0)
+                                                }
+                                            }
+
                                             track_data = {
                                                 'spotify_track_id': track['id'],
                                                 'spotify_album_id': album_data['id'],
@@ -939,7 +1005,7 @@ class WatchlistScanner:
                                                 'popularity': album_data.get('popularity', 0),
                                                 'release_date': album_data.get('release_date', ''),
                                                 'is_new_release': is_new,
-                                                'track_data_json': track,
+                                                'track_data_json': enhanced_track,  # Store enhanced track with full album data
                                                 'artist_genres': artist_genres
                                             }
 
@@ -1069,6 +1135,19 @@ class WatchlistScanner:
                             # Add each track to discovery pool
                             for track in tracks:
                                 try:
+                                    # Enhance track object with full album data (including album_type)
+                                    enhanced_track = {
+                                        **track,
+                                        'album': {
+                                            'id': album_data['id'],
+                                            'name': album_data.get('name', 'Unknown Album'),
+                                            'images': album_data.get('images', []),
+                                            'release_date': album_data.get('release_date', ''),
+                                            'album_type': album_data.get('album_type', 'album'),
+                                            'total_tracks': album_data.get('total_tracks', 0)
+                                        }
+                                    }
+
                                     track_data = {
                                         'spotify_track_id': track['id'],
                                         'spotify_album_id': album_data['id'],
@@ -1081,7 +1160,7 @@ class WatchlistScanner:
                                         'popularity': album_data.get('popularity', 0),
                                         'release_date': album_data.get('release_date', ''),
                                         'is_new_release': is_new,
-                                        'track_data_json': track,
+                                        'track_data_json': enhanced_track,  # Store enhanced track with full album data
                                         'artist_genres': artist_genres
                                     }
 
@@ -1304,11 +1383,19 @@ class WatchlistScanner:
                                     artist_tracks[artist].append(track_id)
 
                                     # Store full track data with score for sorting
+                                    # Only include album metadata (not full album with all tracks)
                                     full_track = {
                                         'id': track_id,
                                         'name': track['name'],
                                         'artists': track.get('artists', []),
-                                        'album': album_data,
+                                        'album': {
+                                            'id': album_data['id'],
+                                            'name': album_data.get('name', 'Unknown Album'),
+                                            'images': album_data.get('images', []),
+                                            'release_date': album_data.get('release_date', ''),
+                                            'album_type': album_data.get('album_type', 'album'),
+                                            'total_tracks': album_data.get('total_tracks', 0)
+                                        },
                                         'duration_ms': track.get('duration_ms', 0),
                                         'popularity': popularity_score,
                                         'score': total_score,
