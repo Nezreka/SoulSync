@@ -2405,6 +2405,26 @@
                                 </div>
                             </div>
 
+                            <!-- Discovery Settings -->
+                            <div class="settings-group">
+                                <h3>🔍 Discovery Pool Settings</h3>
+
+                                <div class="form-group">
+                                    <label>Lookback Period:</label>
+                                    <select id="discovery-lookback-period" class="form-select">
+                                        <option value="7">Last 7 days</option>
+                                        <option value="30" selected>Last 30 days (Default)</option>
+                                        <option value="90">Last 90 days</option>
+                                        <option value="180">Last 6 months</option>
+                                        <option value="all">Entire discography</option>
+                                    </select>
+                                    <div class="setting-help-text">
+                                        Controls how far back to scan when adding new artists or refreshing discovery pool.
+                                        Once scanned, artists are kept updated with new releases only.
+                                    </div>
+                                </div>
+                            </div>
+
                             <!-- Quality Profile Settings -->
                             <div class="settings-group">
                                 <h3>🎵 Quality Profile</h3>

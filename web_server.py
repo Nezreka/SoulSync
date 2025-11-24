@@ -7664,12 +7664,81 @@ def _process_wishlist_automatically():
             for track in raw_wishlist_tracks:
                 sanitized_track = _sanitize_track_data_for_processing(track)
                 wishlist_tracks.append(sanitized_track)
-            
+
             print(f"🔧 [Auto-Wishlist] Sanitized {len(wishlist_tracks)} tracks from wishlist service")
-            
+
+            # CYCLE FILTERING: Get current cycle and filter tracks by category
+            from database.music_database import MusicDatabase
+            db = MusicDatabase()
+
+            with db._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT value FROM metadata WHERE key = 'wishlist_cycle'")
+                row = cursor.fetchone()
+
+                if row:
+                    current_cycle = row['value']
+                else:
+                    # Default to albums on first run
+                    current_cycle = 'albums'
+                    cursor.execute("""
+                        INSERT OR REPLACE INTO metadata (key, value, updated_at)
+                        VALUES ('wishlist_cycle', 'albums', CURRENT_TIMESTAMP)
+                    """)
+                    conn.commit()
+
+            # Filter tracks by current cycle category
+            import json
+            filtered_tracks = []
+            for track in wishlist_tracks:
+                # Extract album_type from spotify_data JSON (after sanitization)
+                spotify_data = track.get('spotify_data', {})
+                if isinstance(spotify_data, str):
+                    try:
+                        spotify_data = json.loads(spotify_data)
+                    except:
+                        spotify_data = {}
+
+                album_data = spotify_data.get('album', {})
+                album_type = album_data.get('album_type', 'album').lower()
+
+                if current_cycle == 'singles':
+                    if album_type in ['single', 'ep']:
+                        filtered_tracks.append(track)
+                elif current_cycle == 'albums':
+                    if album_type == 'album':
+                        filtered_tracks.append(track)
+
+            print(f"🔄 [Auto-Wishlist] Current cycle: {current_cycle}")
+            print(f"📊 [Auto-Wishlist] Filtered {len(filtered_tracks)}/{len(wishlist_tracks)} tracks for '{current_cycle}' category")
+
+            # If no tracks in this category, skip to next cycle immediately
+            if len(filtered_tracks) == 0:
+                print(f"ℹ️ [Auto-Wishlist] No {current_cycle} tracks in wishlist, toggling cycle and scheduling next run")
+
+                # Toggle cycle
+                next_cycle = 'singles' if current_cycle == 'albums' else 'albums'
+                with db._get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        INSERT OR REPLACE INTO metadata (key, value, updated_at)
+                        VALUES ('wishlist_cycle', ?, CURRENT_TIMESTAMP)
+                    """, (next_cycle,))
+                    conn.commit()
+                print(f"🔄 [Auto-Wishlist] Cycle toggled: {current_cycle} → {next_cycle}")
+
+                with wishlist_timer_lock:
+                    wishlist_auto_processing = False
+                    wishlist_auto_processing_timestamp = 0
+                schedule_next_wishlist_processing()
+                return
+
+            # Use filtered tracks for processing
+            wishlist_tracks = filtered_tracks
+
             # Create batch for automatic processing
             batch_id = str(uuid.uuid4())
-            playlist_name = "Wishlist (Auto)"
+            playlist_name = f"Wishlist (Auto - {current_cycle.capitalize()})"
             
             # Create task queue - convert wishlist tracks to expected format
             with tasks_lock:
@@ -7689,7 +7758,9 @@ def _process_wishlist_automatically():
                     'cancelled_tracks': set(),
                     # Mark as auto-initiated
                     'auto_initiated': True,
-                    'auto_processing_timestamp': time.time()
+                    'auto_processing_timestamp': time.time(),
+                    # Store current cycle for toggling after completion
+                    'current_cycle': current_cycle
                 }
             
             print(f"🚀 Starting automatic wishlist batch {batch_id} with {len(wishlist_tracks)} tracks")
@@ -7818,12 +7889,213 @@ def get_wishlist_count():
         print(f"Error getting wishlist count: {e}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/wishlist/stats', methods=['GET'])
+def get_wishlist_stats():
+    """
+    Get wishlist statistics broken down by category.
+
+    Returns:
+        {
+            "singles": int,  # Count of singles + EPs
+            "albums": int,   # Count of album tracks
+            "total": int     # Total count
+        }
+    """
+    try:
+        from core.wishlist_service import get_wishlist_service
+
+        wishlist_service = get_wishlist_service()
+        raw_tracks = wishlist_service.get_wishlist_tracks_for_download()
+
+        singles_count = 0
+        albums_count = 0
+
+        for track in raw_tracks:
+            # Extract album_type from spotify_data JSON
+            spotify_data = track.get('spotify_data', {})
+            if isinstance(spotify_data, str):
+                import json
+                spotify_data = json.loads(spotify_data)
+
+            album_data = spotify_data.get('album', {})
+            album_type = album_data.get('album_type', 'album').lower()
+
+            if album_type in ['single', 'ep']:
+                singles_count += 1
+            elif album_type == 'album':
+                albums_count += 1
+            else:
+                # Default unknown types to albums
+                albums_count += 1
+
+        total_count = singles_count + albums_count
+
+        return jsonify({
+            "singles": singles_count,
+            "albums": albums_count,
+            "total": total_count
+        })
+
+    except Exception as e:
+        print(f"Error getting wishlist stats: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/wishlist/cycle', methods=['GET'])
+def get_wishlist_cycle():
+    """
+    Get the current wishlist processing cycle.
+
+    Returns:
+        {"cycle": "albums" | "singles"}
+    """
+    try:
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+
+        # Get cycle from metadata table
+        with db._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT value FROM metadata WHERE key = 'wishlist_cycle'")
+            row = cursor.fetchone()
+
+            if row:
+                cycle = row['value']
+            else:
+                # Default to albums on first run
+                cycle = 'albums'
+                cursor.execute("""
+                    INSERT OR REPLACE INTO metadata (key, value, updated_at)
+                    VALUES ('wishlist_cycle', 'albums', CURRENT_TIMESTAMP)
+                """)
+                conn.commit()
+
+        return jsonify({"cycle": cycle})
+
+    except Exception as e:
+        print(f"Error getting wishlist cycle: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/wishlist/cycle', methods=['POST'])
+def set_wishlist_cycle():
+    """
+    Set the current wishlist processing cycle.
+
+    Body:
+        {"cycle": "albums" | "singles"}
+    """
+    try:
+        data = request.get_json()
+        cycle = data.get('cycle')
+
+        if cycle not in ['albums', 'singles']:
+            return jsonify({"error": "Invalid cycle. Must be 'albums' or 'singles'"}), 400
+
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+
+        # Store cycle in metadata table
+        with db._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO metadata (key, value, updated_at)
+                VALUES ('wishlist_cycle', ?, CURRENT_TIMESTAMP)
+            """, (cycle,))
+            conn.commit()
+
+        print(f"✅ Wishlist cycle set to: {cycle}")
+        return jsonify({"success": True, "cycle": cycle})
+
+    except Exception as e:
+        print(f"Error setting wishlist cycle: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/discovery/lookback-period', methods=['GET'])
+def get_discovery_lookback_period():
+    """
+    Get the discovery pool lookback period setting.
+
+    Returns:
+        {"period": "7" | "30" | "90" | "180" | "all"}
+    """
+    try:
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+
+        # Get lookback period from metadata table
+        with db._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT value FROM metadata WHERE key = 'discovery_lookback_period'")
+            row = cursor.fetchone()
+
+            if row:
+                period = row['value']
+            else:
+                # Default to 30 days on first access
+                period = '30'
+                cursor.execute("""
+                    INSERT OR REPLACE INTO metadata (key, value, updated_at)
+                    VALUES ('discovery_lookback_period', '30', CURRENT_TIMESTAMP)
+                """)
+                conn.commit()
+
+        return jsonify({"period": period})
+
+    except Exception as e:
+        print(f"Error getting discovery lookback period: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/discovery/lookback-period', methods=['POST'])
+def set_discovery_lookback_period():
+    """
+    Set the discovery pool lookback period setting.
+
+    Body:
+        {"period": "7" | "30" | "90" | "180" | "all"}
+    """
+    try:
+        data = request.get_json()
+        period = data.get('period')
+
+        valid_periods = ['7', '30', '90', '180', 'all']
+        if period not in valid_periods:
+            return jsonify({"error": f"Invalid period. Must be one of: {', '.join(valid_periods)}"}), 400
+
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+
+        # Store lookback period in metadata table
+        with db._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO metadata (key, value, updated_at)
+                VALUES ('discovery_lookback_period', ?, CURRENT_TIMESTAMP)
+            """, (period,))
+            conn.commit()
+
+        print(f"✅ Discovery lookback period set to: {period}")
+        return jsonify({"success": True, "period": period})
+
+    except Exception as e:
+        print(f"Error setting discovery lookback period: {e}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/api/wishlist/tracks', methods=['GET'])
 def get_wishlist_tracks():
-    """Endpoint to get wishlist tracks for display in modal."""
+    """
+    Endpoint to get wishlist tracks for display in modal.
+    Supports category filtering via query parameter.
+
+    Query Parameters:
+        category (optional): 'singles' or 'albums' - filters tracks by album type
+    """
     try:
         from core.wishlist_service import get_wishlist_service
         from database.music_database import MusicDatabase
+
+        # Get category filter from query params
+        category = request.args.get('category', None)  # None = all tracks
 
         # Clean duplicates ONLY if no active wishlist download is running
         # This prevents count mismatches during active downloads
@@ -7849,6 +8121,34 @@ def get_wishlist_tracks():
         for track in raw_tracks:
             sanitized_track = _sanitize_track_data_for_processing(track)
             sanitized_tracks.append(sanitized_track)
+
+        # FILTER by category if specified
+        if category:
+            import json
+            filtered_tracks = []
+            for track in sanitized_tracks:
+                # Extract album_type from spotify_data JSON (same as stats endpoint)
+                spotify_data = track.get('spotify_data', {})
+                if isinstance(spotify_data, str):
+                    try:
+                        spotify_data = json.loads(spotify_data)
+                    except:
+                        spotify_data = {}
+
+                album_data = spotify_data.get('album', {})
+                album_type = album_data.get('album_type', 'album').lower()
+
+                if category == 'singles':
+                    # Singles category includes 'single' and 'ep'
+                    if album_type in ['single', 'ep']:
+                        filtered_tracks.append(track)
+                elif category == 'albums':
+                    # Albums category includes only 'album'
+                    if album_type == 'album':
+                        filtered_tracks.append(track)
+
+            print(f"📊 Wishlist filter: {len(filtered_tracks)}/{len(sanitized_tracks)} tracks in '{category}' category")
+            return jsonify({"tracks": filtered_tracks, "category": category})
 
         return jsonify({"tracks": sanitized_tracks})
     except Exception as e:
@@ -8411,7 +8711,10 @@ def _run_quality_scanner(scope='watchlist'):
                             'id': best_match.id,
                             'name': best_match.name,
                             'artists': [{'name': artist} for artist in best_match.artists],
-                            'album': {'name': best_match.album},
+                            'album': {
+                                'name': best_match.album,
+                                'album_type': 'album'  # Default to 'album' for quality scanner matches
+                            },
                             'duration_ms': best_match.duration_ms,
                             'popularity': best_match.popularity,
                             'preview_url': best_match.preview_url,
@@ -9207,7 +9510,31 @@ def _process_failed_tracks_to_wishlist_exact_with_auto_completion(batch_id):
         # Add activity for wishlist processing
         if tracks_added > 0:
             add_activity_item("⭐", "Wishlist Updated", f"{tracks_added} failed tracks added to wishlist", "Now")
-        
+
+        # TOGGLE CYCLE: Switch to next category for next run
+        try:
+            with tasks_lock:
+                if batch_id in download_batches:
+                    current_cycle = download_batches[batch_id].get('current_cycle', 'albums')
+                else:
+                    current_cycle = 'albums'  # Default fallback
+
+            next_cycle = 'singles' if current_cycle == 'albums' else 'albums'
+
+            from database.music_database import MusicDatabase
+            db = MusicDatabase()
+            with db._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT OR REPLACE INTO metadata (key, value, updated_at)
+                    VALUES ('wishlist_cycle', ?, CURRENT_TIMESTAMP)
+                """, (next_cycle,))
+                conn.commit()
+
+            print(f"🔄 [Auto-Wishlist] Cycle toggled after completion: {current_cycle} → {next_cycle}")
+        except Exception as cycle_error:
+            print(f"⚠️ [Auto-Wishlist] Error toggling cycle: {cycle_error}")
+
         # Mark auto-processing as complete and reset timestamp
         with wishlist_timer_lock:
             wishlist_auto_processing = False
@@ -10780,7 +11107,10 @@ def cancel_download_task():
                 'id': track_info.get('id'),
                 'name': track_info.get('name'),
                 'artists': formatted_artists,
-                'album': {'name': track_info.get('album')},
+                'album': {
+                    'name': track_info.get('album'),
+                    'album_type': track_info.get('album_type', 'album')  # Use track's album type if available
+                },
                 'duration_ms': track_info.get('duration_ms')
             }
             
@@ -11196,10 +11526,13 @@ def _add_cancelled_task_to_wishlist(task):
             'id': track_info.get('id'),
             'name': track_info.get('name'),
             'artists': formatted_artists,
-            'album': {'name': track_info.get('album')},
+            'album': {
+                'name': track_info.get('album'),
+                'album_type': track_info.get('album_type', 'album')  # Use track's album type if available
+            },
             'duration_ms': track_info.get('duration_ms')
         }
-        
+
         source_context = {
             'playlist_name': task.get('playlist_name', 'Unknown Playlist'),
             'playlist_id': task.get('playlist_id'),

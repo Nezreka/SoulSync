@@ -1505,7 +1505,18 @@ async function loadSettingsData() {
         // Populate Logging information (read-only)
         document.getElementById('log-level-display').textContent = settings.logging?.level || 'INFO';
         document.getElementById('log-path-display').textContent = settings.logging?.path || 'logs/app.log';
-        
+
+        // Load Discovery Lookback Period setting
+        try {
+            const lookbackResponse = await fetch('/api/discovery/lookback-period');
+            const lookbackData = await lookbackResponse.json();
+            if (lookbackData.period) {
+                document.getElementById('discovery-lookback-period').value = lookbackData.period;
+            }
+        } catch (error) {
+            console.error('Error loading discovery lookback period:', error);
+        }
+
     } catch (error) {
         console.error('Error loading settings:', error);
         showToast('Failed to load settings', 'error');
@@ -1826,9 +1837,28 @@ async function saveSettings() {
         // Save quality profile
         const qualityProfileSaved = await saveQualityProfile();
 
-        if (result.success && qualityProfileSaved) {
+        // Save discovery lookback period
+        let lookbackSaved = true;
+        try {
+            const lookbackPeriod = document.getElementById('discovery-lookback-period').value;
+            const lookbackResponse = await fetch('/api/discovery/lookback-period', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ period: lookbackPeriod })
+            });
+            const lookbackResult = await lookbackResponse.json();
+            lookbackSaved = lookbackResult.success === true;
+        } catch (error) {
+            console.error('Error saving discovery lookback period:', error);
+            lookbackSaved = false;
+        }
+
+        if (result.success && qualityProfileSaved && lookbackSaved) {
             showToast('Settings saved successfully', 'success');
             // Trigger immediate status update
+            setTimeout(updateServiceStatus, 1000);
+        } else if (result.success && qualityProfileSaved && !lookbackSaved) {
+            showToast('Settings saved, but discovery lookback period failed to save', 'warning');
             setTimeout(updateServiceStatus, 1000);
         } else if (result.success && !qualityProfileSaved) {
             showToast('Settings saved, but quality profile failed to save', 'warning');
@@ -4641,10 +4671,312 @@ async function closeDownloadMissingModal(playlistId) {
     }
 }
 
-async function openDownloadMissingWishlistModal() {
+/**
+ * Open wishlist overview modal showing category breakdown
+ * This is the NEW entry point for wishlist from dashboard
+ */
+async function openWishlistOverviewModal() {
+    try {
+        showLoadingOverlay('Loading wishlist...');
+
+        // Fetch wishlist stats
+        const statsResponse = await fetch('/api/wishlist/stats');
+        const statsData = await statsResponse.json();
+
+        if (!statsResponse.ok) {
+            throw new Error(statsData.error || 'Failed to fetch wishlist stats');
+        }
+
+        const { singles, albums, total } = statsData;
+
+        if (total === 0) {
+            hideLoadingOverlay();
+            showToast('Wishlist is empty. No tracks to process.', 'info');
+            return;
+        }
+
+        // Create modal if it doesn't exist
+        let modal = document.getElementById('wishlist-overview-modal');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'wishlist-overview-modal';
+            modal.className = 'modal-overlay';
+            document.body.appendChild(modal);
+        }
+
+        // Fetch current cycle
+        const cycleResponse = await fetch('/api/wishlist/cycle');
+        const cycleData = await cycleResponse.json();
+        const currentCycle = cycleData.cycle || 'albums';
+
+        modal.innerHTML = `
+            <div class="modal-container playlist-modal">
+                <div class="playlist-modal-header">
+                    <div class="playlist-header-content">
+                        <h2>🎵 Wishlist Overview</h2>
+                        <div class="playlist-quick-info">
+                            <span class="playlist-track-count">${total} Total Tracks</span>
+                            <span class="playlist-owner">Next Auto: ${currentCycle === 'albums' ? 'Albums/EPs' : 'Singles'}</span>
+                        </div>
+                    </div>
+                    <span class="playlist-modal-close" onclick="closeWishlistOverviewModal()">×</span>
+                </div>
+
+                <div class="playlist-modal-body">
+                    <div class="wishlist-category-grid">
+                        <!-- Albums/EPs Category -->
+                        <div class="wishlist-category-card ${currentCycle === 'albums' ? 'next-in-queue' : ''}" data-category="albums" onclick="selectWishlistCategory('albums')">
+                            <div class="wishlist-category-icon">💿</div>
+                            <div class="wishlist-category-title">Albums / EPs</div>
+                            <div class="wishlist-category-count">${albums} tracks</div>
+                            ${currentCycle === 'albums' ? '<div class="wishlist-category-badge">Next in Queue</div>' : ''}
+                        </div>
+
+                        <!-- Singles Category -->
+                        <div class="wishlist-category-card ${currentCycle === 'singles' ? 'next-in-queue' : ''}" data-category="singles" onclick="selectWishlistCategory('singles')">
+                            <div class="wishlist-category-icon">🎵</div>
+                            <div class="wishlist-category-title">Singles</div>
+                            <div class="wishlist-category-count">${singles} tracks</div>
+                            ${currentCycle === 'singles' ? '<div class="wishlist-category-badge">Next in Queue</div>' : ''}
+                        </div>
+                    </div>
+
+                    <!-- Selected Category Track List (initially hidden) -->
+                    <div id="wishlist-category-tracks" class="wishlist-category-tracks" style="display: none;">
+                        <div class="wishlist-category-header">
+                            <button class="wishlist-back-btn" onclick="backToCategories()">← Back</button>
+                            <span id="wishlist-category-name" class="wishlist-category-name"></span>
+                        </div>
+                        <div id="wishlist-tracks-list" class="playlist-tracks-scroll">
+                            <div class="loading-indicator">Loading tracks...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="playlist-modal-footer">
+                    <button class="playlist-modal-btn playlist-modal-btn-secondary" onclick="closeWishlistOverviewModal()">Close</button>
+                    <button id="wishlist-download-btn" class="playlist-modal-btn playlist-modal-btn-primary" style="display: none;" onclick="downloadSelectedCategory()">
+                        Download Selection
+                    </button>
+                </div>
+            </div>
+        `;
+
+        modal.style.display = 'flex';
+        hideLoadingOverlay();
+
+    } catch (error) {
+        console.error('Error opening wishlist overview:', error);
+        showToast(`Failed to load wishlist: ${error.message}`, 'error');
+        hideLoadingOverlay();
+    }
+}
+
+function closeWishlistOverviewModal() {
+    const modal = document.getElementById('wishlist-overview-modal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+    window.selectedWishlistCategory = null;
+}
+
+async function selectWishlistCategory(category) {
+    try {
+        window.selectedWishlistCategory = category;
+
+        const tracksList = document.getElementById('wishlist-tracks-list');
+        const categoryTracksSection = document.getElementById('wishlist-category-tracks');
+        const categoryGrid = document.querySelector('.wishlist-category-grid');
+        const downloadBtn = document.getElementById('wishlist-download-btn');
+        const categoryName = document.getElementById('wishlist-category-name');
+
+        categoryGrid.style.display = 'none';
+        categoryTracksSection.style.display = 'block';
+        downloadBtn.style.display = 'inline-block';
+        categoryName.textContent = category === 'albums' ? 'Albums / EPs' : 'Singles';
+
+        tracksList.innerHTML = '<div class="loading-indicator">Loading tracks...</div>';
+
+        const response = await fetch(`/api/wishlist/tracks?category=${category}`);
+        const data = await response.json();
+
+        if (!response.ok) throw new Error(data.error || 'Failed to fetch tracks');
+
+        const tracks = data.tracks || [];
+
+        if (tracks.length === 0) {
+            tracksList.innerHTML = '<div class="empty-state">No tracks in this category</div>';
+            return;
+        }
+
+        // For Albums/EPs, group by album
+        if (category === 'albums') {
+            const albumGroups = {};
+
+            tracks.forEach(track => {
+                let spotifyData = track.spotify_data;
+                if (typeof spotifyData === 'string') {
+                    try {
+                        spotifyData = JSON.parse(spotifyData);
+                    } catch (e) {
+                        spotifyData = null;
+                    }
+                }
+
+                const albumName = spotifyData?.album?.name || 'Unknown Album';
+                const artistName = spotifyData?.artists?.[0]?.name || 'Unknown Artist';
+                const artistId = spotifyData?.artists?.[0]?.id || null;
+                const albumImage = spotifyData?.album?.images?.[0]?.url || '';
+
+                // Use album ID if available, otherwise create unique key from album + artist
+                const albumId = spotifyData?.album?.id || `${albumName}_${artistName}`.replace(/\s+/g, '_').toLowerCase();
+
+                if (!albumGroups[albumId]) {
+                    albumGroups[albumId] = {
+                        albumName,
+                        artistName,
+                        artistId,
+                        albumImage,
+                        tracks: []
+                    };
+                }
+
+                albumGroups[albumId].tracks.push({
+                    name: track.name || 'Unknown Track',
+                    artistName,
+                    trackNumber: spotifyData?.track_number || 0
+                });
+            });
+
+            // Render album cards
+            let albumsHTML = '<div class="wishlist-album-grid">';
+            Object.entries(albumGroups).forEach(([albumId, albumData]) => {
+                // Sort tracks by track number
+                albumData.tracks.sort((a, b) => a.trackNumber - b.trackNumber);
+
+                const tracksListHTML = albumData.tracks.map(track => `
+                    <div class="wishlist-album-track">
+                        <span class="wishlist-album-track-name">${track.name}</span>
+                    </div>
+                `).join('');
+
+                albumsHTML += `
+                    <div class="wishlist-album-card" onclick="toggleAlbumTracks('${albumId}')">
+                        <div class="wishlist-album-header">
+                            <div class="wishlist-album-image" style="background-image: url('${albumData.albumImage}')"></div>
+                            <div class="wishlist-album-info">
+                                <div class="wishlist-album-name">${albumData.albumName}</div>
+                                <div class="wishlist-album-artist">${albumData.artistName}</div>
+                                <div class="wishlist-album-track-count">${albumData.tracks.length} track${albumData.tracks.length !== 1 ? 's' : ''}</div>
+                            </div>
+                            <div class="wishlist-album-expand-icon" id="expand-icon-${albumId}">▼</div>
+                        </div>
+                        <div class="wishlist-album-tracks" id="tracks-${albumId}" style="display: none;">
+                            ${tracksListHTML}
+                        </div>
+                    </div>
+                `;
+            });
+            albumsHTML += '</div>';
+
+            tracksList.innerHTML = albumsHTML;
+
+        } else {
+            // For Singles, show list with album images
+            let tracksHTML = '';
+            tracks.forEach((track, index) => {
+                const trackName = track.name || 'Unknown Track';
+
+                let spotifyData = track.spotify_data;
+                if (typeof spotifyData === 'string') {
+                    try {
+                        spotifyData = JSON.parse(spotifyData);
+                    } catch (e) {
+                        spotifyData = null;
+                    }
+                }
+
+                let artistName = 'Unknown Artist';
+                if (spotifyData?.artists?.[0]?.name) {
+                    artistName = spotifyData.artists[0].name;
+                } else if (Array.isArray(track.artists) && track.artists.length > 0) {
+                    if (typeof track.artists[0] === 'string') {
+                        artistName = track.artists[0];
+                    } else if (track.artists[0]?.name) {
+                        artistName = track.artists[0].name;
+                    }
+                }
+
+                let albumName = 'Unknown Album';
+                if (spotifyData?.album?.name) {
+                    albumName = spotifyData.album.name;
+                } else if (typeof track.album === 'string') {
+                    albumName = track.album;
+                } else if (track.album?.name) {
+                    albumName = track.album.name;
+                }
+
+                const albumImage = spotifyData?.album?.images?.[0]?.url || '';
+
+                tracksHTML += `
+                    <div class="playlist-track-item-with-image">
+                        <div class="playlist-track-image" style="background-image: url('${albumImage}')"></div>
+                        <div class="playlist-track-info">
+                            <div class="playlist-track-name">${trackName}</div>
+                            <div class="playlist-track-artist">${artistName} • ${albumName}</div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            tracksList.innerHTML = tracksHTML;
+        }
+
+    } catch (error) {
+        console.error('Error loading category tracks:', error);
+        showToast(`Failed to load tracks: ${error.message}`, 'error');
+    }
+}
+
+function backToCategories() {
+    const categoryTracksSection = document.getElementById('wishlist-category-tracks');
+    const categoryGrid = document.querySelector('.wishlist-category-grid');
+    const downloadBtn = document.getElementById('wishlist-download-btn');
+
+    categoryTracksSection.style.display = 'none';
+    categoryGrid.style.display = 'grid';
+    downloadBtn.style.display = 'none';
+    window.selectedWishlistCategory = null;
+}
+
+function toggleAlbumTracks(albumId) {
+    const tracksElement = document.getElementById(`tracks-${albumId}`);
+    const expandIcon = document.getElementById(`expand-icon-${albumId}`);
+
+    if (tracksElement.style.display === 'none') {
+        tracksElement.style.display = 'block';
+        expandIcon.textContent = '▲';
+    } else {
+        tracksElement.style.display = 'none';
+        expandIcon.textContent = '▼';
+    }
+}
+
+async function downloadSelectedCategory() {
+    const category = window.selectedWishlistCategory;
+    if (!category) {
+        showToast('No category selected', 'error');
+        return;
+    }
+
+    closeWishlistOverviewModal();
+    await openDownloadMissingWishlistModal(category);
+}
+
+async function openDownloadMissingWishlistModal(category = null) {
     showLoadingOverlay('Loading wishlist...');
     const playlistId = "wishlist"; // Use a consistent ID for wishlist
-    
+
     // Check if a process is already active for the wishlist
     if (activeDownloadProcesses[playlistId]) {
         console.log(`Modal for wishlist already exists. Showing it.`);
@@ -4660,20 +4992,24 @@ async function openDownloadMissingWishlistModal() {
         return; // Don't create a new one
     }
 
-    console.log(`📥 Opening Download Missing Tracks modal for wishlist`);
-    
+    console.log(`📥 Opening Download Missing Tracks modal for wishlist${category ? ' (' + category + ')' : ''}`);
+
     // Fetch actual wishlist tracks from the server
     let tracks;
     try {
+        // Build API URL with optional category filter
+        const apiUrl = category ? `/api/wishlist/tracks?category=${category}` : '/api/wishlist/tracks';
+
         const response = await fetch('/api/wishlist/count');
         const countData = await response.json();
         if (countData.count === 0) {
             showToast('Wishlist is empty. No tracks to download.', 'info');
+            hideLoadingOverlay();
             return;
         }
-        
-        // Fetch the actual wishlist tracks for display
-        const tracksResponse = await fetch('/api/wishlist/tracks');
+
+        // Fetch the actual wishlist tracks for display (filtered by category if specified)
+        const tracksResponse = await fetch(apiUrl);
         if (!tracksResponse.ok) {
             throw new Error('Failed to fetch wishlist tracks');
         }
@@ -8354,6 +8690,17 @@ async function addModalTracksToWishlist(playlistId) {
                     artists: formattedArtists
                 };
 
+                // Use track's own album data if available (has correct album_type)
+                // Don't fall back to process album/playlist if track has no album
+                // (better to skip than add with wrong data)
+                if (!track.album || !track.album.name) {
+                    console.warn(`⚠️ Skipping track "${track.name}" - missing album data`);
+                    continue;
+                }
+
+                const trackAlbum = track.album;
+                const trackAlbumType = track.album.album_type || 'album';
+
                 const response = await fetch('/api/add-album-to-wishlist', {
                     method: 'POST',
                     headers: {
@@ -8362,12 +8709,12 @@ async function addModalTracksToWishlist(playlistId) {
                     body: JSON.stringify({
                         track: formattedTrack,
                         artist: artist,
-                        album: album,
+                        album: trackAlbum,
                         source_type: 'album',
                         source_context: {
-                            album_name: album.name,
+                            album_name: trackAlbum.name,
                             artist_name: artist.name,
-                            album_type: album.album_type || 'album'
+                            album_type: trackAlbumType
                         }
                     })
                 });
@@ -8440,6 +8787,13 @@ window.handleViewProgressClick = handleViewProgressClick;
 window.openDownloadMissingWishlistModal = openDownloadMissingWishlistModal;
 window.startWishlistMissingTracksProcess = startWishlistMissingTracksProcess;
 window.handleWishlistButtonClick = handleWishlistButtonClick;
+
+// Wishlist Overview Modal functions (new)
+window.openWishlistOverviewModal = openWishlistOverviewModal;
+window.closeWishlistOverviewModal = closeWishlistOverviewModal;
+window.selectWishlistCategory = selectWishlistCategory;
+window.backToCategories = backToCategories;
+window.downloadSelectedCategory = downloadSelectedCategory;
 
 // Add to Wishlist Modal functions (new)
 window.openAddToWishlistModal = openAddToWishlistModal;
@@ -11883,9 +12237,9 @@ async function handleWishlistButtonClick() {
             return;
         }
         
-        // STEP 4: Create fresh modal for new wishlist process
-        console.log(`🆕 [Wishlist Button] Creating fresh modal for ${countData.count} wishlist tracks`);
-        await openDownloadMissingWishlistModal();
+        // STEP 4: Open wishlist overview modal (NEW - category selection)
+        console.log(`🆕 [Wishlist Button] Opening wishlist overview for ${countData.count} tracks`);
+        await openWishlistOverviewModal();
         
     } catch (error) {
         console.error('❌ [Wishlist Button] Error handling wishlist button click:', error);
@@ -25085,7 +25439,7 @@ async function loadDiscoverPage() {
         loadDiscoverRecentReleases(),
         loadSeasonalContent(),  // Seasonal discovery
         loadPersonalizedRecentlyAdded(),  // NEW: Recently added from library
-        loadPersonalizedDailyMixes(),  // NEW: Daily Mix playlists
+        // loadPersonalizedDailyMixes(),  // NEW: Daily Mix playlists (HIDDEN)
         loadDiscoverReleaseRadar(),
         loadDiscoverWeekly(),
         loadPersonalizedPopularPicks(),  // NEW: Popular picks from discovery pool
