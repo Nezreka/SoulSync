@@ -8401,6 +8401,15 @@ def add_album_track_to_wishlist():
             return jsonify({"success": False, "error": "Missing required fields: track, artist, album"}), 400
 
         # Create Spotify track data format expected by wishlist service
+        # Handle both formats: Spotify API format (images array) and library format (image_url string)
+        album_images = []
+        if 'images' in album and album.get('images'):
+            # Spotify API format with images array
+            album_images = album['images']
+        elif 'image_url' in album and album.get('image_url'):
+            # Library format with single image_url - convert to Spotify format
+            album_images = [{'url': album['image_url'], 'height': 640, 'width': 640}]
+
         spotify_track_data = {
             'id': track.get('id'),
             'name': track.get('name'),
@@ -8408,7 +8417,7 @@ def add_album_track_to_wishlist():
             'album': {
                 'id': album.get('id'),
                 'name': album.get('name'),
-                'images': album.get('images', []) if 'images' in album else [{'url': album.get('image_url', '')}],
+                'images': album_images,
                 'album_type': album.get('album_type', 'album'),
                 'release_date': album.get('release_date', ''),
                 'total_tracks': album.get('total_tracks', 1)
