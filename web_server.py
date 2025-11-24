@@ -12610,12 +12610,30 @@ def _run_tidal_discovery_worker(playlist_id):
                     'status': 'not_found'
                 }
                 
-                if spotify_track:
+                if isinstance(spotify_track, tuple):
+                    # Function now returns (Track, raw_data)
+                    track_obj, raw_track_data = spotify_track
+                    # Use full album object from raw API response
+                    album_obj = raw_track_data.get('album', {}) if raw_track_data else {}
+
+                    result['spotify_data'] = {
+                        'id': track_obj.id,
+                        'name': track_obj.name,
+                        'artists': track_obj.artists,  # Already a list of strings
+                        'album': album_obj,  # Full album object with images
+                        'duration_ms': track_obj.duration_ms,
+                        'external_urls': track_obj.external_urls
+                    }
+                    result['status'] = 'found'
+                    successful_discoveries += 1
+                    state['spotify_matches'] = successful_discoveries
+                elif spotify_track:
+                    # Fallback for old format (shouldn't happen after update)
                     result['spotify_data'] = {
                         'id': spotify_track.id,
                         'name': spotify_track.name,
-                        'artists': spotify_track.artists,  # Already a list of strings
-                        'album': spotify_track.album,      # Already a string
+                        'artists': spotify_track.artists,
+                        'album': {'name': spotify_track.album, 'album_type': 'album', 'images': []},
                         'duration_ms': spotify_track.duration_ms,
                         'external_urls': spotify_track.external_urls
                     }
@@ -12698,19 +12716,28 @@ def _search_spotify_for_tidal_track(tidal_track):
 
         # Find best match using confidence scoring
         best_match = None
+        best_match_raw = None  # Store raw Spotify API data for full album info
         best_confidence = 0.0
         min_confidence = 0.7  # Higher threshold for Tidal since data is cleaner
 
         for query_idx, search_query in enumerate(search_queries):
             try:
                 print(f"🔍 Tidal query {query_idx + 1}/{len(search_queries)}: {search_query}")
+
+                # Get raw Spotify API response to access full album object with images
+                raw_results = spotify_client.sp.search(q=search_query, type='track', limit=5)
+                if not raw_results or 'tracks' not in raw_results or not raw_results['tracks']['items']:
+                    continue
+
+                # Also get Track objects for matching logic
                 results = spotify_client.search_tracks(search_query, limit=5)
 
                 if not results:
                     continue
 
                 # Score each result using matching engine
-                for result in results:
+                for idx, result in enumerate(results):
+                    raw_track = raw_results['tracks']['items'][idx] if idx < len(raw_results['tracks']['items']) else None
                     try:
                         # Calculate confidence using matching engine's similarity scoring (with fallback)
                         try:
@@ -12745,6 +12772,7 @@ def _search_spotify_for_tidal_track(tidal_track):
                         if combined_confidence > best_confidence and combined_confidence >= min_confidence:
                             best_confidence = combined_confidence
                             best_match = result
+                            best_match_raw = raw_track  # Store raw data with full album object
                             print(f"✅ New best Tidal match: {result.artists[0]} - {result.name} (confidence: {combined_confidence:.3f})")
 
                     except Exception as e:
@@ -12762,10 +12790,10 @@ def _search_spotify_for_tidal_track(tidal_track):
 
         if best_match:
             print(f"✅ Final Tidal match: {best_match.artists[0]} - {best_match.name} (confidence: {best_confidence:.3f})")
+            return (best_match, best_match_raw)  # Return both Track object and raw data
         else:
             print(f"❌ No suitable Tidal match found (best confidence was {best_confidence:.3f}, required {min_confidence:.3f})")
-
-        return best_match
+            return None
 
     except Exception as e:
         print(f"❌ Error searching Spotify for Tidal track: {e}")
@@ -13179,16 +13207,26 @@ def _run_youtube_discovery_worker(url_hash):
                     # Fallback to original simple query
                     search_queries = [f"artist:{cleaned_artist} track:{cleaned_title}"]
 
+                # Store raw Spotify data for best match
+                best_raw_track = None
+
                 for query_idx, search_query in enumerate(search_queries):
                     try:
                         print(f"🔍 YouTube query {query_idx + 1}/{len(search_queries)}: {search_query}")
+
+                        # Get raw Spotify API response to access full album object with images
+                        raw_results = spotify_client.sp.search(q=search_query, type='track', limit=5)
+                        if not raw_results or 'tracks' not in raw_results or not raw_results['tracks']['items']:
+                            continue
+
                         spotify_results = spotify_client.search_tracks(search_query, limit=5)
 
                         if not spotify_results:
                             continue
 
                         # Score each result using matching engine
-                        for spotify_result in spotify_results:
+                        for result_idx, spotify_result in enumerate(spotify_results):
+                            raw_track = raw_results['tracks']['items'][result_idx] if result_idx < len(raw_results['tracks']['items']) else None
                             try:
                                 # Calculate confidence using matching engine's similarity scoring (with fallback)
                                 try:
@@ -13238,6 +13276,7 @@ def _run_youtube_discovery_worker(url_hash):
                                 if combined_confidence > best_confidence and combined_confidence >= min_confidence:
                                     best_confidence = combined_confidence
                                     spotify_track = spotify_result
+                                    best_raw_track = raw_track  # Store raw data with full album object
                                     print(f"✅ New best YouTube match: {spotify_result.artists[0]} - {spotify_result.name} (confidence: {combined_confidence:.3f})")
 
                             except Exception as e:
@@ -13291,11 +13330,17 @@ def _run_youtube_discovery_worker(url_hash):
                 
                 if spotify_track:
                     state['spotify_matches'] += 1
+                    # Use full album object from raw Spotify data if available
+                    album_data = best_raw_track.get('album', {}) if best_raw_track else {}
+                    if not album_data:
+                        # Fallback to string album name
+                        album_data = {'name': spotify_track.album, 'album_type': 'album', 'images': []}
+
                     result['spotify_data'] = {
                         'id': spotify_track.id,
                         'name': spotify_track.name,
                         'artists': spotify_track.artists,
-                        'album': spotify_track.album,
+                        'album': album_data,  # Full album object with images
                         'duration_ms': spotify_track.duration_ms
                     }
                 
@@ -17868,19 +17913,27 @@ def _run_beatport_discovery_worker(url_hash):
 
                 # Try each search query until we find a good match
                 best_match = None
+                best_raw_track = None  # Store raw Spotify data for full album info
                 best_confidence = 0.0
                 min_confidence = 0.75  # Increased threshold to avoid bad matches like "Dolce" for "Fancy $hit"
 
                 for query_idx, search_query in enumerate(search_queries):
                     try:
                         print(f"🔍 Query {query_idx + 1}/{len(search_queries)}: {search_query}")
+
+                        # Get raw Spotify API response to access full album object with images
+                        raw_results = spotify_client.sp.search(q=search_query, type='track', limit=10)
+                        if not raw_results or 'tracks' not in raw_results or not raw_results['tracks']['items']:
+                            continue
+
                         search_results = spotify_client.search_tracks(search_query, limit=10)
 
                         if not search_results:
                             continue
 
                         # Use matching engine to find the best match from search results
-                        for result in search_results:
+                        for result_idx, result in enumerate(search_results):
+                            raw_track = raw_results['tracks']['items'][result_idx] if result_idx < len(raw_results['tracks']['items']) else None
                             try:
                                 # Calculate confidence using matching engine's similarity scoring (with fallback)
                                 try:
@@ -17938,6 +17991,7 @@ def _run_beatport_discovery_worker(url_hash):
                                     core_title_confidence >= min_core_title_confidence):
                                     best_confidence = combined_confidence
                                     best_match = result
+                                    best_raw_track = raw_track  # Store raw data with full album object
                                     print(f"✅ New best match: {result.artists[0]} - {result.name} (confidence: {combined_confidence:.3f})")
 
                             except Exception as e:
@@ -17988,10 +18042,16 @@ def _run_beatport_discovery_worker(url_hash):
                         # Single artist case
                         formatted_artists = [{'name': str(spotify_track.artists)}]
 
+                    # Use full album object from raw Spotify data if available
+                    album_data = best_raw_track.get('album', {}) if best_raw_track else {}
+                    if not album_data:
+                        # Fallback to string album name
+                        album_data = {'name': spotify_track.album, 'album_type': 'album', 'images': []}
+
                     result_entry['spotify_data'] = {
                         'name': spotify_track.name,
                         'artists': formatted_artists,  # Now formatted as list of objects with 'name' property
-                        'album': spotify_track.album,  # Already a string
+                        'album': album_data,  # Full album object with images
                         'id': spotify_track.id
                         # Remove uri for now since it's causing errors
                     }

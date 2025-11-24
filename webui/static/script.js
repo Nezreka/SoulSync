@@ -8807,38 +8807,35 @@ async function addModalTracksToWishlist(playlistId) {
                     artists: formattedArtists
                 };
 
-                // Use track's own album data if available (has correct album_type)
-                // If missing, fetch from Spotify using track ID
+                // Use track's own album data if available
+                // Convert string album names to objects if needed (no Spotify fetch!)
                 let trackAlbum = track.album;
-                let trackAlbumType = track.album?.album_type || 'album';
+                let trackAlbumType = 'album';
 
-                if (!trackAlbum || !trackAlbum.name) {
-                    // Try to fetch track data from Spotify to get album info
-                    if (track.spotify_track_id || track.id) {
-                        try {
-                            const spotifyTrackId = track.spotify_track_id || track.id;
-                            const trackInfoResponse = await fetch(`/api/spotify/track/${spotifyTrackId}`);
-                            const trackInfo = await trackInfoResponse.json();
-
-                            if (trackInfo && trackInfo.album) {
-                                trackAlbum = trackInfo.album;
-                                trackAlbumType = trackInfo.album.album_type || 'album';
-                                console.log(`✅ Fetched album data for "${track.name}"`);
-                            } else {
-                                console.warn(`⚠️ Skipping track "${track.name}" - could not fetch album data`);
-                                errorCount++;
-                                continue;
-                            }
-                        } catch (fetchError) {
-                            console.error(`❌ Error fetching track data for "${track.name}":`, fetchError);
-                            errorCount++;
-                            continue;
-                        }
-                    } else {
-                        console.warn(`⚠️ Skipping track "${track.name}" - missing album data and track ID`);
-                        errorCount++;
-                        continue;
+                // Handle both object and string album formats
+                if (typeof trackAlbum === 'string') {
+                    // Album is just a string - convert to minimal object
+                    trackAlbum = {
+                        name: trackAlbum,
+                        album_type: 'album',
+                        images: []
+                    };
+                    trackAlbumType = 'album';
+                } else if (trackAlbum && typeof trackAlbum === 'object') {
+                    // Album is already an object - extract album_type
+                    trackAlbumType = trackAlbum.album_type || 'album';
+                    // Ensure it has a name
+                    if (!trackAlbum.name) {
+                        trackAlbum.name = 'Unknown Album';
                     }
+                } else {
+                    // No album data at all - create minimal object
+                    trackAlbum = {
+                        name: 'Unknown Album',
+                        album_type: 'album',
+                        images: []
+                    };
+                    trackAlbumType = 'album';
                 }
 
                 const response = await fetch('/api/add-album-to-wishlist', {
@@ -11848,11 +11845,22 @@ async function startTidalDownloadMissing(urlHash) {
                 spotifyTracks.push(result.spotify_data);
             } else if (result.spotify_track && result.status_class === 'found') {
                 // Build from individual fields (automatic discovery format)
+                // Convert album to proper object format for wishlist compatibility
+                const albumData = result.spotify_album || 'Unknown Album';
+                const albumObject = typeof albumData === 'object' && albumData !== null
+                    ? albumData
+                    : {
+                        name: typeof albumData === 'string' ? albumData : 'Unknown Album',
+                        album_type: 'album',
+                        images: []
+                    };
+
                 spotifyTracks.push({
                     id: result.spotify_id || 'unknown',
                     name: result.spotify_track || 'Unknown Track',
                     artists: result.spotify_artist ? [result.spotify_artist] : ['Unknown Artist'],
-                    album: result.spotify_album || 'Unknown Album'
+                    album: albumObject,
+                    duration_ms: 0
                 });
             }
         }
@@ -13889,11 +13897,21 @@ async function startBeatportDownloadMissing(urlHash) {
                     track = result.spotify_data;
                 } else {
                     // Build from individual fields (automatic discovery format)
+                    // Convert album to proper object format for wishlist compatibility
+                    const albumData = result.spotify_album || 'Unknown Album';
+                    const albumObject = typeof albumData === 'object' && albumData !== null
+                        ? albumData
+                        : {
+                            name: typeof albumData === 'string' ? albumData : 'Unknown Album',
+                            album_type: 'album',
+                            images: []
+                        };
+
                     track = {
                         id: result.spotify_id || 'unknown',
                         name: result.spotify_track || 'Unknown Track',
                         artists: result.spotify_artist ? [result.spotify_artist] : ['Unknown Artist'],
-                        album: result.spotify_album || 'Unknown Album',
+                        album: albumObject,
                         duration_ms: 0
                     };
                 }
@@ -13908,11 +13926,21 @@ async function startBeatportDownloadMissing(urlHash) {
                 } else {
                     track.artists = ['Unknown Artist'];
                 }
+
+                // Ensure album is an object (in case it was converted back to string somehow)
+                const albumForReturn = typeof track.album === 'object' && track.album !== null
+                    ? track.album
+                    : {
+                        name: typeof track.album === 'string' ? track.album : 'Unknown Album',
+                        album_type: 'album',
+                        images: []
+                    };
+
                 return {
                     id: track.id,
                     name: track.name,
                     artists: track.artists,
-                    album: track.album || 'Unknown Album',
+                    album: albumForReturn,
                     duration_ms: track.duration_ms || 0,
                     external_urls: track.external_urls || {}
                 };
@@ -16374,11 +16402,22 @@ async function startYouTubeDownloadMissing(urlHash) {
                     return result.spotify_data;
                 } else {
                     // Build from individual fields (automatic discovery format)
+                    // Convert album to proper object format for wishlist compatibility
+                    const albumData = result.spotify_album || 'Unknown Album';
+                    const albumObject = typeof albumData === 'object' && albumData !== null
+                        ? albumData
+                        : {
+                            name: typeof albumData === 'string' ? albumData : 'Unknown Album',
+                            album_type: 'album',
+                            images: []
+                        };
+
                     return {
                         id: result.spotify_id || 'unknown',
                         name: result.spotify_track || 'Unknown Track',
                         artists: result.spotify_artist ? [result.spotify_artist] : ['Unknown Artist'],
-                        album: result.spotify_album || 'Unknown Album'
+                        album: albumObject,
+                        duration_ms: 0
                     };
                 }
             });
