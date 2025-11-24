@@ -2926,7 +2926,7 @@ async function loadBeatportChartsFromBackend() {
                                 spotify_track: result.spotify_data ? result.spotify_data.name : '-',
                                 spotify_artist: result.spotify_data && result.spotify_data.artists ?
                                     result.spotify_data.artists.map(a => a.name || a).join(', ') : '-',
-                                spotify_album: result.spotify_data ? result.spotify_data.album : '-'
+                                spotify_album: result.spotify_data ? (typeof result.spotify_data.album === 'object' ? result.spotify_data.album.name : result.spotify_data.album) : '-'
                             }));
 
                             // Create Beatport state in YouTube system for modal functionality
@@ -3162,7 +3162,7 @@ async function rehydrateBeatportChart(chartInfo, userRequested = false) {
                 spotify_track: result.spotify_data ? result.spotify_data.name : '-',
                 spotify_artist: result.spotify_data && result.spotify_data.artists ?
                     result.spotify_data.artists.map(a => a.name || a).join(', ') : '-',
-                spotify_album: result.spotify_data ? result.spotify_data.album : '-'
+                spotify_album: result.spotify_data ? (typeof result.spotify_data.album === 'object' ? result.spotify_data.album.name : result.spotify_data.album) : '-'
             }));
         }
 
@@ -11200,7 +11200,7 @@ async function openTidalDiscoveryModal(playlistId, playlistData) {
                 spotify_track: result.spotify_data ? result.spotify_data.name : (result.spotify_track || '-'),
                 spotify_artist: result.spotify_data && result.spotify_data.artists ?
                     (Array.isArray(result.spotify_data.artists) ? result.spotify_data.artists.join(', ') : result.spotify_data.artists) : (result.spotify_artist || '-'),
-                spotify_album: result.spotify_data ? result.spotify_data.album : (result.spotify_album || '-'),
+                spotify_album: result.spotify_data ? (typeof result.spotify_data.album === 'object' ? result.spotify_data.album.name : result.spotify_data.album) : (result.spotify_album || '-'),
                 spotify_data: result.spotify_data, // Pass through spotify_data
                 spotify_id: result.spotify_id, // Pass through spotify_id
                 manual_match: result.manual_match // Pass through manual match flag
@@ -11319,7 +11319,7 @@ function startTidalDiscoveryPolling(fakeUrlHash, playlistId) {
                         spotify_track: result.spotify_data ? result.spotify_data.name : (result.spotify_track || '-'),
                         spotify_artist: result.spotify_data && result.spotify_data.artists ?
                             (Array.isArray(result.spotify_data.artists) ? result.spotify_data.artists.join(', ') : result.spotify_data.artists) : (result.spotify_artist || '-'),
-                        spotify_album: result.spotify_data ? result.spotify_data.album : (result.spotify_album || '-'),
+                        spotify_album: result.spotify_data ? (typeof result.spotify_data.album === 'object' ? result.spotify_data.album.name : result.spotify_data.album) : (result.spotify_album || '-'),
                         spotify_data: result.spotify_data, // Pass through
                         spotify_id: result.spotify_id, // Pass through
                         manual_match: result.manual_match // Pass through
@@ -13071,7 +13071,7 @@ function startBeatportDiscoveryPolling(urlHash) {
                         spotify_track: result.spotify_data ? result.spotify_data.name : (result.spotify_track || '-'),
                         spotify_artist: result.spotify_data && result.spotify_data.artists ?
                             result.spotify_data.artists.map(a => a.name || a).join(', ') : (result.spotify_artist || '-'),
-                        spotify_album: result.spotify_data ? result.spotify_data.album : (result.spotify_album || '-'),
+                        spotify_album: result.spotify_data ? (typeof result.spotify_data.album === 'object' ? result.spotify_data.album.name : result.spotify_data.album) : (result.spotify_album || '-'),
                         spotify_data: result.spotify_data, // Pass through
                         spotify_id: result.spotify_id, // Pass through
                         manual_match: result.manual_match // Pass through
