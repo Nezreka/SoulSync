@@ -7313,61 +7313,60 @@ def get_version_info():
     This provides the same data that the GUI version modal displays.
     """
     version_data = {
-        "version": "1.0",
+        "version": "1.1",
         "title": "What's New in SoulSync",
-        "subtitle": "Version 1.0 - Complete WebUI Rebuild",
+        "subtitle": "Version 1.1 - Discovery & Wishlist Enhancements",
         "sections": [
             {
-                "title": "🌐 Complete WebUI Transformation",
-                "description": "SoulSync has been completely rebuilt from the ground up as a modern web application, moving from desktop GUI to web-based interface",
+                "title": "🎧 Discovery Page - Your Personal Music Explorer",
+                "description": "A brand new intelligent music discovery system that learns from your library and helps you find your next favorite tracks",
                 "features": [
-                    "• Full transition from PyQt6 desktop application to responsive web interface",
-                    "• Modern HTML5, CSS3, and JavaScript implementation with premium glassmorphic design",
-                    "• Real-time updates and live status monitoring through WebSocket connections",
-                    "• Cross-platform compatibility - access from any device with a web browser",
-                    "• Mobile-responsive design optimized for tablets and smartphones",
-                    "• Dark theme with sophisticated visual effects and smooth animations",
-                    "• RESTful API architecture enabling future third-party integrations"
+                    "• Smart Discovery Pool - Automatically populated from watchlist artists and similar artists",
+                    "• Personalized Playlists - Popular Picks, Hidden Gems, Discovery Shuffle, and more",
+                    "• Genre & Decade Playlists - Browse music by mood, style, or era",
+                    "• Seasonal Playlists - Curated collections for holidays and seasons (Christmas, Halloween, Summer, etc.)",
+                    "• Configurable Lookback Period - Control how far back to scan artist discographies (7 days to full catalog)",
+                    "• Smart Album Categorization - Accurate track count-based classification (Singles/EPs vs Albums)",
+                    "• One-Click Wishlist Integration - Add any discovered track to wishlist for automatic downloading"
                 ],
-                "usage_note": "Access SoulSync through your web browser at localhost:8888 - no desktop installation required!"
+                "usage_note": "Discovery pool automatically populates during watchlist scans. Configure lookback period in Settings!"
             },
             {
-                "title": "🐳 Docker Container Support",
-                "description": "Complete containerization with Docker for easy deployment and scalability",
+                "title": "⭐ Enhanced Wishlist System",
+                "description": "Completely redesigned wishlist with automatic processing, smart categorization, and powerful management tools",
                 "features": [
-                    "• Pre-built Docker images available for instant deployment",
-                    "• Multi-architecture support (AMD64, ARM64) for various server platforms",
-                    "• Volume mounting for persistent configuration and downloads",
-                    "• Environment variable configuration for easy customization",
-                    "• Docker Compose templates for simplified multi-container setups",
-                    "• Automatic health checks and restart policies for reliability",
-                    "• Lightweight Alpine Linux base for minimal resource usage"
+                    "• Automatic Processing - Downloads wishlist tracks every 30 minutes, alternating between Albums/EPs and Singles",
+                    "• Album/Single Categorization - Smart filtering based on track count (1-5 tracks = Singles/EPs, 6+ = Albums)",
+                    "• Manual Cycle Control - Override automatic cycle selection anytime from the wishlist modal",
+                    "• Wishlist Cleanup - One-click removal of tracks that already exist in your library",
+                    "• Clear Wishlist - Fresh start with a single click",
+                    "• Category View - Browse wishlist by Albums/EPs or Singles with track counts",
+                    "• Add from Anywhere - Library, Artist pages, Playlists, and Discovery page all support wishlist additions"
+                ],
+                "usage_note": "Wishlist processing starts 1 minute after app launch, then runs every 30 minutes automatically!"
+            },
+            {
+                "title": "🔧 Quality of Life Improvements",
+                "description": "Numerous enhancements to make SoulSync more powerful and easier to use",
+                "features": [
+                    "• Improved Metadata Handling - Better album type detection using track counts instead of Spotify marketing tags",
+                    "• Enhanced Discovery Pool Management - Configurable artist scan depth with intelligent fallback options",
+                    "• Seasonal Content Auto-Refresh - Seasonal playlists update weekly during watchlist scans",
+                    "• Better Error Handling - More informative messages and automatic recovery mechanisms",
+                    "• UI Polish - Refined modals, better button layouts, and improved visual feedback",
+                    "• Performance Optimizations - Faster database queries and more efficient data processing"
                 ]
             },
             {
-                "title": "🎵 Enhanced Music Management",
-                "description": "All beloved features preserved and enhanced with new web-based capabilities",
+                "title": "🐛 Bug Fixes",
+                "description": "Stability improvements and issue resolutions",
                 "features": [
-                    "• Complete Spotify, Tidal, and YouTube Music playlist synchronization",
-                    "• Advanced Soulseek integration with real-time download management",
-                    "• Intelligent music matching engine with improved accuracy",
-                    "• Plex and Jellyfin server integration with automatic library updates",
-                    "• Artist watchlist with automatic new release detection",
-                    "• Comprehensive metadata enhancement with high-quality album artwork",
-                    "• Real-time download progress with detailed logging and status updates"
-                ]
-            },
-            {
-                "title": "🚀 Performance & Reliability",
-                "description": "Significant improvements in speed, stability, and resource efficiency",
-                "features": [
-                    "• Asynchronous processing for improved responsiveness",
-                    "• Multi-threaded download management with concurrent processing",
-                    "• Optimized database operations with connection pooling",
-                    "• Intelligent caching system for faster API responses",
-                    "• Robust error handling with automatic retry mechanisms",
-                    "• Memory-efficient architecture suitable for long-running deployments",
-                    "• Comprehensive logging system for easy troubleshooting"
+                    "• Fixed album grouping issues when album IDs are missing",
+                    "• Corrected timezone handling in discovery pool timestamp comparisons",
+                    "• Resolved conflicts between multiple clearWishlist function definitions",
+                    "• Fixed seasonal track data not including total_tracks field",
+                    "• Improved modal close behavior after wishlist operations",
+                    "• Better handling of tracks from different sources (playlists, discovery, library)"
                 ]
             }
         ]
