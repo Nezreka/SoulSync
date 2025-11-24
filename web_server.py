@@ -6052,30 +6052,42 @@ def clean_youtube_track_title(title, artist_name=None):
     
     original_title = title
     
-    # FIRST: Remove artist name if it appears at the start with a dash
-    # Handle formats like "LITTLE BIG - MOUSTACHE" → "MOUSTACHE"
-    if artist_name:
-        # Create a regex pattern to match artist name at the beginning followed by dash
-        # Use word boundaries and case-insensitive matching for better accuracy
-        artist_pattern = r'^' + re.escape(artist_name.strip()) + r'\s*[-–—]\s*'
+    # FIRST: Try to extract track name from "Artist - Track" or "Track - Artist" format
+    artist_removed = False
+    if artist_name and '-' in title:
+        # Check if artist is at the start: "Artist - Track" or "Artist & Others - Track"
+        # Handle collaborations: "Artist1 & Artist2 - Track" or "Artist, Artist2 - Track"
+        artist_pattern = r'^' + re.escape(artist_name.strip()) + r'(?:\s*[&,x]\s*[^-]+)?\s*[-–—]\s*'
         cleaned_title = re.sub(artist_pattern, '', title, flags=re.IGNORECASE).strip()
-        
-        # Debug logging for artist removal
+
         if cleaned_title != title:
-            print(f"🎯 Removed artist from title: '{title}' -> '{cleaned_title}' (artist: '{artist_name}')")
-        
-        title = cleaned_title
-    
-    # Remove content in brackets/braces of any type SECOND (before general dash removal)
+            print(f"🎯 Removed artist from start: '{title}' -> '{cleaned_title}' (artist: '{artist_name}')")
+            title = cleaned_title
+            artist_removed = True
+        else:
+            # Artist not at start, check if format is "Track - Artist" by looking for artist at end
+            # Only remove trailing artist if it comes after a dash
+            artist_end_pattern = r'\s*[-–—]\s*' + re.escape(artist_name.strip()) + r'(?:\s*[&,x]\s*[^-]+)?\s*$'
+            cleaned_title = re.sub(artist_end_pattern, '', title, flags=re.IGNORECASE).strip()
+
+            if cleaned_title != title:
+                print(f"🎯 Removed artist from end: '{title}' -> '{cleaned_title}' (artist: '{artist_name}')")
+                title = cleaned_title
+                artist_removed = True
+
+    # Remove content in brackets/braces BEFORE removing dashes
     title = re.sub(r'【[^】]*】', '', title)  # Japanese brackets
     title = re.sub(r'\s*\([^)]*\)', '', title)   # Parentheses - removes everything after first (
     title = re.sub(r'\s*\(.*$', '', title)      # Remove everything after lone ( (unmatched parentheses)
     title = re.sub(r'\[[^\]]*\]', '', title)  # Square brackets
     title = re.sub(r'\{[^}]*\}', '', title)   # Curly braces
     title = re.sub(r'<[^>]*>', '', title)     # Angle brackets
-    
-    # Remove everything after a dash (often album or extra info)
-    title = re.sub(r'\s*-\s*.*$', '', title)
+
+    # ONLY remove trailing dashes with garbage if artist was already removed
+    # This prevents "Artist1, Artist2 - Song" from becoming "Artist1, Artist2"
+    if artist_removed:
+        # Safe to remove any remaining trailing dash content (likely album/extra info)
+        title = re.sub(r'\s*-\s*.*$', '', title)
     
     # Remove everything after pipes (|) - often used for additional context
     title = re.split(r'\s*\|\s*', title)[0].strip()
@@ -6108,17 +6120,27 @@ def clean_youtube_track_title(title, artist_name=None):
     for pattern in noise_patterns:
         title = re.sub(pattern, '', title, flags=re.IGNORECASE)
     
-    # Remove artist name from title if present
+    # Only remove artist name if it's standalone (not part of "Artist1 & Artist2")
+    # Skip this if the title contains collaboration indicators near the artist name
     if artist_name:
-        # Try removing exact artist name
-        title = re.sub(rf'\b{re.escape(artist_name)}\b', '', title, flags=re.IGNORECASE)
-        # Try removing artist name with common separators
-        title = re.sub(rf'\b{re.escape(artist_name)}\s*[-–—:]\s*', '', title, flags=re.IGNORECASE)
-        title = re.sub(rf'^{re.escape(artist_name)}\s*[-–—:]\s*', '', title, flags=re.IGNORECASE)
+        # Check if artist appears with collaboration indicators (& or ,)
+        collab_pattern = rf'\b{re.escape(artist_name)}\s*[&,]\s*\w+|[\w\s]+[&,]\s*{re.escape(artist_name)}\b'
+        has_collab = re.search(collab_pattern, title, flags=re.IGNORECASE)
+
+        if not has_collab:
+            # Safe to remove artist - it's standalone
+            title = re.sub(rf'\b{re.escape(artist_name)}\b', '', title, flags=re.IGNORECASE)
+            title = re.sub(rf'\b{re.escape(artist_name)}\s*[-–—:]\s*', '', title, flags=re.IGNORECASE)
+            title = re.sub(rf'^{re.escape(artist_name)}\s*[-–—:]\s*', '', title, flags=re.IGNORECASE)
+        else:
+            print(f"⚠️ Skipping artist removal - collaboration detected: '{title}'")
     
+    # Remove "prod. Producer" patterns
+    title = re.sub(r'\s+prod\.?\s+\S+', '', title, flags=re.IGNORECASE)
+
     # Remove all quotes and other punctuation
     title = re.sub(r'["\'''""„‚‛‹›«»]', '', title)
-    
+
     # Remove featured artist patterns (after removing parentheses)
     feat_patterns = [
         r'\s+feat\.?\s+.+$',     # " feat Artist" at end
