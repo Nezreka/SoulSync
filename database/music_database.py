@@ -85,6 +85,7 @@ class WatchlistArtist:
     last_scan_timestamp: Optional[datetime] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    image_url: Optional[str] = None
 
 @dataclass
 class SimilarArtist:
@@ -257,6 +258,9 @@ class MusicDatabase:
 
             # Add discovery feature tables (migration)
             self._add_discovery_tables(cursor)
+
+            # Add image_url column to watchlist_artists (migration)
+            self._add_watchlist_artist_image_column(cursor)
 
             conn.commit()
             logger.info("Database initialized successfully")
@@ -571,6 +575,20 @@ class MusicDatabase:
 
         except Exception as e:
             logger.error(f"Error creating discovery tables: {e}")
+            # Don't raise - this is a migration, database can still function
+
+    def _add_watchlist_artist_image_column(self, cursor):
+        """Add image_url column to watchlist_artists table"""
+        try:
+            cursor.execute("PRAGMA table_info(watchlist_artists)")
+            columns = [column[1] for column in cursor.fetchall()]
+
+            if 'image_url' not in columns:
+                cursor.execute("ALTER TABLE watchlist_artists ADD COLUMN image_url TEXT")
+                logger.info("Added image_url column to watchlist_artists table")
+
+        except Exception as e:
+            logger.error(f"Error adding image_url column to watchlist_artists: {e}")
             # Don't raise - this is a migration, database can still function
 
     def close(self):
@@ -2544,9 +2562,9 @@ class MusicDatabase:
                 cursor = conn.cursor()
                 
                 cursor.execute("""
-                    SELECT id, spotify_artist_id, artist_name, date_added, 
-                           last_scan_timestamp, created_at, updated_at
-                    FROM watchlist_artists 
+                    SELECT id, spotify_artist_id, artist_name, date_added,
+                           last_scan_timestamp, created_at, updated_at, image_url
+                    FROM watchlist_artists
                     ORDER BY date_added DESC
                 """)
                 
@@ -2554,6 +2572,12 @@ class MusicDatabase:
                 
                 watchlist_artists = []
                 for row in rows:
+                    # Try to get image_url, fallback to None if column doesn't exist yet (migration)
+                    try:
+                        image_url = row['image_url']
+                    except (KeyError, IndexError):
+                        image_url = None
+
                     watchlist_artists.append(WatchlistArtist(
                         id=row['id'],
                         spotify_artist_id=row['spotify_artist_id'],
@@ -2561,7 +2585,8 @@ class MusicDatabase:
                         date_added=datetime.fromisoformat(row['date_added']),
                         last_scan_timestamp=datetime.fromisoformat(row['last_scan_timestamp']) if row['last_scan_timestamp'] else None,
                         created_at=datetime.fromisoformat(row['created_at']) if row['created_at'] else None,
-                        updated_at=datetime.fromisoformat(row['updated_at']) if row['updated_at'] else None
+                        updated_at=datetime.fromisoformat(row['updated_at']) if row['updated_at'] else None,
+                        image_url=image_url
                     ))
                 
                 return watchlist_artists
@@ -2584,6 +2609,25 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error getting watchlist count: {e}")
             return 0
+
+    def update_watchlist_artist_image(self, spotify_artist_id: str, image_url: str) -> bool:
+        """Update the image URL for a watchlist artist"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                cursor.execute("""
+                    UPDATE watchlist_artists
+                    SET image_url = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE spotify_artist_id = ?
+                """, (image_url, spotify_artist_id))
+
+                conn.commit()
+                return cursor.rowcount > 0
+
+        except Exception as e:
+            logger.error(f"Error updating watchlist artist image: {e}")
+            return False
 
     # === Discovery Feature Methods ===
 

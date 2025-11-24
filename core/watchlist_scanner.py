@@ -240,10 +240,32 @@ class WatchlistScanner:
         """
         try:
             logger.info(f"Scanning artist: {watchlist_artist.artist_name}")
-            
+
+            # Update artist image from Spotify (cached for performance)
+            try:
+                artist_data = self.spotify_client.get_artist(watchlist_artist.spotify_artist_id)
+                if artist_data and 'images' in artist_data and artist_data['images']:
+                    # Get medium-sized image (usually the second one, or first if only one)
+                    image_url = None
+                    if len(artist_data['images']) > 1:
+                        image_url = artist_data['images'][1]['url']
+                    else:
+                        image_url = artist_data['images'][0]['url']
+
+                    # Update in database
+                    if image_url:
+                        self.database.update_watchlist_artist_image(watchlist_artist.spotify_artist_id, image_url)
+                        logger.info(f"Updated artist image for {watchlist_artist.artist_name}")
+                    else:
+                        logger.warning(f"No image URL found for {watchlist_artist.artist_name}")
+                else:
+                    logger.warning(f"No images in Spotify data for {watchlist_artist.artist_name}")
+            except Exception as img_error:
+                logger.warning(f"Could not update artist image for {watchlist_artist.artist_name}: {img_error}")
+
             # Get artist discography from Spotify
             albums = self.get_artist_discography(watchlist_artist.spotify_artist_id, watchlist_artist.last_scan_timestamp)
-            
+
             if albums is None:
                 return ScanResult(
                     artist_name=watchlist_artist.artist_name,

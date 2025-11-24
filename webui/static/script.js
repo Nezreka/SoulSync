@@ -19748,10 +19748,29 @@ async function showWatchlistModal() {
                             Update Similar Artists
                         </button>
                     </div>
-                    
-                    <div class="watchlist-artists-list">
+
+                    <!-- Search Bar -->
+                    <div class="watchlist-search-container" style="margin-bottom: 16px;">
+                        <input type="text"
+                               id="watchlist-search-input"
+                               class="watchlist-search-input"
+                               placeholder="🔍 Search artists..."
+                               oninput="filterWatchlistArtists()">
+                    </div>
+
+                    <div class="watchlist-artists-list" id="watchlist-artists-list">
                         ${artistsData.artists.map(artist => `
-                            <div class="watchlist-artist-item">
+                            <div class="watchlist-artist-item" data-artist-name="${artist.artist_name.toLowerCase().replace(/"/g, '&quot;')}">
+                                ${artist.image_url ? `
+                                    <img src="${artist.image_url}"
+                                         alt="${escapeHtml(artist.artist_name)}"
+                                         class="watchlist-artist-image"
+                                         onerror="this.style.display='none'">
+                                ` : `
+                                    <div class="watchlist-artist-image-placeholder">
+                                        🎤
+                                    </div>
+                                `}
                                 <div class="watchlist-artist-info">
                                     <span class="watchlist-artist-name">${escapeHtml(artist.artist_name)}</span>
                                     <span class="watchlist-artist-date">Added ${new Date(artist.date_added).toLocaleDateString()}</span>
@@ -19807,6 +19826,29 @@ function closeWatchlistModal() {
     if (modal) {
         modal.style.display = 'none';
     }
+}
+
+/**
+ * Filter watchlist artists based on search input
+ */
+function filterWatchlistArtists() {
+    const searchInput = document.getElementById('watchlist-search-input');
+    const artistsList = document.getElementById('watchlist-artists-list');
+
+    if (!searchInput || !artistsList) return;
+
+    const searchTerm = searchInput.value.toLowerCase().trim();
+    const artistItems = artistsList.querySelectorAll('.watchlist-artist-item');
+
+    artistItems.forEach(item => {
+        const artistName = item.getAttribute('data-artist-name');
+
+        if (!searchTerm || artistName.includes(searchTerm)) {
+            item.style.display = 'flex';
+        } else {
+            item.style.display = 'none';
+        }
+    });
 }
 
 /**
