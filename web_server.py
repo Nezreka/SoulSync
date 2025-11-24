@@ -14358,12 +14358,12 @@ def get_watchlist_count():
 
 @app.route('/api/watchlist/artists', methods=['GET'])
 def get_watchlist_artists():
-    """Get all artists in the watchlist"""
+    """Get all artists in the watchlist with cached images"""
     try:
         database = get_database()
         watchlist_artists = database.get_watchlist_artists()
-        
-        # Convert to JSON serializable format
+
+        # Convert to JSON serializable format (images are cached from watchlist scans)
         artists_data = []
         for artist in watchlist_artists:
             artists_data.append({
@@ -14373,9 +14373,10 @@ def get_watchlist_artists():
                 "date_added": artist.date_added.isoformat() if artist.date_added else None,
                 "last_scan_timestamp": artist.last_scan_timestamp.isoformat() if artist.last_scan_timestamp else None,
                 "created_at": artist.created_at.isoformat() if artist.created_at else None,
-                "updated_at": artist.updated_at.isoformat() if artist.updated_at else None
+                "updated_at": artist.updated_at.isoformat() if artist.updated_at else None,
+                "image_url": artist.image_url  # Cached during watchlist scans
             })
-        
+
         return jsonify({"success": True, "artists": artists_data})
     except Exception as e:
         print(f"Error getting watchlist artists: {e}")
