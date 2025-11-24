@@ -523,12 +523,14 @@ class WatchlistScanner:
                 album_release_date = album.get('release_date', '')
                 album_images = album.get('images', [])
                 album_type = album.get('album_type', 'album')  # 'album', 'single', or 'ep'
+                total_tracks = album.get('total_tracks', 0)
             else:
                 album_name = album.name
                 album_id = album.id
                 album_release_date = album.release_date
                 album_images = album.images if hasattr(album, 'images') else []
                 album_type = album.album_type if hasattr(album, 'album_type') else 'album'
+                total_tracks = album.total_tracks if hasattr(album, 'total_tracks') else 0
 
             # Create Spotify track data structure
             spotify_track_data = {
@@ -540,7 +542,8 @@ class WatchlistScanner:
                     'id': album_id,
                     'release_date': album_release_date,
                     'images': album_images,
-                    'album_type': album_type  # Store album type for category filtering
+                    'album_type': album_type,  # Store album type for category filtering
+                    'total_tracks': total_tracks  # Store track count for accurate categorization
                 },
                 'duration_ms': track_duration,
                 'explicit': track_explicit,

@@ -332,6 +332,15 @@ class SeasonalDiscoveryService:
                 rows = cursor.fetchall()
 
                 for row in rows:
+                    import json
+                    # Parse track_data_json if it's a string
+                    track_data_json = row['track_data_json']
+                    if isinstance(track_data_json, str):
+                        try:
+                            track_data_json = json.loads(track_data_json)
+                        except:
+                            track_data_json = {}
+
                     seasonal_tracks.append({
                         'spotify_track_id': row['spotify_track_id'],
                         'track_name': row['track_name'],
@@ -340,7 +349,7 @@ class SeasonalDiscoveryService:
                         'album_cover_url': row['album_cover_url'],
                         'duration_ms': row['duration_ms'],
                         'popularity': row['popularity'],
-                        'track_data_json': row['track_data_json']
+                        'track_data_json': track_data_json  # Now parsed as dict
                     })
 
                 return seasonal_tracks
@@ -643,6 +652,19 @@ class SeasonalDiscoveryService:
                             # Use track's actual artist, not album artist
                             track_artist = track['artists'][0]['name'] if track.get('artists') else album['artist_name']
 
+                            # Enhance track object with full album data (including total_tracks)
+                            enhanced_track = {
+                                **track,
+                                'album': {
+                                    'id': album_data['id'],
+                                    'name': album_data.get('name', 'Unknown Album'),
+                                    'images': album_data.get('images', []),
+                                    'release_date': album_data.get('release_date', ''),
+                                    'album_type': album_data.get('album_type', 'album'),
+                                    'total_tracks': album_data.get('total_tracks', 0)
+                                }
+                            }
+
                             track_data = {
                                 'spotify_track_id': track['id'],
                                 'track_name': track['name'],
@@ -650,7 +672,8 @@ class SeasonalDiscoveryService:
                                 'album_name': album['album_name'],
                                 'popularity': album.get('popularity', 50),
                                 'album_cover_url': album.get('album_cover_url'),
-                                'duration_ms': track.get('duration_ms', 0)
+                                'duration_ms': track.get('duration_ms', 0),
+                                'track_data_json': enhanced_track  # Add full track data with album info
                             }
 
                             all_tracks.append(track_data)

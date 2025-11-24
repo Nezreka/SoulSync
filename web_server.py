@@ -7691,7 +7691,7 @@ def _process_wishlist_automatically():
             import json
             filtered_tracks = []
             for track in wishlist_tracks:
-                # Extract album_type from spotify_data JSON (after sanitization)
+                # Extract track count from spotify_data JSON (after sanitization)
                 spotify_data = track.get('spotify_data', {})
                 if isinstance(spotify_data, str):
                     try:
@@ -7700,14 +7700,27 @@ def _process_wishlist_automatically():
                         spotify_data = {}
 
                 album_data = spotify_data.get('album', {})
+                total_tracks = album_data.get('total_tracks')
                 album_type = album_data.get('album_type', 'album').lower()
 
-                if current_cycle == 'singles':
-                    if album_type in ['single', 'ep']:
-                        filtered_tracks.append(track)
-                elif current_cycle == 'albums':
-                    if album_type == 'album':
-                        filtered_tracks.append(track)
+                # Categorize by track count if available, otherwise use album_type
+                # Single: 1 track, EP: 2-5 tracks, Album: 6+ tracks
+                is_single_or_ep = False
+                is_album = False
+
+                if total_tracks is not None and total_tracks > 0:
+                    # Use track count (most accurate)
+                    is_single_or_ep = total_tracks < 6
+                    is_album = total_tracks >= 6
+                else:
+                    # Fall back to Spotify's album_type
+                    is_single_or_ep = album_type in ['single', 'ep']
+                    is_album = album_type == 'album'
+
+                if current_cycle == 'singles' and is_single_or_ep:
+                    filtered_tracks.append(track)
+                elif current_cycle == 'albums' and is_album:
+                    filtered_tracks.append(track)
 
             print(f"🔄 [Auto-Wishlist] Current cycle: {current_cycle}")
             print(f"📊 [Auto-Wishlist] Filtered {len(filtered_tracks)}/{len(wishlist_tracks)} tracks for '{current_cycle}' category")
@@ -7911,22 +7924,30 @@ def get_wishlist_stats():
         albums_count = 0
 
         for track in raw_tracks:
-            # Extract album_type from spotify_data JSON
+            # Extract track count from spotify_data JSON
             spotify_data = track.get('spotify_data', {})
             if isinstance(spotify_data, str):
                 import json
                 spotify_data = json.loads(spotify_data)
 
             album_data = spotify_data.get('album', {})
+            total_tracks = album_data.get('total_tracks')
             album_type = album_data.get('album_type', 'album').lower()
 
-            if album_type in ['single', 'ep']:
-                singles_count += 1
-            elif album_type == 'album':
-                albums_count += 1
+            # Categorize by track count if available, otherwise use album_type
+            # Single: 1 track, EP: 2-5 tracks, Album: 6+ tracks
+            if total_tracks is not None and total_tracks > 0:
+                # Use track count (most accurate)
+                if total_tracks >= 6:
+                    albums_count += 1
+                else:
+                    singles_count += 1
             else:
-                # Default unknown types to albums
-                albums_count += 1
+                # Fall back to Spotify's album_type
+                if album_type in ['single', 'ep']:
+                    singles_count += 1
+                else:
+                    albums_count += 1
 
         total_count = singles_count + albums_count
 
@@ -8127,7 +8148,7 @@ def get_wishlist_tracks():
             import json
             filtered_tracks = []
             for track in sanitized_tracks:
-                # Extract album_type from spotify_data JSON (same as stats endpoint)
+                # Extract track count from spotify_data JSON (same as stats endpoint)
                 spotify_data = track.get('spotify_data', {})
                 if isinstance(spotify_data, str):
                     try:
@@ -8136,16 +8157,27 @@ def get_wishlist_tracks():
                         spotify_data = {}
 
                 album_data = spotify_data.get('album', {})
+                total_tracks = album_data.get('total_tracks')
                 album_type = album_data.get('album_type', 'album').lower()
 
-                if category == 'singles':
-                    # Singles category includes 'single' and 'ep'
-                    if album_type in ['single', 'ep']:
-                        filtered_tracks.append(track)
-                elif category == 'albums':
-                    # Albums category includes only 'album'
-                    if album_type == 'album':
-                        filtered_tracks.append(track)
+                # Categorize by track count if available, otherwise use album_type
+                # Single: 1 track, EP: 2-5 tracks, Album: 6+ tracks
+                is_single_or_ep = False
+                is_album = False
+
+                if total_tracks is not None and total_tracks > 0:
+                    # Use track count (most accurate)
+                    is_single_or_ep = total_tracks < 6
+                    is_album = total_tracks >= 6
+                else:
+                    # Fall back to Spotify's album_type
+                    is_single_or_ep = album_type in ['single', 'ep']
+                    is_album = album_type == 'album'
+
+                if category == 'singles' and is_single_or_ep:
+                    filtered_tracks.append(track)
+                elif category == 'albums' and is_album:
+                    filtered_tracks.append(track)
 
             print(f"📊 Wishlist filter: {len(filtered_tracks)}/{len(sanitized_tracks)} tracks in '{category}' category")
             return jsonify({"tracks": filtered_tracks, "category": category})
@@ -15251,7 +15283,8 @@ def get_seasonal_playlist(season_key):
                         album_name,
                         album_cover_url,
                         duration_ms,
-                        popularity
+                        popularity,
+                        track_data_json
                     FROM seasonal_tracks
                     WHERE spotify_track_id = ?
                 """, (track_id,))
@@ -15259,7 +15292,15 @@ def get_seasonal_playlist(season_key):
                 result = cursor.fetchone()
 
                 if result:
-                    tracks.append(dict(result))
+                    track_dict = dict(result)
+                    # Parse track_data_json if available
+                    if track_dict.get('track_data_json'):
+                        try:
+                            import json
+                            track_dict['track_data_json'] = json.loads(track_dict['track_data_json'])
+                        except:
+                            pass
+                    tracks.append(track_dict)
                 else:
                     # Try discovery_pool as fallback
                     cursor.execute("""
@@ -15270,14 +15311,23 @@ def get_seasonal_playlist(season_key):
                             album_name,
                             album_cover_url,
                             duration_ms,
-                            popularity
+                            popularity,
+                            track_data_json
                         FROM discovery_pool
                         WHERE spotify_track_id = ?
                     """, (track_id,))
 
                     result = cursor.fetchone()
                     if result:
-                        tracks.append(dict(result))
+                        track_dict = dict(result)
+                        # Parse track_data_json if available
+                        if track_dict.get('track_data_json'):
+                            try:
+                                import json
+                                track_dict['track_data_json'] = json.loads(track_dict['track_data_json'])
+                            except:
+                                pass
+                        tracks.append(track_dict)
 
         config = SEASONAL_CONFIG[season_key]
 
