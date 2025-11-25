@@ -70,6 +70,9 @@ class ListenBrainzManager:
             except Exception as e:
                 logger.error(f"Error updating {playlist_type} playlists: {e}")
 
+        # Cleanup old playlists (keep only 4 most recent per type)
+        self._cleanup_old_playlists()
+
         logger.info(f"✅ ListenBrainz update complete: {summary}")
         return {
             "success": True,
@@ -281,6 +284,42 @@ class ListenBrainzManager:
         covers_found = sum(1 for t in track_data_list if t.get('album_cover_url'))
         logger.info(f"✅ Fetched {covers_found}/{len(track_data_list)} cover art URLs")
 
+    def _cleanup_old_playlists(self):
+        """Remove old playlists, keeping only the 4 most recent per type"""
+        conn = self._get_db_connection()
+        cursor = conn.cursor()
+
+        # For each playlist type, keep only the 4 most recent
+        playlist_types = ['created_for', 'user', 'collaborative']
+
+        for playlist_type in playlist_types:
+            try:
+                # Get IDs of playlists to delete (all except 4 most recent)
+                cursor.execute("""
+                    SELECT id FROM listenbrainz_playlists
+                    WHERE playlist_type = ?
+                    ORDER BY last_updated DESC
+                    LIMIT -1 OFFSET 4
+                """, (playlist_type,))
+
+                old_playlist_ids = [row[0] for row in cursor.fetchall()]
+
+                if old_playlist_ids:
+                    # Delete tracks for old playlists
+                    placeholders = ','.join('?' * len(old_playlist_ids))
+                    cursor.execute(f"DELETE FROM listenbrainz_tracks WHERE playlist_id IN ({placeholders})", old_playlist_ids)
+
+                    # Delete old playlists
+                    cursor.execute(f"DELETE FROM listenbrainz_playlists WHERE id IN ({placeholders})", old_playlist_ids)
+
+                    logger.info(f"🗑️ Removed {len(old_playlist_ids)} old {playlist_type} playlists")
+
+            except Exception as e:
+                logger.error(f"Error cleaning up {playlist_type} playlists: {e}")
+
+        conn.commit()
+        conn.close()
+
     def has_cached_playlists(self) -> bool:
         """Check if there are any cached playlists in the database"""
         conn = self._get_db_connection()
@@ -291,7 +330,7 @@ class ListenBrainzManager:
         return count > 0
 
     def get_cached_playlists(self, playlist_type: str) -> List[Dict]:
-        """Get cached playlists of a specific type from database"""
+        """Get cached playlists of a specific type from database (limited to 4 most recent)"""
         conn = self._get_db_connection()
         cursor = conn.cursor()
 
@@ -300,6 +339,7 @@ class ListenBrainzManager:
             FROM listenbrainz_playlists
             WHERE playlist_type = ?
             ORDER BY last_updated DESC
+            LIMIT 4
         """, (playlist_type,))
 
         playlists = []
