@@ -299,7 +299,13 @@ class WatchlistScanner:
                     
                     tracks = album_data['tracks']['items']
                     logger.debug(f"Checking album: {album_data.get('name', 'Unknown')} ({len(tracks)} tracks)")
-                    
+
+                    # Check if user wants this type of release
+                    if not self._should_include_release(len(tracks), watchlist_artist):
+                        release_type = "album" if len(tracks) >= 7 else ("EP" if len(tracks) >= 4 else "single")
+                        logger.debug(f"Skipping {release_type}: {album_data.get('name', 'Unknown')} - user preference")
+                        continue
+
                     # Check each track
                     for track in tracks:
                         if self.is_track_missing_from_library(track):
@@ -454,11 +460,48 @@ class WatchlistScanner:
                 timestamp = timestamp.replace(tzinfo=timezone.utc)
             
             return album_date > timestamp
-            
+
         except Exception as e:
             logger.warning(f"Error comparing album date {album.release_date} with timestamp {timestamp}: {e}")
             return True  # Include if we can't determine
-    
+
+    def _should_include_release(self, track_count: int, watchlist_artist: WatchlistArtist) -> bool:
+        """
+        Check if a release should be included based on user's preferences.
+
+        Categorization:
+        - Singles: 1-3 tracks
+        - EPs: 4-6 tracks
+        - Albums: 7+ tracks
+
+        Args:
+            track_count: Number of tracks in the release
+            watchlist_artist: WatchlistArtist object with user preferences
+
+        Returns:
+            True if release should be included, False if should be skipped
+        """
+        try:
+            # Default to including everything if preferences aren't set (backwards compatibility)
+            include_albums = getattr(watchlist_artist, 'include_albums', True)
+            include_eps = getattr(watchlist_artist, 'include_eps', True)
+            include_singles = getattr(watchlist_artist, 'include_singles', True)
+
+            # Determine release type based on track count
+            if track_count >= 7:
+                # This is an album
+                return include_albums
+            elif track_count >= 4:
+                # This is an EP (4-6 tracks)
+                return include_eps
+            else:
+                # This is a single (1-3 tracks)
+                return include_singles
+
+        except Exception as e:
+            logger.warning(f"Error checking release inclusion: {e}")
+            return True  # Default to including on error
+
     def is_track_missing_from_library(self, track) -> bool:
         """
         Check if a track is missing from the local Plex library.
