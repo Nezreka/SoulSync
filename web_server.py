@@ -14843,6 +14843,30 @@ def start_watchlist_scan():
                     import traceback
                     traceback.print_exc()
 
+                # Update current seasonal playlist (weekly refresh)
+                print("🎃 Starting seasonal content update...")
+                watchlist_scan_state['current_phase'] = 'updating_seasonal'
+                try:
+                    from core.seasonal_discovery import get_seasonal_discovery_service
+                    seasonal_service = get_seasonal_discovery_service(spotify_client, database)
+
+                    # Only update the current active season
+                    current_season = seasonal_service.get_current_season()
+                    if current_season:
+                        if seasonal_service.should_populate_seasonal_content(current_season, days_threshold=7):
+                            print(f"🎃 Updating {current_season} seasonal content...")
+                            seasonal_service.populate_seasonal_content(current_season)
+                            seasonal_service.curate_seasonal_playlist(current_season)
+                            print(f"✅ {current_season.capitalize()} seasonal content updated")
+                        else:
+                            print(f"⏭️ {current_season.capitalize()} seasonal content recently updated, skipping")
+                    else:
+                        print("ℹ️ No active season at this time")
+                except Exception as seasonal_error:
+                    print(f"⚠️ Error updating seasonal content: {seasonal_error}")
+                    import traceback
+                    traceback.print_exc()
+
             except Exception as e:
                 print(f"Error during watchlist scan: {e}")
                 watchlist_scan_state['status'] = 'error'
@@ -15443,6 +15467,30 @@ def _process_watchlist_scan_automatically():
                     print(f"⚠️ ListenBrainz update had issues: {lb_result.get('error', 'Unknown error')}")
             except Exception as lb_error:
                 print(f"⚠️ Error updating ListenBrainz: {lb_error}")
+                import traceback
+                traceback.print_exc()
+
+            # Update current seasonal playlist (weekly refresh)
+            print("🎃 Starting seasonal content update...")
+            watchlist_scan_state['current_phase'] = 'updating_seasonal'
+            try:
+                from core.seasonal_discovery import get_seasonal_discovery_service
+                seasonal_service = get_seasonal_discovery_service(spotify_client, database)
+
+                # Only update the current active season
+                current_season = seasonal_service.get_current_season()
+                if current_season:
+                    if seasonal_service.should_populate_seasonal_content(current_season, days_threshold=7):
+                        print(f"🎃 Updating {current_season} seasonal content...")
+                        seasonal_service.populate_seasonal_content(current_season)
+                        seasonal_service.curate_seasonal_playlist(current_season)
+                        print(f"✅ {current_season.capitalize()} seasonal content updated")
+                    else:
+                        print(f"⏭️ {current_season.capitalize()} seasonal content recently updated, skipping")
+                else:
+                    print("ℹ️ No active season at this time")
+            except Exception as seasonal_error:
+                print(f"⚠️ Error updating seasonal content: {seasonal_error}")
                 import traceback
                 traceback.print_exc()
 
