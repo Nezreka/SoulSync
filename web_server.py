@@ -12,6 +12,7 @@ import shutil
 import glob
 import uuid
 import re
+import sqlite3
 from pathlib import Path
 from urllib.parse import urljoin
 
@@ -14913,6 +14914,116 @@ def get_similar_artists_update_status():
         return jsonify({"success": True, **similar_artists_update_state})
     except Exception as e:
         print(f"Error getting similar artists status: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/watchlist/artist/<artist_id>/config', methods=['GET', 'POST'])
+def watchlist_artist_config(artist_id):
+    """Get or update watchlist artist configuration"""
+    try:
+        from database.music_database import get_database
+
+        database = get_database()
+
+        if request.method == 'GET':
+            # Get current config from database
+            conn = sqlite3.connect(str(database.database_path))
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT include_albums, include_eps, include_singles, artist_name, image_url
+                FROM watchlist_artists
+                WHERE spotify_artist_id = ?
+            """, (artist_id,))
+            result = cursor.fetchone()
+            conn.close()
+
+            if not result:
+                return jsonify({"success": False, "error": "Artist not found in watchlist"}), 404
+
+            # Get artist info from Spotify
+            artist_info = None
+            if spotify_client and spotify_client.is_authenticated():
+                try:
+                    artist_data = spotify_client.sp.artist(artist_id)
+                    if artist_data:
+                        artist_info = {
+                            'id': artist_data['id'],
+                            'name': artist_data['name'],
+                            'image_url': artist_data['images'][0]['url'] if artist_data.get('images') else None,
+                            'followers': artist_data.get('followers', {}).get('total', 0),
+                            'popularity': artist_data.get('popularity', 0),
+                            'genres': artist_data.get('genres', [])
+                        }
+                except Exception as e:
+                    print(f"Warning: Could not fetch artist info from Spotify: {e}")
+
+            # Fallback to database info if Spotify fetch failed
+            if not artist_info:
+                artist_info = {
+                    'id': artist_id,
+                    'name': result[3],  # artist_name
+                    'image_url': result[4],  # image_url
+                    'followers': 0,
+                    'popularity': 0,
+                    'genres': []
+                }
+
+            config = {
+                'include_albums': bool(result[0]),  # Convert INTEGER to boolean
+                'include_eps': bool(result[1]),
+                'include_singles': bool(result[2])
+            }
+
+            return jsonify({
+                "success": True,
+                "config": config,
+                "artist": artist_info
+            })
+
+        else:  # POST
+            data = request.get_json()
+            if not data:
+                return jsonify({"success": False, "error": "No data provided"}), 400
+
+            include_albums = data.get('include_albums', True)
+            include_eps = data.get('include_eps', True)
+            include_singles = data.get('include_singles', True)
+
+            # Validate at least one is selected
+            if not (include_albums or include_eps or include_singles):
+                return jsonify({"success": False, "error": "At least one release type must be selected"}), 400
+
+            # Update database
+            conn = sqlite3.connect(str(database.database_path))
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE watchlist_artists
+                SET include_albums = ?, include_eps = ?, include_singles = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE spotify_artist_id = ?
+            """, (int(include_albums), int(include_eps), int(include_singles), artist_id))
+            conn.commit()
+
+            if cursor.rowcount == 0:
+                conn.close()
+                return jsonify({"success": False, "error": "Artist not found in watchlist"}), 404
+
+            conn.close()
+
+            print(f"✅ Updated watchlist config for artist {artist_id}: albums={include_albums}, eps={include_eps}, singles={include_singles}")
+
+            return jsonify({
+                "success": True,
+                "message": "Artist configuration updated successfully",
+                "config": {
+                    'include_albums': include_albums,
+                    'include_eps': include_eps,
+                    'include_singles': include_singles
+                }
+            })
+
+    except Exception as e:
+        print(f"Error in watchlist artist config: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
 
 def _update_similar_artists_worker():

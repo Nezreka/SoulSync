@@ -2790,6 +2790,73 @@
         </div>
     </div>
 
+    <!-- Watchlist Artist Config Modal -->
+    <div class="modal-overlay hidden" id="watchlist-artist-config-modal-overlay">
+        <div class="watchlist-artist-config-modal" id="watchlist-artist-config-modal">
+            <div class="watchlist-artist-config-header">
+                <div class="watchlist-artist-config-hero" id="watchlist-artist-config-hero">
+                    <!-- Hero content will be dynamically populated -->
+                </div>
+                <span class="watchlist-artist-config-close" onclick="closeWatchlistArtistConfigModal()">&times;</span>
+            </div>
+
+            <div class="watchlist-artist-config-content">
+                <div class="watchlist-artist-config-body">
+                    <div class="config-section">
+                        <h3 class="config-section-title">Download Preferences</h3>
+                        <p class="config-section-subtitle">Select which types of releases to monitor for this artist</p>
+
+                        <div class="config-options">
+                            <label class="config-option">
+                                <input type="checkbox" id="config-include-albums" checked>
+                                <div class="config-option-content">
+                                    <div class="config-option-icon">💿</div>
+                                    <div class="config-option-text">
+                                        <span class="config-option-title">Albums</span>
+                                        <span class="config-option-description">Full-length studio albums</span>
+                                    </div>
+                                </div>
+                            </label>
+
+                            <label class="config-option">
+                                <input type="checkbox" id="config-include-eps" checked>
+                                <div class="config-option-content">
+                                    <div class="config-option-icon">🎵</div>
+                                    <div class="config-option-text">
+                                        <span class="config-option-title">EPs</span>
+                                        <span class="config-option-description">Extended plays (4-6 tracks)</span>
+                                    </div>
+                                </div>
+                            </label>
+
+                            <label class="config-option">
+                                <input type="checkbox" id="config-include-singles" checked>
+                                <div class="config-option-content">
+                                    <div class="config-option-icon">🎶</div>
+                                    <div class="config-option-text">
+                                        <span class="config-option-title">Singles</span>
+                                        <span class="config-option-description">Single tracks and 2-3 track releases</span>
+                                    </div>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="watchlist-artist-config-footer">
+                    <div class="config-modal-actions">
+                        <button class="config-modal-btn config-modal-btn-secondary" onclick="closeWatchlistArtistConfigModal()">
+                            Cancel
+                        </button>
+                        <button class="config-modal-btn config-modal-btn-primary" id="save-artist-config-btn">
+                            Save Preferences
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Genre Browser Modal -->
     <div class="genre-browser-modal-overlay" id="genre-browser-modal">
         <div class="genre-browser-modal-container">
