@@ -263,8 +263,8 @@ class WatchlistScanner:
             except Exception as img_error:
                 logger.warning(f"Could not update artist image for {watchlist_artist.artist_name}: {img_error}")
 
-            # Get artist discography from Spotify (filtered by artist's album type preferences)
-            albums = self.get_artist_discography(watchlist_artist, watchlist_artist.last_scan_timestamp)
+            # Get artist discography from Spotify
+            albums = self.get_artist_discography(watchlist_artist.spotify_artist_id, watchlist_artist.last_scan_timestamp)
 
             if albums is None:
                 return ScanResult(
@@ -355,38 +355,22 @@ class WatchlistScanner:
                 error_message=str(e)
             )
     
-    def get_artist_discography(self, watchlist_artist: WatchlistArtist, last_scan_timestamp: Optional[datetime] = None) -> Optional[List]:
+    def get_artist_discography(self, spotify_artist_id: str, last_scan_timestamp: Optional[datetime] = None) -> Optional[List]:
         """
-        Get artist's discography from Spotify, optionally filtered by release date and album type.
+        Get artist's discography from Spotify, optionally filtered by release date.
 
         Args:
-            watchlist_artist: WatchlistArtist object with configuration settings
+            spotify_artist_id: Spotify artist ID
             last_scan_timestamp: Only return releases after this date (for incremental scans)
                                 If None, uses lookback period setting from database
         """
         try:
-            # Build album_type filter from artist configuration
-            album_types = []
-            if watchlist_artist.include_albums:
-                album_types.append('album')
-            if watchlist_artist.include_eps:
-                album_types.append('ep')
-            if watchlist_artist.include_singles:
-                album_types.append('single')
-
-            # Fallback to albums only if nothing is selected (shouldn't happen due to validation)
-            if not album_types:
-                logger.warning(f"Artist {watchlist_artist.artist_name} has no album types selected, defaulting to albums only")
-                album_types = ['album']
-
-            album_type_param = ','.join(album_types)
-            logger.info(f"Fetching discography for {watchlist_artist.artist_name} (types: {album_type_param})")
-
-            # Get artist albums with configured types - this is rate limited in spotify_client
-            albums = self.spotify_client.get_artist_albums(watchlist_artist.spotify_artist_id, album_type=album_type_param, limit=50)
+            # Get all artist albums (albums + singles) - this is rate limited in spotify_client
+            logger.debug(f"Fetching discography for artist {spotify_artist_id}")
+            albums = self.spotify_client.get_artist_albums(spotify_artist_id, album_type='album,single', limit=50)
 
             if not albums:
-                logger.warning(f"No albums found for artist {watchlist_artist.artist_name}")
+                logger.warning(f"No albums found for artist {spotify_artist_id}")
                 return []
 
             # Add small delay after fetching artist discography to be extra safe
@@ -418,7 +402,7 @@ class WatchlistScanner:
             return albums
             
         except Exception as e:
-            logger.error(f"Error getting discography for artist {watchlist_artist.artist_name}: {e}")
+            logger.error(f"Error getting discography for artist {spotify_artist_id}: {e}")
             return None
 
     def _get_lookback_period_setting(self) -> str:

@@ -2590,8 +2590,7 @@ class MusicDatabase:
                 
                 cursor.execute("""
                     SELECT id, spotify_artist_id, artist_name, date_added,
-                           last_scan_timestamp, created_at, updated_at, image_url,
-                           include_albums, include_eps, include_singles
+                           last_scan_timestamp, created_at, updated_at, image_url
                     FROM watchlist_artists
                     ORDER BY date_added DESC
                 """)
@@ -2606,22 +2605,6 @@ class MusicDatabase:
                     except (KeyError, IndexError):
                         image_url = None
 
-                    # Try to get album type filter settings, fallback to True (include all) if columns don't exist yet (migration)
-                    try:
-                        include_albums = bool(row['include_albums'])
-                    except (KeyError, IndexError):
-                        include_albums = True
-
-                    try:
-                        include_eps = bool(row['include_eps'])
-                    except (KeyError, IndexError):
-                        include_eps = True
-
-                    try:
-                        include_singles = bool(row['include_singles'])
-                    except (KeyError, IndexError):
-                        include_singles = True
-
                     watchlist_artists.append(WatchlistArtist(
                         id=row['id'],
                         spotify_artist_id=row['spotify_artist_id'],
@@ -2630,10 +2613,7 @@ class MusicDatabase:
                         last_scan_timestamp=datetime.fromisoformat(row['last_scan_timestamp']) if row['last_scan_timestamp'] else None,
                         created_at=datetime.fromisoformat(row['created_at']) if row['created_at'] else None,
                         updated_at=datetime.fromisoformat(row['updated_at']) if row['updated_at'] else None,
-                        image_url=image_url,
-                        include_albums=include_albums,
-                        include_eps=include_eps,
-                        include_singles=include_singles
+                        image_url=image_url
                     ))
                 
                 return watchlist_artists
