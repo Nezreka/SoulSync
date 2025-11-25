@@ -13011,6 +13011,10 @@ youtube_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefi
 beatport_chart_states = {}  # Key: url_hash, Value: persistent chart state
 beatport_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="beatport_discovery")
 
+# Global state for ListenBrainz playlist management (persistent across page reloads)
+listenbrainz_playlist_states = {}  # Key: playlist_mbid, Value: persistent playlist state
+listenbrainz_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="listenbrainz_discovery")
+
 @app.route('/api/youtube/parse', methods=['POST'])
 def parse_youtube_playlist_endpoint():
     """Parse a YouTube playlist URL and return structured track data"""
@@ -13409,6 +13413,226 @@ def _run_youtube_discovery_worker(url_hash):
         
     except Exception as e:
         print(f"❌ Error in YouTube discovery worker: {e}")
+        state['status'] = 'error'
+        state['phase'] = 'fresh'
+
+def _run_listenbrainz_discovery_worker(playlist_mbid):
+    """Background worker for ListenBrainz Spotify discovery process"""
+    try:
+        state = listenbrainz_playlist_states[playlist_mbid]
+        playlist = state['playlist']
+        tracks = playlist['tracks']
+
+        print(f"🔍 Starting Spotify discovery for {len(tracks)} ListenBrainz tracks...")
+
+        if not spotify_client or not spotify_client.is_authenticated():
+            print("❌ Spotify client not authenticated")
+            state['status'] = 'error'
+            state['phase'] = 'fresh'
+            return
+
+        # Process each track for Spotify discovery
+        for i, track in enumerate(tracks):
+            try:
+                # Update progress
+                state['discovery_progress'] = int((i / len(tracks)) * 100)
+
+                # Get cleaned track data from ListenBrainz
+                cleaned_title = track['track_name']
+                cleaned_artist = track['artist_name']
+                album_name = track.get('album_name', '')
+                duration_ms = track.get('duration_ms', 0)
+
+                print(f"🔍 Searching Spotify for: '{cleaned_artist}' - '{cleaned_title}'")
+
+                # Try multiple search strategies using matching_engine for better accuracy
+                spotify_track = None
+                best_confidence = 0.0
+                min_confidence = 0.6  # Keep same threshold as YouTube
+
+                # Strategy 1: Use matching_engine search queries (with fallback)
+                try:
+                    # Create a temporary SpotifyTrack-like object for the matching engine
+                    temp_track = type('TempTrack', (), {
+                        'name': cleaned_title,
+                        'artists': [cleaned_artist],
+                        'album': album_name if album_name else None
+                    })()
+                    search_queries = matching_engine.generate_download_queries(temp_track)
+                    print(f"🔍 Generated {len(search_queries)} search queries for ListenBrainz track")
+                except Exception as e:
+                    print(f"⚠️ Matching engine failed for ListenBrainz, falling back to basic query: {e}")
+                    # Fallback to original simple query
+                    search_queries = [f"artist:{cleaned_artist} track:{cleaned_title}"]
+
+                # Store raw Spotify data for best match
+                best_raw_track = None
+
+                for query_idx, search_query in enumerate(search_queries):
+                    try:
+                        print(f"🔍 ListenBrainz query {query_idx + 1}/{len(search_queries)}: {search_query}")
+
+                        # Get raw Spotify API response to access full album object with images
+                        raw_results = spotify_client.sp.search(q=search_query, type='track', limit=5)
+                        if not raw_results or 'tracks' not in raw_results or not raw_results['tracks']['items']:
+                            continue
+
+                        spotify_results = spotify_client.search_tracks(search_query, limit=5)
+
+                        if not spotify_results:
+                            continue
+
+                        # Score each result using matching engine
+                        for result_idx, spotify_result in enumerate(spotify_results):
+                            raw_track = raw_results['tracks']['items'][result_idx] if result_idx < len(raw_results['tracks']['items']) else None
+                            try:
+                                # Calculate confidence using matching engine's similarity scoring (with fallback)
+                                try:
+                                    artist_confidence = 0.0
+                                    if spotify_result.artists:
+                                        # Get best artist match confidence
+                                        for result_artist in spotify_result.artists:
+                                            artist_sim = matching_engine.similarity_score(
+                                                matching_engine.normalize_string(cleaned_artist),
+                                                matching_engine.normalize_string(result_artist)
+                                            )
+                                            artist_confidence = max(artist_confidence, artist_sim)
+
+                                    # Calculate title confidence
+                                    title_confidence = matching_engine.similarity_score(
+                                        matching_engine.normalize_string(cleaned_title),
+                                        matching_engine.normalize_string(spotify_result.name)
+                                    )
+
+                                    # Combined confidence (70% title, 30% artist - same as YouTube)
+                                    combined_confidence = (title_confidence * 0.7 + artist_confidence * 0.3)
+                                except Exception as e:
+                                    print(f"⚠️ Matching engine scoring failed for ListenBrainz, using basic similarity: {e}")
+                                    # Fallback to original character overlap method
+                                    def _calculate_similarity_fallback(str1, str2):
+                                        if not str1 or not str2:
+                                            return 0
+                                        str1 = str1.lower().strip()
+                                        str2 = str2.lower().strip()
+                                        if str1 == str2:
+                                            return 1.0
+                                        set1 = set(str1.replace(' ', ''))
+                                        set2 = set(str2.replace(' ', ''))
+                                        if not set1 or not set2:
+                                            return 0
+                                        intersection = len(set1.intersection(set2))
+                                        union = len(set1.union(set2))
+                                        return intersection / union if union > 0 else 0
+
+                                    title_score = _calculate_similarity_fallback(cleaned_title, spotify_result.name)
+                                    artist_score = _calculate_similarity_fallback(cleaned_artist, spotify_result.artists[0] if spotify_result.artists else "")
+                                    combined_confidence = (title_score * 0.7) + (artist_score * 0.3)
+
+                                print(f"🔍 ListenBrainz candidate: '{spotify_result.artists[0]}' - '{spotify_result.name}' (confidence: {combined_confidence:.3f})")
+
+                                # Update best match if this is better
+                                if combined_confidence > best_confidence and combined_confidence >= min_confidence:
+                                    best_confidence = combined_confidence
+                                    spotify_track = spotify_result
+                                    best_raw_track = raw_track  # Store raw data with full album object
+                                    print(f"✅ New best ListenBrainz match: {spotify_result.artists[0]} - {spotify_result.name} (confidence: {combined_confidence:.3f})")
+
+                            except Exception as e:
+                                print(f"❌ Error processing ListenBrainz search result: {e}")
+                                continue
+
+                        # If we found a very high confidence match, stop searching
+                        if best_confidence >= 0.9:
+                            print(f"🎯 High confidence ListenBrainz match found ({best_confidence:.3f}), stopping search")
+                            break
+
+                    except Exception as e:
+                        print(f"❌ Error in ListenBrainz search for query '{search_query}': {e}")
+                        continue
+
+                if spotify_track:
+                    print(f"✅ Strategy 1 ListenBrainz match: {spotify_track.artists[0]} - {spotify_track.name} (confidence: {best_confidence:.3f})")
+
+                # Strategy 2: Swapped search (if first failed) - keep simple for fallback
+                if not spotify_track:
+                    print("🔄 ListenBrainz Strategy 2: Trying swapped search (artist/title reversed)")
+                    query = f"artist:{cleaned_title} track:{cleaned_artist}"
+                    spotify_results = spotify_client.search_tracks(query, limit=3)
+                    if spotify_results:
+                        spotify_track = spotify_results[0]
+                        print(f"✅ Strategy 2 ListenBrainz match (swapped): {spotify_track.artists[0]} - {spotify_track.name}")
+
+                # Strategy 3: Album-based search (if still failed and we have album name)
+                if not spotify_track and album_name:
+                    print(f"🔄 ListenBrainz Strategy 3: Trying album-based search: '{cleaned_artist} {album_name} {cleaned_title}'")
+                    query = f"artist:{cleaned_artist} album:{album_name} track:{cleaned_title}"
+                    spotify_results = spotify_client.search_tracks(query, limit=3)
+                    if spotify_results:
+                        spotify_track = spotify_results[0]
+                        print(f"✅ Strategy 3 ListenBrainz match (album): {spotify_track.artists[0]} - {spotify_track.name}")
+
+                # Create result entry
+                result = {
+                    'index': i,
+                    'lb_track': cleaned_title,
+                    'lb_artist': cleaned_artist,
+                    'status': '✅ Found' if spotify_track else '❌ Not Found',
+                    'status_class': 'found' if spotify_track else 'not-found',
+                    'spotify_track': spotify_track.name if spotify_track else '',
+                    'spotify_artist': spotify_track.artists[0] if spotify_track else '',
+                    'spotify_album': spotify_track.album if spotify_track else '',
+                    'duration': f"{duration_ms // 60000}:{(duration_ms % 60000) // 1000:02d}" if duration_ms else '0:00'
+                }
+
+                if spotify_track:
+                    state['spotify_matches'] += 1
+                    # Use full album object from raw Spotify data if available
+                    album_data = best_raw_track.get('album', {}) if best_raw_track else {}
+                    if not album_data:
+                        # Fallback to string album name
+                        album_data = {'name': spotify_track.album, 'album_type': 'album', 'images': []}
+
+                    result['spotify_data'] = {
+                        'id': spotify_track.id,
+                        'name': spotify_track.name,
+                        'artists': spotify_track.artists,
+                        'album': album_data,  # Full album object with images
+                        'duration_ms': spotify_track.duration_ms
+                    }
+
+                state['discovery_results'].append(result)
+
+                print(f"  {'✅' if spotify_track else '❌'} Track {i+1}/{len(tracks)}: {result['status']}")
+
+            except Exception as e:
+                print(f"❌ Error processing track {i}: {e}")
+                # Add failed result
+                result = {
+                    'index': i,
+                    'lb_track': track['track_name'],
+                    'lb_artist': track['artist_name'],
+                    'status': '❌ Error',
+                    'status_class': 'error',
+                    'spotify_track': '',
+                    'spotify_artist': '',
+                    'spotify_album': '',
+                    'duration': '0:00'
+                }
+                state['discovery_results'].append(result)
+
+        # Complete discovery
+        state['phase'] = 'discovered'
+        state['status'] = 'complete'
+        state['discovery_progress'] = 100
+
+        # Add activity for discovery completion
+        playlist_name = playlist['name']
+        add_activity_item("✅", "ListenBrainz Discovery Complete", f"'{playlist_name}' - {state['spotify_matches']}/{len(tracks)} tracks found", "Now")
+
+        print(f"✅ ListenBrainz discovery complete: {state['spotify_matches']}/{len(tracks)} tracks matched")
+
+    except Exception as e:
+        print(f"❌ Error in ListenBrainz discovery worker: {e}")
         state['status'] = 'error'
         state['phase'] = 'fresh'
 
@@ -16494,6 +16718,429 @@ def refresh_listenbrainz():
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
+
+# ========================================
+# LISTENBRAINZ PLAYLIST MANAGEMENT (Discovery System)
+# ========================================
+
+@app.route('/api/listenbrainz/playlists', methods=['GET'])
+def get_all_listenbrainz_playlists():
+    """Get all stored ListenBrainz playlists for frontend hydration"""
+    try:
+        playlists = []
+        current_time = time.time()
+
+        for playlist_mbid, state in listenbrainz_playlist_states.items():
+            # Update access time when requested
+            state['last_accessed'] = current_time
+
+            # Return essential data for card recreation
+            playlist_info = {
+                'playlist_mbid': playlist_mbid,
+                'playlist': state['playlist'],
+                'phase': state['phase'],
+                'status': state['status'],
+                'discovery_progress': state['discovery_progress'],
+                'spotify_matches': state['spotify_matches'],
+                'spotify_total': state['spotify_total'],
+                'converted_spotify_playlist_id': state.get('converted_spotify_playlist_id'),
+                'download_process_id': state.get('download_process_id'),
+                'created_at': state['created_at'],
+                'last_accessed': state['last_accessed']
+            }
+            playlists.append(playlist_info)
+
+        print(f"📋 Returning {len(playlists)} stored ListenBrainz playlists for hydration")
+        return jsonify({"playlists": playlists})
+
+    except Exception as e:
+        print(f"❌ Error getting ListenBrainz playlists: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/listenbrainz/state/<playlist_mbid>', methods=['GET'])
+def get_listenbrainz_playlist_state(playlist_mbid):
+    """Get specific ListenBrainz playlist state (detailed version)"""
+    try:
+        if playlist_mbid not in listenbrainz_playlist_states:
+            return jsonify({"error": "ListenBrainz playlist not found"}), 404
+
+        state = listenbrainz_playlist_states[playlist_mbid]
+        state['last_accessed'] = time.time()
+
+        # Return full state information (including results for modal hydration)
+        response = {
+            'playlist_mbid': playlist_mbid,
+            'playlist': state['playlist'],
+            'phase': state['phase'],
+            'status': state['status'],
+            'discovery_progress': state['discovery_progress'],
+            'spotify_matches': state['spotify_matches'],
+            'spotify_total': state['spotify_total'],
+            'discovery_results': state['discovery_results'],
+            'sync_playlist_id': state['sync_playlist_id'],
+            'converted_spotify_playlist_id': state['converted_spotify_playlist_id'],
+            'sync_progress': state['sync_progress'],
+            'created_at': state['created_at'],
+            'last_accessed': state['last_accessed']
+        }
+
+        return jsonify(response)
+
+    except Exception as e:
+        print(f"❌ Error getting ListenBrainz playlist state: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/listenbrainz/reset/<playlist_mbid>', methods=['POST'])
+def reset_listenbrainz_playlist(playlist_mbid):
+    """Reset ListenBrainz playlist to fresh phase (clear discovery/sync data)"""
+    try:
+        if playlist_mbid not in listenbrainz_playlist_states:
+            return jsonify({"error": "ListenBrainz playlist not found"}), 404
+
+        state = listenbrainz_playlist_states[playlist_mbid]
+
+        # Stop any active discovery
+        if 'discovery_future' in state and state['discovery_future']:
+            state['discovery_future'].cancel()
+
+        # Reset state to fresh (preserve original playlist data)
+        state['phase'] = 'fresh'
+        state['status'] = 'cached'
+        state['discovery_results'] = []
+        state['discovery_progress'] = 0
+        state['spotify_matches'] = 0
+        state['sync_playlist_id'] = None
+        state['converted_spotify_playlist_id'] = None
+        state['sync_progress'] = {}
+        state['discovery_future'] = None
+        state['last_accessed'] = time.time()
+
+        print(f"🔄 Reset ListenBrainz playlist to fresh: {state['playlist']['title']}")
+        return jsonify({"success": True, "phase": "fresh"})
+
+    except Exception as e:
+        print(f"❌ Error resetting ListenBrainz playlist: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/listenbrainz/remove/<playlist_mbid>', methods=['POST'])
+def remove_listenbrainz_playlist(playlist_mbid):
+    """Remove ListenBrainz playlist from state (doesn't affect cache)"""
+    try:
+        if playlist_mbid not in listenbrainz_playlist_states:
+            return jsonify({"error": "ListenBrainz playlist not found"}), 404
+
+        state = listenbrainz_playlist_states[playlist_mbid]
+
+        # Stop any active discovery
+        if 'discovery_future' in state and state['discovery_future']:
+            state['discovery_future'].cancel()
+
+        # Remove from state
+        del listenbrainz_playlist_states[playlist_mbid]
+
+        print(f"🗑️ Removed ListenBrainz playlist from state: {playlist_mbid}")
+        return jsonify({"success": True})
+
+    except Exception as e:
+        print(f"❌ Error removing ListenBrainz playlist: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/listenbrainz/discovery/start/<playlist_mbid>', methods=['POST'])
+def start_listenbrainz_discovery(playlist_mbid):
+    """Initialize and start Spotify discovery process for a ListenBrainz playlist"""
+    try:
+        data = request.get_json()
+        playlist_data = data.get('playlist')
+
+        if not playlist_data:
+            return jsonify({"error": "Playlist data required"}), 400
+
+        # Create or update state
+        if playlist_mbid not in listenbrainz_playlist_states:
+            # Initialize new state
+            listenbrainz_playlist_states[playlist_mbid] = {
+                'playlist_mbid': playlist_mbid,
+                'playlist': playlist_data,
+                'phase': 'discovering',
+                'status': 'discovering',
+                'discovery_progress': 0,
+                'spotify_matches': 0,
+                'spotify_total': len(playlist_data.get('tracks', [])),
+                'discovery_results': [],
+                'created_at': time.time(),
+                'last_accessed': time.time()
+            }
+            print(f"✅ Created new ListenBrainz playlist state: {playlist_data.get('name', 'Unknown')}")
+        else:
+            # State already exists, update it
+            state = listenbrainz_playlist_states[playlist_mbid]
+            if state['phase'] == 'discovering':
+                return jsonify({"error": "Discovery already in progress"}), 400
+
+            # Reset for new discovery
+            state['phase'] = 'discovering'
+            state['status'] = 'discovering'
+            state['discovery_progress'] = 0
+            state['spotify_matches'] = 0
+            state['discovery_results'] = []
+            state['last_accessed'] = time.time()
+
+        state = listenbrainz_playlist_states[playlist_mbid]
+
+        # Add activity for discovery start
+        playlist_name = playlist_data.get('name', 'Unknown Playlist')
+        track_count = len(playlist_data.get('tracks', []))
+        add_activity_item("🔍", "ListenBrainz Discovery Started", f"'{playlist_name}' - {track_count} tracks", "Now")
+
+        # Start discovery worker
+        future = listenbrainz_discovery_executor.submit(_run_listenbrainz_discovery_worker, playlist_mbid)
+        state['discovery_future'] = future
+
+        print(f"🔍 Started Spotify discovery for ListenBrainz playlist: {playlist_name}")
+        return jsonify({"success": True, "message": "Discovery started"})
+
+    except Exception as e:
+        print(f"❌ Error starting ListenBrainz discovery: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/listenbrainz/discovery/status/<playlist_mbid>', methods=['GET'])
+def get_listenbrainz_discovery_status(playlist_mbid):
+    """Get real-time discovery status for a ListenBrainz playlist"""
+    try:
+        if playlist_mbid not in listenbrainz_playlist_states:
+            return jsonify({"error": "ListenBrainz playlist not found"}), 404
+
+        state = listenbrainz_playlist_states[playlist_mbid]
+        state['last_accessed'] = time.time()
+
+        response = {
+            'phase': state['phase'],
+            'status': state['status'],
+            'progress': state['discovery_progress'],
+            'spotify_matches': state['spotify_matches'],
+            'spotify_total': state['spotify_total'],
+            'results': state['discovery_results'],
+            'complete': state['phase'] == 'discovered'
+        }
+
+        return jsonify(response)
+
+    except Exception as e:
+        print(f"❌ Error getting ListenBrainz discovery status: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/listenbrainz/discovery/update_match', methods=['POST'])
+def update_listenbrainz_discovery_match():
+    """Update a ListenBrainz discovery result with manually selected Spotify track"""
+    try:
+        data = request.get_json()
+        identifier = data.get('identifier')  # playlist_mbid
+        track_index = data.get('track_index')
+        spotify_track = data.get('spotify_track')
+
+        if not identifier or track_index is None or not spotify_track:
+            return jsonify({'error': 'Missing required fields'}), 400
+
+        # Get the state
+        state = listenbrainz_playlist_states.get(identifier)
+
+        if not state:
+            return jsonify({'error': 'Discovery state not found'}), 404
+
+        # Update the discovery result
+        if track_index < len(state['discovery_results']):
+            result = state['discovery_results'][track_index]
+
+            # Was previously not found, now found
+            if result['status_class'] == 'not-found' and spotify_track:
+                state['spotify_matches'] += 1
+            # Was previously found, now not found
+            elif result['status_class'] == 'found' and not spotify_track:
+                state['spotify_matches'] -= 1
+
+            # Update result
+            result['status'] = '✅ Found' if spotify_track else '❌ Not Found'
+            result['status_class'] = 'found' if spotify_track else 'not-found'
+            result['spotify_track'] = spotify_track.get('name', '') if spotify_track else ''
+            result['spotify_artist'] = spotify_track.get('artists', [''])[0] if spotify_track and spotify_track.get('artists') else ''
+            result['spotify_album'] = spotify_track.get('album', {}).get('name', '') if spotify_track else ''
+
+            if spotify_track:
+                result['spotify_data'] = spotify_track
+            else:
+                result['spotify_data'] = None
+
+            print(f"✅ Updated ListenBrainz match for track {track_index}: {result['status']}")
+            return jsonify({'success': True})
+        else:
+            return jsonify({'error': 'Invalid track index'}), 400
+
+    except Exception as e:
+        print(f"❌ Error updating ListenBrainz discovery match: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+def convert_listenbrainz_results_to_spotify_tracks(discovery_results):
+    """Convert ListenBrainz discovery results to Spotify tracks format for sync"""
+    spotify_tracks = []
+
+    for result in discovery_results:
+        # Support both data formats: spotify_data (manual fixes) and individual fields (automatic discovery)
+        if result.get('spotify_data'):
+            spotify_data = result['spotify_data']
+
+            # Create track object matching the expected format
+            track = {
+                'id': spotify_data['id'],
+                'name': spotify_data['name'],
+                'artists': spotify_data['artists'],
+                'album': spotify_data['album'],
+                'duration_ms': spotify_data.get('duration_ms', 0)
+            }
+            spotify_tracks.append(track)
+        elif result.get('spotify_track') and result.get('status_class') == 'found':
+            # Build from individual fields (automatic discovery format)
+            track = {
+                'id': result.get('spotify_id', 'unknown'),
+                'name': result.get('spotify_track', 'Unknown Track'),
+                'artists': [result.get('spotify_artist', 'Unknown Artist')] if result.get('spotify_artist') else ['Unknown Artist'],
+                'album': result.get('spotify_album', 'Unknown Album'),
+                'duration_ms': 0
+            }
+            spotify_tracks.append(track)
+
+    print(f"🔄 Converted {len(spotify_tracks)} ListenBrainz matches to Spotify tracks for sync")
+    return spotify_tracks
+
+@app.route('/api/listenbrainz/sync/start/<playlist_mbid>', methods=['POST'])
+def start_listenbrainz_sync(playlist_mbid):
+    """Start sync process for a ListenBrainz playlist using discovered Spotify tracks"""
+    try:
+        if playlist_mbid not in listenbrainz_playlist_states:
+            return jsonify({"error": "ListenBrainz playlist not found"}), 404
+
+        state = listenbrainz_playlist_states[playlist_mbid]
+        state['last_accessed'] = time.time()  # Update access time
+
+        if state['phase'] not in ['discovered', 'sync_complete']:
+            return jsonify({"error": "ListenBrainz playlist not ready for sync"}), 400
+
+        # Convert discovery results to Spotify tracks format
+        spotify_tracks = convert_listenbrainz_results_to_spotify_tracks(state['discovery_results'])
+
+        if not spotify_tracks:
+            return jsonify({"error": "No Spotify matches found for sync"}), 400
+
+        # Create a temporary playlist ID for sync tracking
+        sync_playlist_id = f"listenbrainz_{playlist_mbid}"
+        playlist_name = state['playlist']['name']
+
+        # Add activity for sync start
+        add_activity_item("🔄", "ListenBrainz Sync Started", f"'{playlist_name}' - {len(spotify_tracks)} tracks", "Now")
+
+        # Update ListenBrainz state
+        state['phase'] = 'syncing'
+        state['sync_playlist_id'] = sync_playlist_id
+        state['sync_progress'] = {}
+
+        # Start the sync using existing sync infrastructure
+        sync_data = {
+            'playlist_id': sync_playlist_id,
+            'playlist_name': f"[ListenBrainz] {playlist_name}",
+            'tracks': spotify_tracks
+        }
+
+        with sync_lock:
+            sync_states[sync_playlist_id] = {"status": "starting", "progress": {}}
+
+        # Submit sync task
+        future = sync_executor.submit(_run_sync_task, sync_playlist_id, sync_data['playlist_name'], spotify_tracks)
+        active_sync_workers[sync_playlist_id] = future
+
+        print(f"🔄 Started ListenBrainz sync for: {playlist_name} ({len(spotify_tracks)} tracks)")
+        return jsonify({"success": True, "sync_playlist_id": sync_playlist_id})
+
+    except Exception as e:
+        print(f"❌ Error starting ListenBrainz sync: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/listenbrainz/sync/status/<playlist_mbid>', methods=['GET'])
+def get_listenbrainz_sync_status(playlist_mbid):
+    """Get sync status for a ListenBrainz playlist"""
+    try:
+        if playlist_mbid not in listenbrainz_playlist_states:
+            return jsonify({"error": "ListenBrainz playlist not found"}), 404
+
+        state = listenbrainz_playlist_states[playlist_mbid]
+        state['last_accessed'] = time.time()  # Update access time
+        sync_playlist_id = state.get('sync_playlist_id')
+
+        if not sync_playlist_id:
+            return jsonify({"error": "No sync in progress"}), 404
+
+        # Get sync status from existing sync infrastructure
+        with sync_lock:
+            sync_state = sync_states.get(sync_playlist_id, {})
+
+        response = {
+            'phase': state['phase'],
+            'sync_status': sync_state.get('status', 'unknown'),
+            'progress': sync_state.get('progress', {}),
+            'complete': sync_state.get('status') == 'finished',
+            'error': sync_state.get('error')
+        }
+
+        # Update ListenBrainz state if sync completed
+        if sync_state.get('status') == 'finished':
+            state['phase'] = 'sync_complete'
+            state['sync_progress'] = sync_state.get('progress', {})
+            # Add activity for sync completion
+            playlist_name = state.get('playlist', {}).get('name', 'Unknown Playlist')
+            add_activity_item("🔄", "Sync Complete", f"ListenBrainz playlist '{playlist_name}' synced successfully", "Now")
+        elif sync_state.get('status') == 'error':
+            state['phase'] = 'discovered'  # Revert on error
+            playlist_name = state.get('playlist', {}).get('name', 'Unknown Playlist')
+            add_activity_item("❌", "Sync Failed", f"ListenBrainz playlist '{playlist_name}' sync failed", "Now")
+
+        return jsonify(response)
+
+    except Exception as e:
+        print(f"❌ Error getting ListenBrainz sync status: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/listenbrainz/sync/cancel/<playlist_mbid>', methods=['POST'])
+def cancel_listenbrainz_sync(playlist_mbid):
+    """Cancel sync for a ListenBrainz playlist"""
+    try:
+        if playlist_mbid not in listenbrainz_playlist_states:
+            return jsonify({"error": "ListenBrainz playlist not found"}), 404
+
+        state = listenbrainz_playlist_states[playlist_mbid]
+        state['last_accessed'] = time.time()  # Update access time
+        sync_playlist_id = state.get('sync_playlist_id')
+
+        if sync_playlist_id:
+            # Cancel the sync using existing sync infrastructure
+            with sync_lock:
+                sync_states[sync_playlist_id] = {"status": "cancelled"}
+
+            # Clean up sync worker
+            if sync_playlist_id in active_sync_workers:
+                del active_sync_workers[sync_playlist_id]
+
+        # Revert ListenBrainz state
+        state['phase'] = 'discovered'
+        state['sync_playlist_id'] = None
+        state['sync_progress'] = {}
+
+        return jsonify({"success": True, "message": "ListenBrainz sync cancelled"})
+
+    except Exception as e:
+        print(f"❌ Error cancelling ListenBrainz sync: {e}")
+        return jsonify({"error": str(e)}), 500
 
 
 # OLD ENDPOINT - REMOVE ALL THE CODE BELOW FOR THE OLD IMPLEMENTATION

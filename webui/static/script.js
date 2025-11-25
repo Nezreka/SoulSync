@@ -52,6 +52,10 @@ let tidalPlaylistsLoaded = false;
 // --- Beatport Chart State Management (Similar to YouTube/Tidal) ---
 let beatportChartStates = {}; // Key: chart_hash, Value: chart state with phases
 
+// --- ListenBrainz Playlist State Management (Similar to YouTube/Tidal/Beatport) ---
+let listenbrainzPlaylistStates = {}; // Key: playlist_mbid, Value: playlist state with phases
+let listenbrainzPlaylistsLoaded = false;  // Track if playlists have been loaded from backend
+
 // --- Artists Page State Management ---
 let artistsPageState = {
     currentView: 'search', // 'search', 'results', 'detail'
@@ -3061,6 +3065,104 @@ async function loadBeatportChartsFromBackend() {
     } catch (error) {
         console.error('❌ Error loading Beatport charts from backend:', error);
         showToast(`Error loading Beatport charts: ${error.message}`, 'error');
+    }
+}
+
+async function loadListenBrainzPlaylistsFromBackend() {
+    // Load all stored ListenBrainz playlist states from backend for persistence (similar to Beatport hydration)
+    try {
+        console.log('📋 Loading ListenBrainz playlists from backend...');
+
+        const response = await fetch('/api/listenbrainz/playlists');
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to fetch ListenBrainz playlists');
+        }
+
+        const data = await response.json();
+        const playlists = data.playlists || [];
+
+        console.log(`🎵 Found ${playlists.length} stored ListenBrainz playlists in backend`);
+
+        if (playlists.length === 0) {
+            console.log('📋 No ListenBrainz playlists to hydrate');
+            listenbrainzPlaylistsLoaded = true;
+            return;
+        }
+
+        // Restore state for each playlist
+        for (const playlistInfo of playlists) {
+            const playlistMbid = playlistInfo.playlist_mbid;
+
+            console.log(`🎵 Hydrating ListenBrainz playlist: ${playlistInfo.playlist.name} (Phase: ${playlistInfo.phase})`);
+
+            // Fetch full state for non-fresh playlists to restore discovery results
+            if (playlistInfo.phase !== 'fresh') {
+                try {
+                    console.log(`🔍 Fetching full state for: ${playlistInfo.playlist.name}`);
+                    const stateResponse = await fetch(`/api/listenbrainz/state/${playlistMbid}`);
+                    if (stateResponse.ok) {
+                        const fullState = await stateResponse.json();
+                        console.log(`📋 Retrieved full state with ${fullState.discovery_results?.length || 0} discovery results`);
+
+                        // Transform backend results to frontend format (like Beatport does)
+                        const transformedResults = (fullState.discovery_results || []).map((result, index) => ({
+                            index: result.index !== undefined ? result.index : index,
+                            yt_track: result.lb_track || result.track_name || 'Unknown',
+                            yt_artist: result.lb_artist || result.artist_name || 'Unknown',
+                            status: result.status === 'found' || result.status === '✅ Found' || result.status_class === 'found' ? '✅ Found' : (result.status === 'error' ? '❌ Error' : '❌ Not Found'),
+                            status_class: result.status_class || (result.status === 'found' || result.status === '✅ Found' ? 'found' : (result.status === 'error' ? 'error' : 'not-found')),
+                            spotify_track: result.spotify_data ? result.spotify_data.name : (result.spotify_track || '-'),
+                            spotify_artist: result.spotify_data && result.spotify_data.artists ?
+                                (Array.isArray(result.spotify_data.artists) ? result.spotify_data.artists[0] : result.spotify_data.artists) : (result.spotify_artist || '-'),
+                            spotify_album: result.spotify_data ? (typeof result.spotify_data.album === 'object' ? result.spotify_data.album.name : result.spotify_data.album) : (result.spotify_album || '-'),
+                            spotify_data: result.spotify_data,
+                            duration: result.duration || '0:00'
+                        }));
+
+                        // Create ListenBrainz state with both naming conventions
+                        listenbrainzPlaylistStates[playlistMbid] = {
+                            phase: fullState.phase,
+                            playlist: fullState.playlist,
+                            is_listenbrainz_playlist: true,
+                            playlist_mbid: playlistMbid,
+                            // Store with both naming conventions
+                            discovery_results: fullState.discovery_results || [],
+                            discoveryResults: transformedResults,
+                            discovery_progress: fullState.discovery_progress || 0,
+                            discoveryProgress: fullState.discovery_progress || 0,
+                            spotify_matches: fullState.spotify_matches || 0,
+                            spotifyMatches: fullState.spotify_matches || 0,
+                            spotify_total: fullState.spotify_total || 0,
+                            spotifyTotal: fullState.spotify_total || 0,
+                            convertedSpotifyPlaylistId: fullState.converted_spotify_playlist_id,
+                            download_process_id: fullState.download_process_id
+                        };
+
+                        console.log(`✅ Restored ${transformedResults.length} discovery results for: ${playlistInfo.playlist.name}`);
+                    } else {
+                        console.warn(`⚠️ Could not fetch full state for: ${playlistInfo.playlist.name}`);
+                    }
+                } catch (error) {
+                    console.warn(`⚠️ Error fetching full state for ${playlistInfo.playlist.name}:`, error.message);
+                }
+            }
+        }
+
+        // Start polling for any playlists that are still in discovering phase
+        for (const playlistInfo of playlists) {
+            if (playlistInfo.phase === 'discovering') {
+                console.log(`🔄 [Backend Loading] Auto-starting polling for discovering playlist: ${playlistInfo.playlist.name}`);
+                startListenBrainzDiscoveryPolling(playlistInfo.playlist_mbid);
+            }
+        }
+
+        listenbrainzPlaylistsLoaded = true;
+        console.log(`✅ Successfully loaded and rehydrated ${playlists.length} ListenBrainz playlists`);
+
+    } catch (error) {
+        console.error('❌ Error loading ListenBrainz playlists from backend:', error);
+        listenbrainzPlaylistsLoaded = true;  // Mark as loaded even on error to prevent retries
     }
 }
 
@@ -7927,7 +8029,7 @@ function openDiscoveryFixModal(platform, identifier, trackIndex) {
     console.log(`🔧 Opening fix modal: ${platform} - ${identifier} - track ${trackIndex}`);
 
     // Get the discovery state
-    // Note: Beatport and Tidal reuse youtubePlaylistStates for discovery results
+    // Note: Beatport, Tidal, and ListenBrainz have their own states, but reuse YouTube modal infrastructure
     let state, result;
     if (platform === 'youtube') {
         state = youtubePlaylistStates[identifier];
@@ -7935,6 +8037,8 @@ function openDiscoveryFixModal(platform, identifier, trackIndex) {
         state = youtubePlaylistStates[identifier]; // Tidal uses YouTube state infrastructure
     } else if (platform === 'beatport') {
         state = youtubePlaylistStates[identifier]; // Beatport uses YouTube state infrastructure
+    } else if (platform === 'listenbrainz') {
+        state = listenbrainzPlaylistStates[identifier]; // ListenBrainz has its own state
     }
 
     // Support both camelCase and snake_case for discovery results
@@ -15552,14 +15656,15 @@ function stopYouTubeDiscoveryPolling(urlHash) {
 }
 
 function openYouTubeDiscoveryModal(urlHash) {
-    const state = youtubePlaylistStates[urlHash];
+    // Check ListenBrainz state first, then fallback to YouTube state
+    const state = listenbrainzPlaylistStates[urlHash] || youtubePlaylistStates[urlHash];
     if (!state || !state.playlist) {
-        console.error('❌ No YouTube playlist data found for hash:', urlHash);
+        console.error('❌ No playlist data found for identifier:', urlHash);
         return;
     }
-    
-    console.log('🎵 Opening YouTube discovery modal for:', state.playlist.name);
-    
+
+    console.log('🎵 Opening discovery modal for:', state.playlist.name);
+
     // Check if modal already exists
     let modal = document.getElementById(`youtube-discovery-modal-${urlHash}`);
 
@@ -15579,19 +15684,24 @@ function openYouTubeDiscoveryModal(urlHash) {
                 startTidalSyncPolling(urlHash);
             } else if (state.is_beatport_playlist) {
                 startBeatportSyncPolling(urlHash);
+            } else if (state.is_listenbrainz_playlist) {
+                startListenBrainzSyncPolling(urlHash);
             } else {
                 startYouTubeSyncPolling(urlHash);
             }
         }
     } else {
-        // Create new modal (support YouTube, Tidal, and Beatport like sync.py)
+        // Create new modal (support YouTube, Tidal, Beatport, and ListenBrainz)
         const isTidal = state.is_tidal_playlist;
         const isBeatport = state.is_beatport_playlist;
+        const isListenBrainz = state.is_listenbrainz_playlist;
         const modalTitle = isTidal ? '🎵 Tidal Playlist Discovery' :
                           isBeatport ? '🎵 Beatport Chart Discovery' :
+                          isListenBrainz ? '🎵 ListenBrainz Playlist Discovery' :
                           '🎵 YouTube Playlist Discovery';
         const sourceLabel = isTidal ? 'Tidal' :
                            isBeatport ? 'Beatport' :
+                           isListenBrainz ? 'LB' :
                            'YT';
         
         const modalHtml = `
@@ -15600,17 +15710,17 @@ function openYouTubeDiscoveryModal(urlHash) {
                     <div class="modal-header">
                         <h2>${modalTitle}</h2>
                         <div class="modal-subtitle">${state.playlist.name} (${state.playlist.tracks.length} tracks)</div>
-                        <div class="modal-description">${getModalDescription(state.phase, isTidal, isBeatport)}</div>
+                        <div class="modal-description">${getModalDescription(state.phase, isTidal, isBeatport, isListenBrainz)}</div>
                         <button class="modal-close-btn" onclick="closeYouTubeDiscoveryModal('${urlHash}')">✕</button>
                     </div>
-                    
+
                     <div class="modal-body">
                         <div class="progress-section">
                             <div class="progress-label">🔍 Spotify Discovery Progress</div>
                             <div class="progress-bar-container">
                                 <div class="progress-bar-fill" id="youtube-discovery-progress-${urlHash}" style="width: 0%;"></div>
                             </div>
-                            <div class="progress-text" id="youtube-discovery-progress-text-${urlHash}">${getInitialProgressText(state.phase, isTidal, isBeatport)}</div>
+                            <div class="progress-text" id="youtube-discovery-progress-text-${urlHash}">${getInitialProgressText(state.phase, isTidal, isBeatport, isListenBrainz)}</div>
                         </div>
                         
                         <div class="discovery-table-container">
@@ -15741,18 +15851,37 @@ function openYouTubeDiscoveryModal(urlHash) {
 function getModalActionButtons(urlHash, phase, state = null) {
     // Get state if not provided
     if (!state) {
-        state = youtubePlaylistStates[urlHash];
+        state = listenbrainzPlaylistStates[urlHash] || youtubePlaylistStates[urlHash];
     }
-    
+
     const isTidal = state && state.is_tidal_playlist;
     const isBeatport = state && state.is_beatport_playlist;
+    const isListenBrainz = state && state.is_listenbrainz_playlist;
     
-    // Validate data availability for buttons
-    const hasDiscoveryResults = state && state.discoveryResults && state.discoveryResults.length > 0;
-    const hasSpotifyMatches = state && state.spotifyMatches > 0;
+    // Validate data availability for buttons (support both naming conventions)
+    const hasDiscoveryResults = state && ((state.discoveryResults && state.discoveryResults.length > 0) || (state.discovery_results && state.discovery_results.length > 0));
+    const hasSpotifyMatches = state && ((state.spotifyMatches > 0) || (state.spotify_matches > 0));
     const hasConvertedPlaylistId = state && state.convertedSpotifyPlaylistId;
     
     switch (phase) {
+        case 'fresh':
+        case 'discovering':
+            // Show start discovery button for fresh playlists
+            if (phase === 'fresh') {
+                if (isListenBrainz) {
+                    return `<button class="modal-btn modal-btn-primary" onclick="startListenBrainzDiscovery('${urlHash}')">🔍 Start Discovery</button>`;
+                } else if (isTidal) {
+                    return `<button class="modal-btn modal-btn-primary" onclick="startYouTubeDiscovery('${urlHash}')">🔍 Start Discovery</button>`;
+                } else if (isBeatport) {
+                    return `<button class="modal-btn modal-btn-primary" onclick="startYouTubeDiscovery('${urlHash}')">🔍 Start Discovery</button>`;
+                } else {
+                    return `<button class="modal-btn modal-btn-primary" onclick="startYouTubeDiscovery('${urlHash}')">🔍 Start Discovery</button>`;
+                }
+            } else {
+                // Discovering phase - show progress
+                return `<div class="modal-info">🔍 Discovering Spotify matches...</div>`;
+            }
+
         case 'discovered':
             // Only show buttons if we actually have discovery data
             if (!hasDiscoveryResults) {
@@ -15763,7 +15892,9 @@ function getModalActionButtons(urlHash, phase, state = null) {
             
             // Only show sync button if there are Spotify matches
             if (hasSpotifyMatches) {
-                if (isTidal) {
+                if (isListenBrainz) {
+                    buttons += `<button class="modal-btn modal-btn-primary" onclick="startListenBrainzPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                } else if (isTidal) {
                     buttons += `<button class="modal-btn modal-btn-primary" onclick="startTidalPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
                 } else if (isBeatport) {
                     buttons += `<button class="modal-btn modal-btn-primary" onclick="startBeatportPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
@@ -15771,10 +15902,13 @@ function getModalActionButtons(urlHash, phase, state = null) {
                     buttons += `<button class="modal-btn modal-btn-primary" onclick="startYouTubePlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
                 }
             }
-            
+
             // Only show download button if we have matches or a converted playlist ID
             if (hasSpotifyMatches || hasConvertedPlaylistId) {
-                if (isTidal) {
+                if (isListenBrainz) {
+                    // ListenBrainz uses same download function as others (to be implemented)
+                    buttons += `<button class="modal-btn modal-btn-primary" onclick="startYouTubeDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
+                } else if (isTidal) {
                     buttons += `<button class="modal-btn modal-btn-primary" onclick="startTidalDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
                 } else if (isBeatport) {
                     buttons += `<button class="modal-btn modal-btn-primary" onclick="startBeatportDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
@@ -15790,7 +15924,19 @@ function getModalActionButtons(urlHash, phase, state = null) {
             return buttons;
             
         case 'syncing':
-            if (isTidal) {
+            if (isListenBrainz) {
+                return `
+                    <button class="modal-btn modal-btn-danger" onclick="cancelYouTubeSync('${urlHash}')">❌ Cancel Sync</button>
+                    <div class="playlist-modal-sync-status" id="listenbrainz-sync-status-${urlHash}" style="display: flex;">
+                        <span class="sync-stat total-tracks">♪ <span id="listenbrainz-total-${urlHash}">0</span></span>
+                        <span class="sync-separator">/</span>
+                        <span class="sync-stat matched-tracks">✓ <span id="listenbrainz-matched-${urlHash}">0</span></span>
+                        <span class="sync-separator">/</span>
+                        <span class="sync-stat failed-tracks">✗ <span id="listenbrainz-failed-${urlHash}">0</span></span>
+                        <span class="sync-stat percentage">(<span id="listenbrainz-percentage-${urlHash}">0</span>%)</span>
+                    </div>
+                `;
+            } else if (isTidal) {
                 return `
                     <button class="modal-btn modal-btn-danger" onclick="cancelTidalSync('${urlHash}')">❌ Cancel Sync</button>
                     <div class="playlist-modal-sync-status" id="tidal-sync-status-${urlHash}" style="display: flex;">
@@ -15830,10 +15976,12 @@ function getModalActionButtons(urlHash, phase, state = null) {
             
         case 'sync_complete':
             let syncCompleteButtons = '';
-            
+
             // Only show sync button if there are Spotify matches
             if (hasSpotifyMatches) {
-                if (isTidal) {
+                if (isListenBrainz) {
+                    syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startListenBrainzPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                } else if (isTidal) {
                     syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startTidalPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
                 } else if (isBeatport) {
                     syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startBeatportPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
@@ -15841,10 +15989,12 @@ function getModalActionButtons(urlHash, phase, state = null) {
                     syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startYouTubePlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
                 }
             }
-            
+
             // Only show download button if we have matches or a converted playlist ID
             if (hasSpotifyMatches || hasConvertedPlaylistId) {
-                if (isTidal) {
+                if (isListenBrainz) {
+                    syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startYouTubeDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
+                } else if (isTidal) {
                     syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startTidalDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
                 } else if (isBeatport) {
                     syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startBeatportDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
@@ -15852,8 +16002,10 @@ function getModalActionButtons(urlHash, phase, state = null) {
                     syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startYouTubeDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
                 }
             }
-            
-            if (isTidal) {
+
+            if (isListenBrainz) {
+                // ListenBrainz playlists don't need reset (they're read-only from ListenBrainz API)
+            } else if (isTidal) {
                 // Tidal doesn't have a reset function yet, but could be added
                 // syncCompleteButtons += `<button class="modal-btn modal-btn-secondary" onclick="resetTidalPlaylist('${urlHash}')">🔄 Reset</button>`;
             } else if (isBeatport) {
@@ -15861,7 +16013,7 @@ function getModalActionButtons(urlHash, phase, state = null) {
             } else {
                 syncCompleteButtons += `<button class="modal-btn modal-btn-secondary" onclick="resetYouTubePlaylist('${urlHash}')">🔄 Reset</button>`;
             }
-            
+
             return syncCompleteButtons;
             
         default:
@@ -15869,8 +16021,8 @@ function getModalActionButtons(urlHash, phase, state = null) {
     }
 }
 
-function getModalDescription(phase, isTidal = false, isBeatport = false) {
-    const source = isBeatport ? 'Beatport' : (isTidal ? 'Tidal' : 'YouTube');
+function getModalDescription(phase, isTidal = false, isBeatport = false, isListenBrainz = false) {
+    const source = isListenBrainz ? 'ListenBrainz' : (isBeatport ? 'Beatport' : (isTidal ? 'Tidal' : 'YouTube'));
     switch (phase) {
         case 'fresh':
             return `Ready to discover clean Spotify metadata for ${source} tracks...`;
@@ -15883,7 +16035,7 @@ function getModalDescription(phase, isTidal = false, isBeatport = false) {
     }
 }
 
-function getInitialProgressText(phase, isTidal = false, isBeatport = false) {
+function getInitialProgressText(phase, isTidal = false, isBeatport = false, isListenBrainz = false) {
     switch (phase) {
         case 'fresh':
             return 'Click Start Discovery to begin...';
@@ -15899,42 +16051,64 @@ function getInitialProgressText(phase, isTidal = false, isBeatport = false) {
 function generateTableRowsFromState(state, urlHash) {
     const isTidal = state.is_tidal_playlist;
     const isBeatport = state.is_beatport_playlist;
-    const platform = isTidal ? 'tidal' : (isBeatport ? 'beatport' : 'youtube');
+    const isListenBrainz = state.is_listenbrainz_playlist;
+    const platform = isListenBrainz ? 'listenbrainz' : (isTidal ? 'tidal' : (isBeatport ? 'beatport' : 'youtube'));
 
     // Support both camelCase and snake_case
     const discoveryResults = state.discoveryResults || state.discovery_results;
 
     if (discoveryResults && discoveryResults.length > 0) {
         // Generate rows from existing discovery results
-        return discoveryResults.map((result, index) => `
+        return discoveryResults.map((result, index) => {
+            // Handle different field names based on platform
+            const trackName = result.lb_track || result.yt_track || result.track_name || '-';
+            const artistName = result.lb_artist || result.yt_artist || result.artist_name || '-';
+
+            return `
             <tr id="discovery-row-${urlHash}-${result.index}">
-                <td class="yt-track">${result.yt_track}</td>
-                <td class="yt-artist">${result.yt_artist}</td>
+                <td class="yt-track">${trackName}</td>
+                <td class="yt-artist">${artistName}</td>
                 <td class="discovery-status ${result.status_class}">${result.status}</td>
                 <td class="spotify-track">${result.spotify_track || '-'}</td>
                 <td class="spotify-artist">${result.spotify_artist || '-'}</td>
                 <td class="spotify-album">${result.spotify_album || '-'}</td>
                 <td class="discovery-actions">${generateDiscoveryActionButton(result, urlHash, platform)}</td>
             </tr>
-        `).join('');
+        `;
+        }).join('');
     } else {
         // Generate initial rows from playlist tracks
-        return generateInitialTableRows(state.playlist.tracks, isTidal, urlHash, isBeatport);
+        return generateInitialTableRows(state.playlist.tracks, isTidal, urlHash, isBeatport, isListenBrainz);
     }
 }
 
-function generateInitialTableRows(tracks, isTidal = false, urlHash = '', isBeatport = false) {
-    return tracks.map((track, index) => `
+function generateInitialTableRows(tracks, isTidal = false, urlHash = '', isBeatport = false, isListenBrainz = false) {
+    return tracks.map((track, index) => {
+        // Handle different track formats based on platform
+        let trackName, artistName;
+
+        if (isListenBrainz) {
+            // ListenBrainz tracks have track_name and artist_name
+            trackName = track.track_name || 'Unknown Track';
+            artistName = track.artist_name || 'Unknown Artist';
+        } else {
+            // YouTube/Tidal/Beatport tracks have name and artists
+            trackName = track.name || 'Unknown Track';
+            artistName = track.artists ? (Array.isArray(track.artists) ? track.artists.join(', ') : track.artists) : 'Unknown Artist';
+        }
+
+        return `
         <tr id="discovery-row-${urlHash}-${index}">
-            <td class="yt-track">${track.name}</td>
-            <td class="yt-artist">${track.artists ? (Array.isArray(track.artists) ? track.artists.join(', ') : track.artists) : 'Unknown Artist'}</td>
+            <td class="yt-track">${trackName}</td>
+            <td class="yt-artist">${artistName}</td>
             <td class="discovery-status">🔍 Pending...</td>
             <td class="spotify-track">-</td>
             <td class="spotify-artist">-</td>
             <td class="spotify-album">-</td>
             <td class="discovery-actions">-</td>
         </tr>
-    `).join('');
+    `;
+    }).join('');
 }
 
 function formatDuration(durationMs) {
@@ -16383,9 +16557,10 @@ function updateYouTubeModalButtons(urlHash, phase) {
 
 async function startYouTubeDownloadMissing(urlHash) {
     try {
-        console.log('🔍 Starting download missing tracks for YouTube playlist:', urlHash);
+        console.log('🔍 Starting download missing tracks:', urlHash);
 
-        const state = youtubePlaylistStates[urlHash];
+        // Check both YouTube and ListenBrainz states (like Beatport does)
+        const state = youtubePlaylistStates[urlHash] || listenbrainzPlaylistStates[urlHash];
         // Support both camelCase and snake_case
         const discoveryResults = state?.discoveryResults || state?.discovery_results;
 
@@ -16394,7 +16569,13 @@ async function startYouTubeDownloadMissing(urlHash) {
             return;
         }
 
-        // Convert YouTube results to a format compatible with the download modal
+        // Determine source type
+        const isListenBrainz = state.is_listenbrainz_playlist;
+        const isBeatport = state.is_beatport_playlist;
+        const isTidal = state.is_tidal_playlist;
+        const sourcePrefix = isListenBrainz ? '[ListenBrainz]' : (isBeatport ? '[Beatport]' : (isTidal ? '[Tidal]' : '[YouTube]'));
+
+        // Convert discovery results to a format compatible with the download modal
         const spotifyTracks = discoveryResults
             .filter(result => result.spotify_data || (result.spotify_track && result.status_class === 'found'))
             .map(result => {
@@ -16421,15 +16602,15 @@ async function startYouTubeDownloadMissing(urlHash) {
                     };
                 }
             });
-        
+
         if (spotifyTracks.length === 0) {
             showToast('No Spotify matches found for download', 'error');
             return;
         }
-        
+
         // Create a virtual playlist for the download system
-        const virtualPlaylistId = `youtube_${urlHash}`;
-        const playlistName = `[YouTube] ${state.playlist.name}`;
+        const virtualPlaylistId = isListenBrainz ? `listenbrainz_${urlHash}` : (isBeatport ? `beatport_${urlHash}` : (isTidal ? `tidal_${urlHash}` : `youtube_${urlHash}`));
+        const playlistName = `${sourcePrefix} ${state.playlist.name}`;
         
         // Store reference for card navigation
         state.convertedSpotifyPlaylistId = virtualPlaylistId;
@@ -16570,6 +16751,241 @@ async function resetBeatportChart(urlHash) {
     } catch (error) {
         console.error(`❌ Error resetting Beatport chart:`, error);
         showToast(`Error resetting chart: ${error.message}`, 'error');
+    }
+}
+
+// ============================================================================
+// LISTENBRAINZ PLAYLIST DISCOVERY & SYNC
+// ============================================================================
+
+function startListenBrainzDiscoveryPolling(playlistMbid) {
+    console.log(`🔄 Starting ListenBrainz discovery polling for: ${playlistMbid}`);
+
+    // Stop any existing polling (reuse YouTube polling infrastructure)
+    if (activeYouTubePollers[playlistMbid]) {
+        clearInterval(activeYouTubePollers[playlistMbid]);
+    }
+
+    const pollInterval = setInterval(async () => {
+        try {
+            const response = await fetch(`/api/listenbrainz/discovery/status/${playlistMbid}`);
+            const status = await response.json();
+
+            if (status.error) {
+                console.error('❌ Error polling ListenBrainz discovery status:', status.error);
+                clearInterval(pollInterval);
+                delete activeYouTubePollers[playlistMbid];
+                return;
+            }
+
+            // Update state and modal (reuse YouTube infrastructure like Beatport/Tidal)
+            if (listenbrainzPlaylistStates[playlistMbid]) {
+                // Transform ListenBrainz results to YouTube modal format (like Beatport does)
+                const transformedStatus = {
+                    progress: status.progress || 0,
+                    spotify_matches: status.spotify_matches || 0,
+                    spotify_total: status.spotify_total || 0,
+                    results: (status.results || []).map((result, index) => ({
+                        index: result.index !== undefined ? result.index : index,
+                        yt_track: result.lb_track || result.track_name || 'Unknown',
+                        yt_artist: result.lb_artist || result.artist_name || 'Unknown',
+                        status: result.status === 'found' || result.status === '✅ Found' || result.status_class === 'found' ? '✅ Found' : (result.status === 'error' ? '❌ Error' : '❌ Not Found'),
+                        status_class: result.status_class || (result.status === 'found' || result.status === '✅ Found' ? 'found' : (result.status === 'error' ? 'error' : 'not-found')),
+                        spotify_track: result.spotify_data ? result.spotify_data.name : (result.spotify_track || '-'),
+                        spotify_artist: result.spotify_data ? (result.spotify_data.artists && result.spotify_data.artists[0] ? result.spotify_data.artists[0] : '-') : (result.spotify_artist || '-'),
+                        spotify_album: result.spotify_data ? (result.spotify_data.album && result.spotify_data.album.name ? result.spotify_data.album.name : '-') : (result.spotify_album || '-'),
+                        spotify_data: result.spotify_data,
+                        duration: result.duration || '0:00'
+                    })),
+                    complete: status.complete || status.phase === 'discovered'
+                };
+
+                // Store both raw and transformed results (support both naming conventions)
+                listenbrainzPlaylistStates[playlistMbid].discovery_results = status.results || [];
+                listenbrainzPlaylistStates[playlistMbid].discoveryResults = transformedStatus.results;
+                listenbrainzPlaylistStates[playlistMbid].discovery_progress = status.progress || 0;
+                listenbrainzPlaylistStates[playlistMbid].discoveryProgress = status.progress || 0;
+                listenbrainzPlaylistStates[playlistMbid].spotify_matches = status.spotify_matches || 0;
+                listenbrainzPlaylistStates[playlistMbid].spotifyMatches = status.spotify_matches || 0;  // camelCase for modal
+                listenbrainzPlaylistStates[playlistMbid].spotify_total = status.spotify_total || 0;
+                listenbrainzPlaylistStates[playlistMbid].spotifyTotal = status.spotify_total || 0;  // camelCase for modal
+
+                // Update modal if open
+                updateYouTubeDiscoveryModal(playlistMbid, transformedStatus);
+            }
+
+            // Check if complete
+            if (status.complete || status.phase === 'discovered') {
+                clearInterval(pollInterval);
+                delete activeYouTubePollers[playlistMbid];
+
+                // Update phase
+                if (listenbrainzPlaylistStates[playlistMbid]) {
+                    listenbrainzPlaylistStates[playlistMbid].phase = 'discovered';
+                }
+
+                // Update modal buttons to show sync and download buttons
+                updateYouTubeModalButtons(playlistMbid, 'discovered');
+
+                console.log('✅ ListenBrainz discovery complete:', playlistMbid);
+                showToast('ListenBrainz discovery complete!', 'success');
+            }
+
+        } catch (error) {
+            console.error('❌ Error polling ListenBrainz discovery:', error);
+            clearInterval(pollInterval);
+            delete activeYouTubePollers[playlistMbid];
+        }
+    }, 1000);
+
+    activeYouTubePollers[playlistMbid] = pollInterval;
+}
+
+function startListenBrainzSyncPolling(playlistMbid) {
+    // Stop any existing polling
+    if (activeYouTubePollers[playlistMbid]) {
+        clearInterval(activeYouTubePollers[playlistMbid]);
+    }
+
+    // Define the polling function
+    const pollFunction = async () => {
+        try {
+            const response = await fetch(`/api/listenbrainz/sync/status/${playlistMbid}`);
+            const status = await response.json();
+
+            if (status.error) {
+                console.error('❌ Error polling ListenBrainz sync status:', status.error);
+                clearInterval(pollInterval);
+                delete activeYouTubePollers[playlistMbid];
+                return;
+            }
+
+            // Update modal sync display if open
+            updateYouTubeModalSyncProgress(playlistMbid, status.progress);
+
+            // Check if complete
+            if (status.complete) {
+                clearInterval(pollInterval);
+                delete activeYouTubePollers[playlistMbid];
+
+                // Update modal buttons
+                updateYouTubeModalButtons(playlistMbid, 'sync_complete');
+
+                console.log('✅ ListenBrainz sync complete:', playlistMbid);
+                showToast('ListenBrainz playlist sync complete!', 'success');
+            } else if (status.sync_status === 'error') {
+                clearInterval(pollInterval);
+                delete activeYouTubePollers[playlistMbid];
+
+                // Revert to discovered phase on error
+                updateYouTubeModalButtons(playlistMbid, 'discovered');
+
+                showToast(`Sync failed: ${status.error || 'Unknown error'}`, 'error');
+            }
+
+        } catch (error) {
+            console.error('❌ Error polling ListenBrainz sync:', error);
+            if (activeYouTubePollers[playlistMbid]) {
+                clearInterval(activeYouTubePollers[playlistMbid]);
+                delete activeYouTubePollers[playlistMbid];
+            }
+        }
+    };
+
+    // Run immediately to get current status
+    pollFunction();
+
+    // Then continue polling at regular intervals
+    const pollInterval = setInterval(pollFunction, 1000);
+    activeYouTubePollers[playlistMbid] = pollInterval;
+}
+
+async function startListenBrainzDiscovery(playlistMbid) {
+    const state = listenbrainzPlaylistStates[playlistMbid];
+    if (!state) {
+        console.error('❌ No ListenBrainz playlist state found');
+        return;
+    }
+
+    try {
+        console.log('🔍 Starting ListenBrainz discovery for:', state.playlist.name);
+
+        // Update local phase to discovering
+        state.phase = 'discovering';
+        state.status = 'discovering';
+
+        // Call backend to start discovery worker
+        const response = await fetch(`/api/listenbrainz/discovery/start/${playlistMbid}`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                playlist: state.playlist
+            })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to start discovery');
+        }
+
+        console.log('✅ ListenBrainz discovery started on backend');
+
+        // Start polling for progress
+        startListenBrainzDiscoveryPolling(playlistMbid);
+
+        // Update modal to show discovering state
+        updateYouTubeDiscoveryModal(playlistMbid, {
+            phase: 'discovering',
+            progress: 0,
+            results: []
+        });
+
+        showToast('Starting ListenBrainz discovery...', 'info');
+
+    } catch (error) {
+        console.error('❌ Error starting ListenBrainz discovery:', error);
+        showToast(`Error: ${error.message}`, 'error');
+
+        // Revert phase on error
+        state.phase = 'fresh';
+        state.status = 'pending';
+    }
+}
+
+async function startListenBrainzPlaylistSync(playlistMbid) {
+    const state = listenbrainzPlaylistStates[playlistMbid];
+    if (!state) {
+        console.error('❌ No ListenBrainz playlist state found');
+        return;
+    }
+
+    try {
+        console.log('🔄 Starting ListenBrainz sync for:', state.playlist.name);
+
+        // Call backend to start sync
+        const response = await fetch(`/api/listenbrainz/sync/start/${playlistMbid}`, {
+            method: 'POST'
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to start sync');
+        }
+
+        // Update phase to syncing
+        state.phase = 'syncing';
+
+        // Start polling for sync progress
+        startListenBrainzSyncPolling(playlistMbid);
+
+        // Update modal
+        updateYouTubeModalButtons(playlistMbid, 'syncing');
+
+        showToast('Starting ListenBrainz sync...', 'info');
+
+    } catch (error) {
+        console.error('❌ Error starting ListenBrainz sync:', error);
+        showToast(`Error: ${error.message}`, 'error');
     }
 }
 
@@ -25937,7 +26353,8 @@ async function loadDiscoverPage() {
         loadFamiliarFavorites(),  // NEW: Familiar Favorites
         initializeListenBrainzTabs(),  // ListenBrainz playlists (tabbed)
         loadDecadeBrowserTabs(),  // Time Machine (tabbed by decade)
-        loadGenreBrowserTabs()  // Browse by Genre (tabbed by genre)
+        loadGenreBrowserTabs(),  // Browse by Genre (tabbed by genre)
+        loadListenBrainzPlaylistsFromBackend()  // Load ListenBrainz playlist states for persistence
     ]);
 
     // Check for active syncs after page load
@@ -27940,29 +28357,182 @@ async function openDownloadModalForListenBrainzPlaylist(identifier, title) {
             return;
         }
 
-        console.log(`📥 Opening download modal for ListenBrainz playlist: ${title}`);
+        console.log(`🎵 Opening ListenBrainz discovery modal: ${title}`);
 
-        // Convert ListenBrainz tracks to Spotify-compatible format
-        const spotifyTracks = tracks.map(track => ({
-            id: null, // No Spotify ID for ListenBrainz tracks
-            name: track.track_name,
-            artists: [cleanArtistName(track.artist_name)], // Clean featured artists
-            album: {
-                name: track.album_name,
-                images: track.album_cover_url ? [{ url: track.album_cover_url }] : []
+        // Check if state already exists from backend hydration (like Beatport does)
+        const existingState = listenbrainzPlaylistStates[identifier];
+
+        if (existingState && existingState.phase !== 'fresh') {
+            // State exists - rehydrate the modal with existing data
+            console.log(`🔄 Rehydrating existing ListenBrainz state (Phase: ${existingState.phase})`);
+
+            // If downloading/download_complete, rehydrate download modal instead
+            if ((existingState.phase === 'downloading' || existingState.phase === 'download_complete') &&
+                existingState.convertedSpotifyPlaylistId && existingState.download_process_id) {
+
+                console.log(`📥 Rehydrating download modal for ListenBrainz playlist: ${title}`);
+
+                // Implement download modal rehydration (like Beatport does)
+                const convertedPlaylistId = existingState.convertedSpotifyPlaylistId;
+
+                try {
+                    // Create the download modal using the ListenBrainz state
+                    if (!activeDownloadProcesses[convertedPlaylistId]) {
+                        // Get tracks from the existing state
+                        let spotifyTracks = [];
+
+                        if (existingState && existingState.discovery_results) {
+                            spotifyTracks = existingState.discovery_results
+                                .filter(result => result.spotify_data)
+                                .map(result => {
+                                    const track = result.spotify_data;
+                                    // Ensure artists is an array of strings
+                                    if (track.artists && Array.isArray(track.artists)) {
+                                        track.artists = track.artists.map(artist =>
+                                            typeof artist === 'string' ? artist : (artist.name || artist)
+                                        );
+                                    } else if (track.artists && typeof track.artists === 'string') {
+                                        track.artists = [track.artists];
+                                    } else {
+                                        track.artists = ['Unknown Artist'];
+                                    }
+                                    return {
+                                        id: track.id,
+                                        name: track.name,
+                                        artists: track.artists,
+                                        album: track.album || 'Unknown Album',
+                                        duration_ms: track.duration_ms || 0,
+                                        external_urls: track.external_urls || {}
+                                    };
+                                });
+                        }
+
+                        if (spotifyTracks.length > 0) {
+                            await openDownloadMissingModalForYouTube(
+                                convertedPlaylistId,
+                                `[ListenBrainz] ${title}`,
+                                spotifyTracks
+                            );
+
+                            // Set the modal to running state with the correct batch ID
+                            const process = activeDownloadProcesses[convertedPlaylistId];
+                            if (process) {
+                                process.status = existingState.phase === 'download_complete' ? 'complete' : 'running';
+                                process.batchId = existingState.download_process_id;
+
+                                // Update UI to running state
+                                const beginBtn = document.getElementById(`begin-analysis-btn-${convertedPlaylistId}`);
+                                const cancelBtn = document.getElementById(`cancel-all-btn-${convertedPlaylistId}`);
+                                if (beginBtn) beginBtn.style.display = 'none';
+                                if (cancelBtn) cancelBtn.style.display = 'inline-block';
+
+                                // Start polling for this process
+                                startModalDownloadPolling(convertedPlaylistId);
+
+                                // Hide modal since this is background rehydration
+                                process.modalElement.style.display = 'none';
+                                console.log(`✅ Rehydrated download modal for ListenBrainz playlist: ${title}`);
+                            }
+                        } else {
+                            console.warn(`⚠️ No Spotify tracks found for ListenBrainz download modal: ${title}`);
+                        }
+                    }
+                } catch (error) {
+                    console.warn(`⚠️ Error setting up download process for ListenBrainz playlist "${title}":`, error.message);
+                }
+
+                return;
+            }
+
+            // Open discovery modal with existing state
+            openYouTubeDiscoveryModal(identifier);
+
+            // If still discovering, resume polling
+            if (existingState.phase === 'discovering') {
+                console.log(`🔄 Resuming discovery polling for: ${title}`);
+                startListenBrainzDiscoveryPolling(identifier);
+            }
+
+            return;
+        }
+
+        // No existing state - create fresh state and start discovery
+        console.log(`🆕 Creating fresh ListenBrainz state for: ${title}`);
+
+        // Create YouTube-style state entry for this ListenBrainz playlist (like Beatport does)
+        const listenbrainzState = {
+            phase: 'fresh',
+            playlist: {
+                name: title,
+                tracks: tracks.map(track => ({
+                    track_name: track.track_name,
+                    artist_name: track.artist_name,
+                    album_name: track.album_name,
+                    duration_ms: track.duration_ms || 0,
+                    mbid: track.mbid,
+                    release_mbid: track.release_mbid,
+                    album_cover_url: track.album_cover_url
+                })),
+                description: `${tracks.length} tracks from ${title}`,
+                source: 'listenbrainz'
             },
-            duration_ms: track.duration_ms || 0,
-            mbid: track.mbid // Include MusicBrainz ID for matching
-        }));
+            is_listenbrainz_playlist: true,
+            playlist_mbid: identifier,  // Link to ListenBrainz playlist
+            // Initialize discovery state properties (both naming conventions for modal compatibility)
+            discovery_results: [],
+            discoveryResults: [],
+            discovery_progress: 0,
+            discoveryProgress: 0,
+            spotify_matches: 0,
+            spotifyMatches: 0,
+            spotify_total: tracks.length,
+            spotifyTotal: tracks.length
+        };
 
-        const virtualPlaylistId = `discover_lb_${identifier}`;
+        // Store in ListenBrainz playlist states
+        listenbrainzPlaylistStates[identifier] = listenbrainzState;
 
-        // Open the download modal
-        await openDownloadMissingModalForYouTube(virtualPlaylistId, title, spotifyTracks);
+        // Start discovery automatically (like Beatport and Tidal do)
+        try {
+            console.log(`🔍 Starting ListenBrainz discovery for: ${title}`);
+
+            // Call the discovery start endpoint with playlist data
+            const response = await fetch(`/api/listenbrainz/discovery/start/${identifier}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    playlist: listenbrainzState.playlist
+                })
+            });
+
+            const result = await response.json();
+            if (result.success) {
+                // Update state to discovering
+                listenbrainzPlaylistStates[identifier].phase = 'discovering';
+
+                // Start polling for progress
+                startListenBrainzDiscoveryPolling(identifier);
+
+                console.log(`✅ Started ListenBrainz discovery for: ${title}`);
+            } else {
+                console.error('❌ Error starting ListenBrainz discovery:', result.error);
+                showToast(`Error starting discovery: ${result.error}`, 'error');
+            }
+        } catch (error) {
+            console.error('❌ Error starting ListenBrainz discovery:', error);
+            showToast(`Error starting discovery: ${error.message}`, 'error');
+        }
+
+        // Open the existing YouTube discovery modal infrastructure
+        openYouTubeDiscoveryModal(identifier);
+
+        console.log(`✅ ListenBrainz discovery modal opened for ${title} with ${tracks.length} tracks`);
 
     } catch (error) {
-        console.error('Error opening download modal for ListenBrainz playlist:', error);
-        showToast('Failed to open download modal', 'error');
+        console.error('Error opening discovery modal for ListenBrainz playlist:', error);
+        showToast('Failed to open discovery modal', 'error');
     }
 }
 
