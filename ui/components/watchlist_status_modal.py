@@ -156,7 +156,11 @@ class WatchlistScanWorker(QThread):
                         continue
                     
                     track_count = len(album_data['tracks'].get('items', []))
-                    
+
+                    # Check if user wants this type of release
+                    if not scanner._should_include_release(track_count, watchlist_artist):
+                        continue  # Skip counting this release
+
                     # Categorize based on track count - COUNT RELEASES not tracks
                     if track_count >= 4:
                         total_albums += 1
@@ -198,10 +202,14 @@ class WatchlistScanWorker(QThread):
                         continue
                     
                     tracks = album_data['tracks']['items']
-                    
+
+                    # Check if user wants this type of release
+                    if not scanner._should_include_release(len(tracks), watchlist_artist):
+                        continue  # Skip this release
+
                     # Emit album progress with track count
                     self.album_scan_started.emit(watchlist_artist.artist_name, album.name, len(tracks))
-                    
+
                     # Check each track
                     for track in tracks:
                         if self.should_stop:
