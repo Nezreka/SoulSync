@@ -86,6 +86,9 @@ class WatchlistArtist:
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     image_url: Optional[str] = None
+    include_albums: bool = True
+    include_eps: bool = True
+    include_singles: bool = True
 
 @dataclass
 class SimilarArtist:
@@ -261,6 +264,9 @@ class MusicDatabase:
 
             # Add image_url column to watchlist_artists (migration)
             self._add_watchlist_artist_image_column(cursor)
+
+            # Add album type filter columns to watchlist_artists (migration)
+            self._add_watchlist_album_type_filters(cursor)
 
             conn.commit()
             logger.info("Database initialized successfully")
@@ -589,6 +595,27 @@ class MusicDatabase:
 
         except Exception as e:
             logger.error(f"Error adding image_url column to watchlist_artists: {e}")
+            # Don't raise - this is a migration, database can still function
+
+    def _add_watchlist_album_type_filters(self, cursor):
+        """Add album type filter columns to watchlist_artists table"""
+        try:
+            cursor.execute("PRAGMA table_info(watchlist_artists)")
+            columns = [column[1] for column in cursor.fetchall()]
+
+            columns_to_add = {
+                'include_albums': ('INTEGER', '1'),     # 1 = True (include albums)
+                'include_eps': ('INTEGER', '1'),        # 1 = True (include EPs)
+                'include_singles': ('INTEGER', '1')     # 1 = True (include singles)
+            }
+
+            for column_name, (column_type, default_value) in columns_to_add.items():
+                if column_name not in columns:
+                    cursor.execute(f"ALTER TABLE watchlist_artists ADD COLUMN {column_name} {column_type} DEFAULT {default_value}")
+                    logger.info(f"Added {column_name} column to watchlist_artists table")
+
+        except Exception as e:
+            logger.error(f"Error adding album type filter columns to watchlist_artists: {e}")
             # Don't raise - this is a migration, database can still function
 
     def close(self):

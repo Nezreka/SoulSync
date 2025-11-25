@@ -19822,7 +19822,10 @@ async function showWatchlistModal() {
 
                     <div class="watchlist-artists-list" id="watchlist-artists-list">
                         ${artistsData.artists.map(artist => `
-                            <div class="watchlist-artist-item" data-artist-name="${artist.artist_name.toLowerCase().replace(/"/g, '&quot;')}">
+                            <div class="watchlist-artist-item"
+                                 data-artist-name="${artist.artist_name.toLowerCase().replace(/"/g, '&quot;')}"
+                                 data-artist-id="${artist.spotify_artist_id}"
+                                 style="cursor: pointer;">
                                 ${artist.image_url ? `
                                     <img src="${artist.image_url}"
                                          alt="${escapeHtml(artist.artist_name)}"
@@ -19842,7 +19845,8 @@ async function showWatchlistModal() {
                                 </div>
                                 <button class="playlist-modal-btn playlist-modal-btn-secondary watchlist-remove-btn"
                                         data-artist-id="${artist.spotify_artist_id}"
-                                        data-artist-name="${escapeHtml(artist.artist_name)}">
+                                        data-artist-name="${escapeHtml(artist.artist_name)}"
+                                        onclick="event.stopPropagation();">
                                     Remove
                                 </button>
                             </div>
@@ -19867,6 +19871,22 @@ async function showWatchlistModal() {
             });
         });
 
+        // Add click handlers to artist items (except for remove button)
+        modal.querySelectorAll('.watchlist-artist-item').forEach(item => {
+            item.addEventListener('click', (e) => {
+                // Don't trigger if clicking the remove button
+                if (e.target.closest('.watchlist-remove-btn')) {
+                    return;
+                }
+
+                const artistId = item.getAttribute('data-artist-id');
+                const artistName = item.querySelector('.watchlist-artist-name').textContent;
+
+                console.log(`🎵 Artist card clicked: ${artistName} (${artistId})`);
+                openWatchlistArtistConfigModal(artistId, artistName);
+            });
+        });
+
         // Show modal
         modal.style.display = 'flex';
         
@@ -19888,6 +19908,184 @@ function closeWatchlistModal() {
     if (modal) {
         modal.style.display = 'none';
     }
+}
+
+/**
+ * Open watchlist artist configuration modal
+ * @param {string} artistId - Spotify artist ID
+ * @param {string} artistName - Artist name
+ */
+async function openWatchlistArtistConfigModal(artistId, artistName) {
+    try {
+        console.log(`🎨 Opening config modal for artist: ${artistName} (${artistId})`);
+
+        // Fetch artist config and info
+        const response = await fetch(`/api/watchlist/artist/${artistId}/config`);
+        const data = await response.json();
+
+        if (!data.success) {
+            console.error('Error loading artist config:', data.error);
+            showToast(`Error loading artist configuration: ${data.error}`, 'error');
+            return;
+        }
+
+        const { config, artist } = data;
+
+        // Generate hero section
+        const heroHTML = `
+            ${artist.image_url ? `
+                <img src="${artist.image_url}"
+                     alt="${escapeHtml(artist.name)}"
+                     class="watchlist-artist-config-hero-image">
+            ` : ''}
+            <div class="watchlist-artist-config-hero-info">
+                <h2 class="watchlist-artist-config-hero-name">${escapeHtml(artist.name)}</h2>
+                <div class="watchlist-artist-config-hero-stats">
+                    <div class="watchlist-artist-config-stat">
+                        <span class="watchlist-artist-config-stat-value">${formatNumber(artist.followers)}</span>
+                        <span class="watchlist-artist-config-stat-label">Followers</span>
+                    </div>
+                    <div class="watchlist-artist-config-stat">
+                        <span class="watchlist-artist-config-stat-value">${artist.popularity}/100</span>
+                        <span class="watchlist-artist-config-stat-label">Popularity</span>
+                    </div>
+                </div>
+                ${artist.genres && artist.genres.length > 0 ? `
+                    <div class="watchlist-artist-config-hero-genres">
+                        ${artist.genres.slice(0, 3).map(genre =>
+                            `<span class="watchlist-artist-config-genre-tag">${escapeHtml(genre)}</span>`
+                        ).join('')}
+                    </div>
+                ` : ''}
+            </div>
+        `;
+
+        // Populate hero section
+        const heroContainer = document.getElementById('watchlist-artist-config-hero');
+        if (heroContainer) {
+            heroContainer.innerHTML = heroHTML;
+        }
+
+        // Set checkbox states
+        document.getElementById('config-include-albums').checked = config.include_albums;
+        document.getElementById('config-include-eps').checked = config.include_eps;
+        document.getElementById('config-include-singles').checked = config.include_singles;
+
+        // Store artist ID for saving
+        const modal = document.getElementById('watchlist-artist-config-modal');
+        if (modal) {
+            modal.setAttribute('data-artist-id', artistId);
+        }
+
+        // Show modal
+        const overlay = document.getElementById('watchlist-artist-config-modal-overlay');
+        if (overlay) {
+            overlay.classList.remove('hidden');
+        }
+
+        // Add save button handler
+        const saveBtn = document.getElementById('save-artist-config-btn');
+        if (saveBtn) {
+            // Remove old listeners
+            const newSaveBtn = saveBtn.cloneNode(true);
+            saveBtn.parentNode.replaceChild(newSaveBtn, saveBtn);
+
+            // Add new listener
+            newSaveBtn.addEventListener('click', () => saveWatchlistArtistConfig(artistId));
+        }
+
+    } catch (error) {
+        console.error('Error opening watchlist artist config modal:', error);
+        showToast(`Error: ${error.message}`, 'error');
+    }
+}
+
+/**
+ * Close watchlist artist configuration modal
+ */
+function closeWatchlistArtistConfigModal() {
+    const overlay = document.getElementById('watchlist-artist-config-modal-overlay');
+    if (overlay) {
+        overlay.classList.add('hidden');
+    }
+
+    // Clear hero content
+    const heroContainer = document.getElementById('watchlist-artist-config-hero');
+    if (heroContainer) {
+        heroContainer.innerHTML = '';
+    }
+}
+
+/**
+ * Save watchlist artist configuration
+ * @param {string} artistId - Spotify artist ID
+ */
+async function saveWatchlistArtistConfig(artistId) {
+    try {
+        const includeAlbums = document.getElementById('config-include-albums').checked;
+        const includeEps = document.getElementById('config-include-eps').checked;
+        const includeSingles = document.getElementById('config-include-singles').checked;
+
+        // Validate at least one is selected
+        if (!includeAlbums && !includeEps && !includeSingles) {
+            showToast('Please select at least one release type', 'error');
+            return;
+        }
+
+        // Disable save button
+        const saveBtn = document.getElementById('save-artist-config-btn');
+        if (saveBtn) {
+            saveBtn.disabled = true;
+            saveBtn.textContent = 'Saving...';
+        }
+
+        // Send update to backend
+        const response = await fetch(`/api/watchlist/artist/${artistId}/config`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                include_albums: includeAlbums,
+                include_eps: includeEps,
+                include_singles: includeSingles
+            })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            showToast('Artist preferences saved successfully', 'success');
+            closeWatchlistArtistConfigModal();
+
+            // Refresh watchlist modal if it's open
+            const watchlistModal = document.getElementById('watchlist-modal');
+            if (watchlistModal && watchlistModal.style.display === 'flex') {
+                await showWatchlistModal();
+            }
+        } else {
+            showToast(`Error saving preferences: ${data.error}`, 'error');
+        }
+
+    } catch (error) {
+        console.error('Error saving watchlist artist config:', error);
+        showToast(`Error: ${error.message}`, 'error');
+    } finally {
+        // Re-enable save button
+        const saveBtn = document.getElementById('save-artist-config-btn');
+        if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.textContent = 'Save Preferences';
+        }
+    }
+}
+
+/**
+ * Format large numbers with commas
+ * @param {number} num - Number to format
+ * @returns {string} Formatted number
+ */
+function formatNumber(num) {
+    if (!num) return '0';
+    return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
 
 /**

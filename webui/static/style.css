@@ -7960,6 +7960,313 @@ body {
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
+/* ===== WATCHLIST ARTIST CONFIG MODAL STYLES ===== */
+
+#watchlist-artist-config-modal-overlay {
+    z-index: 11000; /* Higher than default modal-overlay to appear on top of watchlist modal */
+}
+
+.watchlist-artist-config-modal {
+    background: linear-gradient(135deg,
+        rgba(26, 26, 26, 0.98) 0%,
+        rgba(18, 18, 18, 0.98) 100%);
+    border-radius: 24px;
+    box-shadow: 0 25px 80px rgba(0, 0, 0, 0.6);
+    max-width: 580px;
+    width: 90%;
+    max-height: 90vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.watchlist-artist-config-header {
+    position: relative;
+    background: linear-gradient(180deg,
+        rgba(29, 185, 84, 0.15) 0%,
+        rgba(29, 185, 84, 0.05) 50%,
+        transparent 100%);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.watchlist-artist-config-hero {
+    padding: 32px 28px;
+    display: flex;
+    align-items: center;
+    gap: 24px;
+}
+
+.watchlist-artist-config-hero-image {
+    width: 100px;
+    height: 100px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 3px solid rgba(29, 185, 84, 0.3);
+    box-shadow: 0 8px 24px rgba(29, 185, 84, 0.2);
+    flex-shrink: 0;
+}
+
+.watchlist-artist-config-hero-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.watchlist-artist-config-hero-name {
+    font-size: 28px;
+    font-weight: 700;
+    color: #ffffff;
+    margin-bottom: 8px;
+    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.watchlist-artist-config-hero-stats {
+    display: flex;
+    gap: 20px;
+    margin-top: 12px;
+    flex-wrap: wrap;
+}
+
+.watchlist-artist-config-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.watchlist-artist-config-stat-value {
+    font-size: 18px;
+    font-weight: 600;
+    color: rgba(29, 185, 84, 1);
+}
+
+.watchlist-artist-config-stat-label {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.watchlist-artist-config-hero-genres {
+    margin-top: 12px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.watchlist-artist-config-genre-tag {
+    padding: 4px 12px;
+    background: rgba(29, 185, 84, 0.15);
+    border: 1px solid rgba(29, 185, 84, 0.3);
+    border-radius: 12px;
+    font-size: 12px;
+    color: rgba(29, 185, 84, 1);
+    font-weight: 500;
+}
+
+.watchlist-artist-config-close {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    font-size: 32px;
+    color: rgba(255, 255, 255, 0.6);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    line-height: 1;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.3);
+}
+
+.watchlist-artist-config-close:hover {
+    color: #ffffff;
+    background: rgba(255, 59, 48, 0.2);
+    transform: scale(1.1);
+}
+
+.watchlist-artist-config-content {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+}
+
+.watchlist-artist-config-body {
+    padding: 28px;
+    flex: 1;
+}
+
+.config-section {
+    margin-bottom: 24px;
+}
+
+.config-section-title {
+    font-size: 20px;
+    font-weight: 600;
+    color: #ffffff;
+    margin-bottom: 8px;
+}
+
+.config-section-subtitle {
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.6);
+    margin-bottom: 24px;
+}
+
+.config-options {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.config-option {
+    display: flex;
+    align-items: center;
+    padding: 20px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 2px solid rgba(255, 255, 255, 0.08);
+    border-radius: 16px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    position: relative;
+}
+
+.config-option:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(29, 185, 84, 0.3);
+    transform: translateY(-2px);
+}
+
+.config-option input[type="checkbox"] {
+    width: 24px;
+    height: 24px;
+    margin-right: 16px;
+    cursor: pointer;
+    accent-color: #1db954;
+    flex-shrink: 0;
+}
+
+.config-option-content {
+    display: flex;
+    align-items: center;
+    flex: 1;
+    gap: 16px;
+}
+
+.config-option-icon {
+    font-size: 32px;
+    flex-shrink: 0;
+}
+
+.config-option-text {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.config-option-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: #ffffff;
+}
+
+.config-option-description {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.config-option input[type="checkbox"]:checked + .config-option-content {
+    opacity: 1;
+}
+
+.config-option input[type="checkbox"]:not(:checked) + .config-option-content {
+    opacity: 0.5;
+}
+
+.watchlist-artist-config-footer {
+    padding: 20px 28px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(0, 0, 0, 0.2);
+}
+
+.config-modal-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+}
+
+.config-modal-btn {
+    padding: 12px 28px;
+    border-radius: 12px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border: none;
+    outline: none;
+}
+
+.config-modal-btn-primary {
+    background: linear-gradient(135deg, #1ed760, #1db954);
+    color: #000;
+    box-shadow: 0 4px 16px rgba(29, 185, 84, 0.3);
+}
+
+.config-modal-btn-primary:hover {
+    background: linear-gradient(135deg, #1fdf64, #1ed760);
+    box-shadow: 0 6px 20px rgba(29, 185, 84, 0.4);
+    transform: translateY(-1px);
+}
+
+.config-modal-btn-primary:active {
+    transform: translateY(0);
+}
+
+.config-modal-btn-primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.config-modal-btn-secondary {
+    background: rgba(255, 255, 255, 0.08);
+    color: #ffffff;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.config-modal-btn-secondary:hover {
+    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.25);
+}
+
+/* Mobile Responsive */
+@media (max-width: 640px) {
+    .watchlist-artist-config-modal {
+        width: 95%;
+        max-width: none;
+    }
+
+    .watchlist-artist-config-hero {
+        flex-direction: column;
+        text-align: center;
+        padding: 24px 20px;
+    }
+
+    .watchlist-artist-config-hero-stats {
+        justify-content: center;
+    }
+
+    .config-modal-actions {
+        flex-direction: column-reverse;
+    }
+
+    .config-modal-btn {
+        width: 100%;
+    }
+}
+
 /* Add these styles to the end of style.css */
 
 .sync-progress-indicator {
