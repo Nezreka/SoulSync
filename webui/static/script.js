@@ -19772,15 +19772,38 @@ async function showWatchlistModal() {
         modal.innerHTML = `
             <div class="modal-container playlist-modal">
                 <div class="playlist-modal-header">
-                    <div class="playlist-header-content">
+                    <div class="playlist-header-content" style="width: 100%;">
                         <h2>👁️ Watchlist</h2>
                         <div class="playlist-quick-info">
                             <span class="playlist-track-count">${countData.count} artist${countData.count !== 1 ? 's' : ''}</span>
                         </div>
-                        <div class="playlist-modal-sync-status" id="watchlist-scan-status" style="display: ${scanStatus !== 'idle' ? 'block' : 'none'};">
-                            <div class="scan-status-main">
-                                <span class="sync-stat"><span id="scan-status-text">${scanStatus}</span></span>
+                        <div class="playlist-modal-sync-status" id="watchlist-scan-status" style="display: ${scanStatus !== 'idle' ? 'flex' : 'none'}; flex-direction: column; align-items: center;">
+                            <!-- Live Visual Activity Display -->
+                            <div id="watchlist-live-activity" style="display: ${scanStatus === 'scanning' ? 'flex' : 'none'}; gap: 15px; margin-top: 15px; padding: 15px; background: #2a2a2a; border-radius: 8px; border: 1px solid #444; justify-content: center; align-items: flex-start;">
+                                <!-- Artist Photo -->
+                                <div style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
+                                    <img id="watchlist-artist-img" src="" alt="Artist" style="width: 80px; height: 80px; border-radius: 50%; border: 2px solid #1db954; object-fit: cover; background: #1a1a1a;" onerror="this.style.display='none';" />
+                                    <div id="watchlist-artist-name" style="font-size: 11px; font-weight: bold; color: #fff; text-align: center; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Waiting...</div>
+                                </div>
+
+                                <!-- Album Cover -->
+                                <div style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
+                                    <img id="watchlist-album-img" src="" alt="Album" style="width: 80px; height: 80px; border-radius: 6px; border: 2px solid #ffc107; object-fit: cover; background: #1a1a1a;" onerror="this.style.display='none';" />
+                                    <div id="watchlist-album-name" style="font-size: 11px; font-weight: bold; color: #fff; text-align: center; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Waiting...</div>
+                                </div>
+
+                                <!-- Track and Wishlist Feed -->
+                                <div style="display: flex; flex-direction: column; gap: 6px; min-width: 250px; max-width: 300px;">
+                                    <div style="font-size: 10px; color: #b3b3b3; text-transform: uppercase;">Current Track:</div>
+                                    <div id="watchlist-track-name" style="font-size: 11px; font-weight: bold; color: #1ed760; margin-bottom: 8px;">Waiting...</div>
+
+                                    <div style="font-size: 10px; color: #ff9800; text-transform: uppercase;">✨ Recently Added:</div>
+                                    <div id="watchlist-additions-feed" style="max-height: 80px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; font-size: 10px;">
+                                        <!-- Populated by JavaScript -->
+                                    </div>
+                                </div>
                             </div>
+
                             ${statusData.summary ? `
                                 <div class="scan-status-summary" style="margin-top: 8px; font-size: 13px; opacity: 0.8;">
                                     <span class="sync-stat">Artists: ${statusData.summary.total_artists || 0}</span>
@@ -20131,14 +20154,13 @@ async function startWatchlistScan() {
         }
         
         button.textContent = 'Scanning...';
-        
+
         // Show scan status
         const statusDiv = document.getElementById('watchlist-scan-status');
         if (statusDiv) {
             statusDiv.style.display = 'flex';
-            document.getElementById('scan-status-text').textContent = 'scanning';
         }
-        
+
         // Start polling for updates
         pollWatchlistScanStatus();
         
@@ -20160,35 +20182,62 @@ async function pollWatchlistScanStatus() {
         const data = await response.json();
         
         if (data.success) {
-            const statusText = document.getElementById('scan-status-text');
             const button = document.getElementById('scan-watchlist-btn');
-            
-            if (statusText) {
-                // Show detailed progress if scanning
-                if (data.status === 'scanning' && data.current_artist_name) {
-                    const artistProgress = `${data.current_artist_index || 0}/${data.total_artists || 0}`;
-                    let detailText = `Scanning ${data.current_artist_name} (${artistProgress})`;
-                    
-                    if (data.current_phase === 'fetching_discography') {
-                        detailText += ' - Fetching releases...';
-                    } else if (data.current_phase === 'checking_albums' && data.albums_to_check > 0) {
-                        const albumProgress = `${data.albums_checked || 0}/${data.albums_to_check}`;
-                        detailText += ` - Checking albums (${albumProgress})`;
-                    } else if (data.current_phase && data.current_phase.startsWith('checking_album_')) {
-                        detailText += ` - "${data.current_album || 'Unknown Album'}"`;
-                    } else if (data.current_phase === 'rate_limiting') {
-                        detailText += ' - Rate limiting...';
-                    }
-                    
-                    // Add running totals
-                    if (data.tracks_found_this_scan > 0 || data.tracks_added_this_scan > 0) {
-                        detailText += ` | Found: ${data.tracks_found_this_scan || 0}, Added: ${data.tracks_added_this_scan || 0}`;
-                    }
-                    
-                    statusText.textContent = detailText;
-                } else {
-                    statusText.textContent = data.status;
+            const liveActivity = document.getElementById('watchlist-live-activity');
+
+            // Update live visual activity display
+            if (liveActivity && data.status === 'scanning') {
+                liveActivity.style.display = 'flex';
+
+                // Update artist image and name
+                const artistImg = document.getElementById('watchlist-artist-img');
+                const artistName = document.getElementById('watchlist-artist-name');
+                if (artistImg && data.current_artist_image_url) {
+                    artistImg.src = data.current_artist_image_url;
+                    artistImg.style.display = 'block';
                 }
+                if (artistName) {
+                    artistName.textContent = data.current_artist_name || 'Processing...';
+                }
+
+                // Update album image and name
+                const albumImg = document.getElementById('watchlist-album-img');
+                const albumName = document.getElementById('watchlist-album-name');
+                if (albumImg && data.current_album_image_url) {
+                    albumImg.src = data.current_album_image_url;
+                    albumImg.style.display = 'block';
+                } else if (albumImg) {
+                    albumImg.style.display = 'none';
+                }
+                if (albumName) {
+                    albumName.textContent = data.current_album || (data.current_phase === 'fetching_discography' ? 'Fetching releases...' : 'Processing...');
+                }
+
+                // Update current track
+                const trackName = document.getElementById('watchlist-track-name');
+                if (trackName) {
+                    trackName.textContent = data.current_track_name || (data.current_phase === 'fetching_discography' ? 'Fetching releases...' : 'Processing...');
+                }
+
+                // Update wishlist additions feed
+                const additionsFeed = document.getElementById('watchlist-additions-feed');
+                if (additionsFeed) {
+                    if (data.recent_wishlist_additions && data.recent_wishlist_additions.length > 0) {
+                        additionsFeed.innerHTML = data.recent_wishlist_additions.map(item => `
+                            <div style="display: flex; gap: 6px; align-items: center; padding: 3px; background: #1a1a1a; border-radius: 4px;">
+                                <img src="${item.album_image_url || ''}" alt="" style="width: 24px; height: 24px; border-radius: 3px; object-fit: cover;" onerror="this.style.display='none';" />
+                                <div style="flex: 1; overflow: hidden;">
+                                    <div style="font-weight: bold; color: #1ed760; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${item.track_name}</div>
+                                    <div style="font-size: 9px; color: #b3b3b3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${item.artist_name}</div>
+                                </div>
+                            </div>
+                        `).join('');
+                    } else {
+                        additionsFeed.innerHTML = '<div style="color: #666; font-size: 10px;">No tracks added yet...</div>';
+                    }
+                }
+            } else if (liveActivity && data.status !== 'scanning') {
+                liveActivity.style.display = 'none';
             }
             
             if (data.status === 'completed') {
@@ -20196,15 +20245,20 @@ async function pollWatchlistScanStatus() {
                     button.disabled = false;
                     button.textContent = 'Scan for New Releases';
                 }
-                
-                // Update status display with results
+
+                // Hide live activity
+                if (liveActivity) {
+                    liveActivity.style.display = 'none';
+                }
+
+                // Show completion message in status div
                 const statusDiv = document.getElementById('watchlist-scan-status');
                 if (statusDiv && data.summary) {
                     const newTracks = data.summary.new_tracks_found || 0;
                     const addedTracks = data.summary.tracks_added_to_wishlist || 0;
                     const totalArtists = data.summary.total_artists || 0;
                     const successfulScans = data.summary.successful_scans || 0;
-                    
+
                     let completionMessage = `Scan completed: ${successfulScans}/${totalArtists} artists scanned`;
                     if (newTracks > 0) {
                         completionMessage += `, found ${newTracks} new track${newTracks !== 1 ? 's' : ''}`;
@@ -20214,25 +20268,39 @@ async function pollWatchlistScanStatus() {
                     } else {
                         completionMessage += ', no new tracks found';
                     }
-                    
+
+                    // Update the scan status display with completion message and summary
                     statusDiv.innerHTML = `
-                        <div class="scan-status-main">
-                            <span class="sync-stat">${completionMessage}</span>
+                        <div style="text-align: center; padding: 15px; background: #2a2a2a; border-radius: 8px; border: 1px solid #444;">
+                            <div style="font-size: 14px; color: #1ed760; margin-bottom: 10px;">${completionMessage}</div>
+                            <div style="font-size: 13px; opacity: 0.8;">
+                                <span class="sync-stat">Artists: ${totalArtists}</span>
+                                <span class="sync-separator"> • </span>
+                                <span class="sync-stat">New tracks: ${newTracks}</span>
+                                <span class="sync-separator"> • </span>
+                                <span class="sync-stat">Added to wishlist: ${addedTracks}</span>
+                            </div>
                         </div>
                     `;
                 }
-                
+
                 // Update watchlist count
                 updateWatchlistButtonCount();
-                
+
                 console.log('Watchlist scan completed:', data.summary);
                 return; // Stop polling
-                
+
             } else if (data.status === 'error') {
                 if (button) {
                     button.disabled = false;
                     button.textContent = 'Scan for New Releases';
                 }
+
+                // Hide live activity
+                if (liveActivity) {
+                    liveActivity.style.display = 'none';
+                }
+
                 console.error('Watchlist scan error:', data.error);
                 return; // Stop polling
             }

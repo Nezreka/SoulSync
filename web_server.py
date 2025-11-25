@@ -14638,26 +14638,42 @@ def start_watchlist_scan():
                     'total_artists': len(watchlist_artists),
                     'current_artist_index': 0,
                     'current_artist_name': '',
+                    'current_artist_image_url': '',
                     'current_phase': 'starting',
                     'albums_to_check': 0,
                     'albums_checked': 0,
                     'current_album': '',
+                    'current_album_image_url': '',
+                    'current_track_name': '',
                     'tracks_found_this_scan': 0,
-                    'tracks_added_this_scan': 0
+                    'tracks_added_this_scan': 0,
+                    'recent_wishlist_additions': []
                 })
                 
                 scan_results = []
                 
                 for i, artist in enumerate(watchlist_artists):
                     try:
+                        # Fetch artist image
+                        artist_image_url = ''
+                        try:
+                            artist_data = spotify_client.get_artist(artist.spotify_artist_id)
+                            if artist_data and 'images' in artist_data and artist_data['images']:
+                                artist_image_url = artist_data['images'][0]['url']
+                        except:
+                            pass
+
                         # Update progress
                         watchlist_scan_state.update({
                             'current_artist_index': i + 1,
                             'current_artist_name': artist.artist_name,
+                            'current_artist_image_url': artist_image_url,
                             'current_phase': 'fetching_discography',
                             'albums_to_check': 0,
                             'albums_checked': 0,
-                            'current_album': ''
+                            'current_album': '',
+                            'current_album_image_url': '',
+                            'current_track_name': ''
                         })
                         
                         # Get artist discography
@@ -14688,30 +14704,54 @@ def start_watchlist_scan():
                         
                         # Scan each album
                         for album_index, album in enumerate(albums):
-                            watchlist_scan_state.update({
-                                'albums_checked': album_index + 1,
-                                'current_album': album.name,
-                                'current_phase': f'checking_album_{album_index + 1}_of_{len(albums)}'
-                            })
-                            
                             try:
                                 # Get album tracks
                                 album_data = scanner.spotify_client.get_album(album.id)
                                 if not album_data or 'tracks' not in album_data:
                                     continue
-                                
+
                                 tracks = album_data['tracks']['items']
-                                
+
+                                # Get album image
+                                album_image_url = ''
+                                if 'images' in album_data and album_data['images']:
+                                    album_image_url = album_data['images'][0]['url']
+
+                                watchlist_scan_state.update({
+                                    'albums_checked': album_index + 1,
+                                    'current_album': album.name,
+                                    'current_album_image_url': album_image_url,
+                                    'current_phase': f'checking_album_{album_index + 1}_of_{len(albums)}'
+                                })
+
                                 # Check each track
                                 for track in tracks:
+                                    # Update current track being processed
+                                    track_name = track.get('name', 'Unknown Track')
+                                    watchlist_scan_state['current_track_name'] = track_name
+
                                     if scanner.is_track_missing_from_library(track):
                                         artist_new_tracks += 1
                                         watchlist_scan_state['tracks_found_this_scan'] += 1
-                                        
+
                                         # Add to wishlist
                                         if scanner.add_track_to_wishlist(track, album_data, artist):
                                             artist_added_tracks += 1
                                             watchlist_scan_state['tracks_added_this_scan'] += 1
+
+                                            # Add to recent wishlist additions feed
+                                            track_artists = track.get('artists', [])
+                                            track_artist_name = track_artists[0].get('name', 'Unknown Artist') if track_artists else 'Unknown Artist'
+
+                                            watchlist_scan_state['recent_wishlist_additions'].insert(0, {
+                                                'track_name': track_name,
+                                                'artist_name': track_artist_name,
+                                                'album_image_url': album_image_url
+                                            })
+
+                                            # Keep only last 10
+                                            if len(watchlist_scan_state['recent_wishlist_additions']) > 10:
+                                                watchlist_scan_state['recent_wishlist_additions'].pop()
                                 
                                 # Small delay between albums
                                 import time
@@ -15188,38 +15228,223 @@ def _process_watchlist_scan_automatically():
 
             print(f"👁️ [Auto-Watchlist] Found {watchlist_count} artists in watchlist, starting automatic scan...")
 
-            # Update global scan state
+            # Get list of artists to scan
+            watchlist_artists = database.get_watchlist_artists()
+            scanner = get_watchlist_scanner(spotify_client)
+
+            # Initialize detailed progress tracking (same as manual scan)
             watchlist_scan_state = {
                 'status': 'scanning',
                 'started_at': datetime.now(),
+                'total_artists': len(watchlist_artists),
+                'current_artist_index': 0,
+                'current_artist_name': '',
+                'current_artist_image_url': '',
+                'current_phase': 'starting',
+                'albums_to_check': 0,
+                'albums_checked': 0,
+                'current_album': '',
+                'current_album_image_url': '',
+                'current_track_name': '',
+                'tracks_found_this_scan': 0,
+                'tracks_added_this_scan': 0,
+                'recent_wishlist_additions': [],
                 'results': [],
                 'summary': {},
                 'error': None
             }
 
-            # Run the scan
-            scanner = get_watchlist_scanner(spotify_client)
-            results = scanner.scan_all_watchlist_artists()
+            scan_results = []
+
+            # Scan each artist with detailed tracking
+            for i, artist in enumerate(watchlist_artists):
+                try:
+                    # Fetch artist image
+                    artist_image_url = ''
+                    try:
+                        artist_data = spotify_client.get_artist(artist.spotify_artist_id)
+                        if artist_data and 'images' in artist_data and artist_data['images']:
+                            artist_image_url = artist_data['images'][0]['url']
+                    except:
+                        pass
+
+                    # Update progress
+                    watchlist_scan_state.update({
+                        'current_artist_index': i + 1,
+                        'current_artist_name': artist.artist_name,
+                        'current_artist_image_url': artist_image_url,
+                        'current_phase': 'fetching_discography',
+                        'albums_to_check': 0,
+                        'albums_checked': 0,
+                        'current_album': '',
+                        'current_album_image_url': '',
+                        'current_track_name': ''
+                    })
+
+                    # Get artist discography
+                    albums = scanner.get_artist_discography(artist.spotify_artist_id, artist.last_scan_timestamp)
+
+                    if albums is None:
+                        scan_results.append(type('ScanResult', (), {
+                            'artist_name': artist.artist_name,
+                            'spotify_artist_id': artist.spotify_artist_id,
+                            'albums_checked': 0,
+                            'new_tracks_found': 0,
+                            'tracks_added_to_wishlist': 0,
+                            'success': False,
+                            'error_message': "Failed to get artist discography"
+                        })())
+                        continue
+
+                    # Update with album count
+                    watchlist_scan_state.update({
+                        'current_phase': 'checking_albums',
+                        'albums_to_check': len(albums),
+                        'albums_checked': 0
+                    })
+
+                    # Track progress for this artist
+                    artist_new_tracks = 0
+                    artist_added_tracks = 0
+
+                    # Scan each album
+                    for album_index, album in enumerate(albums):
+                        try:
+                            # Get album tracks
+                            album_data = scanner.spotify_client.get_album(album.id)
+                            if not album_data or 'tracks' not in album_data:
+                                continue
+
+                            tracks = album_data['tracks']['items']
+
+                            # Get album image
+                            album_image_url = ''
+                            if 'images' in album_data and album_data['images']:
+                                album_image_url = album_data['images'][0]['url']
+
+                            watchlist_scan_state.update({
+                                'albums_checked': album_index + 1,
+                                'current_album': album.name,
+                                'current_album_image_url': album_image_url,
+                                'current_phase': f'checking_album_{album_index + 1}_of_{len(albums)}'
+                            })
+
+                            # Check each track
+                            for track in tracks:
+                                # Update current track being processed
+                                track_name = track.get('name', 'Unknown Track')
+                                watchlist_scan_state['current_track_name'] = track_name
+
+                                if scanner.is_track_missing_from_library(track):
+                                    artist_new_tracks += 1
+                                    watchlist_scan_state['tracks_found_this_scan'] += 1
+
+                                    # Add to wishlist
+                                    if scanner.add_track_to_wishlist(track, album_data, artist):
+                                        artist_added_tracks += 1
+                                        watchlist_scan_state['tracks_added_this_scan'] += 1
+
+                                        # Add to recent wishlist additions feed
+                                        track_artists = track.get('artists', [])
+                                        track_artist_name = track_artists[0].get('name', 'Unknown Artist') if track_artists else 'Unknown Artist'
+
+                                        watchlist_scan_state['recent_wishlist_additions'].insert(0, {
+                                            'track_name': track_name,
+                                            'artist_name': track_artist_name,
+                                            'album_image_url': album_image_url
+                                        })
+
+                                        # Keep only last 10
+                                        if len(watchlist_scan_state['recent_wishlist_additions']) > 10:
+                                            watchlist_scan_state['recent_wishlist_additions'].pop()
+
+                            # Small delay between albums
+                            import time
+                            time.sleep(0.5)
+
+                        except Exception as e:
+                            print(f"Error checking album {album.name}: {e}")
+                            continue
+
+                    # Update scan timestamp
+                    scanner.update_artist_scan_timestamp(artist.spotify_artist_id)
+
+                    # Store result
+                    scan_results.append(type('ScanResult', (), {
+                        'artist_name': artist.artist_name,
+                        'spotify_artist_id': artist.spotify_artist_id,
+                        'albums_checked': len(albums),
+                        'new_tracks_found': artist_new_tracks,
+                        'tracks_added_to_wishlist': artist_added_tracks,
+                        'success': True,
+                        'error_message': None
+                    })())
+
+                    print(f"✅ Scanned {artist.artist_name}: {artist_new_tracks} new tracks found, {artist_added_tracks} added to wishlist")
+
+                    # Delay between artists
+                    if i < len(watchlist_artists) - 1:
+                        watchlist_scan_state['current_phase'] = 'rate_limiting'
+                        time.sleep(2.0)
+
+                except Exception as e:
+                    print(f"Error scanning artist {artist.artist_name}: {e}")
+                    scan_results.append(type('ScanResult', (), {
+                        'artist_name': artist.artist_name,
+                        'spotify_artist_id': artist.spotify_artist_id,
+                        'albums_checked': 0,
+                        'new_tracks_found': 0,
+                        'tracks_added_to_wishlist': 0,
+                        'success': False,
+                        'error_message': str(e)
+                    })())
+                    continue
 
             # Update state with results
-            watchlist_scan_state['status'] = 'completed'
-            watchlist_scan_state['results'] = results
-            watchlist_scan_state['completed_at'] = datetime.now()
-
-            # Calculate summary
-            successful_scans = [r for r in results if r.success]
+            successful_scans = [r for r in scan_results if r.success]
             total_new_tracks = sum(r.new_tracks_found for r in successful_scans)
             total_added_to_wishlist = sum(r.tracks_added_to_wishlist for r in successful_scans)
 
+            watchlist_scan_state['status'] = 'completed'
+            watchlist_scan_state['results'] = scan_results
+            watchlist_scan_state['completed_at'] = datetime.now()
             watchlist_scan_state['summary'] = {
-                'total_artists': len(results),
+                'total_artists': len(scan_results),
                 'successful_scans': len(successful_scans),
                 'new_tracks_found': total_new_tracks,
                 'tracks_added_to_wishlist': total_added_to_wishlist
             }
 
-            print(f"Automatic watchlist scan completed: {len(successful_scans)}/{len(results)} artists scanned successfully")
+            print(f"Automatic watchlist scan completed: {len(successful_scans)}/{len(scan_results)} artists scanned successfully")
             print(f"Found {total_new_tracks} new tracks, added {total_added_to_wishlist} to wishlist")
+
+            # Populate discovery pool from similar artists
+            print("🎵 Starting discovery pool population...")
+            watchlist_scan_state['current_phase'] = 'populating_discovery_pool'
+            try:
+                scanner.populate_discovery_pool()
+                print("✅ Discovery pool population complete")
+            except Exception as discovery_error:
+                print(f"⚠️ Error populating discovery pool: {discovery_error}")
+                import traceback
+                traceback.print_exc()
+
+            # Update ListenBrainz playlists cache
+            print("🧠 Starting ListenBrainz playlists update...")
+            watchlist_scan_state['current_phase'] = 'updating_listenbrainz'
+            try:
+                from core.listenbrainz_manager import ListenBrainzManager
+                lb_manager = ListenBrainzManager("database/music_library.db")
+                lb_result = lb_manager.update_all_playlists()
+                if lb_result.get('success'):
+                    summary = lb_result.get('summary', {})
+                    print(f"✅ ListenBrainz update complete: {summary}")
+                else:
+                    print(f"⚠️ ListenBrainz update had issues: {lb_result.get('error', 'Unknown error')}")
+            except Exception as lb_error:
+                print(f"⚠️ Error updating ListenBrainz: {lb_error}")
+                import traceback
+                traceback.print_exc()
 
             # Add activity for watchlist scan completion
             if total_added_to_wishlist > 0:
