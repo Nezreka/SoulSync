@@ -2587,23 +2587,33 @@ class MusicDatabase:
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                
-                cursor.execute("""
-                    SELECT id, spotify_artist_id, artist_name, date_added,
-                           last_scan_timestamp, created_at, updated_at, image_url
+
+                # Check which columns exist (for migration compatibility)
+                cursor.execute("PRAGMA table_info(watchlist_artists)")
+                existing_columns = {column[1] for column in cursor.fetchall()}
+
+                # Build SELECT query based on existing columns
+                base_columns = ['id', 'spotify_artist_id', 'artist_name', 'date_added',
+                               'last_scan_timestamp', 'created_at', 'updated_at']
+                optional_columns = ['image_url', 'include_albums', 'include_eps', 'include_singles']
+
+                columns_to_select = base_columns + [col for col in optional_columns if col in existing_columns]
+
+                cursor.execute(f"""
+                    SELECT {', '.join(columns_to_select)}
                     FROM watchlist_artists
                     ORDER BY date_added DESC
                 """)
-                
+
                 rows = cursor.fetchall()
-                
+
                 watchlist_artists = []
                 for row in rows:
-                    # Try to get image_url, fallback to None if column doesn't exist yet (migration)
-                    try:
-                        image_url = row['image_url']
-                    except (KeyError, IndexError):
-                        image_url = None
+                    # Safely get optional columns with defaults
+                    image_url = row.get('image_url') if 'image_url' in existing_columns else None
+                    include_albums = bool(row.get('include_albums', 1)) if 'include_albums' in existing_columns else True
+                    include_eps = bool(row.get('include_eps', 1)) if 'include_eps' in existing_columns else True
+                    include_singles = bool(row.get('include_singles', 1)) if 'include_singles' in existing_columns else True
 
                     watchlist_artists.append(WatchlistArtist(
                         id=row['id'],
@@ -2613,11 +2623,14 @@ class MusicDatabase:
                         last_scan_timestamp=datetime.fromisoformat(row['last_scan_timestamp']) if row['last_scan_timestamp'] else None,
                         created_at=datetime.fromisoformat(row['created_at']) if row['created_at'] else None,
                         updated_at=datetime.fromisoformat(row['updated_at']) if row['updated_at'] else None,
-                        image_url=image_url
+                        image_url=image_url,
+                        include_albums=include_albums,
+                        include_eps=include_eps,
+                        include_singles=include_singles
                     ))
-                
+
                 return watchlist_artists
-                
+
         except Exception as e:
             logger.error(f"Error getting watchlist artists: {e}")
             return []
@@ -2642,6 +2655,14 @@ class MusicDatabase:
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
+
+                # Check if image_url column exists (for migration compatibility)
+                cursor.execute("PRAGMA table_info(watchlist_artists)")
+                existing_columns = {column[1] for column in cursor.fetchall()}
+
+                if 'image_url' not in existing_columns:
+                    logger.warning("image_url column does not exist in watchlist_artists table. Skipping update. Please restart the app to apply migrations.")
+                    return False
 
                 cursor.execute("""
                     UPDATE watchlist_artists
