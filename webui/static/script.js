@@ -28663,12 +28663,12 @@ async function openListenBrainzPlaylist(playlistMbid, playlistName) {
 
         // Convert to Spotify-like format for compatibility with download modal
         const spotifyTracks = tracks.map(track => ({
-            id: track.recording_mbid || '',
+            id: track.recording_mbid || `listenbrainz_${track.title}_${track.creator}`.replace(/[^a-z0-9]/gi, '_'),  // Generate ID if missing
             name: track.title || 'Unknown',
             artists: [{name: cleanArtistName(track.creator || 'Unknown')}], // Proper Spotify format
             album: {
                 name: track.album || 'Unknown Album',
-                images: []
+                images: track.album_cover_url ? [{url: track.album_cover_url}] : []
             },
             duration_ms: track.duration_ms || 0,
             listenbrainz_metadata: track.additional_metadata
@@ -30272,7 +30272,7 @@ async function rehydrateDiscoverDownloadModal(playlistId) {
 
             // Convert to Spotify format
             const spotifyTracks = tracks.map(track => ({
-                id: null,
+                id: track.mbid || `listenbrainz_${track.track_name}_${track.artist_name}`.replace(/[^a-z0-9]/gi, '_'),  // Generate ID if missing
                 name: track.track_name,
                 artists: [{name: cleanArtistName(track.artist_name)}], // Proper Spotify format
                 album: {
@@ -30345,7 +30345,7 @@ async function rehydrateDiscoverDownloadModal(playlistId) {
                             id: track.id,
                             name: track.name,
                             artists: artistsArray,
-                            album: track.album || 'Unknown Album',
+                            album: track.album || {name: 'Unknown Album', images: []},
                             duration_ms: track.duration_ms || 0,
                             external_urls: track.external_urls || {}
                         };
