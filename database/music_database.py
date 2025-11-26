@@ -2609,11 +2609,11 @@ class MusicDatabase:
 
                 watchlist_artists = []
                 for row in rows:
-                    # Safely get optional columns with defaults
-                    image_url = row.get('image_url') if 'image_url' in existing_columns else None
-                    include_albums = bool(row.get('include_albums', 1)) if 'include_albums' in existing_columns else True
-                    include_eps = bool(row.get('include_eps', 1)) if 'include_eps' in existing_columns else True
-                    include_singles = bool(row.get('include_singles', 1)) if 'include_singles' in existing_columns else True
+                    # Safely get optional columns with defaults (sqlite3.Row uses dict-style access)
+                    image_url = row['image_url'] if 'image_url' in existing_columns else None
+                    include_albums = bool(row['include_albums']) if 'include_albums' in existing_columns else True
+                    include_eps = bool(row['include_eps']) if 'include_eps' in existing_columns else True
+                    include_singles = bool(row['include_singles']) if 'include_singles' in existing_columns else True
 
                     watchlist_artists.append(WatchlistArtist(
                         id=row['id'],
