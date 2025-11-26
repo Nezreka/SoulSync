@@ -10832,7 +10832,9 @@ def _build_batch_status_data(batch_id, batch, live_transfers_lookup):
     response_data = {
         "phase": batch.get('phase', 'unknown'),
         "error": batch.get('error'),
-        "auto_initiated": batch.get('auto_initiated', False)
+        "auto_initiated": batch.get('auto_initiated', False),
+        "playlist_id": batch.get('playlist_id'),  # Include playlist_id for rehydration
+        "playlist_name": batch.get('playlist_name')  # Include playlist_name for reference
     }
 
     if response_data["phase"] == 'analysis':

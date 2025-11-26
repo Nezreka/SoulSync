@@ -4465,7 +4465,7 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
                    'YouTube';
 
     // Store metadata for discover download sidebar (will be added when Begin Analysis is clicked)
-    if (source === 'SoulSync' || virtualPlaylistId.startsWith('discover_lb_')) {
+    if (source === 'SoulSync' || virtualPlaylistId.startsWith('discover_lb_') || virtualPlaylistId.startsWith('listenbrainz_')) {
         // Extract image URL from first track's album cover
         let imageUrl = null;
         if (spotifyTracks && spotifyTracks.length > 0) {
@@ -28519,6 +28519,15 @@ async function openDownloadModalForListenBrainzPlaylist(identifier, title) {
                             // Start polling for this process
                             startModalDownloadPolling(convertedPlaylistId);
 
+                            // Add to discover download sidebar if this has discoverMetadata
+                            if (process.discoverMetadata) {
+                                const playlistName = `[ListenBrainz] ${title}`;
+                                const imageUrl = process.discoverMetadata.imageUrl;
+                                const type = process.discoverMetadata.type || 'album';
+                                addDiscoverDownload(convertedPlaylistId, playlistName, type, imageUrl);
+                                console.log(`📥 [REHYDRATION] Added ListenBrainz download to sidebar: ${playlistName}`);
+                            }
+
                             // Show modal since user clicked the download button (different from background rehydration)
                             if (process.modalElement) {
                                 process.modalElement.style.display = 'flex';
@@ -30135,24 +30144,32 @@ async function rehydrateDiscoverDownloadModal(playlistId) {
         console.log(`💧 [REHYDRATE] Attempting to rehydrate modal for: ${playlistId}`);
 
         // Check if there's an active backend process for this playlist
-        const batchResponse = await fetch(`/api/playlists/batch_info`);
+        const batchResponse = await fetch(`/api/download_status/batch`);
         if (!batchResponse.ok) {
             console.log(`⚠️ [REHYDRATE] Failed to fetch batch info`);
             return false;
         }
 
         const batchData = await batchResponse.json();
-        const batches = batchData.batches || [];
+        const batches = batchData.batches || {};
 
-        // Find the batch for this playlist
-        const batch = batches.find(b => b.playlist_id === playlistId);
+        // Find the batch for this playlist (batches is an object with batch_id keys)
+        let batchId = null;
+        let batch = null;
+        for (const [id, batchStatus] of Object.entries(batches)) {
+            if (batchStatus.playlist_id === playlistId) {
+                batchId = id;
+                batch = batchStatus;
+                break;
+            }
+        }
 
-        if (!batch) {
+        if (!batch || !batchId) {
             console.log(`⚠️ [REHYDRATE] No active batch found for ${playlistId}`);
             return false;
         }
 
-        console.log(`✅ [REHYDRATE] Found active batch for ${playlistId}:`, batch);
+        console.log(`✅ [REHYDRATE] Found active batch for ${playlistId}: ${batchId}`, batch);
 
         // Get the download metadata from discoverDownloads
         const downloadData = discoverDownloads[playlistId];
@@ -30207,12 +30224,15 @@ async function rehydrateDiscoverDownloadModal(playlistId) {
                 const process = activeDownloadProcesses[playlistId];
                 if (process) {
                     process.status = 'running';
-                    process.batchId = batch.batch_id;
+                    process.batchId = batchId;
                     const beginBtn = document.getElementById(`begin-analysis-btn-${playlistId}`);
                     const cancelBtn = document.getElementById(`cancel-all-btn-${playlistId}`);
                     if (beginBtn) beginBtn.style.display = 'none';
                     if (cancelBtn) cancelBtn.style.display = 'inline-block';
-                    console.log(`✅ [REHYDRATE] Successfully rehydrated album modal`);
+
+                    // Start polling for status updates
+                    startModalDownloadPolling(playlistId);
+                    console.log(`✅ [REHYDRATE] Successfully rehydrated album modal with polling`);
                     return true;
                 }
                 return false;
@@ -30268,15 +30288,91 @@ async function rehydrateDiscoverDownloadModal(playlistId) {
             const process = activeDownloadProcesses[playlistId];
             if (process) {
                 process.status = 'running';
-                process.batchId = batch.batch_id;
+                process.batchId = batchId;
                 const beginBtn = document.getElementById(`begin-analysis-btn-${playlistId}`);
                 const cancelBtn = document.getElementById(`cancel-all-btn-${playlistId}`);
                 if (beginBtn) beginBtn.style.display = 'none';
                 if (cancelBtn) cancelBtn.style.display = 'inline-block';
-                console.log(`✅ [REHYDRATE] Successfully rehydrated ListenBrainz modal`);
+
+                // Start polling for status updates
+                startModalDownloadPolling(playlistId);
+                console.log(`✅ [REHYDRATE] Successfully rehydrated ListenBrainz modal with polling`);
                 return true;
             }
             return false;
+        } else if (playlistId.startsWith('listenbrainz_')) {
+            // ListenBrainz download from discovery modal - get from backend state
+            const mbid = playlistId.replace('listenbrainz_', '');
+            console.log(`💧 [REHYDRATE] ListenBrainz download - fetching state for MBID: ${mbid}`);
+
+            try {
+                // Fetch ListenBrainz state from backend
+                const stateResponse = await fetch(`/api/listenbrainz/state/${mbid}`);
+                if (!stateResponse.ok) {
+                    console.log(`⚠️ [REHYDRATE] Failed to fetch ListenBrainz state`);
+                    return false;
+                }
+
+                const stateData = await stateResponse.json();
+                if (!stateData || !stateData.discovery_results) {
+                    console.log(`⚠️ [REHYDRATE] No discovery results in ListenBrainz state`);
+                    return false;
+                }
+
+                // Convert discovery results to Spotify tracks
+                const spotifyTracks = stateData.discovery_results
+                    .filter(result => result.spotify_data)
+                    .map(result => {
+                        const track = result.spotify_data;
+                        // Ensure artists is an array of strings
+                        if (track.artists && Array.isArray(track.artists)) {
+                            track.artists = track.artists.map(artist =>
+                                typeof artist === 'string' ? artist : (artist.name || artist)
+                            );
+                        } else if (track.artists && typeof track.artists === 'string') {
+                            track.artists = [track.artists];
+                        } else {
+                            track.artists = ['Unknown Artist'];
+                        }
+                        return {
+                            id: track.id,
+                            name: track.name,
+                            artists: track.artists,
+                            album: track.album || 'Unknown Album',
+                            duration_ms: track.duration_ms || 0,
+                            external_urls: track.external_urls || {}
+                        };
+                    });
+
+                if (spotifyTracks.length === 0) {
+                    console.log(`⚠️ [REHYDRATE] No Spotify tracks in ListenBrainz discovery results`);
+                    return false;
+                }
+
+                console.log(`✅ [REHYDRATE] Retrieved ${spotifyTracks.length} tracks from ListenBrainz state`);
+
+                // Create modal and update process
+                await openDownloadMissingModalForYouTube(playlistId, downloadData.name, spotifyTracks);
+                const process = activeDownloadProcesses[playlistId];
+                if (process) {
+                    process.status = 'running';
+                    process.batchId = batchId;
+                    const beginBtn = document.getElementById(`begin-analysis-btn-${playlistId}`);
+                    const cancelBtn = document.getElementById(`cancel-all-btn-${playlistId}`);
+                    if (beginBtn) beginBtn.style.display = 'none';
+                    if (cancelBtn) cancelBtn.style.display = 'inline-block';
+
+                    // Start polling for status updates
+                    startModalDownloadPolling(playlistId);
+                    console.log(`✅ [REHYDRATE] Successfully rehydrated ListenBrainz download modal with polling`);
+                    return true;
+                }
+                return false;
+
+            } catch (error) {
+                console.error(`❌ [REHYDRATE] Error fetching ListenBrainz state:`, error);
+                return false;
+            }
         } else {
             console.error(`❌ [REHYDRATE] Unknown discover playlist type: ${playlistId}`);
             return false;
@@ -30329,7 +30425,7 @@ async function rehydrateDiscoverDownloadModal(playlistId) {
         const process = activeDownloadProcesses[playlistId];
         if (process) {
             process.status = 'running';
-            process.batchId = batch.batch_id;
+            process.batchId = batchId;
 
             // Update button states
             const beginBtn = document.getElementById(`begin-analysis-btn-${playlistId}`);
@@ -30337,8 +30433,11 @@ async function rehydrateDiscoverDownloadModal(playlistId) {
             if (beginBtn) beginBtn.style.display = 'none';
             if (cancelBtn) cancelBtn.style.display = 'inline-block';
 
+            // Start polling for status updates
+            startModalDownloadPolling(playlistId);
+
             // Don't hide the modal - user clicked to open it
-            console.log(`✅ [REHYDRATE] Successfully rehydrated modal for ${downloadData.name}`);
+            console.log(`✅ [REHYDRATE] Successfully rehydrated modal for ${downloadData.name} with polling`);
             return true;
         } else {
             console.error(`❌ [REHYDRATE] Failed to find rehydrated process for ${playlistId}`);
