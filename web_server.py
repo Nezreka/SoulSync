@@ -16777,9 +16777,10 @@ def get_listenbrainz_playlist_state(playlist_mbid):
             'spotify_matches': state['spotify_matches'],
             'spotify_total': state['spotify_total'],
             'discovery_results': state['discovery_results'],
-            'sync_playlist_id': state['sync_playlist_id'],
-            'converted_spotify_playlist_id': state['converted_spotify_playlist_id'],
-            'sync_progress': state['sync_progress'],
+            'sync_playlist_id': state.get('sync_playlist_id'),
+            'converted_spotify_playlist_id': state.get('converted_spotify_playlist_id'),
+            'download_process_id': state.get('download_process_id'),
+            'sync_progress': state.get('sync_progress', {}),
             'created_at': state['created_at'],
             'last_accessed': state['last_accessed']
         }
@@ -16929,6 +16930,44 @@ def get_listenbrainz_discovery_status(playlist_mbid):
 
     except Exception as e:
         print(f"❌ Error getting ListenBrainz discovery status: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/listenbrainz/update-phase/<playlist_mbid>', methods=['POST'])
+def update_listenbrainz_phase(playlist_mbid):
+    """Update ListenBrainz playlist phase (for phase transitions and persistence)"""
+    try:
+        if playlist_mbid not in listenbrainz_playlist_states:
+            return jsonify({"error": "ListenBrainz playlist not found"}), 404
+
+        data = request.get_json() or {}
+        new_phase = data.get('phase')
+
+        if not new_phase:
+            return jsonify({"error": "Phase is required"}), 400
+
+        state = listenbrainz_playlist_states[playlist_mbid]
+        state['phase'] = new_phase
+        state['last_accessed'] = time.time()
+
+        # Update download process ID if provided (for download persistence)
+        if 'download_process_id' in data:
+            state['download_process_id'] = data['download_process_id']
+            logger.info(f"🎵 Updated ListenBrainz download_process_id: {data['download_process_id']}")
+
+        # Update converted Spotify playlist ID if provided (for download persistence)
+        if 'converted_spotify_playlist_id' in data:
+            state['converted_spotify_playlist_id'] = data['converted_spotify_playlist_id']
+            logger.info(f"🎵 Updated ListenBrainz converted_spotify_playlist_id: {data['converted_spotify_playlist_id']}")
+
+        logger.info(f"🎵 Updated ListenBrainz playlist {playlist_mbid} phase to: {new_phase}")
+
+        return jsonify({
+            "success": True,
+            "phase": new_phase
+        })
+
+    except Exception as e:
+        print(f"❌ Error updating ListenBrainz playlist phase: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/listenbrainz/discovery/update_match', methods=['POST'])

@@ -3094,7 +3094,7 @@ async function loadListenBrainzPlaylistsFromBackend() {
         for (const playlistInfo of playlists) {
             const playlistMbid = playlistInfo.playlist_mbid;
 
-            console.log(`🎵 Hydrating ListenBrainz playlist: ${playlistInfo.playlist.name} (Phase: ${playlistInfo.phase})`);
+            console.log(`🎵 Hydrating ListenBrainz playlist: ${playlistInfo.playlist.name} (Phase: ${playlistInfo.phase}, MBID: ${playlistMbid})`);
 
             // Fetch full state for non-fresh playlists to restore discovery results
             if (playlistInfo.phase !== 'fresh') {
@@ -3154,6 +3154,15 @@ async function loadListenBrainzPlaylistsFromBackend() {
             if (playlistInfo.phase === 'discovering') {
                 console.log(`🔄 [Backend Loading] Auto-starting polling for discovering playlist: ${playlistInfo.playlist.name}`);
                 startListenBrainzDiscoveryPolling(playlistInfo.playlist_mbid);
+            }
+            // Show sync button for discovered playlists (hidden by default)
+            else if (playlistInfo.phase === 'discovered' || playlistInfo.phase === 'syncing' || playlistInfo.phase === 'sync_complete') {
+                const playlistId = `discover-lb-playlist-${playlistInfo.playlist_mbid}`;
+                const syncBtn = document.getElementById(`${playlistId}-sync-btn`);
+                if (syncBtn) {
+                    syncBtn.style.display = 'inline-block';
+                    console.log(`✅ Showing sync button for discovered playlist: ${playlistInfo.playlist.name}`);
+                }
             }
         }
 
@@ -4745,7 +4754,46 @@ async function closeDownloadMissingModal(playlistId) {
                 console.error(`❌ [Modal Close] Error updating backend phase for Tidal playlist ${tidalPlaylistId}:`, error);
             }
         }
-        
+
+        // Reset ListenBrainz playlist phase to 'discovered' when modal is closed
+        if (playlistId.startsWith('listenbrainz_')) {
+            const playlistMbid = playlistId.replace('listenbrainz_', '');
+
+            console.log(`🧹 [Modal Close] Processing ListenBrainz playlist close: playlistId="${playlistId}", mbid="${playlistMbid}"`);
+
+            // Clear download-specific state but preserve discovery results
+            if (listenbrainzPlaylistStates[playlistMbid]) {
+                const currentPhase = listenbrainzPlaylistStates[playlistMbid].phase;
+                console.log(`🧹 [Modal Close] Current phase before reset: ${currentPhase}`);
+
+                // Reset to discovered phase (unless download actually completed successfully)
+                if (currentPhase !== 'download_complete') {
+                    // Clear download-specific fields
+                    delete listenbrainzPlaylistStates[playlistMbid].download_process_id;
+                    delete listenbrainzPlaylistStates[playlistMbid].convertedSpotifyPlaylistId;
+
+                    // Set back to discovered
+                    listenbrainzPlaylistStates[playlistMbid].phase = 'discovered';
+
+                    // Update backend state
+                    try {
+                        await fetch(`/api/listenbrainz/update-phase/${playlistMbid}`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ phase: 'discovered' })
+                        });
+                        console.log(`✅ [Modal Close] Updated backend phase for ListenBrainz playlist ${playlistMbid} to 'discovered'`);
+                    } catch (error) {
+                        console.error(`❌ [Modal Close] Error updating backend phase for ListenBrainz playlist ${playlistMbid}:`, error);
+                    }
+
+                    console.log(`🔄 [Modal Close] Reset ListenBrainz playlist ${playlistMbid} to discovered phase`);
+                }
+            } else {
+                console.error(`❌ [Modal Close] No ListenBrainz state found for mbid: ${playlistMbid}`);
+            }
+        }
+
         // Clear wishlist modal state when modal is fully closed
         if (playlistId === 'wishlist') {
             WishlistModalState.clear(); // Clear all tracking since modal is fully closed
@@ -5511,6 +5559,30 @@ async function startMissingTracksProcess(playlistId) {
                 console.log(`🔄 Updated Beatport chart ${chartHash} to downloading phase`);
             }
         }
+
+        // Update ListenBrainz playlist phase to 'downloading' if this is a ListenBrainz playlist
+        if (playlistId.startsWith('listenbrainz_')) {
+            const playlistMbid = playlistId.replace('listenbrainz_', '');
+            const state = listenbrainzPlaylistStates[playlistMbid];
+
+            if (state) {
+                // Update frontend state
+                state.phase = 'downloading';
+
+                // Update backend state
+                try {
+                    fetch(`/api/listenbrainz/update-phase/${playlistMbid}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ phase: 'downloading' })
+                    });
+                } catch (error) {
+                    console.warn('⚠️ Error updating backend ListenBrainz phase to downloading:', error);
+                }
+
+                console.log(`🔄 Updated ListenBrainz playlist ${playlistMbid} to downloading phase`);
+            }
+        }
         document.getElementById(`begin-analysis-btn-${playlistId}`).style.display = 'none';
         document.getElementById(`cancel-all-btn-${playlistId}`).style.display = 'inline-block';
 
@@ -5601,6 +5673,33 @@ async function startMissingTracksProcess(playlistId) {
                     console.log(`🔄 Updated Beatport backend with download_process_id: ${data.batch_id}`);
                 } catch (error) {
                     console.warn('⚠️ Error updating Beatport backend with download_process_id:', error);
+                }
+            }
+        }
+
+        // Update ListenBrainz backend state with download_process_id and convertedSpotifyPlaylistId
+        if (playlistId.startsWith('listenbrainz_')) {
+            const playlistMbid = playlistId.replace('listenbrainz_', '');
+            const state = listenbrainzPlaylistStates[playlistMbid];
+            if (state) {
+                // Store in frontend state
+                state.download_process_id = data.batch_id;
+                state.convertedSpotifyPlaylistId = playlistId;
+
+                // Update backend state
+                try {
+                    fetch(`/api/listenbrainz/update-phase/${playlistMbid}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            phase: 'downloading',
+                            download_process_id: data.batch_id,
+                            converted_spotify_playlist_id: playlistId
+                        })
+                    });
+                    console.log(`🔄 Updated ListenBrainz backend with download_process_id: ${data.batch_id}`);
+                } catch (error) {
+                    console.warn('⚠️ Error updating ListenBrainz backend with download_process_id:', error);
                 }
             }
         }
@@ -16819,13 +16918,33 @@ function startListenBrainzDiscoveryPolling(playlistMbid) {
                 clearInterval(pollInterval);
                 delete activeYouTubePollers[playlistMbid];
 
-                // Update phase
+                // Update phase in backend for persistence (like Beatport does)
+                try {
+                    await fetch(`/api/listenbrainz/update-phase/${playlistMbid}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ phase: 'discovered' })
+                    });
+                    console.log('✅ Updated ListenBrainz backend phase to discovered');
+                } catch (error) {
+                    console.warn('⚠️ Failed to update backend phase:', error);
+                }
+
+                // Update phase in frontend state
                 if (listenbrainzPlaylistStates[playlistMbid]) {
                     listenbrainzPlaylistStates[playlistMbid].phase = 'discovered';
                 }
 
                 // Update modal buttons to show sync and download buttons
                 updateYouTubeModalButtons(playlistMbid, 'discovered');
+
+                // Show sync button in playlist listing (hidden by default until discovered)
+                const playlistId = `discover-lb-playlist-${playlistMbid}`;
+                const syncBtn = document.getElementById(`${playlistId}-sync-btn`);
+                if (syncBtn) {
+                    syncBtn.style.display = 'inline-block';
+                    console.log('✅ Showing sync button after discovery completion');
+                }
 
                 console.log('✅ ListenBrainz discovery complete:', playlistMbid);
                 showToast('ListenBrainz discovery complete!', 'success');
@@ -16962,6 +17081,22 @@ async function startListenBrainzPlaylistSync(playlistMbid) {
     try {
         console.log('🔄 Starting ListenBrainz sync for:', state.playlist.name);
 
+        // Check if being called from playlist listing (has UI elements) or modal
+        const listingPlaylistId = `discover-lb-playlist-${playlistMbid}`;
+        const statusDisplay = document.getElementById(`${listingPlaylistId}-sync-status`);
+        const isFromListing = statusDisplay !== null;
+
+        if (isFromListing) {
+            console.log('🔄 Sync initiated from playlist listing');
+            // Show status display in listing
+            statusDisplay.style.display = 'block';
+            const syncButton = document.getElementById(`${listingPlaylistId}-sync-btn`);
+            if (syncButton) {
+                syncButton.disabled = true;
+                syncButton.style.opacity = '0.5';
+            }
+        }
+
         // Call backend to start sync
         const response = await fetch(`/api/listenbrainz/sync/start/${playlistMbid}`, {
             method: 'POST'
@@ -16976,10 +17111,12 @@ async function startListenBrainzPlaylistSync(playlistMbid) {
         state.phase = 'syncing';
 
         // Start polling for sync progress
-        startListenBrainzSyncPolling(playlistMbid);
-
-        // Update modal
-        updateYouTubeModalButtons(playlistMbid, 'syncing');
+        if (isFromListing) {
+            startListenBrainzListingSyncPolling(playlistMbid, listingPlaylistId);
+        } else {
+            startListenBrainzSyncPolling(playlistMbid);
+            updateYouTubeModalButtons(playlistMbid, 'syncing');
+        }
 
         showToast('Starting ListenBrainz sync...', 'info');
 
@@ -16987,6 +17124,86 @@ async function startListenBrainzPlaylistSync(playlistMbid) {
         console.error('❌ Error starting ListenBrainz sync:', error);
         showToast(`Error: ${error.message}`, 'error');
     }
+}
+
+function startListenBrainzListingSyncPolling(playlistMbid, listingPlaylistId) {
+    console.log(`🔄 Starting listing sync polling for: ${playlistMbid} (UI: ${listingPlaylistId})`);
+
+    // Stop any existing polling
+    if (activeYouTubePollers[playlistMbid]) {
+        clearInterval(activeYouTubePollers[playlistMbid]);
+    }
+
+    const pollInterval = setInterval(async () => {
+        try {
+            const response = await fetch(`/api/listenbrainz/sync/status/${playlistMbid}`);
+            const status = await response.json();
+
+            if (status.error) {
+                console.error('❌ Error polling ListenBrainz sync status:', status.error);
+                clearInterval(pollInterval);
+                delete activeYouTubePollers[playlistMbid];
+                return;
+            }
+
+            // Update UI elements in listing
+            const totalEl = document.getElementById(`${listingPlaylistId}-sync-total`);
+            const matchedEl = document.getElementById(`${listingPlaylistId}-sync-matched`);
+            const failedEl = document.getElementById(`${listingPlaylistId}-sync-failed`);
+            const percentageEl = document.getElementById(`${listingPlaylistId}-sync-percentage`);
+
+            console.log(`📊 ListenBrainz listing sync progress:`, {
+                total: status.progress?.total_tracks,
+                matched: status.progress?.matched_tracks,
+                failed: status.progress?.failed_tracks,
+                complete: status.complete
+            });
+
+            if (totalEl) totalEl.textContent = status.progress?.total_tracks || 0;
+            if (matchedEl) matchedEl.textContent = status.progress?.matched_tracks || 0;
+            if (failedEl) failedEl.textContent = status.progress?.failed_tracks || 0;
+
+            const percentage = status.progress?.total_tracks > 0
+                ? Math.round(((status.progress?.matched_tracks || 0) / status.progress.total_tracks) * 100)
+                : 0;
+            if (percentageEl) percentageEl.textContent = percentage;
+
+            // Check if complete
+            if (status.complete) {
+                clearInterval(pollInterval);
+                delete activeYouTubePollers[playlistMbid];
+
+                const statusDisplay = document.getElementById(`${listingPlaylistId}-sync-status`);
+                const syncButton = document.getElementById(`${listingPlaylistId}-sync-btn`);
+
+                if (statusDisplay) {
+                    setTimeout(() => {
+                        statusDisplay.style.display = 'none';
+                    }, 3000);
+                }
+
+                if (syncButton) {
+                    syncButton.disabled = false;
+                    syncButton.style.opacity = '1';
+                }
+
+                // Update state
+                if (listenbrainzPlaylistStates[playlistMbid]) {
+                    listenbrainzPlaylistStates[playlistMbid].phase = 'sync_complete';
+                }
+
+                showToast(`Sync complete: ${status.progress?.matched_tracks || 0}/${status.progress?.total_tracks || 0} tracks matched`, 'success');
+                console.log('✅ ListenBrainz listing sync complete:', playlistMbid);
+            }
+
+        } catch (error) {
+            console.error('❌ Error polling ListenBrainz listing sync:', error);
+            clearInterval(pollInterval);
+            delete activeYouTubePollers[playlistMbid];
+        }
+    }, 1000);
+
+    activeYouTubePollers[playlistMbid] = pollInterval;
 }
 
 // ============================================================================
@@ -28026,7 +28243,7 @@ async function loadListenBrainzTabContent(tabId) {
             trackCount = playlistData.track.length;
         }
 
-        const playlistId = `lb-${tabId}-${index}`;
+        const playlistId = `discover-lb-playlist-${identifier}`;  // Use consistent MBID-based ID
         const virtualPlaylistId = `discover_lb_${tabId}_${identifier}`;
 
         html += `
@@ -28045,8 +28262,9 @@ async function loadListenBrainzTabContent(tabId) {
                         </button>
                         <button class="action-button primary"
                                 id="${playlistId}-sync-btn"
-                                onclick="startListenBrainzPlaylistSync('${identifier}', '${escapeHtml(title)}', '${playlistId}')"
-                                title="Sync to media server">
+                                onclick="startListenBrainzPlaylistSync('${identifier}')"
+                                title="Sync to media server"
+                                style="display: none;">
                             <span class="button-icon">⟳</span>
                             <span class="button-text">Sync</span>
                         </button>
@@ -28082,7 +28300,7 @@ async function loadListenBrainzTabContent(tabId) {
     playlists.forEach((playlist, index) => {
         const playlistData = playlist.playlist || playlist;
         const identifier = playlistData.identifier?.split('/').pop() || '';
-        const playlistId = `lb-${tabId}-${index}`;
+        const playlistId = `discover-lb-playlist-${identifier}`;  // Use consistent MBID-based ID
         loadListenBrainzPlaylistTracks(identifier, playlistId);
     });
 }
@@ -28208,147 +28426,6 @@ function displayListenBrainzTracks(tracks, playlistId) {
     playlistContainer.innerHTML = html;
 }
 
-async function startListenBrainzPlaylistSync(identifier, title, playlistId) {
-    try {
-        console.log(`🔄 Starting sync for ListenBrainz playlist:`, { identifier, title, playlistId });
-
-        const tracks = listenbrainzTracksCache[identifier];
-        console.log(`📊 Cached tracks for ${identifier}:`, tracks?.length || 0);
-
-        if (!tracks || tracks.length === 0) {
-            console.error('❌ No tracks found in cache');
-            showToast('No tracks to sync', 'error');
-            return;
-        }
-
-        console.log(`✅ Found ${tracks.length} tracks to sync`);
-
-        // Convert ListenBrainz tracks to Spotify format (same as other discover playlists)
-        const spotifyTracks = tracks.map(track => ({
-            id: null, // No Spotify ID for ListenBrainz tracks
-            name: track.track_name,
-            artists: [cleanArtistName(track.artist_name)], // Clean featured artists, array of strings for sync compatibility
-            album: {
-                name: track.album_name,
-                images: track.album_cover_url ? [{ url: track.album_cover_url }] : []
-            },
-            duration_ms: track.duration_ms || 0,
-            mbid: track.mbid // Include MusicBrainz ID for matching
-        }));
-
-        const virtualPlaylistId = `discover_lb_${identifier}`;
-        console.log(`🆔 Virtual playlist ID: ${virtualPlaylistId}`);
-
-        // Store in cache for sync function (CRITICAL - same as other discover playlists)
-        playlistTrackCache[virtualPlaylistId] = spotifyTracks;
-
-        // Create virtual playlist object (CRITICAL - same as other discover playlists)
-        const virtualPlaylist = {
-            id: virtualPlaylistId,
-            name: title,
-            track_count: spotifyTracks.length
-        };
-
-        // Add to spotify playlists array if not already there (CRITICAL)
-        if (!spotifyPlaylists.find(p => p.id === virtualPlaylistId)) {
-            spotifyPlaylists.push(virtualPlaylist);
-        }
-
-        // Show sync status display
-        const statusDisplay = document.getElementById(`${playlistId}-sync-status`);
-        const syncButton = document.getElementById(`${playlistId}-sync-btn`);
-
-        if (statusDisplay) statusDisplay.style.display = 'block';
-        if (syncButton) {
-            syncButton.disabled = true;
-            syncButton.style.opacity = '0.5';
-            syncButton.style.cursor = 'not-allowed';
-        }
-
-        // Use the same sync function as all other discover playlists
-        await startPlaylistSync(virtualPlaylistId);
-
-        // Extract image URL from first track for download bar bubble
-        let imageUrl = null;
-        if (spotifyTracks && spotifyTracks.length > 0) {
-            const firstTrack = spotifyTracks[0];
-            if (firstTrack.album && firstTrack.album.images && firstTrack.album.images.length > 0) {
-                imageUrl = firstTrack.album.images[0].url;
-            }
-        }
-
-        // Add to discover download bar
-        addDiscoverDownload(virtualPlaylistId, title, 'listenbrainz', imageUrl);
-
-        // Start polling for progress updates (using discover playlist pattern)
-        startListenBrainzSyncPolling(playlistId, virtualPlaylistId);
-
-    } catch (error) {
-        console.error('❌ Error starting ListenBrainz playlist sync:', error);
-        showToast('Failed to start sync', 'error');
-
-        const statusDisplay = document.getElementById(`${playlistId}-sync-status`);
-        const syncButton = document.getElementById(`${playlistId}-sync-btn`);
-        if (statusDisplay) statusDisplay.style.display = 'none';
-        if (syncButton) {
-            syncButton.disabled = false;
-            syncButton.style.opacity = '1';
-            syncButton.style.cursor = 'pointer';
-        }
-    }
-}
-
-function startListenBrainzSyncPolling(playlistId, virtualPlaylistId) {
-    const pollInterval = setInterval(async () => {
-        try {
-            const response = await fetch(`/api/sync/status/${virtualPlaylistId}`);
-            if (!response.ok) {
-                clearInterval(pollInterval);
-                return;
-            }
-
-            const status = await response.json();
-
-            // Update UI
-            const totalEl = document.getElementById(`${playlistId}-sync-total`);
-            const matchedEl = document.getElementById(`${playlistId}-sync-matched`);
-            const failedEl = document.getElementById(`${playlistId}-sync-failed`);
-            const percentageEl = document.getElementById(`${playlistId}-sync-percentage`);
-
-            if (totalEl) totalEl.textContent = status.total_tracks || 0;
-            if (matchedEl) matchedEl.textContent = status.matched_tracks || 0;
-            if (failedEl) failedEl.textContent = status.failed_tracks || 0;
-
-            const percentage = status.total_tracks > 0
-                ? Math.round(((status.matched_tracks || 0) / status.total_tracks) * 100)
-                : 0;
-            if (percentageEl) percentageEl.textContent = percentage;
-
-            // Check if complete
-            if (status.is_complete) {
-                clearInterval(pollInterval);
-
-                const statusDisplay = document.getElementById(`${playlistId}-sync-status`);
-                const syncButton = document.getElementById(`${playlistId}-sync-btn`);
-
-                if (statusDisplay) {
-                    setTimeout(() => {
-                        statusDisplay.style.display = 'none';
-                    }, 3000);
-                }
-
-                if (syncButton) syncButton.disabled = false;
-
-                showToast(`Sync complete: ${status.matched_tracks}/${status.total_tracks} tracks matched`, 'success');
-            }
-
-        } catch (error) {
-            console.error('Error polling sync status:', error);
-            clearInterval(pollInterval);
-        }
-    }, 2000);
-}
-
 async function openDownloadModalForListenBrainzPlaylist(identifier, title) {
     try {
         const tracks = listenbrainzTracksCache[identifier];
@@ -28358,9 +28435,12 @@ async function openDownloadModalForListenBrainzPlaylist(identifier, title) {
         }
 
         console.log(`🎵 Opening ListenBrainz discovery modal: ${title}`);
+        console.log(`🔍 Looking for existing state with identifier: ${identifier}`);
+        console.log(`📋 All ListenBrainz states:`, Object.keys(listenbrainzPlaylistStates));
 
         // Check if state already exists from backend hydration (like Beatport does)
         const existingState = listenbrainzPlaylistStates[identifier];
+        console.log(`🔍 Existing state found:`, existingState ? `Phase: ${existingState.phase}` : 'None');
 
         if (existingState && existingState.phase !== 'fresh') {
             // State exists - rehydrate the modal with existing data
@@ -28376,66 +28456,77 @@ async function openDownloadModalForListenBrainzPlaylist(identifier, title) {
                 const convertedPlaylistId = existingState.convertedSpotifyPlaylistId;
 
                 try {
+                    // Check if modal already exists (user just closed it)
+                    if (activeDownloadProcesses[convertedPlaylistId]) {
+                        console.log(`✅ Download modal already exists, just showing it`);
+                        const process = activeDownloadProcesses[convertedPlaylistId];
+                        if (process.modalElement) {
+                            process.modalElement.style.display = 'flex';
+                        }
+                        return;
+                    }
+
                     // Create the download modal using the ListenBrainz state
-                    if (!activeDownloadProcesses[convertedPlaylistId]) {
-                        // Get tracks from the existing state
-                        let spotifyTracks = [];
+                    console.log(`🆕 Creating new download modal for rehydration`);
+                    // Get tracks from the existing state
+                    let spotifyTracks = [];
 
-                        if (existingState && existingState.discovery_results) {
-                            spotifyTracks = existingState.discovery_results
-                                .filter(result => result.spotify_data)
-                                .map(result => {
-                                    const track = result.spotify_data;
-                                    // Ensure artists is an array of strings
-                                    if (track.artists && Array.isArray(track.artists)) {
-                                        track.artists = track.artists.map(artist =>
-                                            typeof artist === 'string' ? artist : (artist.name || artist)
-                                        );
-                                    } else if (track.artists && typeof track.artists === 'string') {
-                                        track.artists = [track.artists];
-                                    } else {
-                                        track.artists = ['Unknown Artist'];
-                                    }
-                                    return {
-                                        id: track.id,
-                                        name: track.name,
-                                        artists: track.artists,
-                                        album: track.album || 'Unknown Album',
-                                        duration_ms: track.duration_ms || 0,
-                                        external_urls: track.external_urls || {}
-                                    };
-                                });
-                        }
+                    if (existingState && existingState.discovery_results) {
+                        spotifyTracks = existingState.discovery_results
+                            .filter(result => result.spotify_data)
+                            .map(result => {
+                                const track = result.spotify_data;
+                                // Ensure artists is an array of strings
+                                if (track.artists && Array.isArray(track.artists)) {
+                                    track.artists = track.artists.map(artist =>
+                                        typeof artist === 'string' ? artist : (artist.name || artist)
+                                    );
+                                } else if (track.artists && typeof track.artists === 'string') {
+                                    track.artists = [track.artists];
+                                } else {
+                                    track.artists = ['Unknown Artist'];
+                                }
+                                return {
+                                    id: track.id,
+                                    name: track.name,
+                                    artists: track.artists,
+                                    album: track.album || 'Unknown Album',
+                                    duration_ms: track.duration_ms || 0,
+                                    external_urls: track.external_urls || {}
+                                };
+                            });
+                    }
 
-                        if (spotifyTracks.length > 0) {
-                            await openDownloadMissingModalForYouTube(
-                                convertedPlaylistId,
-                                `[ListenBrainz] ${title}`,
-                                spotifyTracks
-                            );
+                    if (spotifyTracks.length > 0) {
+                        await openDownloadMissingModalForYouTube(
+                            convertedPlaylistId,
+                            `[ListenBrainz] ${title}`,
+                            spotifyTracks
+                        );
 
-                            // Set the modal to running state with the correct batch ID
-                            const process = activeDownloadProcesses[convertedPlaylistId];
-                            if (process) {
-                                process.status = existingState.phase === 'download_complete' ? 'complete' : 'running';
-                                process.batchId = existingState.download_process_id;
+                        // Set the modal to running state with the correct batch ID
+                        const process = activeDownloadProcesses[convertedPlaylistId];
+                        if (process) {
+                            process.status = existingState.phase === 'download_complete' ? 'complete' : 'running';
+                            process.batchId = existingState.download_process_id;
 
-                                // Update UI to running state
-                                const beginBtn = document.getElementById(`begin-analysis-btn-${convertedPlaylistId}`);
-                                const cancelBtn = document.getElementById(`cancel-all-btn-${convertedPlaylistId}`);
-                                if (beginBtn) beginBtn.style.display = 'none';
-                                if (cancelBtn) cancelBtn.style.display = 'inline-block';
+                            // Update UI to running state
+                            const beginBtn = document.getElementById(`begin-analysis-btn-${convertedPlaylistId}`);
+                            const cancelBtn = document.getElementById(`cancel-all-btn-${convertedPlaylistId}`);
+                            if (beginBtn) beginBtn.style.display = 'none';
+                            if (cancelBtn) cancelBtn.style.display = 'inline-block';
 
-                                // Start polling for this process
-                                startModalDownloadPolling(convertedPlaylistId);
+                            // Start polling for this process
+                            startModalDownloadPolling(convertedPlaylistId);
 
-                                // Hide modal since this is background rehydration
-                                process.modalElement.style.display = 'none';
-                                console.log(`✅ Rehydrated download modal for ListenBrainz playlist: ${title}`);
+                            // Show modal since user clicked the download button (different from background rehydration)
+                            if (process.modalElement) {
+                                process.modalElement.style.display = 'flex';
                             }
-                        } else {
-                            console.warn(`⚠️ No Spotify tracks found for ListenBrainz download modal: ${title}`);
+                            console.log(`✅ Rehydrated download modal for ListenBrainz playlist: ${title}`);
                         }
+                    } else {
+                        console.warn(`⚠️ No Spotify tracks found for ListenBrainz download modal: ${title}`);
                     }
                 } catch (error) {
                     console.warn(`⚠️ Error setting up download process for ListenBrainz playlist "${title}":`, error.message);
