@@ -8218,10 +8218,11 @@ def start_wishlist_missing_downloads():
     try:
         data = request.get_json() or {}
         force_download_all = data.get('force_download_all', False)
+        category = data.get('category')  # Get category filter (albums or singles)
 
         from core.wishlist_service import get_wishlist_service
         wishlist_service = get_wishlist_service()
-        
+
         # Get wishlist tracks formatted for download modal
         raw_wishlist_tracks = wishlist_service.get_wishlist_tracks_for_download()
         if not raw_wishlist_tracks:
@@ -8232,8 +8233,47 @@ def start_wishlist_missing_downloads():
         for track in raw_wishlist_tracks:
             sanitized_track = _sanitize_track_data_for_processing(track)
             wishlist_tracks.append(sanitized_track)
-        
+
         print(f"🔧 [Manual-Wishlist] Sanitized {len(wishlist_tracks)} tracks from wishlist service")
+
+        # FILTER BY CATEGORY if specified (same logic as auto-processing)
+        if category:
+            import json
+            filtered_tracks = []
+            for track in wishlist_tracks:
+                # Extract track count from spotify_data
+                spotify_data = track.get('spotify_data', {})
+                if isinstance(spotify_data, str):
+                    try:
+                        spotify_data = json.loads(spotify_data)
+                    except:
+                        spotify_data = {}
+
+                album_data = spotify_data.get('album', {})
+                total_tracks = album_data.get('total_tracks')
+                album_type = album_data.get('album_type', 'album').lower()
+
+                # Categorize by track count if available, otherwise use album_type
+                # Single: 1 track, EP: 2-5 tracks, Album: 6+ tracks
+                is_single_or_ep = False
+                is_album = False
+
+                if total_tracks is not None and total_tracks > 0:
+                    # Use track count (most accurate)
+                    is_single_or_ep = total_tracks < 6
+                    is_album = total_tracks >= 6
+                else:
+                    # Fall back to Spotify's album_type
+                    is_single_or_ep = album_type in ['single', 'ep']
+                    is_album = album_type == 'album'
+
+                if category == 'singles' and is_single_or_ep:
+                    filtered_tracks.append(track)
+                elif category == 'albums' and is_album:
+                    filtered_tracks.append(track)
+
+            wishlist_tracks = filtered_tracks
+            print(f"🔍 [Manual-Wishlist] Filtered to {len(wishlist_tracks)} tracks for category: {category}")
 
         # Add activity for wishlist download start
         add_activity_item("📥", "Wishlist Download Started", f"{len(wishlist_tracks)} tracks", "Now")

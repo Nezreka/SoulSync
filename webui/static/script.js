@@ -5261,6 +5261,9 @@ async function openDownloadMissingWishlistModal(category = null) {
 
     console.log(`📥 Opening Download Missing Tracks modal for wishlist${category ? ' (' + category + ')' : ''}`);
 
+    // Store category in global state for when process starts
+    window.currentWishlistCategory = category;
+
     // Fetch actual wishlist tracks from the server
     let tracks;
     try {
@@ -5452,7 +5455,8 @@ async function startWishlistMissingTracksProcess(playlistId) {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                force_download_all: forceDownloadAll
+                force_download_all: forceDownloadAll,
+                category: window.currentWishlistCategory  // Pass category to backend
             })
         });
 
