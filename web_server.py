@@ -10855,9 +10855,10 @@ def get_active_processes():
                         "auto_initiated": batch_data.get('auto_initiated', False),
                         "auto_processing_timestamp": batch_data.get('auto_processing_timestamp'),
                         "should_show_modal": True,  # Wishlist processes should always be visible
-                        "is_background_process": batch_data.get('auto_initiated', False)
+                        "is_background_process": batch_data.get('auto_initiated', False),
+                        "current_cycle": batch_data.get('current_cycle')  # Pass category filter to frontend
                     })
-                    
+
                     # Add current auto-processing state for frontend awareness
                     with wishlist_timer_lock:
                         process_info["auto_processing_active"] = wishlist_auto_processing
