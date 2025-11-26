@@ -7747,6 +7747,20 @@ def _process_wishlist_automatically():
             print(f"🔄 [Auto-Wishlist] Current cycle: {current_cycle}")
             print(f"📊 [Auto-Wishlist] Filtered {len(filtered_tracks)}/{len(wishlist_tracks)} tracks for '{current_cycle}' category")
 
+            # DEBUG: Check for duplicates in filtered tracks
+            unique_ids = set()
+            duplicate_count = 0
+            for track in filtered_tracks:
+                track_id = track.get('id') or track.get('spotify_track_id')
+                if track_id in unique_ids:
+                    duplicate_count += 1
+                    print(f"⚠️ [DEBUG] Duplicate track found in filtered_tracks: {track.get('name')} (ID: {track_id})")
+                unique_ids.add(track_id)
+            if duplicate_count > 0:
+                print(f"🚨 [DEBUG] Found {duplicate_count} duplicate tracks in filtered_tracks!")
+            else:
+                print(f"✅ [DEBUG] No duplicates in filtered_tracks (all {len(filtered_tracks)} tracks unique)")
+
             # If no tracks in this category, skip to next cycle immediately
             if len(filtered_tracks) == 0:
                 print(f"ℹ️ [Auto-Wishlist] No {current_cycle} tracks in wishlist, toggling cycle and scheduling next run")
@@ -7770,6 +7784,26 @@ def _process_wishlist_automatically():
 
             # Use filtered tracks for processing
             wishlist_tracks = filtered_tracks
+
+            # SAFETY: Deduplicate tracks by ID before processing
+            seen_ids = set()
+            deduped_tracks = []
+            removed_dupes = 0
+            for track in wishlist_tracks:
+                track_id = track.get('id') or track.get('spotify_track_id')
+                if track_id and track_id not in seen_ids:
+                    deduped_tracks.append(track)
+                    seen_ids.add(track_id)
+                elif track_id:
+                    removed_dupes += 1
+                    print(f"⚠️ [Auto-Wishlist] Removed duplicate track: {track.get('name')} (ID: {track_id})")
+                else:
+                    # No ID, keep it (shouldn't happen but be safe)
+                    deduped_tracks.append(track)
+
+            if removed_dupes > 0:
+                print(f"🔧 [Auto-Wishlist] Removed {removed_dupes} duplicate tracks, {len(deduped_tracks)} remain")
+                wishlist_tracks = deduped_tracks
 
             # Create batch for automatic processing
             batch_id = str(uuid.uuid4())
@@ -9807,11 +9841,15 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                 download_batches[batch_id]['phase'] = 'analysis'
                 download_batches[batch_id]['analysis_total'] = len(tracks_json)
                 download_batches[batch_id]['analysis_processed'] = 0
+                download_batches[batch_id]['analysis_results'] = []  # Clear old results to prevent duplicates
 
         from database.music_database import MusicDatabase
         db = MusicDatabase()
         active_server = config_manager.get_active_media_server()
         analysis_results = []
+
+        # DEBUG: Log incoming track count
+        print(f"🔍 [DEBUG] Starting analysis with {len(tracks_json)} tracks for batch {batch_id}")
 
         # Get force download flag from batch
         force_download_all = False
@@ -9864,11 +9902,16 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                     # Store incremental results for live updates
                     download_batches[batch_id]['analysis_results'] = analysis_results.copy()
 
+        # DEBUG: Log final analysis count
+        print(f"🔍 [DEBUG] Analysis complete: {len(analysis_results)} results (input was {len(tracks_json)} tracks)")
+
         missing_tracks = [res for res in analysis_results if not res['found']]
 
         with tasks_lock:
             if batch_id in download_batches:
                 download_batches[batch_id]['analysis_results'] = analysis_results
+                # DEBUG: Verify what's stored
+                print(f"🔍 [DEBUG] Stored {len(download_batches[batch_id]['analysis_results'])} results in batch")
 
         # PHASE 2: TRANSITION TO DOWNLOAD (if necessary)
         if not missing_tracks:
