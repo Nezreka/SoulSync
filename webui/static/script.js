@@ -28665,7 +28665,7 @@ async function openListenBrainzPlaylist(playlistMbid, playlistName) {
         const spotifyTracks = tracks.map(track => ({
             id: track.recording_mbid || '',
             name: track.title || 'Unknown',
-            artists: [cleanArtistName(track.creator || 'Unknown')], // Clean featured artists
+            artists: [{name: cleanArtistName(track.creator || 'Unknown')}], // Proper Spotify format
             album: {
                 name: track.album || 'Unknown Album',
                 images: []
@@ -30274,7 +30274,7 @@ async function rehydrateDiscoverDownloadModal(playlistId) {
             const spotifyTracks = tracks.map(track => ({
                 id: null,
                 name: track.track_name,
-                artists: [cleanArtistName(track.artist_name)], // Clean featured artists
+                artists: [{name: cleanArtistName(track.artist_name)}], // Proper Spotify format
                 album: {
                     name: track.album_name,
                     images: track.album_cover_url ? [{ url: track.album_cover_url }] : []
@@ -30324,20 +30324,27 @@ async function rehydrateDiscoverDownloadModal(playlistId) {
                     .filter(result => result.spotify_data)
                     .map(result => {
                         const track = result.spotify_data;
-                        // Ensure artists is an array of strings
+                        // Ensure artists is in proper Spotify format: [{name: ...}]
+                        let artistsArray = [];
                         if (track.artists && Array.isArray(track.artists)) {
-                            track.artists = track.artists.map(artist =>
-                                typeof artist === 'string' ? artist : (artist.name || artist)
-                            );
+                            artistsArray = track.artists.map(artist => {
+                                if (typeof artist === 'string') {
+                                    return {name: artist};
+                                } else if (artist && artist.name) {
+                                    return {name: artist.name};
+                                } else {
+                                    return {name: String(artist || 'Unknown Artist')};
+                                }
+                            });
                         } else if (track.artists && typeof track.artists === 'string') {
-                            track.artists = [track.artists];
+                            artistsArray = [{name: track.artists}];
                         } else {
-                            track.artists = ['Unknown Artist'];
+                            artistsArray = [{name: 'Unknown Artist'}];
                         }
                         return {
                             id: track.id,
                             name: track.name,
-                            artists: track.artists,
+                            artists: artistsArray,
                             album: track.album || 'Unknown Album',
                             duration_ms: track.duration_ms || 0,
                             external_urls: track.external_urls || {}
