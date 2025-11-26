@@ -9373,22 +9373,33 @@ def _ensure_spotify_track_format(track_info):
         else:
             artists_list.append({'name': 'Unknown Artist'})
     
+    # Build album object with images if available
+    album_data = track_info.get('album', {})
+    if isinstance(album_data, dict):
+        album = {
+            'name': album_data.get('name', 'Unknown Album')
+        }
+        # Preserve album images if present (important for ListenBrainz tracks)
+        if 'images' in album_data:
+            album['images'] = album_data['images']
+    else:
+        album = {
+            'name': str(album_data) if album_data else 'Unknown Album'
+        }
+
     # Build proper Spotify track structure
     spotify_track = {
         'id': track_info.get('id', f"webui_{hash(str(track_info))}"),
         'name': track_info.get('name', 'Unknown Track'),
         'artists': artists_list,  # Proper Spotify format
-        'album': {
-            'name': track_info.get('album', {}).get('name') if isinstance(track_info.get('album'), dict) 
-                   else track_info.get('album', 'Unknown Album')
-        },
+        'album': album,
         'duration_ms': track_info.get('duration_ms', 0),
         'preview_url': track_info.get('preview_url'),
         'external_urls': track_info.get('external_urls', {}),
         'popularity': track_info.get('popularity', 0),
         'source': 'webui_modal'  # Mark as coming from webui
     }
-    
+
     return spotify_track
 
 def _process_failed_tracks_to_wishlist_exact(batch_id):
@@ -9672,7 +9683,17 @@ def _on_download_completed(batch_id, task_id, success=True):
                 
                 # Add activity for successful download
                 track_name = track_info.get('name', 'Unknown Track')
-                artist_name = track_info.get('artists', [{}])[0].get('name', 'Unknown Artist') if track_info.get('artists') else 'Unknown Artist'
+
+                # Safely extract artist name (handle both list and string formats)
+                artists = track_info.get('artists', [])
+                if isinstance(artists, list) and len(artists) > 0:
+                    first_artist = artists[0]
+                    artist_name = first_artist.get('name', 'Unknown Artist') if isinstance(first_artist, dict) else str(first_artist)
+                elif isinstance(artists, str):
+                    artist_name = artists
+                else:
+                    artist_name = 'Unknown Artist'
+
                 add_activity_item("📥", "Download Complete", f"'{track_name}' by {artist_name}", "Now")
                 
                 # Try to remove from wishlist using track info
