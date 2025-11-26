@@ -30,6 +30,8 @@ let dbUpdateStatusInterval = null;
 let qualityScannerStatusInterval = null;
 let duplicateCleanerStatusInterval = null;
 let wishlistCountInterval = null;
+let wishlistCountdownInterval = null;  // Countdown timer for wishlist overview modal
+let watchlistCountdownInterval = null;  // Countdown timer for watchlist overview modal
 
 // --- Add these globals for the Sync Page ---
 let spotifyPlaylists = [];
@@ -1275,10 +1277,27 @@ function onAudioCanPlay() {
 function formatTime(seconds) {
     // Format seconds as MM:SS
     if (!seconds || !isFinite(seconds)) return '0:00';
-    
+
     const minutes = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     return `${minutes}:${secs.toString().padStart(2, '0')}`;
+}
+
+function formatCountdownTime(seconds) {
+    // Format seconds as countdown timer (e.g., "24m 13s", "2h 15m", "23h 59m")
+    if (!seconds || seconds <= 0) return '';
+
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+
+    if (hours > 0) {
+        return `${hours}h ${minutes}m`;
+    } else if (minutes > 0) {
+        return `${minutes}m ${secs}s`;
+    } else {
+        return `${secs}s`;
+    }
 }
 
 // ===============================
@@ -4859,6 +4878,11 @@ async function openWishlistOverviewModal() {
         const cycleData = await cycleResponse.json();
         const currentCycle = cycleData.cycle || 'albums';
 
+        // Format countdown timer
+        const nextRunSeconds = statsData.next_run_in_seconds || 0;
+        const countdownText = formatCountdownTime(nextRunSeconds);
+        const nextCycleText = currentCycle === 'albums' ? 'Albums/EPs' : 'Singles';
+
         modal.innerHTML = `
             <div class="modal-container playlist-modal">
                 <div class="playlist-modal-header">
@@ -4866,7 +4890,7 @@ async function openWishlistOverviewModal() {
                         <h2>🎵 Wishlist Overview</h2>
                         <div class="playlist-quick-info">
                             <span class="playlist-track-count">${total} Total Tracks</span>
-                            <span class="playlist-owner">Next Auto: ${currentCycle === 'albums' ? 'Albums/EPs' : 'Singles'}</span>
+                            <span class="playlist-owner" id="wishlist-next-auto-timer">Next Auto: ${nextCycleText}${countdownText ? ' in ' + countdownText : ''}</span>
                         </div>
                     </div>
                     <span class="playlist-modal-close" onclick="closeWishlistOverviewModal()">×</span>
@@ -4925,6 +4949,9 @@ async function openWishlistOverviewModal() {
         modal.style.display = 'flex';
         hideLoadingOverlay();
 
+        // Start countdown timer update interval
+        startWishlistCountdownTimer(currentCycle, nextRunSeconds);
+
     } catch (error) {
         console.error('Error opening wishlist overview:', error);
         showToast(`Failed to load wishlist: ${error.message}`, 'error');
@@ -4932,8 +4959,59 @@ async function openWishlistOverviewModal() {
     }
 }
 
+function startWishlistCountdownTimer(currentCycle, initialSeconds) {
+    // Clear any existing interval
+    if (wishlistCountdownInterval) {
+        clearInterval(wishlistCountdownInterval);
+    }
+
+    let remainingSeconds = initialSeconds;
+    const nextCycleText = currentCycle === 'albums' ? 'Albums/EPs' : 'Singles';
+
+    wishlistCountdownInterval = setInterval(async () => {
+        remainingSeconds--;
+
+        if (remainingSeconds <= 0) {
+            // Timer expired, fetch fresh data
+            try {
+                const response = await fetch('/api/wishlist/stats');
+                const data = await response.json();
+                remainingSeconds = data.next_run_in_seconds || 0;
+
+                // Also update cycle in case it changed
+                const cycleResponse = await fetch('/api/wishlist/cycle');
+                const cycleData = await cycleResponse.json();
+                const newCycle = cycleData.cycle || 'albums';
+                const newCycleText = newCycle === 'albums' ? 'Albums/EPs' : 'Singles';
+
+                const timerElement = document.getElementById('wishlist-next-auto-timer');
+                if (timerElement) {
+                    const countdownText = formatCountdownTime(remainingSeconds);
+                    timerElement.textContent = `Next Auto: ${newCycleText}${countdownText ? ' in ' + countdownText : ''}`;
+                }
+            } catch (error) {
+                console.debug('Error updating wishlist countdown:', error);
+            }
+        } else {
+            // Update the display
+            const timerElement = document.getElementById('wishlist-next-auto-timer');
+            if (timerElement) {
+                const countdownText = formatCountdownTime(remainingSeconds);
+                timerElement.textContent = `Next Auto: ${nextCycleText}${countdownText ? ' in ' + countdownText : ''}`;
+            }
+        }
+    }, 1000); // Update every second
+}
+
 function closeWishlistOverviewModal() {
     console.log('🚪 closeWishlistOverviewModal() called');
+
+    // Stop countdown timer
+    if (wishlistCountdownInterval) {
+        clearInterval(wishlistCountdownInterval);
+        wishlistCountdownInterval = null;
+    }
+
     const modal = document.getElementById('wishlist-overview-modal');
     console.log('Modal element:', modal);
     if (modal) {
@@ -20311,11 +20389,16 @@ async function updateWatchlistButtonCount() {
     try {
         const response = await fetch('/api/watchlist/count');
         const data = await response.json();
-        
+
         if (data.success) {
             const watchlistButton = document.getElementById('watchlist-button');
             if (watchlistButton) {
+                // Format countdown for button tooltip (optional enhancement)
+                const countdownText = data.next_run_in_seconds ? formatCountdownTime(data.next_run_in_seconds) : '';
                 watchlistButton.textContent = `👁️ Watchlist (${data.count})`;
+                if (countdownText) {
+                    watchlistButton.title = `Next auto-scan in ${countdownText}`;
+                }
             }
         }
     } catch (error) {
@@ -20404,7 +20487,11 @@ async function showWatchlistModal() {
         const statusResponse = await fetch('/api/watchlist/scan/status');
         const statusData = await statusResponse.json();
         const scanStatus = statusData.success ? statusData.status : 'idle';
-        
+
+        // Format countdown timer
+        const nextRunSeconds = countData.next_run_in_seconds || 0;
+        const countdownText = formatCountdownTime(nextRunSeconds);
+
         // Build modal content
         modal.innerHTML = `
             <div class="modal-container playlist-modal">
@@ -20413,6 +20500,7 @@ async function showWatchlistModal() {
                         <h2>👁️ Watchlist</h2>
                         <div class="playlist-quick-info">
                             <span class="playlist-track-count">${countData.count} artist${countData.count !== 1 ? 's' : ''}</span>
+                            <span class="playlist-owner" id="watchlist-next-auto-timer">Next Auto${countdownText ? ': ' + countdownText : ''}</span>
                         </div>
                         <div class="playlist-modal-sync-status" id="watchlist-scan-status" style="display: ${scanStatus !== 'idle' ? 'flex' : 'none'}; flex-direction: column; align-items: center;">
                             <!-- Live Visual Activity Display -->
@@ -20549,21 +20637,67 @@ async function showWatchlistModal() {
 
         // Show modal
         modal.style.display = 'flex';
-        
+
+        // Start countdown timer update interval
+        startWatchlistCountdownTimer(nextRunSeconds);
+
         // Start polling for scan status if scanning
         if (scanStatus === 'scanning') {
             pollWatchlistScanStatus();
         }
-        
+
     } catch (error) {
         console.error('Error showing watchlist modal:', error);
     }
+}
+
+function startWatchlistCountdownTimer(initialSeconds) {
+    // Clear any existing interval
+    if (watchlistCountdownInterval) {
+        clearInterval(watchlistCountdownInterval);
+    }
+
+    let remainingSeconds = initialSeconds;
+
+    watchlistCountdownInterval = setInterval(async () => {
+        remainingSeconds--;
+
+        if (remainingSeconds <= 0) {
+            // Timer expired, fetch fresh data
+            try {
+                const response = await fetch('/api/watchlist/count');
+                const data = await response.json();
+                remainingSeconds = data.next_run_in_seconds || 0;
+
+                const timerElement = document.getElementById('watchlist-next-auto-timer');
+                if (timerElement) {
+                    const countdownText = formatCountdownTime(remainingSeconds);
+                    timerElement.textContent = `Next Auto${countdownText ? ': ' + countdownText : ''}`;
+                }
+            } catch (error) {
+                console.debug('Error updating watchlist countdown:', error);
+            }
+        } else {
+            // Update the display
+            const timerElement = document.getElementById('watchlist-next-auto-timer');
+            if (timerElement) {
+                const countdownText = formatCountdownTime(remainingSeconds);
+                timerElement.textContent = `Next Auto${countdownText ? ': ' + countdownText : ''}`;
+            }
+        }
+    }, 1000); // Update every second
 }
 
 /**
  * Close watchlist modal
  */
 function closeWatchlistModal() {
+    // Stop countdown timer
+    if (watchlistCountdownInterval) {
+        clearInterval(watchlistCountdownInterval);
+        watchlistCountdownInterval = null;
+    }
+
     const modal = document.getElementById('watchlist-modal');
     if (modal) {
         modal.style.display = 'none';
