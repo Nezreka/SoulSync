@@ -2588,7 +2588,7 @@ async function rehydrateDiscoverPlaylistModal(virtualPlaylistId, playlistName, b
 }
 
 async function rehydrateModal(processInfo, userRequested = false) {
-    const { playlist_id, playlist_name, batch_id } = processInfo;
+    const { playlist_id, playlist_name, batch_id, current_cycle } = processInfo;
     console.log(`💧 Rehydrating modal for "${playlist_name}" (batch: ${batch_id}) - User requested: ${userRequested}`);
 
     // Handle YouTube virtual playlists - skip rehydration here, handled by YouTube system
@@ -2651,8 +2651,8 @@ async function rehydrateModal(processInfo, userRequested = false) {
             if (userRequested) {
                 console.log(`💧 [Rehydrate] User requested - creating wishlist modal for active process: ${batch_id}`);
 
-                // Create the modal with current server state
-                await openDownloadMissingWishlistModal();
+                // Create the modal with current server state (pass category filter for auto-processing)
+                await openDownloadMissingWishlistModal(current_cycle);
                 const process = activeDownloadProcesses[playlist_id];
                 if (!process) {
                     console.error('❌ [Rehydrate] Failed to create wishlist process in activeDownloadProcesses');
