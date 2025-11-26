@@ -233,6 +233,7 @@ wishlist_auto_processor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="
 wishlist_auto_timer = None  # threading.Timer for scheduling next auto-processing
 wishlist_auto_processing = False  # Flag to prevent concurrent auto-processing
 wishlist_auto_processing_timestamp = 0  # Timestamp when processing started (for stuck detection)
+wishlist_next_run_time = 0  # Timestamp when next auto-processing is scheduled (for countdown display)
 wishlist_timer_lock = threading.Lock()  # Thread safety for timer operations
 
 # --- Automatic Watchlist Scanning Infrastructure ---
@@ -240,6 +241,7 @@ wishlist_timer_lock = threading.Lock()  # Thread safety for timer operations
 watchlist_auto_timer = None  # threading.Timer for scheduling next auto-scanning
 watchlist_auto_scanning = False  # Flag to prevent concurrent auto-scanning
 watchlist_auto_scanning_timestamp = 0  # Timestamp when scanning started (for stuck detection)
+watchlist_next_run_time = 0  # Timestamp when next auto-scanning is scheduled (for countdown display)
 watchlist_timer_lock = threading.Lock()  # Thread safety for timer operations
 
 # --- Shared Transfer Data Cache ---
@@ -7608,10 +7610,11 @@ def stop_wishlist_auto_processing():
 
 def schedule_next_wishlist_processing():
     """Schedule next automatic wishlist processing in 30 minutes."""
-    global wishlist_auto_timer
+    global wishlist_auto_timer, wishlist_next_run_time
 
     with wishlist_timer_lock:
         print("⏰ Scheduling next automatic wishlist processing in 30 minutes")
+        wishlist_next_run_time = time.time() + 1800.0  # Set timestamp for countdown display
         wishlist_auto_timer = threading.Timer(1800.0, _process_wishlist_automatically)  # 30 minutes (1800 seconds)
         wishlist_auto_timer.daemon = True
         wishlist_auto_timer.start()
@@ -7973,10 +7976,17 @@ def get_wishlist_stats():
 
         total_count = singles_count + albums_count
 
+        # Calculate time until next auto-processing
+        next_run_in_seconds = 0
+        with wishlist_timer_lock:
+            if wishlist_next_run_time > 0:
+                next_run_in_seconds = max(0, int(wishlist_next_run_time - time.time()))
+
         return jsonify({
             "singles": singles_count,
             "albums": albums_count,
-            "total": total_count
+            "total": total_count,
+            "next_run_in_seconds": next_run_in_seconds
         })
 
     except Exception as e:
@@ -14777,7 +14787,18 @@ def get_watchlist_count():
     try:
         database = get_database()
         count = database.get_watchlist_count()
-        return jsonify({"success": True, "count": count})
+
+        # Calculate time until next auto-scanning
+        next_run_in_seconds = 0
+        with watchlist_timer_lock:
+            if watchlist_next_run_time > 0:
+                next_run_in_seconds = max(0, int(watchlist_next_run_time - time.time()))
+
+        return jsonify({
+            "success": True,
+            "count": count,
+            "next_run_in_seconds": next_run_in_seconds
+        })
     except Exception as e:
         print(f"Error getting watchlist count: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
@@ -15445,7 +15466,7 @@ watchlist_scan_state = {
 
 def start_watchlist_auto_scanning():
     """Start automatic watchlist scanning with 5-minute initial delay (Timer-based like wishlist)"""
-    global watchlist_auto_timer
+    global watchlist_auto_timer, watchlist_next_run_time
 
     print("🚀 [Auto-Watchlist] Initializing automatic watchlist scanning...")
 
@@ -15455,6 +15476,7 @@ def start_watchlist_auto_scanning():
             watchlist_auto_timer.cancel()
 
         print("🔄 Starting automatic watchlist scanning system (5 minute initial delay)")
+        watchlist_next_run_time = time.time() + 300.0  # Set timestamp for countdown display
         watchlist_auto_timer = threading.Timer(300.0, _process_watchlist_scan_automatically)  # 5 minutes
         watchlist_auto_timer.daemon = True
         watchlist_auto_timer.start()
@@ -15475,10 +15497,11 @@ def stop_watchlist_auto_scanning():
 
 def schedule_next_watchlist_scan():
     """Schedule next automatic watchlist scan in 24 hours."""
-    global watchlist_auto_timer
+    global watchlist_auto_timer, watchlist_next_run_time
 
     with watchlist_timer_lock:
         print("⏰ Scheduling next automatic watchlist scan in 24 hours")
+        watchlist_next_run_time = time.time() + 86400.0  # Set timestamp for countdown display
         watchlist_auto_timer = threading.Timer(86400.0, _process_watchlist_scan_automatically)  # 24 hours
         watchlist_auto_timer.daemon = True
         watchlist_auto_timer.start()
@@ -15500,7 +15523,8 @@ def _process_watchlist_scan_automatically():
             if is_wishlist_actually_processing():
                 print("🎵 Wishlist processing in progress, rescheduling watchlist scan for 10 minutes from now")
                 # Smart retry: don't wait 24 hours, just wait 10 minutes and try again
-                global watchlist_auto_timer
+                global watchlist_auto_timer, watchlist_next_run_time
+                watchlist_next_run_time = time.time() + 600.0  # Set timestamp for countdown display
                 watchlist_auto_timer = threading.Timer(600.0, _process_watchlist_scan_automatically)  # 10 minutes
                 watchlist_auto_timer.daemon = True
                 watchlist_auto_timer.start()
