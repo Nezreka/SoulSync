@@ -7673,7 +7673,17 @@ def _process_wishlist_automatically():
                             wishlist_auto_processing = False
                         schedule_next_wishlist_processing()
                         return
-            
+
+            # CRITICAL: Clean duplicates BEFORE fetching tracks to prevent count mismatches
+            # This prevents the "11 tracks shown but 12 counted" bug
+            from database.music_database import MusicDatabase
+            db = MusicDatabase()
+
+            print("🧹 [Auto-Wishlist] Cleaning duplicate tracks before processing...")
+            duplicates_removed = db.remove_wishlist_duplicates()
+            if duplicates_removed > 0:
+                print(f"🧹 [Auto-Wishlist] Removed {duplicates_removed} duplicate tracks")
+
             # Get wishlist tracks for processing
             raw_wishlist_tracks = wishlist_service.get_wishlist_tracks_for_download()
             if not raw_wishlist_tracks:
@@ -7693,9 +7703,6 @@ def _process_wishlist_automatically():
             print(f"🔧 [Auto-Wishlist] Sanitized {len(wishlist_tracks)} tracks from wishlist service")
 
             # CYCLE FILTERING: Get current cycle and filter tracks by category
-            from database.music_database import MusicDatabase
-            db = MusicDatabase()
-
             with db._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("SELECT value FROM metadata WHERE key = 'wishlist_cycle'")
@@ -8231,7 +8238,17 @@ def start_wishlist_missing_downloads():
         category = data.get('category')  # Get category filter (albums or singles)
 
         from core.wishlist_service import get_wishlist_service
+        from database.music_database import MusicDatabase
+
         wishlist_service = get_wishlist_service()
+
+        # CRITICAL: Clean duplicates BEFORE fetching tracks to prevent count mismatches
+        # This prevents the "11 tracks shown but 12 counted" bug
+        print("🧹 [Manual-Wishlist] Cleaning duplicate tracks before download...")
+        db = MusicDatabase()
+        duplicates_removed = db.remove_wishlist_duplicates()
+        if duplicates_removed > 0:
+            print(f"🧹 [Manual-Wishlist] Removed {duplicates_removed} duplicate tracks")
 
         # Get wishlist tracks formatted for download modal
         raw_wishlist_tracks = wishlist_service.get_wishlist_tracks_for_download()
