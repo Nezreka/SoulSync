@@ -1285,8 +1285,8 @@ class WatchlistScanner:
             # Clear existing cache
             self.database.clear_discovery_recent_albums()
 
-            # IMPROVED: 14-day window (like Spotify Release Radar) instead of 90 days
-            cutoff_date = datetime.now() - timedelta(days=14)
+            # IMPROVED: 30-day window for better content variety while staying recent
+            cutoff_date = datetime.now() - timedelta(days=30)
             cached_count = 0
             albums_checked = 0
 

@@ -9923,23 +9923,32 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
         # PHASE 2: TRANSITION TO DOWNLOAD (if necessary)
         if not missing_tracks:
             print(f"✅ Analysis for batch {batch_id} complete. No missing tracks.")
+
+            is_auto_batch = False
             with tasks_lock:
                 if batch_id in download_batches:
+                    is_auto_batch = download_batches[batch_id].get('auto_initiated', False)
                     download_batches[batch_id]['phase'] = 'complete'
-                    
+
                     # Update YouTube playlist phase to 'download_complete' if this is a YouTube playlist
                     if playlist_id.startswith('youtube_'):
                         url_hash = playlist_id.replace('youtube_', '')
                         if url_hash in youtube_playlist_states:
                             youtube_playlist_states[url_hash]['phase'] = 'download_complete'
                             print(f"📋 Updated YouTube playlist {url_hash} to download_complete phase (no missing tracks)")
-                    
+
                     # Update Tidal playlist phase to 'download_complete' if this is a Tidal playlist
                     if playlist_id.startswith('tidal_'):
                         tidal_playlist_id = playlist_id.replace('tidal_', '')
                         if tidal_playlist_id in tidal_discovery_states:
                             tidal_discovery_states[tidal_playlist_id]['phase'] = 'download_complete'
                             print(f"📋 Updated Tidal playlist {tidal_playlist_id} to download_complete phase (no missing tracks)")
+
+            # Handle auto-initiated wishlist completion even when no missing tracks
+            if is_auto_batch and playlist_id == 'wishlist':
+                print("🤖 [Auto-Wishlist] No missing tracks found - calling auto-completion handler to toggle cycle and reschedule")
+                missing_download_executor.submit(_process_failed_tracks_to_wishlist_exact_with_auto_completion, batch_id)
+
             return
 
         print(f" transitioning batch {batch_id} to download phase with {len(missing_tracks)} tracks.")
@@ -9993,17 +10002,29 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
         print(f"❌ Master worker for batch {batch_id} failed: {e}")
         import traceback
         traceback.print_exc()
+
+        is_auto_batch = False
         with tasks_lock:
             if batch_id in download_batches:
+                is_auto_batch = download_batches[batch_id].get('auto_initiated', False)
                 download_batches[batch_id]['phase'] = 'error'
                 download_batches[batch_id]['error'] = str(e)
-                
+
                 # Reset YouTube playlist phase to 'discovered' if this is a YouTube playlist on error
                 if playlist_id.startswith('youtube_'):
                     url_hash = playlist_id.replace('youtube_', '')
                     if url_hash in youtube_playlist_states:
                         youtube_playlist_states[url_hash]['phase'] = 'discovered'
                         print(f"📋 Reset YouTube playlist {url_hash} to discovered phase (error)")
+
+        # Handle auto-initiated wishlist errors - reset flag and reschedule timer
+        if is_auto_batch and playlist_id == 'wishlist':
+            print("❌ [Auto-Wishlist] Master worker error - resetting auto-processing flag and rescheduling timer")
+            global wishlist_auto_processing, wishlist_auto_processing_timestamp
+            with wishlist_timer_lock:
+                wishlist_auto_processing = False
+                wishlist_auto_processing_timestamp = 0
+            schedule_next_wishlist_processing()
 
 def _run_post_processing_worker(task_id, batch_id):
     """
