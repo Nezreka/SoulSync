@@ -7626,23 +7626,31 @@ def _process_wishlist_automatically():
     print("🤖 [Auto-Wishlist] Timer triggered - starting automatic wishlist processing...")
 
     try:
+        # Check conditions and set flag
+        should_skip_already_running = False
+        should_skip_watchlist_conflict = False
+
         with wishlist_timer_lock:
             if wishlist_auto_processing:
                 print("⚠️ Wishlist auto-processing already running, skipping.")
-                schedule_next_wishlist_processing()
-                return
+                should_skip_already_running = True
 
             # Check if watchlist scan is currently running (using smart detection)
-            if is_watchlist_actually_scanning():
+            elif is_watchlist_actually_scanning():
                 print("👁️ Watchlist scan in progress, skipping automatic wishlist processing to avoid conflicts.")
-                schedule_next_wishlist_processing()
-                return
+                should_skip_watchlist_conflict = True
 
-            # Set flag and timestamp
-            import time
-            wishlist_auto_processing = True
-            wishlist_auto_processing_timestamp = time.time()
-            print(f"🔒 [Auto-Wishlist] Flag set at timestamp {wishlist_auto_processing_timestamp}")
+            else:
+                # Set flag and timestamp
+                import time
+                wishlist_auto_processing = True
+                wishlist_auto_processing_timestamp = time.time()
+                print(f"🔒 [Auto-Wishlist] Flag set at timestamp {wishlist_auto_processing_timestamp}")
+
+        # Schedule next run OUTSIDE the lock to avoid deadlock
+        if should_skip_already_running or should_skip_watchlist_conflict:
+            schedule_next_wishlist_processing()
+            return
         
         # Use app context for database operations
         with app.app_context():
