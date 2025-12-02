@@ -7692,7 +7692,57 @@ def _process_wishlist_automatically():
             if duplicates_removed > 0:
                 print(f"🧹 [Auto-Wishlist] Removed {duplicates_removed} duplicate tracks")
 
-            # Get wishlist tracks for processing
+            # CLEANUP: Remove tracks from wishlist that already exist in library
+            # This prevents wasting bandwidth on tracks we already have
+            print("🧼 [Auto-Wishlist] Checking wishlist against library for already-owned tracks...")
+            cleanup_tracks = wishlist_service.get_wishlist_tracks_for_download()
+            cleanup_removed = 0
+
+            for track in cleanup_tracks:
+                track_name = track.get('name', '')
+                artists = track.get('artists', [])
+                spotify_track_id = track.get('spotify_track_id') or track.get('id')
+
+                if not track_name or not artists or not spotify_track_id:
+                    continue
+
+                # Check if track exists in library
+                found_in_db = False
+                for artist in artists:
+                    if isinstance(artist, str):
+                        artist_name = artist
+                    elif isinstance(artist, dict) and 'name' in artist:
+                        artist_name = artist['name']
+                    else:
+                        artist_name = str(artist)
+
+                    try:
+                        db_track, confidence = db.check_track_exists(
+                            track_name, artist_name,
+                            confidence_threshold=0.7,
+                            server_source=active_server
+                        )
+
+                        if db_track and confidence >= 0.7:
+                            found_in_db = True
+                            break
+                    except Exception as db_error:
+                        continue
+
+                # Remove from wishlist if found in library
+                if found_in_db:
+                    try:
+                        removed = wishlist_service.mark_track_download_result(spotify_track_id, success=True)
+                        if removed:
+                            cleanup_removed += 1
+                            print(f"🧼 [Auto-Wishlist] Removed already-owned track: '{track_name}' by {artist_name}")
+                    except Exception as remove_error:
+                        print(f"⚠️ [Auto-Wishlist] Error removing track from wishlist: {remove_error}")
+
+            if cleanup_removed > 0:
+                print(f"✅ [Auto-Wishlist] Cleaned up {cleanup_removed} already-owned tracks from wishlist")
+
+            # Get wishlist tracks for processing (after cleanup)
             raw_wishlist_tracks = wishlist_service.get_wishlist_tracks_for_download()
             if not raw_wishlist_tracks:
                 print("⚠️ No tracks returned from wishlist service.")
@@ -8258,7 +8308,57 @@ def start_wishlist_missing_downloads():
         if duplicates_removed > 0:
             print(f"🧹 [Manual-Wishlist] Removed {duplicates_removed} duplicate tracks")
 
-        # Get wishlist tracks formatted for download modal
+        # CLEANUP: Remove tracks from wishlist that already exist in library
+        # This prevents wasting bandwidth on tracks we already have
+        print("🧼 [Manual-Wishlist] Checking wishlist against library for already-owned tracks...")
+        cleanup_tracks = wishlist_service.get_wishlist_tracks_for_download()
+        cleanup_removed = 0
+
+        for track in cleanup_tracks:
+            track_name = track.get('name', '')
+            artists = track.get('artists', [])
+            spotify_track_id = track.get('spotify_track_id') or track.get('id')
+
+            if not track_name or not artists or not spotify_track_id:
+                continue
+
+            # Check if track exists in library
+            found_in_db = False
+            for artist in artists:
+                if isinstance(artist, str):
+                    artist_name = artist
+                elif isinstance(artist, dict) and 'name' in artist:
+                    artist_name = artist['name']
+                else:
+                    artist_name = str(artist)
+
+                try:
+                    db_track, confidence = db.check_track_exists(
+                        track_name, artist_name,
+                        confidence_threshold=0.7,
+                        server_source=active_server
+                    )
+
+                    if db_track and confidence >= 0.7:
+                        found_in_db = True
+                        break
+                except Exception as db_error:
+                    continue
+
+            # Remove from wishlist if found in library
+            if found_in_db:
+                try:
+                    removed = wishlist_service.mark_track_download_result(spotify_track_id, success=True)
+                    if removed:
+                        cleanup_removed += 1
+                        print(f"🧼 [Manual-Wishlist] Removed already-owned track: '{track_name}' by {artist_name}")
+                except Exception as remove_error:
+                    print(f"⚠️ [Manual-Wishlist] Error removing track from wishlist: {remove_error}")
+
+        if cleanup_removed > 0:
+            print(f"✅ [Manual-Wishlist] Cleaned up {cleanup_removed} already-owned tracks from wishlist")
+
+        # Get wishlist tracks formatted for download modal (after cleanup)
         raw_wishlist_tracks = wishlist_service.get_wishlist_tracks_for_download()
         if not raw_wishlist_tracks:
             return jsonify({"success": False, "error": "No tracks in wishlist"}), 400
