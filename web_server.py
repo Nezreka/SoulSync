@@ -14982,18 +14982,44 @@ def add_to_watchlist():
         data = request.get_json()
         artist_id = data.get('artist_id')
         artist_name = data.get('artist_name')
-        
+
         if not artist_id or not artist_name:
             return jsonify({"success": False, "error": "Missing artist_id or artist_name"}), 400
-        
+
         database = get_database()
         success = database.add_artist_to_watchlist(artist_id, artist_name)
-        
+
         if success:
+            # Fetch and cache artist image immediately from Spotify
+            try:
+                if spotify_client and spotify_client.is_authenticated():
+                    artist_data = spotify_client.get_artist(artist_id)
+                    if artist_data and 'images' in artist_data and artist_data['images']:
+                        # Get medium-sized image (usually the second one, or first if only one)
+                        image_url = None
+                        if len(artist_data['images']) > 1:
+                            image_url = artist_data['images'][1]['url']
+                        else:
+                            image_url = artist_data['images'][0]['url']
+
+                        # Update in database
+                        if image_url:
+                            database.update_watchlist_artist_image(artist_id, image_url)
+                            print(f"✅ Cached artist image for {artist_name}")
+                        else:
+                            print(f"⚠️ No image URL found for {artist_name}")
+                    else:
+                        print(f"⚠️ No images in Spotify data for {artist_name}")
+                else:
+                    print(f"⚠️ Spotify client not available for fetching artist image")
+            except Exception as img_error:
+                # Don't fail the add operation if image fetch fails
+                print(f"⚠️ Could not fetch artist image for {artist_name}: {img_error}")
+
             return jsonify({"success": True, "message": f"Added {artist_name} to watchlist"})
         else:
             return jsonify({"success": False, "error": "Failed to add artist to watchlist"}), 500
-            
+
     except Exception as e:
         print(f"Error adding to watchlist: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
