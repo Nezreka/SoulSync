@@ -8294,6 +8294,7 @@ def start_wishlist_missing_downloads():
         data = request.get_json() or {}
         force_download_all = data.get('force_download_all', False)
         category = data.get('category')  # Get category filter (albums or singles)
+        track_ids = data.get('track_ids')  # NEW: Get specific track IDs from frontend
 
         from core.wishlist_service import get_wishlist_service
         from database.music_database import MusicDatabase
@@ -8371,8 +8372,21 @@ def start_wishlist_missing_downloads():
 
         print(f"🔧 [Manual-Wishlist] Sanitized {len(wishlist_tracks)} tracks from wishlist service")
 
-        # FILTER BY CATEGORY if specified (same logic as auto-processing)
-        if category:
+        # FILTER BY TRACK IDs if specified (prioritized - prevents race conditions)
+        if track_ids:
+            # Convert to set for O(1) lookup
+            track_id_set = set(track_ids)
+            filtered_tracks = []
+            for track in wishlist_tracks:
+                spotify_track_id = track.get('spotify_track_id') or track.get('id')
+                if spotify_track_id in track_id_set:
+                    filtered_tracks.append(track)
+
+            wishlist_tracks = filtered_tracks
+            print(f"🎯 [Manual-Wishlist] Filtered to {len(wishlist_tracks)} specific tracks by ID (preventing race condition)")
+
+        # FILTER BY CATEGORY if specified and no track_ids (backward compatibility)
+        elif category:
             import json
             filtered_tracks = []
             for track in wishlist_tracks:
