@@ -5529,12 +5529,18 @@ async function startWishlistMissingTracksProcess(playlistId) {
             forceToggleContainer.style.display = 'none';
         }
 
+        // Extract track IDs from what the user is currently seeing in the modal
+        // This prevents race conditions where wishlist changes between modal open and analysis start
+        const trackIds = process.tracks ? process.tracks.map(t => t.spotify_track_id || t.id).filter(id => id) : null;
+        console.log(`🎯 [Wishlist] Sending ${trackIds ? trackIds.length : 'all'} specific track IDs to prevent race condition`);
+
         const response = await fetch('/api/wishlist/download_missing', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 force_download_all: forceDownloadAll,
-                category: window.currentWishlistCategory  // Pass category to backend
+                category: window.currentWishlistCategory,  // Keep for backward compat
+                track_ids: trackIds  // NEW: Send exact tracks to process
             })
         });
 
