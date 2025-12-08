@@ -2353,6 +2353,14 @@
                                         <button class="detect-button" onclick="autoDetectJellyfin()">Auto-detect</button>
                                         <button class="test-button" onclick="testConnection('jellyfin')">Test</button>
                                     </div>
+
+                                    <div class="form-group" id="jellyfin-library-selector-container" style="display: none;">
+                                        <label>Music Library</label>
+                                        <select id="jellyfin-music-library" onchange="selectJellyfinLibrary()">
+                                            <option value="">Select Library</option>
+                                        </select>
+                                        <small>Select which music library to use (doesn't affect config file)</small>
+                                    </div>
                                 </div>
 
                                 <!-- Navidrome Settings -->

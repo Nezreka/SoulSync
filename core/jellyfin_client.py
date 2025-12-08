@@ -266,7 +266,61 @@ class JellyfinClient:
                 
         except Exception as e:
             logger.error(f"Error finding music library: {e}")
-    
+
+    def get_available_music_libraries(self) -> List[Dict[str, str]]:
+        """Get list of all available music libraries from Jellyfin"""
+        if not self.ensure_connection() or not self.user_id:
+            return []
+
+        try:
+            views_response = self._make_request(f'/Users/{self.user_id}/Views')
+            if not views_response:
+                return []
+
+            music_libraries = []
+            for view in views_response.get('Items', []):
+                collection_type = (view.get('CollectionType') or '').lower()
+                if collection_type == 'music':
+                    music_libraries.append({
+                        'title': view.get('Name', 'Music'),
+                        'key': str(view['Id'])
+                    })
+
+            logger.debug(f"Found {len(music_libraries)} music libraries")
+            return music_libraries
+        except Exception as e:
+            logger.error(f"Error getting music libraries: {e}")
+            return []
+
+    def set_music_library_by_name(self, library_name: str) -> bool:
+        """Set the active music library by name"""
+        if not self.user_id:
+            return False
+
+        try:
+            views_response = self._make_request(f'/Users/{self.user_id}/Views')
+            if not views_response:
+                return False
+
+            for view in views_response.get('Items', []):
+                collection_type = (view.get('CollectionType') or '').lower()
+                if collection_type == 'music' and view.get('Name') == library_name:
+                    self.music_library_id = view['Id']
+                    logger.info(f"Set music library to: {library_name}")
+
+                    # Store preference in database
+                    from database.music_database import MusicDatabase
+                    db = MusicDatabase()
+                    db.set_preference('jellyfin_music_library', library_name)
+
+                    return True
+
+            logger.warning(f"Music library '{library_name}' not found")
+            return False
+        except Exception as e:
+            logger.error(f"Error setting music library: {e}")
+            return False
+
     def _make_request(self, endpoint: str, params: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
         """Make authenticated request to Jellyfin API"""
         if not self.base_url or not self.api_key:
