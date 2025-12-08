@@ -2086,6 +2086,47 @@ def handle_settings():
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 
+@app.route('/api/settings/log-level', methods=['GET', 'POST'])
+def handle_log_level():
+    """Get or set the application log level"""
+    from utils.logging_config import set_log_level, get_current_log_level
+    from database.music_database import MusicDatabase
+
+    if request.method == 'POST':
+        try:
+            data = request.get_json()
+            level = data.get('level')
+
+            if not level or level.upper() not in ['DEBUG', 'INFO', 'WARNING', 'ERROR']:
+                return jsonify({"success": False, "error": "Invalid log level. Must be DEBUG, INFO, WARNING, or ERROR"}), 400
+
+            # Change the log level dynamically
+            success = set_log_level(level)
+
+            if success:
+                # Save to database preferences
+                db = MusicDatabase()
+                db.set_preference('log_level', level.upper())
+
+                logger.info(f"Log level changed to {level.upper()} via Web UI")
+                add_activity_item("🔍", "Log Level Changed", f"Set to {level.upper()}", "Now")
+
+                return jsonify({"success": True, "level": level.upper()})
+            else:
+                return jsonify({"success": False, "error": "Failed to set log level"}), 500
+
+        except Exception as e:
+            logger.error(f"Error setting log level: {e}")
+            return jsonify({"success": False, "error": str(e)}), 500
+
+    else:  # GET request
+        try:
+            current_level = get_current_log_level()
+            return jsonify({"success": True, "level": current_level})
+        except Exception as e:
+            logger.error(f"Error getting log level: {e}")
+            return jsonify({"success": False, "error": str(e)}), 500
+
 @app.route('/api/test-connection', methods=['POST'])
 def test_connection_endpoint():
     data = request.get_json()
