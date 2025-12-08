@@ -2244,6 +2244,58 @@ def select_plex_music_library():
         logger.error(f"Error setting Plex music library: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+@app.route('/api/jellyfin/music-libraries', methods=['GET'])
+def get_jellyfin_music_libraries():
+    """Get list of all available music libraries from Jellyfin"""
+    try:
+        libraries = jellyfin_client.get_available_music_libraries()
+
+        # Get currently selected library
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+        selected_library = db.get_preference('jellyfin_music_library')
+
+        # Get the currently active library name (match Plex behavior)
+        current_library = None
+        if jellyfin_client.music_library_id:
+            # Look up library name from ID
+            for lib in libraries:
+                if lib['key'] == jellyfin_client.music_library_id:
+                    current_library = lib['title']
+                    break
+
+        return jsonify({
+            "success": True,
+            "libraries": libraries,
+            "selected": selected_library,
+            "current": current_library
+        })
+    except Exception as e:
+        logger.error(f"Error getting Jellyfin music libraries: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/jellyfin/select-music-library', methods=['POST'])
+def select_jellyfin_music_library():
+    """Set the active Jellyfin music library"""
+    try:
+        data = request.get_json()
+        library_name = data.get('library_name')
+
+        if not library_name:
+            return jsonify({"success": False, "error": "No library name provided"}), 400
+
+        success = jellyfin_client.set_music_library_by_name(library_name)
+
+        if success:
+            add_activity_item("📚", "Library Selected", f"Jellyfin music library set to: {library_name}", "Now")
+            return jsonify({"success": True, "message": f"Music library set to: {library_name}"})
+        else:
+            return jsonify({"success": False, "error": f"Library '{library_name}' not found"}), 404
+
+    except Exception as e:
+        logger.error(f"Error setting Jellyfin music library: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
 # ===============================
 # == QUALITY PROFILE API       ==
 # ===============================

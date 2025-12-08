@@ -1504,6 +1504,11 @@ async function loadSettingsData() {
             loadPlexMusicLibraries();
         }
 
+        // Load Jellyfin music libraries if Jellyfin is the active server
+        if (activeServer === 'jellyfin') {
+            loadJellyfinMusicLibraries();
+        }
+
         // Populate Soulseek settings
         document.getElementById('soulseek-url').value = settings.soulseek?.slskd_url || '';
         document.getElementById('soulseek-api-key').value = settings.soulseek?.api_key || '';
@@ -1575,6 +1580,11 @@ function toggleServer(serverType) {
     // Load Plex music libraries when switching to Plex
     if (serverType === 'plex') {
         loadPlexMusicLibraries();
+    }
+
+    // Load Jellyfin music libraries when switching to Jellyfin
+    if (serverType === 'jellyfin') {
+        loadJellyfinMusicLibraries();
     }
 }
 
@@ -1908,9 +1918,16 @@ async function testConnection(service) {
         });
         
         const result = await response.json();
-        
+
         if (result.success) {
             showToast(`${service} connection successful`, 'success');
+
+            // Load music libraries after successful connection
+            if (service === 'plex') {
+                loadPlexMusicLibraries();
+            } else if (service === 'jellyfin') {
+                loadJellyfinMusicLibraries();
+            }
         } else {
             showToast(`${service} connection failed: ${result.error}`, 'error');
         }
@@ -26663,6 +26680,77 @@ async function selectPlexLibrary() {
         }
     } catch (error) {
         console.error('Error selecting Plex library:', error);
+        alert('Error selecting library. Please try again.');
+    }
+}
+
+// ============ Jellyfin Music Library Selection ============
+
+async function loadJellyfinMusicLibraries() {
+    try {
+        const response = await fetch('/api/jellyfin/music-libraries');
+        const data = await response.json();
+
+        if (data.success && data.libraries && data.libraries.length > 0) {
+            const selector = document.getElementById('jellyfin-music-library');
+            const container = document.getElementById('jellyfin-library-selector-container');
+
+            // Clear existing options
+            selector.innerHTML = '';
+
+            // Add options for each library
+            data.libraries.forEach(library => {
+                const option = document.createElement('option');
+                option.value = library.title;
+                option.textContent = library.title;
+
+                // Mark the currently selected library
+                if (library.title === data.current || library.title === data.selected) {
+                    option.selected = true;
+                }
+
+                selector.appendChild(option);
+            });
+
+            // Show the container
+            container.style.display = 'block';
+        } else {
+            // Hide if no libraries found or not connected
+            document.getElementById('jellyfin-library-selector-container').style.display = 'none';
+        }
+    } catch (error) {
+        console.error('Error loading Jellyfin music libraries:', error);
+        document.getElementById('jellyfin-library-selector-container').style.display = 'none';
+    }
+}
+
+async function selectJellyfinLibrary() {
+    const selector = document.getElementById('jellyfin-music-library');
+    const selectedLibrary = selector.value;
+
+    if (!selectedLibrary) return;
+
+    try {
+        const response = await fetch('/api/jellyfin/select-music-library', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                library_name: selectedLibrary
+            })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            console.log(`Jellyfin music library switched to: ${selectedLibrary}`);
+        } else {
+            console.error('Failed to switch library:', data.error);
+            alert(`Failed to switch library: ${data.error}`);
+        }
+    } catch (error) {
+        console.error('Error selecting Jellyfin library:', error);
         alert('Error selecting library. Please try again.');
     }
 }
