@@ -5203,10 +5203,13 @@ async function selectWishlistCategory(category) {
                     };
                 }
 
+                const spotifyTrackId = track.spotify_track_id || track.id || '';
+
                 albumGroups[albumId].tracks.push({
                     name: track.name || 'Unknown Track',
                     artistName,
-                    trackNumber: spotifyData?.track_number || 0
+                    trackNumber: spotifyData?.track_number || 0,
+                    spotifyTrackId
                 });
             });
 
@@ -5217,20 +5220,26 @@ async function selectWishlistCategory(category) {
                 albumData.tracks.sort((a, b) => a.trackNumber - b.trackNumber);
 
                 const tracksListHTML = albumData.tracks.map(track => `
-                    <div class="wishlist-album-track">
+                    <div class="wishlist-album-track wishlist-track-item">
                         <span class="wishlist-album-track-name">${track.name}</span>
+                        <button class="wishlist-delete-btn wishlist-delete-btn-small" onclick="removeTrackFromWishlist('${track.spotifyTrackId}', event)" title="Remove from wishlist">
+                            🗑️
+                        </button>
                     </div>
                 `).join('');
 
                 albumsHTML += `
-                    <div class="wishlist-album-card" onclick="toggleAlbumTracks('${albumId}')">
-                        <div class="wishlist-album-header">
+                    <div class="wishlist-album-card">
+                        <div class="wishlist-album-header" onclick="toggleAlbumTracks('${albumId}')">
                             <div class="wishlist-album-image" style="background-image: url('${albumData.albumImage}')"></div>
                             <div class="wishlist-album-info">
                                 <div class="wishlist-album-name">${albumData.albumName}</div>
                                 <div class="wishlist-album-artist">${albumData.artistName}</div>
                                 <div class="wishlist-album-track-count">${albumData.tracks.length} track${albumData.tracks.length !== 1 ? 's' : ''}</div>
                             </div>
+                            <button class="wishlist-delete-btn wishlist-delete-album-btn" onclick="removeAlbumFromWishlist('${albumId}', event)" title="Remove all tracks from album">
+                                🗑️
+                            </button>
                             <div class="wishlist-album-expand-icon" id="expand-icon-${albumId}">▼</div>
                         </div>
                         <div class="wishlist-album-tracks" id="tracks-${albumId}" style="display: none;">
@@ -5279,14 +5288,18 @@ async function selectWishlistCategory(category) {
                 }
 
                 const albumImage = spotifyData?.album?.images?.[0]?.url || '';
+                const spotifyTrackId = track.spotify_track_id || track.id || '';
 
                 tracksHTML += `
-                    <div class="playlist-track-item-with-image">
+                    <div class="playlist-track-item-with-image wishlist-track-item">
                         <div class="playlist-track-image" style="background-image: url('${albumImage}')"></div>
                         <div class="playlist-track-info">
                             <div class="playlist-track-name">${trackName}</div>
                             <div class="playlist-track-artist">${artistName} • ${albumName}</div>
                         </div>
+                        <button class="wishlist-delete-btn" onclick="removeTrackFromWishlist('${spotifyTrackId}', event)" title="Remove from wishlist">
+                            🗑️
+                        </button>
                     </div>
                 `;
             });
@@ -5321,6 +5334,164 @@ function toggleAlbumTracks(albumId) {
     } else {
         tracksElement.style.display = 'none';
         expandIcon.textContent = '▼';
+    }
+}
+
+function showConfirmationModal(title, message, icon = '⚠️') {
+    return new Promise((resolve) => {
+        // Create modal if it doesn't exist
+        let modal = document.getElementById('confirmation-modal-overlay');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'confirmation-modal-overlay';
+            modal.className = 'confirmation-modal-overlay';
+            document.body.appendChild(modal);
+        }
+
+        // Set modal content
+        modal.innerHTML = `
+            <div class="confirmation-modal">
+                <div class="confirmation-modal-icon">${icon}</div>
+                <div class="confirmation-modal-title">${title}</div>
+                <div class="confirmation-modal-message">${message}</div>
+                <div class="confirmation-modal-buttons">
+                    <button class="confirmation-modal-btn confirmation-modal-btn-cancel" id="confirm-cancel">Cancel</button>
+                    <button class="confirmation-modal-btn confirmation-modal-btn-confirm" id="confirm-yes">Yes, Remove</button>
+                </div>
+            </div>
+        `;
+
+        // Show modal with animation
+        setTimeout(() => {
+            modal.classList.add('show');
+        }, 10);
+
+        // Escape key handler - defined outside so we can remove it
+        const handleEscape = (e) => {
+            if (e.key === 'Escape') {
+                handleCancel();
+            }
+        };
+
+        // Handle button clicks
+        const handleCancel = () => {
+            document.removeEventListener('keydown', handleEscape);
+            modal.classList.remove('show');
+            setTimeout(() => {
+                modal.remove();
+            }, 200);
+            resolve(false);
+        };
+
+        const handleConfirm = () => {
+            document.removeEventListener('keydown', handleEscape);
+            modal.classList.remove('show');
+            setTimeout(() => {
+                modal.remove();
+            }, 200);
+            resolve(true);
+        };
+
+        document.getElementById('confirm-cancel').addEventListener('click', handleCancel);
+        document.getElementById('confirm-yes').addEventListener('click', handleConfirm);
+
+        // Close on overlay click
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                handleCancel();
+            }
+        });
+
+        // Add Escape key listener
+        document.addEventListener('keydown', handleEscape);
+    });
+}
+
+async function removeTrackFromWishlist(spotifyTrackId, event) {
+    // Stop event propagation to prevent triggering parent click handlers
+    if (event) {
+        event.stopPropagation();
+    }
+
+    const confirmed = await showConfirmationModal(
+        'Remove Track',
+        'Are you sure you want to remove this track from your wishlist?',
+        '🗑️'
+    );
+
+    if (!confirmed) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/wishlist/remove-track', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ spotify_track_id: spotifyTrackId })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            showToast('Track removed from wishlist', 'success');
+
+            // Reload the current category to refresh the list
+            if (window.selectedWishlistCategory) {
+                await selectWishlistCategory(window.selectedWishlistCategory);
+            }
+
+            // Update wishlist count in sidebar
+            await updateWishlistCount();
+        } else {
+            showToast(`Failed to remove track: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error removing track from wishlist:', error);
+        showToast('Failed to remove track from wishlist', 'error');
+    }
+}
+
+async function removeAlbumFromWishlist(albumId, event) {
+    // Stop event propagation to prevent triggering parent click handlers
+    if (event) {
+        event.stopPropagation();
+    }
+
+    const confirmed = await showConfirmationModal(
+        'Remove Album',
+        'Are you sure you want to remove all tracks from this album from your wishlist?',
+        '💿'
+    );
+
+    if (!confirmed) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/wishlist/remove-album', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ album_id: albumId })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            showToast(`Removed ${data.removed_count} track(s) from wishlist`, 'success');
+
+            // Reload the current category to refresh the list
+            if (window.selectedWishlistCategory) {
+                await selectWishlistCategory(window.selectedWishlistCategory);
+            }
+
+            // Update wishlist count in sidebar
+            await updateWishlistCount();
+        } else {
+            showToast(`Failed to remove album: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error removing album from wishlist:', error);
+        showToast('Failed to remove album from wishlist', 'error');
     }
 }
 

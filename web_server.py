@@ -8668,6 +8668,96 @@ def cleanup_wishlist():
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
 
+@app.route('/api/wishlist/remove-track', methods=['POST'])
+def remove_track_from_wishlist():
+    """Endpoint to remove a single track from the wishlist."""
+    try:
+        from core.wishlist_service import get_wishlist_service
+
+        data = request.get_json()
+        spotify_track_id = data.get('spotify_track_id')
+
+        if not spotify_track_id:
+            return jsonify({"success": False, "error": "No spotify_track_id provided"}), 400
+
+        wishlist_service = get_wishlist_service()
+        success = wishlist_service.remove_track_from_wishlist(spotify_track_id)
+
+        if success:
+            logger.info(f"Successfully removed track from wishlist: {spotify_track_id}")
+            return jsonify({"success": True, "message": "Track removed from wishlist"})
+        else:
+            logger.warning(f"Failed to remove track from wishlist: {spotify_track_id}")
+            return jsonify({"success": False, "error": "Track not found in wishlist"}), 404
+
+    except Exception as e:
+        logger.error(f"Error removing track from wishlist: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/wishlist/remove-album', methods=['POST'])
+def remove_album_from_wishlist():
+    """Endpoint to remove all tracks from an album from the wishlist."""
+    try:
+        from core.wishlist_service import get_wishlist_service
+        import json
+
+        data = request.get_json()
+        album_id = data.get('album_id')
+
+        if not album_id:
+            return jsonify({"success": False, "error": "No album_id provided"}), 400
+
+        wishlist_service = get_wishlist_service()
+        all_tracks = wishlist_service.get_wishlist_tracks_for_download()
+
+        # Find all tracks that belong to this album
+        tracks_to_remove = []
+        for track in all_tracks:
+            spotify_data = track.get('spotify_data', {})
+            if isinstance(spotify_data, str):
+                try:
+                    spotify_data = json.loads(spotify_data)
+                except:
+                    spotify_data = {}
+
+            # Get album ID - use spotify ID if available, otherwise create custom ID
+            track_album_id = spotify_data.get('album', {}).get('id')
+
+            if not track_album_id:
+                # Create custom ID matching frontend logic: album_name_artist_name (lowercase, consecutive spaces -> single underscore)
+                album_name = spotify_data.get('album', {}).get('name', 'Unknown Album')
+                artist_name = spotify_data.get('artists', [{}])[0].get('name', 'Unknown Artist') if spotify_data.get('artists') else 'Unknown Artist'
+                custom_id = f"{album_name}_{artist_name}"
+                # Match frontend regex: /\s+/g -> replace consecutive whitespace with single underscore
+                track_album_id = re.sub(r'\s+', '_', custom_id).lower()
+
+            # Match by album ID
+            if track_album_id == album_id:
+                spotify_track_id = track.get('spotify_track_id') or track.get('id')
+                if spotify_track_id:
+                    tracks_to_remove.append(spotify_track_id)
+
+        # Remove all matching tracks
+        removed_count = 0
+        for spotify_track_id in tracks_to_remove:
+            if wishlist_service.remove_track_from_wishlist(spotify_track_id):
+                removed_count += 1
+
+        if removed_count > 0:
+            logger.info(f"Successfully removed {removed_count} tracks from album {album_id}")
+            return jsonify({
+                "success": True,
+                "message": f"Removed {removed_count} track(s) from wishlist",
+                "removed_count": removed_count
+            })
+        else:
+            logger.warning(f"No tracks found for album {album_id}")
+            return jsonify({"success": False, "error": "No tracks found for this album"}), 404
+
+    except Exception as e:
+        logger.error(f"Error removing album from wishlist: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
 @app.route('/api/add-album-to-wishlist', methods=['POST'])
 def add_album_track_to_wishlist():
     """Endpoint to add a single track from an album to the wishlist."""

@@ -7900,6 +7900,197 @@ body {
     flex-shrink: 0;
 }
 
+/* Wishlist Delete Buttons */
+.wishlist-track-item {
+    position: relative;
+}
+
+.wishlist-delete-btn {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: rgba(220, 53, 69, 0.9);
+    border: none;
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 16px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    opacity: 0;
+    pointer-events: none;
+    z-index: 10;
+}
+
+.wishlist-track-item:hover .wishlist-delete-btn {
+    opacity: 1;
+    pointer-events: all;
+}
+
+.wishlist-delete-btn:hover {
+    background: rgba(220, 53, 69, 1);
+    transform: translateY(-50%) scale(1.1);
+}
+
+.wishlist-delete-btn:active {
+    transform: translateY(-50%) scale(0.95);
+}
+
+/* Smaller delete button for tracks within albums */
+.wishlist-delete-btn-small {
+    padding: 6px 10px;
+    font-size: 14px;
+}
+
+/* Album header delete button */
+.wishlist-album-header {
+    position: relative;
+}
+
+.wishlist-delete-album-btn {
+    position: absolute;
+    right: 40px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: rgba(220, 53, 69, 0.9);
+    border: none;
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 16px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    opacity: 0;
+    pointer-events: none;
+    z-index: 10;
+}
+
+.wishlist-album-card:hover .wishlist-delete-album-btn {
+    opacity: 1;
+    pointer-events: all;
+}
+
+.wishlist-delete-album-btn:hover {
+    background: rgba(220, 53, 69, 1);
+    transform: translateY(-50%) scale(1.1);
+}
+
+.wishlist-delete-album-btn:active {
+    transform: translateY(-50%) scale(0.95);
+}
+
+/* Ensure album track items have proper positioning for delete button */
+.wishlist-album-track.wishlist-track-item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.wishlist-album-track.wishlist-track-item .wishlist-album-track-name {
+    flex: 1;
+}
+
+/* Confirmation Modal - Higher z-index to show above wishlist modal */
+.confirmation-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(8px);
+    z-index: 12000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+}
+
+.confirmation-modal-overlay.show {
+    opacity: 1;
+    pointer-events: all;
+}
+
+.confirmation-modal {
+    background: #1a1a1a;
+    border: 1px solid rgba(29, 185, 84, 0.3);
+    border-radius: 12px;
+    padding: 32px;
+    max-width: 400px;
+    width: 90%;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+    transform: scale(0.9);
+    transition: transform 0.2s ease;
+}
+
+.confirmation-modal-overlay.show .confirmation-modal {
+    transform: scale(1);
+}
+
+.confirmation-modal-icon {
+    font-size: 48px;
+    text-align: center;
+    margin-bottom: 16px;
+}
+
+.confirmation-modal-title {
+    font-size: 20px;
+    font-weight: 600;
+    color: #ffffff;
+    text-align: center;
+    margin-bottom: 12px;
+}
+
+.confirmation-modal-message {
+    font-size: 14px;
+    color: #b3b3b3;
+    text-align: center;
+    margin-bottom: 24px;
+    line-height: 1.5;
+}
+
+.confirmation-modal-buttons {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+}
+
+.confirmation-modal-btn {
+    padding: 12px 32px;
+    border-radius: 8px;
+    border: none;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    min-width: 100px;
+}
+
+.confirmation-modal-btn-cancel {
+    background: rgba(255, 255, 255, 0.1);
+    color: #ffffff;
+}
+
+.confirmation-modal-btn-cancel:hover {
+    background: rgba(255, 255, 255, 0.15);
+}
+
+.confirmation-modal-btn-confirm {
+    background: #dc3545;
+    color: #ffffff;
+}
+
+.confirmation-modal-btn-confirm:hover {
+    background: #c82333;
+    transform: scale(1.05);
+}
+
+.confirmation-modal-btn:active {
+    transform: scale(0.95);
+}
+
 /* Mobile Responsive */
 @media (max-width: 768px) {
     .wishlist-category-grid {
