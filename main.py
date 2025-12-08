@@ -415,8 +415,23 @@ class MainWindow(QMainWindow):
             event.accept()
 
 def main():
+    # Check for saved log level preference in database
+    try:
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+        saved_log_level = db.get_preference('log_level')
+        if saved_log_level:
+            log_level = saved_log_level
+        else:
+            # Fall back to config file
+            logging_config = config_manager.get_logging_config()
+            log_level = logging_config.get('level', 'INFO')
+    except:
+        # If database isn't available yet, use config file
+        logging_config = config_manager.get_logging_config()
+        log_level = logging_config.get('level', 'INFO')
+
     logging_config = config_manager.get_logging_config()
-    log_level = logging_config.get('level', 'INFO')
     log_file = logging_config.get('path', 'logs/newmusic.log')
     setup_logging(level=log_level, log_file=log_file)
     

@@ -90,4 +90,28 @@ def setup_logging(level: str = "INFO", log_file: Optional[str] = None) -> loggin
 def get_logger(name: str) -> logging.Logger:
     return logging.getLogger(f"newmusic.{name}")
 
+def set_log_level(level: str) -> bool:
+    """Dynamically change the log level for all loggers without restart"""
+    try:
+        log_level = getattr(logging, level.upper(), logging.INFO)
+
+        # Get the root "newmusic" logger
+        root_logger = logging.getLogger("newmusic")
+        root_logger.setLevel(log_level)
+
+        # Update all handlers
+        for handler in root_logger.handlers:
+            handler.setLevel(log_level)
+
+        root_logger.info(f"Log level changed to: {level.upper()}")
+        return True
+    except Exception as e:
+        print(f"Error setting log level: {e}")
+        return False
+
+def get_current_log_level() -> str:
+    """Get the current log level"""
+    root_logger = logging.getLogger("newmusic")
+    return logging.getLevelName(root_logger.level)
+
 main_logger = get_logger("main")

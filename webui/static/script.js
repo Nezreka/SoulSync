@@ -1545,9 +1545,45 @@ async function loadSettingsData() {
             console.error('Error loading discovery lookback period:', error);
         }
 
+        // Load current log level
+        try {
+            const logLevelResponse = await fetch('/api/settings/log-level');
+            const logLevelData = await logLevelResponse.json();
+            if (logLevelData.success && logLevelData.level) {
+                document.getElementById('log-level-select').value = logLevelData.level;
+            }
+        } catch (error) {
+            console.error('Error loading log level:', error);
+        }
+
     } catch (error) {
         console.error('Error loading settings:', error);
         showToast('Failed to load settings', 'error');
+    }
+}
+
+async function changeLogLevel() {
+    const selector = document.getElementById('log-level-select');
+    const level = selector.value;
+
+    try {
+        const response = await fetch('/api/settings/log-level', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ level: level })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            showToast(`Log level changed to ${level}`, 'success');
+            console.log(`Log level changed to: ${level}`);
+        } else {
+            showToast(`Failed to change log level: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error changing log level:', error);
+        showToast('Failed to change log level', 'error');
     }
 }
 
