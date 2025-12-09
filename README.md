@@ -12,6 +12,13 @@ Bridge the gap between streaming services and your local music library. Automati
 
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/boulderbadgedad)
 
+## 🆕 Recent Updates
+
+- **Log level control** - Change between DEBUG/INFO/WARNING/ERROR in settings without restart
+- **Jellyfin library selector** - Choose which music library to use (matches Plex functionality)
+- **Enhanced wishlist management** - Remove individual tracks or entire albums with beautiful confirmation modals
+- **Docker config persistence** - Config now properly saves between container restarts
+
 ## ✨ What It Does
 
 - **Auto-sync playlists** from Spotify/Tidal/YouTube to your media server
@@ -24,10 +31,11 @@ Bridge the gap between streaming services and your local music library. Automati
 - **File organization** creates clean folder structures
 - **Artist discovery** browse complete discographies with similar artists recommendations powered by [music-map.com](https://music-map.com)
 - **Music library browser** comprehensive collection management with search and completion tracking
-- **Wishlist system** saves failed downloads for automatic retry
+- **Wishlist system** saves failed downloads for automatic retry with granular track/album removal
 - **Artist watchlist** monitors for new releases and adds missing tracks
 - **Discover page** intelligent music discovery using your watchlist to curate personalized playlists
 - **Background automation** retries failed downloads every hour
+- **Dynamic logging** adjust log verbosity on the fly for easier debugging
 
 
 ## Star History
@@ -133,6 +141,7 @@ docker run -d -p 8008:8008 boulderbadgedad/soulsync:latest
 4. Give it a name like "SoulSync"
 5. Copy the generated API key
 6. Your Jellyfin server URL is typically `http://YOUR_IP:8096`
+7. **New**: After connecting, select which music library to use from the dropdown (if you have multiple)
 
 ### Final Steps
 1. Set up slskd with downloads folder and API key
@@ -141,14 +150,20 @@ docker run -d -p 8008:8008 boulderbadgedad/soulsync:latest
 4. **Important**: Share music in slskd to avoid bans
 
 ### Docker Notes
-- Database persists between rebuilds via named volume
-- Mount drives containing your download/transfer folders:
+- **Config persistence**: Config now properly mounted at `./config:/app/config` - settings persist between restarts
+- **Database persistence**: Uses named volume for database (separate from GUI/WebUI versions)
+- **Multi-library support**: Plex and Jellyfin can select which music library to use via dropdown in settings
+- **Drive mounting**: Mount drives containing your download/transfer folders:
   ```yaml
   volumes:
-    - /mnt/c:/host/mnt/c:rw  # For C: drive paths
-    - /mnt/d:/host/mnt/d:rw  # For D: drive paths
+    - ./config:/app/config          # Config persistence
+    - ./logs:/app/logs              # Log files
+    - /mnt/c:/host/mnt/c:rw        # For C: drive paths
+    - /mnt/d:/host/mnt/d:rw        # For D: drive paths
+    - /mnt/h:/host/mnt/h:rw        # Add drives as needed
   ```
-- Uses separate database from GUI/WebUI versions
+- **Path format**: Use `/host/mnt/X/path` in settings where X is your drive letter
+- **Troubleshooting**: If drive mounts fail, try restarting Docker Desktop and ensure drives are shared in Docker Desktop settings
 
 ### Docker OAuth Fix (Remote Access)
 If accessing SoulSync from a different machine than where it's running:
@@ -235,6 +250,30 @@ Unlike generic algorithms, recommendations are based only on artists you explici
 - **Transfer path** should point to your media server music library
 - **FLAC preferred** but supports all common formats
 - **OAuth from different devices:** See [DOCKER-OAUTH-FIX.md](DOCKER-OAUTH-FIX.md) if you get "Insecure redirect URI" errors
+
+## 🐛 Debugging & Troubleshooting
+
+**Enable Debug Logging:**
+- Go to Settings → scroll to "Log Level" dropdown
+- Change from INFO to DEBUG
+- Takes effect immediately (no restart needed)
+- Check logs at `logs/app.log` for detailed information
+
+**Common Issues:**
+
+- **Files not moving from downloads to transfer folder**
+  - Check that transfer path points to your music library
+  - In Docker: Ensure the drive is mounted (see Docker Notes above)
+  - Verify permissions on both download and transfer folders
+
+- **Plex/Jellyfin connection issues**
+  - Test connection in settings to verify credentials
+  - For multi-library setups: Select the correct music library from dropdown
+  - Check that server URL is accessible from SoulSync
+
+- **Wishlist tracks stuck**
+  - Use the new delete buttons (hover over tracks/albums) to remove stuck items
+  - Auto-retry runs every 30 minutes for wishlist items
 
 ## 🏗️ Architecture
 
