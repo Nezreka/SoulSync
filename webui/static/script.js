@@ -3975,7 +3975,7 @@ function showPlaylistDetailsModal(playlist) {
                                 <span class="playlist-track-number">${index + 1}</span>
                                 <div class="playlist-track-info">
                                     <div class="playlist-track-name">${escapeHtml(track.name)}</div>
-                                    <div class="playlist-track-artists">${track.artists.join(', ')}</div>
+                                    <div class="playlist-track-artists">${formatArtists(track.artists)}</div>
                                 </div>
                                 <div class="playlist-track-duration">${formatDuration(track.duration_ms)}</div>
                             </div>

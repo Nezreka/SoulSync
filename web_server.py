@@ -12547,7 +12547,7 @@ def get_playlist_tracks(playlist_id):
                         tracks.append({
                             'id': track_data['id'],
                             'name': track_data['name'],
-                            'artists': [artist['name'] for artist in track_data['artists']],
+                            'artists': track_data['artists'],  # Full artist objects (matches Download Missing Tracks behavior)
                             'album': track_data['album'],  # Full album object
                             'duration_ms': track_data['duration_ms'],
                             'popularity': track_data.get('popularity', 0),
@@ -12589,7 +12589,7 @@ def get_playlist_tracks(playlist_id):
                     tracks.append({
                         'id': track_data['id'],
                         'name': track_data['name'],
-                        'artists': [artist['name'] for artist in track_data['artists']],
+                        'artists': track_data['artists'],  # Full artist objects (matches Download Missing Tracks behavior)
                         'album': track_data['album'],  # Full album object with album_type, total_tracks, etc.
                         'duration_ms': track_data['duration_ms'],
                         'popularity': track_data.get('popularity', 0),
@@ -14502,6 +14502,14 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json):
         # Recreate a Playlist object from the JSON data sent by the frontend
         # This avoids needing to re-fetch it from Spotify
         print(f"🔄 Converting JSON tracks to SpotifyTrack objects...")
+
+        # Store original track data with full album objects (for wishlist with cover art)
+        original_tracks_map = {}
+        for t in tracks_json:
+            track_id = t.get('id', '')
+            if track_id:
+                original_tracks_map[track_id] = t
+
         tracks = []
         for i, t in enumerate(tracks_json):
             # Handle album field - extract name if it's a dictionary
@@ -14666,7 +14674,10 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json):
         setup_duration = (sync_start_time - task_start_time) * 1000
         print(f"⏱️ [TIMING] Setup completed at {time.strftime('%H:%M:%S')} (took {setup_duration:.1f}ms)")
         print(f"🚀 Starting actual sync process with asyncio.run()...")
-        
+
+        # Attach original tracks map to sync_service for wishlist with album images
+        sync_service._original_tracks_map = original_tracks_map
+
         # Run the sync (this is a blocking call within this thread)
         result = asyncio.run(sync_service.sync_playlist(playlist, download_missing=False))
         
@@ -14704,6 +14715,9 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json):
         # Clean up the callback
         if sync_service:
             sync_service.clear_progress_callback(playlist.name)
+            # Clean up original tracks map
+            if hasattr(sync_service, '_original_tracks_map'):
+                del sync_service._original_tracks_map
         print(f"✅ Cleanup completed for {playlist_id}")
 
 
