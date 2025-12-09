@@ -3942,7 +3942,10 @@ function showPlaylistDetailsModal(playlist) {
     // Check if there's a completed download missing tracks process for this playlist
     const activeProcess = activeDownloadProcesses[playlist.id];
     const hasCompletedProcess = activeProcess && activeProcess.status === 'complete';
-    
+
+    // Check if sync is currently running for this playlist
+    const isSyncing = !!activeSyncPollers[playlist.id];
+
     modal.innerHTML = `
         <div class="modal-container playlist-modal">
             <div class="playlist-modal-header">
@@ -3991,7 +3994,7 @@ function showPlaylistDetailsModal(playlist) {
                         ? '📊 View Download Results' 
                         : '📥 Download Missing Tracks'}
                 </button>
-                <button class="playlist-modal-btn playlist-modal-btn-primary" onclick="startPlaylistSync('${playlist.id}')">Sync Playlist</button>
+                <button id="sync-btn-${playlist.id}" class="playlist-modal-btn playlist-modal-btn-primary" onclick="startPlaylistSync('${playlist.id}')" ${isSyncing ? 'disabled' : ''}>${isSyncing ? '⏳ Syncing...' : 'Sync Playlist'}</button>
             </div>
         </div>
     `;
@@ -7010,6 +7013,19 @@ async function startPlaylistSync(playlistId) {
         return;
     }
     console.log(`✅ Found playlist: ${playlist.name} with ${playlist.track_count || 'unknown'} tracks`);
+
+    // Check if already syncing to prevent duplicate syncs
+    if (activeSyncPollers[playlistId]) {
+        showToast('Sync already in progress for this playlist', 'warning');
+        return;
+    }
+
+    // Update button state immediately for user feedback
+    const syncBtn = document.getElementById(`sync-btn-${playlistId}`);
+    if (syncBtn) {
+        syncBtn.disabled = true;
+        syncBtn.textContent = '⏳ Syncing...';
+    }
 
     // Ensure we have the full track list before starting
     let tracks = playlistTrackCache[playlistId];
