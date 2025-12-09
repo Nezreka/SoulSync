@@ -167,7 +167,13 @@ class PlaylistSyncService:
                 
                 # Update progress for each track
                 progress_percent = 20 + (40 * (i + 1) / total_tracks)  # 20-60% for matching
-                current_track_name = f"{track.artists[0]} - {track.name}" if track.artists else track.name
+                # Extract artist name from both string and dict formats
+                if track.artists:
+                    first_artist = track.artists[0]
+                    artist_name = first_artist if isinstance(first_artist, str) else (first_artist.get('name', 'Unknown') if isinstance(first_artist, dict) else str(first_artist))
+                    current_track_name = f"{artist_name} - {track.name}"
+                else:
+                    current_track_name = track.name
                 self._update_progress(playlist.name, "Matching tracks", current_track_name, progress_percent, 5, 2, 
                                     total_tracks=total_tracks,
                                     matched_tracks=len([r for r in match_results if r.is_match]),
@@ -266,17 +272,25 @@ class PlaylistSyncService:
                     for match_result in unmatched_tracks:
                         spotify_track = match_result.spotify_track
 
-                        # Convert SpotifyTrack to dict format expected by wishlist service
-                        spotify_track_data = {
-                            'id': spotify_track.id,
-                            'name': spotify_track.name,
-                            'artists': [{'name': a} if isinstance(a, str) else a for a in spotify_track.artists],
-                            'album': {'name': spotify_track.album},
-                            'duration_ms': spotify_track.duration_ms,
-                            'popularity': getattr(spotify_track, 'popularity', 0),
-                            'preview_url': getattr(spotify_track, 'preview_url', None),
-                            'external_urls': getattr(spotify_track, 'external_urls', {})
-                        }
+                        # Check if we have original track data with full album objects
+                        original_track_data = None
+                        if hasattr(self, '_original_tracks_map') and self._original_tracks_map:
+                            original_track_data = self._original_tracks_map.get(spotify_track.id)
+
+                        # Use original data if available (preserves album images), otherwise convert
+                        if original_track_data:
+                            spotify_track_data = original_track_data
+                        else:
+                            spotify_track_data = {
+                                'id': spotify_track.id,
+                                'name': spotify_track.name,
+                                'artists': [{'name': a} if isinstance(a, str) else a for a in spotify_track.artists],
+                                'album': {'name': spotify_track.album},
+                                'duration_ms': spotify_track.duration_ms,
+                                'popularity': getattr(spotify_track, 'popularity', 0),
+                                'preview_url': getattr(spotify_track, 'preview_url', None),
+                                'external_urls': getattr(spotify_track, 'external_urls', {})
+                            }
 
                         # Add to wishlist with source context
                         success = wishlist_service.add_spotify_track_to_wishlist(
@@ -344,8 +358,14 @@ class PlaylistSyncService:
             for artist in spotify_track.artists:
                 if self._cancelled:
                     return None, 0.0
-                
-                artist_name = artist if isinstance(artist, str) else artist
+
+                # Extract artist name from both string and dict formats
+                if isinstance(artist, str):
+                    artist_name = artist
+                elif isinstance(artist, dict) and 'name' in artist:
+                    artist_name = artist['name']
+                else:
+                    artist_name = str(artist)
                 
                 # Use the improved database check_track_exists method with server awareness
                 try:

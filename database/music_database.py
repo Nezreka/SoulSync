@@ -2303,7 +2303,16 @@ class MusicDatabase:
 
                 track_name = spotify_track_data.get('name', 'Unknown Track')
                 artists = spotify_track_data.get('artists', [])
-                artist_name = artists[0].get('name', 'Unknown Artist') if artists else 'Unknown Artist'
+                if artists:
+                    first_artist = artists[0]
+                    if isinstance(first_artist, str):
+                        artist_name = first_artist
+                    elif isinstance(first_artist, dict):
+                        artist_name = first_artist.get('name', 'Unknown Artist')
+                    else:
+                        artist_name = 'Unknown Artist'
+                else:
+                    artist_name = 'Unknown Artist'
 
                 # Check for duplicates by track name + artist (not just Spotify ID)
                 # This prevents adding the same track multiple times with different IDs or edge cases
@@ -2319,7 +2328,16 @@ class MusicDatabase:
                         existing_data = json.loads(existing['spotify_data'])
                         existing_name = existing_data.get('name', '')
                         existing_artists = existing_data.get('artists', [])
-                        existing_artist = existing_artists[0].get('name', '') if existing_artists else ''
+                        if existing_artists:
+                            existing_first = existing_artists[0]
+                            if isinstance(existing_first, str):
+                                existing_artist = existing_first
+                            elif isinstance(existing_first, dict):
+                                existing_artist = existing_first.get('name', '')
+                            else:
+                                existing_artist = ''
+                        else:
+                            existing_artist = ''
 
                         # Case-insensitive comparison of track name and primary artist
                         if (existing_name.lower() == track_name.lower() and
