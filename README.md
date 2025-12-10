@@ -4,48 +4,65 @@
 
 # 🎵 SoulSync - Automated Music Discovery & Collection Manager
 
-Bridge the gap between streaming services and your local music library. Automatically sync Spotify/Tidal/YouTube playlists to Plex/Jellyfin/Navidrome via Soulseek.
+**Bridge streaming services to your local music library.** Automatically sync Spotify/Tidal/YouTube playlists to Plex/Jellyfin/Navidrome via Soulseek with intelligent matching, metadata enhancement, and automated discovery.
 
-> 📢 **Development Notice**: New features and major updates are currently being developed exclusively for the **Web UI** version. The original **Desktop GUI** version will continue to receive maintenance and bug fixes to ensure stability, but new functionality will only be added to the Web UI going forward. If the Web UI version ever feels 'completed', I'll likely add those missing features to the GUI version.
+> ⚠️ **CRITICAL**: Configure file sharing in slskd before use. Users who only download without sharing get banned by the Soulseek community. Set up shared folders at `http://localhost:5030/shares`.
 
-> ⚠️ **CRITICAL**: You MUST configure file sharing in slskd before using SoulSync. Users who only download without sharing get banned by the Soulseek community. Set up shared folders in slskd's web interface at `http://localhost:5030/shares` - share your music library or downloads folder.
+> 📢 **Development Focus**: New features are developed for the **Web UI** version. The Desktop GUI receives maintenance and bug fixes only.
 
-[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/boulderbadgedad)
+## ✨ Core Features
 
-## 🆕 Recent Updates
+**Sync & Download**
+- Auto-sync playlists from Spotify/Tidal/YouTube to your media server
+- Smart matching against your existing library
+- FLAC-priority downloads from Soulseek with automatic fallback
+- Customizable file organization with template-based path structures
+- Synchronized lyrics (LRC) for every track via LRClib.net
 
-- **Log level control** - Change between DEBUG/INFO/WARNING/ERROR in settings without restart
-- **Jellyfin library selector** - Choose which music library to use (matches Plex functionality)
-- **Enhanced wishlist management** - Remove individual tracks or entire albums with beautiful confirmation modals
-- **Docker config persistence** - Config now properly saves between container restarts
+**Metadata & Organization**
+- Enhanced metadata with album art and proper tags
+- Flexible folder templates: `$albumartist/$album/$track - $title`
+- Automatic library scanning and database updates
+- Clean, organized music collection
 
-## ✨ What It Does
+**Discovery & Automation**
+- Browse complete artist discographies with similar artist recommendations
+- Intelligent music discovery using your watchlist ([music-map.com](https://music-map.com) integration)
+- Curated playlists: Release Radar, Discovery Weekly, Seasonal Mixes
+- Beatport chart integration for electronic music
+- Artist watchlist monitors new releases automatically
 
-- **Auto-sync playlists** from Spotify/Tidal/YouTube to your media server
-- **Smart matching** finds what you're missing vs what you own
-- **Download missing tracks** from Soulseek with FLAC priority
-- **Metadata enhancement** adds proper tags and album art
-- **Automatic lyrics** synchronized LRC files for every download
-- **Auto server scanning** triggers library scans after downloads
-- **Auto database updates** keeps SoulSync database current
-- **File organization** creates clean folder structures
-- **Artist discovery** browse complete discographies with similar artists recommendations powered by [music-map.com](https://music-map.com)
-- **Music library browser** comprehensive collection management with search and completion tracking
-- **Wishlist system** saves failed downloads for automatic retry with granular track/album removal
-- **Artist watchlist** monitors for new releases and adds missing tracks
-- **Discover page** intelligent music discovery using your watchlist to curate personalized playlists
-- **Background automation** retries failed downloads every hour
-- **Dynamic logging** adjust log verbosity on the fly for easier debugging
+**Management**
+- Comprehensive library browser with search and completion tracking
+- Wishlist system with automatic retry (30-minute intervals)
+- Granular wishlist management (remove individual tracks or entire albums)
+- Dynamic log level control (DEBUG/INFO/WARNING/ERROR)
+- Background automation handles retries and database updates
 
+## 🚀 Installation
 
-## Star History
+### Docker (Recommended)
+```bash
+# Using docker-compose
+curl -O https://raw.githubusercontent.com/Nezreka/SoulSync/main/docker-compose.yml
+docker-compose up -d
 
-[![Star History Chart](https://api.star-history.com/svg?repos=Nezreka/SoulSync&type=date&legend=top-left)](https://www.star-history.com/#Nezreka/SoulSync&type=date&legend=top-left)
+# Or run directly
+docker run -d -p 8008:8008 boulderbadgedad/soulsync:latest
 
-## 🚀 Three Ways to Run
+# Access at http://localhost:8008
+```
 
-### 1. Desktop GUI (Original)
-Full PyQt6 desktop application with all features.
+### Web UI (Python)
+```bash
+git clone https://github.com/Nezreka/SoulSync
+cd SoulSync
+pip install -r requirements.txt
+python web_server.py
+# Open http://localhost:8008
+```
+
+### Desktop GUI
 ```bash
 git clone https://github.com/Nezreka/SoulSync
 cd SoulSync
@@ -53,235 +70,169 @@ pip install -r requirements.txt
 python main.py
 ```
 
-### 2. Web UI (New!)
-Browser-based interface - same features, runs anywhere.
-```bash
-python web_server.py
-# Open http://localhost:8008
-```
-
-### 3. Docker (New!)
-Containerized web UI with persistent database.
-```bash
-# Option 1: Use docker-compose (recommended)
-curl -O https://raw.githubusercontent.com/Nezreka/SoulSync/main/docker-compose.yml
-docker-compose up -d
-
-# Option 2: Run directly
-docker run -d -p 8008:8008 boulderbadgedad/soulsync:latest
-
-# Open http://localhost:8008
-```
-
 ## ⚡ Quick Setup
 
 ### Prerequisites
-- **slskd**: Download from [GitHub](https://github.com/slskd/slskd/releases), run on port 5030
-- **Spotify API**: Get Client ID/Secret (see setup below)
-- **Tidal API**: Get Client ID/Secret (see setup below)
-- **Media Server**: Plex, Jellyfin, or Navidrome (optional but recommended)
+- **slskd**: [Download](https://github.com/slskd/slskd/releases), run on port 5030
+- **Spotify API**: Client ID/Secret from [Developer Dashboard](https://developer.spotify.com/dashboard)
+- **Tidal API** (optional): Client ID/Secret from [Developer Dashboard](https://developer.tidal.com/dashboard)
+- **Media Server** (optional): Plex, Jellyfin, or Navidrome
 
-## 🔑 API Setup Guide
+### API Credentials
 
-### Spotify API Setup
-1. Go to [Spotify Developer Dashboard](https://developer.spotify.com/dashboard)
-2. Click **"Create App"**
-3. Fill out the form:
-   - **App Name**: `SoulSync` (or whatever you want)
-   - **App Description**: `Music library sync`
-   - **Website**: `http://localhost` (or leave blank)
-   - **Redirect URI**: `http://127.0.0.1:8888/callback`
-4. Click **"Save"** 
-5. Click **"Settings"** on your new app
-6. Copy the **Client ID** and **Client Secret**
+**Spotify**
+1. [Create app](https://developer.spotify.com/dashboard) → Settings
+2. Add redirect URI: `http://127.0.0.1:8888/callback`
+3. Copy Client ID and Secret
 
-### Tidal API Setup
-1. Go to [Tidal Developer Dashboard](https://developer.tidal.com/dashboard)
-2. Click **"Create New App"**
-3. Fill out the form:
-   - **App Name**: `SoulSync`
-   - **Description**: `Music library sync`
-   - **Redirect URI**: `http://127.0.0.1:8889/callback`
-   - **Scopes**: Select `user.read` and `playlists.read`
-4. Click **"Save"**
-5. Copy the **Client ID** and **Client Secret**
+**Tidal**
+1. [Create app](https://developer.tidal.com/dashboard)
+2. Add redirect URI: `http://127.0.0.1:8889/callback`
+3. Add scopes: `user.read`, `playlists.read`
+4. Copy Client ID and Secret
 
-### Plex Token Setup
-**Easy Method:**
-1. Open Plex in your browser and sign in
-2. Go to any movie/show page
-3. Click **"Get Info"** or three dots menu → **"View XML"**
-4. In the URL bar, copy everything after `X-Plex-Token=`
-   - Example: `http://192.168.1.100:32400/library/metadata/123?X-Plex-Token=YOUR_TOKEN_HERE`
-5. Your Plex server URL is typically `http://YOUR_IP:32400`
+**Plex**
+- Get token from any media item URL: `?X-Plex-Token=YOUR_TOKEN`
+- Server URL: `http://YOUR_IP:32400`
 
-**Alternative Method:**
-1. Go to [plex.tv/claim](https://plex.tv/claim) while logged in
-2. Your 4-minute claim token appears - this isn't what you need
-3. Instead, right-click → Inspect → Network tab → Reload page
-4. Look for requests with `X-Plex-Token` header and copy that value
+**Jellyfin**
+- Settings → API Keys → Generate new key
+- Server URL: `http://YOUR_IP:8096`
 
-### Navidrome Setup
-**Easy Method:**
-1. Open your Navidrome web interface and sign in
-2. Go to **Settings** → **Users**
-3. Click on your user account
-4. Under **Token**, click **"Generate API Token"**
-5. Copy the generated token
-6. Your Navidrome server URL is typically `http://YOUR_IP:4533`
+**Navidrome**
+- Settings → Users → Generate API Token
+- Or use username/password
+- Server URL: `http://YOUR_IP:4533`
 
-**Using Username/Password:**
-- You can also use your regular username and password instead of a token
-- SoulSync supports both authentication methods for Navidrome
+### Configuration
 
-### Jellyfin Setup
-1. Open your Jellyfin web interface and sign in
-2. Go to **Settings** → **API Keys**
-3. Click **"+"** to create a new API key
-4. Give it a name like "SoulSync"
-5. Copy the generated API key
-6. Your Jellyfin server URL is typically `http://YOUR_IP:8096`
-7. **New**: After connecting, select which music library to use from the dropdown (if you have multiple)
+1. Launch SoulSync and go to Settings
+2. Enter API credentials for streaming services and media server
+3. Configure slskd URL (`http://localhost:5030`) and API key
+4. Set download and transfer paths
+5. **Customize file organization** (optional):
+   - Enable custom templates in Settings → File Organization
+   - Default: `$albumartist/$albumartist - $album/$track - $title`
+   - Variables: `$artist`, `$albumartist`, `$album`, `$title`, `$track`, `$playlist`
+   - Example: `Music/$artist/$year - $album/$track - $title`
+6. **Share files in slskd** to avoid bans
 
-### Final Steps
-1. Set up slskd with downloads folder and API key
-2. Launch SoulSync, go to Settings, enter all your API credentials
-3. Configure your download and transfer folder paths
-4. **Important**: Share music in slskd to avoid bans
+## 📁 File Organization
 
-### Docker Notes
-- **Config persistence**: Config now properly mounted at `./config:/app/config` - settings persist between restarts
-- **Database persistence**: Uses named volume for database (separate from GUI/WebUI versions)
-- **Multi-library support**: Plex and Jellyfin can select which music library to use via dropdown in settings
-- **Drive mounting**: Mount drives containing your download/transfer folders:
-  ```yaml
-  volumes:
-    - ./config:/app/config          # Config persistence
-    - ./logs:/app/logs              # Log files
-    - /mnt/c:/host/mnt/c:rw        # For C: drive paths
-    - /mnt/d:/host/mnt/d:rw        # For D: drive paths
-    - /mnt/h:/host/mnt/h:rw        # Add drives as needed
-  ```
-- **Path format**: Use `/host/mnt/X/path` in settings where X is your drive letter
-- **Troubleshooting**: If drive mounts fail, try restarting Docker Desktop and ensure drives are shared in Docker Desktop settings
+SoulSync supports customizable path templates with validation and fallback protection.
 
-### Docker OAuth Fix (Remote Access)
-If accessing SoulSync from a different machine than where it's running:
-
-1. Set your Spotify callback URL to `http://127.0.0.1:8888/callback`
-2. Open SoulSync settings and click authenticate
-3. Complete Spotify authorization - you'll be redirected to `http://127.0.0.1:8888/callback?code=SOME_CODE_HERE`
-4. If the page fails to load, edit the URL to use your actual SoulSync IP:
-   - Change: `http://127.0.0.1:8888/callback?code=SOME_CODE_HERE`
-   - To: `http://192.168.1.5:8888/callback?code=SOME_CODE_HERE`
-5. Press Enter and authentication should complete
-
-**Note**: Spotify only allows `127.0.0.1` as a local redirect URI, hence this workaround. You may need to repeat this process after rebuilding containers.
-
-## 🎵 Beatport Integration
-
-Discover the hottest dance music with our fresh Beatport integration. Whether you're following superstar DJs or hunting for underground gems, SoulSync pulls directly from Beatport's extensive catalog.
-
-**Chart Explorer**: Browse featured charts, DJ curated sets, and trending tracks
-**Genre Deep Dive**: Discover new releases and popular tracks by genre
-**One-Click Downloads**: Grab entire charts or individual tracks instantly
-**Premium Discovery**: Access the same charts that DJs use to find their next big tracks
-
-Just hit up the Beatport section in the web UI and start exploring. Perfect for DJs building sets or anyone who wants to stay ahead of the curve on electronic music trends.
-
-## 🎧 Discover Page
-
-Personalized music discovery powered by your watchlist. Add artists you like, and SoulSync automatically builds a database of similar artists using [music-map.com](https://music-map.com) to curate fresh playlists.
-
-**Three Smart Playlists:**
-- **Release Radar**: New releases (past 7 days) from watchlist, similar artists, and your library
-- **Discovery Weekly**: Broader selection of recent releases you might have missed
-- **Featured Artists**: Hero slideshow of recommended similar artists with one-click watchlist/discography access
-
-**How it works:** Watchlist → Similar Artists DB → New Releases → Personalized Playlists
-
-Unlike generic algorithms, recommendations are based only on artists you explicitly watch, using actual music relationships instead of popularity trends.
-
-## 📁 File Flow
-
-1. **Search**: Query Soulseek via slskd API
-2. **Download**: Files saved to configured download folder
-3. **Process**: Auto-organize to transfer folder with metadata enhancement
-4. **Lyrics**: Automatic LRC file generation using LRClib.net API
-5. **Server Scan**: Triggers library scan on your media server (60s delay)
-6. **Database Sync**: Updates SoulSync database with new tracks
-7. **Structure**: `Transfer/Artist/Artist - Album/01 - Track.flac` + `01 - Track.lrc`
-8. **Import**: Media server picks up organized files with lyrics
-
-## 🔧 Config Example
-
-```json
-{
-  "spotify": {
-    "client_id": "your_client_id",
-    "client_secret": "your_client_secret"
-  },
-  "plex": {
-    "base_url": "http://localhost:32400",
-    "token": "your_plex_token"
-  },
-  "jellyfin": {
-    "base_url": "http://localhost:8096",
-    "api_key": "your_jellyfin_api_key"
-  },
-  "navidrome": {
-    "base_url": "http://localhost:4533",
-    "username": "your_username",
-    "password": "your_password"
-  },
-  "soulseek": {
-    "slskd_url": "http://localhost:5030",
-    "api_key": "your_api_key",
-    "download_path": "/path/to/downloads",
-    "transfer_path": "/path/to/music/library"
-  }
-}
+**Default Structure**
+```
+Transfer/
+  Artist/
+    Artist - Album/
+      01 - Track.flac
+      01 - Track.lrc
 ```
 
-## ⚠️ Important Notes
+**Template System**
+- **Albums**: `$albumartist/$albumartist - $album/$track - $title`
+- **Singles**: `$artist/$artist - $title/$title`
+- **Playlists**: `$playlist/$artist - $title`
 
-- **Must share files in slskd** - downloaders without shares get banned
-- **Docker uses separate database** from GUI/WebUI versions
-- **Transfer path** should point to your media server music library
-- **FLAC preferred** but supports all common formats
-- **OAuth from different devices:** See [DOCKER-OAUTH-FIX.md](DOCKER-OAUTH-FIX.md) if you get "Insecure redirect URI" errors
+**Available Variables**
+- `$artist`, `$albumartist`, `$album`, `$title`
+- `$track` (zero-padded: 01, 02...)
+- `$playlist` (playlist name)
 
-## 🐛 Debugging & Troubleshooting
+**Features**
+- Client-side validation prevents invalid templates
+- Reset to defaults button in settings
+- Automatic fallback if template fails
+- Changes apply immediately to new downloads
 
-**Enable Debug Logging:**
-- Go to Settings → scroll to "Log Level" dropdown
-- Change from INFO to DEBUG
-- Takes effect immediately (no restart needed)
-- Check logs at `logs/app.log` for detailed information
+## 🐳 Docker Notes
 
-**Common Issues:**
+**Path Configuration**
+```yaml
+volumes:
+  - ./config:/app/config          # Settings persist
+  - ./logs:/app/logs              # Log files
+  - /mnt/c:/host/mnt/c:rw        # Mount Windows drives
+  - /mnt/d:/host/mnt/d:rw
+```
 
-- **Files not moving from downloads to transfer folder**
-  - Check that transfer path points to your music library
-  - In Docker: Ensure the drive is mounted (see Docker Notes above)
-  - Verify permissions on both download and transfer folders
+Use `/host/mnt/X/path` in settings where X is your drive letter.
 
-- **Plex/Jellyfin connection issues**
-  - Test connection in settings to verify credentials
-  - For multi-library setups: Select the correct music library from dropdown
-  - Check that server URL is accessible from SoulSync
+**OAuth from Remote Devices**
+When accessing from a different machine, Spotify redirects may fail:
+1. Complete OAuth flow - get redirected to `http://127.0.0.1:8888/callback?code=...`
+2. Edit URL to use your server IP: `http://192.168.1.5:8888/callback?code=...`
+3. Press Enter to complete authentication
 
-- **Wishlist tracks stuck**
-  - Use the new delete buttons (hover over tracks/albums) to remove stuck items
-  - Auto-retry runs every 30 minutes for wishlist items
+See [DOCKER-OAUTH-FIX.md](DOCKER-OAUTH-FIX.md) for details.
+
+## 📊 Workflow
+
+1. **Sync**: Select Spotify/Tidal/YouTube playlist
+2. **Match**: SoulSync compares against your library
+3. **Download**: Missing tracks queued from Soulseek
+4. **Process**: Files enhanced with metadata, lyrics, and album art
+5. **Organize**: Moved to transfer folder with template-based structure
+6. **Scan**: Media server automatically rescans library
+7. **Update**: SoulSync database syncs with your collection
+
+## 🐛 Troubleshooting
+
+**Enable Debug Logging**
+- Settings → Log Level → DEBUG
+- Check `logs/app.log` for detailed information
+- Change takes effect immediately
+
+**Common Issues**
+
+*Files not organizing properly*
+- Verify transfer path points to your music library
+- Check template syntax in Settings → File Organization
+- Use "Reset to Defaults" if templates are broken
+- Review logs for path-related errors
+
+*Docker drive access*
+- Ensure drives are mounted in docker-compose.yml
+- Restart Docker Desktop if mounts fail
+- Verify paths use `/host/mnt/X/` prefix
+
+*Wishlist tracks stuck*
+- Remove items using delete buttons on wishlist page
+- Auto-retry runs every 30 minutes
+- Check logs for download failures
+
+*Multi-library setups*
+- Select correct library from dropdown in settings (Plex/Jellyfin)
+- Test connection to verify credentials
 
 ## 🏗️ Architecture
 
-- **Core**: Service clients for Spotify, Plex, Jellyfin, Navidrome, Soulseek
-- **Database**: SQLite with full media library cache and automatic updates
-- **UI**: PyQt6 desktop + Flask web interface
-- **Matching**: Advanced text normalization and scoring
-- **Lyrics**: LRClib.net integration for synchronized lyrics
-- **Automation**: Multi-threaded with automatic retry, scanning, and database updates
+- **Services**: Spotify, Tidal, Plex, Jellyfin, Navidrome, Soulseek clients
+- **Database**: SQLite with automatic library caching and updates
+- **UI**: PyQt6 Desktop + Flask Web Interface
+- **Matching**: Advanced text normalization and fuzzy scoring
+- **Metadata**: Mutagen + LRClib.net for tags and lyrics
+- **Automation**: Multi-threaded with retry logic and background tasks
 
-Modern, clean, automated. Set it up once, let it manage your music library.
+## 📝 Recent Updates
+
+- **Customizable file organization** with template-based paths and validation
+- **Log level control** without restart
+- **Jellyfin library selector** for multi-library setups
+- **Enhanced wishlist management** with track/album removal
+- **Docker config persistence** between container restarts
+
+---
+
+<p align="center">
+  <a href="https://ko-fi.com/boulderbadgedad">
+    <img src="https://ko-fi.com/img/githubbutton_sm.svg" alt="Support on Ko-fi">
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://star-history.com/#Nezreka/SoulSync&type=date&legend=top-left">
+    <img src="https://api.star-history.com/svg?repos=Nezreka/SoulSync&type=date&legend=top-left" alt="Star History">
+  </a>
+</p>
