@@ -2612,27 +2612,66 @@
                             <!-- Metadata Enhancement Settings -->
                             <div class="settings-group">
                                 <h3>🎵 Metadata Enhancement</h3>
-                                
+
                                 <div class="form-group">
                                     <label class="checkbox-label">
                                         <input type="checkbox" id="metadata-enabled" checked>
                                         Enable metadata enhancement with Spotify data
                                     </label>
                                 </div>
-                                
+
                                 <div class="form-group">
                                     <label class="checkbox-label">
                                         <input type="checkbox" id="embed-album-art" checked>
                                         Embed high-quality album art from Spotify
                                     </label>
                                 </div>
-                                
+
                                 <div class="form-group">
                                     <label>Supported Formats:</label>
                                     <div class="supported-formats">MP3, FLAC, MP4/M4A, OGG</div>
                                 </div>
                             </div>
-                            
+
+                            <!-- File Organization Settings -->
+                            <div class="settings-group">
+                                <h3>📁 File Organization</h3>
+
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="file-organization-enabled" checked>
+                                        Enable custom file organization templates
+                                    </label>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Album Path Template:</label>
+                                    <input type="text" id="template-album-path" placeholder="$albumartist/$albumartist - $album/$track - $title">
+                                    <small style="color: #888;">Variables: $albumartist, $artist, $album, $title, $track</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Single Path Template:</label>
+                                    <input type="text" id="template-single-path" placeholder="$artist/$artist - $title/$title">
+                                    <small style="color: #888;">Variables: $artist, $title, $album</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Playlist Path Template:</label>
+                                    <input type="text" id="template-playlist-path" placeholder="$playlist/$artist - $title">
+                                    <small style="color: #888;">Variables: $playlist, $artist, $title</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <button class="test-button" onclick="resetFileOrganizationTemplates()" style="background: #666;">
+                                        🔄 Reset to Defaults
+                                    </button>
+                                    <small style="color: #888; display: block; margin-top: 8px;">
+                                        Restores original path structure. Your downloads will be organized like before.
+                                    </small>
+                                </div>
+                            </div>
+
                             <!-- Playlist Sync Settings -->
                             <div class="settings-group">
                                 <h3>Playlist Sync Settings</h3>

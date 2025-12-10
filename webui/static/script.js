@@ -1456,6 +1456,123 @@ function initializeSettings() {
     // Test button event listeners removed - they use onclick attributes in HTML to avoid double firing
 }
 
+function resetFileOrganizationTemplates() {
+    // Reset templates to defaults
+    const defaults = {
+        album: '$albumartist/$albumartist - $album/$track - $title',
+        single: '$artist/$artist - $title/$title',
+        playlist: '$playlist/$artist - $title'
+    };
+
+    document.getElementById('template-album-path').value = defaults.album;
+    document.getElementById('template-single-path').value = defaults.single;
+    document.getElementById('template-playlist-path').value = defaults.playlist;
+
+    showToast('Templates reset to defaults. Click "Save Settings" to apply.', 'success');
+}
+
+function validateFileOrganizationTemplates() {
+    const errors = [];
+
+    // Valid variables for each template type
+    const validVars = {
+        album: ['$artist', '$albumartist', '$album', '$title', '$track'],
+        single: ['$artist', '$albumartist', '$album', '$title'],
+        playlist: ['$artist', '$playlist', '$title']
+    };
+
+    // Get template values
+    const albumPath = document.getElementById('template-album-path').value.trim();
+    const singlePath = document.getElementById('template-single-path').value.trim();
+    const playlistPath = document.getElementById('template-playlist-path').value.trim();
+
+    // Validate album template
+    if (albumPath) {
+        if (albumPath.endsWith('/')) {
+            errors.push('Album template cannot end with /');
+        }
+        if (albumPath.startsWith('/')) {
+            errors.push('Album template cannot start with /');
+        }
+        if (!albumPath.includes('/')) {
+            errors.push('Album template must include at least one folder (use / separator)');
+        }
+        if (albumPath.includes('//')) {
+            errors.push('Album template cannot have consecutive slashes //');
+        }
+        // Check for likely typos of valid variables (case-insensitive to catch $Album, $ARTIST, etc.)
+        const albumVarPattern = /\$[a-zA-Z]+/g;
+        const foundVars = albumPath.match(albumVarPattern) || [];
+        foundVars.forEach(v => {
+            const lowerVar = v.toLowerCase();
+            // Check if lowercase version exists in valid vars
+            const isValid = validVars.album.some(validVar => validVar.toLowerCase() === lowerVar);
+            if (!isValid) {
+                errors.push(`Invalid variable "${v}" in album template. Valid: ${validVars.album.join(', ')}`);
+            } else if (v !== lowerVar && validVars.album.includes(lowerVar)) {
+                // Variable is valid but has wrong case
+                errors.push(`Variable "${v}" should be lowercase: "${lowerVar}"`);
+            }
+        });
+    }
+
+    // Validate single template
+    if (singlePath) {
+        if (singlePath.endsWith('/')) {
+            errors.push('Single template cannot end with /');
+        }
+        if (singlePath.startsWith('/')) {
+            errors.push('Single template cannot start with /');
+        }
+        if (!singlePath.includes('/')) {
+            errors.push('Single template must include at least one folder (use / separator)');
+        }
+        if (singlePath.includes('//')) {
+            errors.push('Single template cannot have consecutive slashes //');
+        }
+        const singleVarPattern = /\$[a-zA-Z]+/g;
+        const foundVars = singlePath.match(singleVarPattern) || [];
+        foundVars.forEach(v => {
+            const lowerVar = v.toLowerCase();
+            const isValid = validVars.single.some(validVar => validVar.toLowerCase() === lowerVar);
+            if (!isValid) {
+                errors.push(`Invalid variable "${v}" in single template. Valid: ${validVars.single.join(', ')}`);
+            } else if (v !== lowerVar && validVars.single.includes(lowerVar)) {
+                errors.push(`Variable "${v}" should be lowercase: "${lowerVar}"`);
+            }
+        });
+    }
+
+    // Validate playlist template
+    if (playlistPath) {
+        if (playlistPath.endsWith('/')) {
+            errors.push('Playlist template cannot end with /');
+        }
+        if (playlistPath.startsWith('/')) {
+            errors.push('Playlist template cannot start with /');
+        }
+        if (!playlistPath.includes('/')) {
+            errors.push('Playlist template must include at least one folder (use / separator)');
+        }
+        if (playlistPath.includes('//')) {
+            errors.push('Playlist template cannot have consecutive slashes //');
+        }
+        const playlistVarPattern = /\$[a-zA-Z]+/g;
+        const foundVars = playlistPath.match(playlistVarPattern) || [];
+        foundVars.forEach(v => {
+            const lowerVar = v.toLowerCase();
+            const isValid = validVars.playlist.some(validVar => validVar.toLowerCase() === lowerVar);
+            if (!isValid) {
+                errors.push(`Invalid variable "${v}" in playlist template. Valid: ${validVars.playlist.join(', ')}`);
+            } else if (v !== lowerVar && validVars.playlist.includes(lowerVar)) {
+                errors.push(`Variable "${v}" should be lowercase: "${lowerVar}"`);
+            }
+        });
+    }
+
+    return errors;
+}
+
 async function loadSettingsData() {
     try {
         const response = await fetch(API.settings);
@@ -1526,7 +1643,13 @@ async function loadSettingsData() {
         // Populate Metadata Enhancement settings
         document.getElementById('metadata-enabled').checked = settings.metadata_enhancement?.enabled !== false;
         document.getElementById('embed-album-art').checked = settings.metadata_enhancement?.embed_album_art !== false;
-        
+
+        // Populate File Organization settings
+        document.getElementById('file-organization-enabled').checked = settings.file_organization?.enabled !== false;
+        document.getElementById('template-album-path').value = settings.file_organization?.templates?.album_path || '$albumartist/$albumartist - $album/$track - $title';
+        document.getElementById('template-single-path').value = settings.file_organization?.templates?.single_path || '$artist/$artist - $title/$title';
+        document.getElementById('template-playlist-path').value = settings.file_organization?.templates?.playlist_path || '$playlist/$artist - $title';
+
         // Populate Playlist Sync settings
         document.getElementById('create-backup').checked = settings.playlist_sync?.create_backup !== false;
         
@@ -1837,6 +1960,13 @@ async function saveQualityProfile() {
 // ===============================
 
 async function saveSettings() {
+    // Validate file organization templates before saving
+    const validationErrors = validateFileOrganizationTemplates();
+    if (validationErrors.length > 0) {
+        showToast('Template validation failed: ' + validationErrors.join(', '), 'error');
+        return;
+    }
+
     // Determine active server from toggle buttons
     let activeServer = 'plex';
     if (document.getElementById('jellyfin-toggle').classList.contains('active')) {
@@ -1844,7 +1974,7 @@ async function saveSettings() {
     } else if (document.getElementById('navidrome-toggle').classList.contains('active')) {
         activeServer = 'navidrome';
     }
-    
+
     const settings = {
         active_media_server: activeServer,
         spotify: {
@@ -1885,6 +2015,14 @@ async function saveSettings() {
         metadata_enhancement: {
             enabled: document.getElementById('metadata-enabled').checked,
             embed_album_art: document.getElementById('embed-album-art').checked
+        },
+        file_organization: {
+            enabled: document.getElementById('file-organization-enabled').checked,
+            templates: {
+                album_path: document.getElementById('template-album-path').value,
+                single_path: document.getElementById('template-single-path').value,
+                playlist_path: document.getElementById('template-playlist-path').value
+            }
         },
         playlist_sync: {
             create_backup: document.getElementById('create-backup').checked
@@ -4272,7 +4410,7 @@ async function openDownloadMissingModal(playlistId) {
                                     <tr data-track-index="${index}">
                                         <td class="track-number">${index + 1}</td>
                                         <td class="track-name" title="${escapeHtml(track.name)}">${escapeHtml(track.name)}</td>
-                                        <td class="track-artist" title="${escapeHtml(track.artists.join(', '))}">${track.artists.join(', ')}</td>
+                                        <td class="track-artist" title="${escapeHtml(formatArtists(track.artists))}">${formatArtists(track.artists)}</td>
                                         <td class="track-duration">${formatDuration(track.duration_ms)}</td>
                                         <td class="track-match-status match-checking" id="match-${playlistId}-${index}">🔍 Pending</td>
                                         <td class="track-download-status" id="download-${playlistId}-${index}">-</td>
@@ -4633,7 +4771,7 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
                                     <tr data-track-index="${index}">
                                         <td class="track-number">${index + 1}</td>
                                         <td class="track-name" title="${escapeHtml(track.name)}">${escapeHtml(track.name)}</td>
-                                        <td class="track-artist" title="${escapeHtml(track.artists.join(', '))}">${track.artists.join(', ')}</td>
+                                        <td class="track-artist" title="${escapeHtml(formatArtists(track.artists))}">${formatArtists(track.artists)}</td>
                                         <td class="track-duration">${formatDuration(track.duration_ms)}</td>
                                         <td class="track-match-status match-checking" id="match-${virtualPlaylistId}-${index}">🔍 Pending</td>
                                         <td class="track-download-status" id="download-${virtualPlaylistId}-${index}">-</td>
@@ -12549,7 +12687,7 @@ async function openDownloadMissingModalForTidal(virtualPlaylistId, playlistName,
                                     <tr data-track-index="${index}">
                                         <td class="track-number">${index + 1}</td>
                                         <td class="track-name" title="${escapeHtml(track.name)}">${escapeHtml(track.name)}</td>
-                                        <td class="track-artist" title="${escapeHtml(track.artists.join(', '))}">${track.artists.join(', ')}</td>
+                                        <td class="track-artist" title="${escapeHtml(formatArtists(track.artists))}">${formatArtists(track.artists)}</td>
                                         <td class="track-duration">${formatDuration(track.duration_ms)}</td>
                                         <td class="track-match-status match-checking" id="match-${virtualPlaylistId}-${index}">🔍 Pending</td>
                                         <td class="track-download-status" id="download-${virtualPlaylistId}-${index}">-</td>
@@ -19451,7 +19589,7 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
                                     <tr data-track-index="${index}">
                                         <td class="track-number">${index + 1}</td>
                                         <td class="track-name" title="${escapeHtml(track.name)}">${escapeHtml(track.name)}</td>
-                                        <td class="track-artist" title="${escapeHtml(track.artists.join(', '))}">${track.artists.join(', ')}</td>
+                                        <td class="track-artist" title="${escapeHtml(formatArtists(track.artists))}">${formatArtists(track.artists)}</td>
                                         <td class="track-duration">${formatDuration(track.duration_ms)}</td>
                                         <td class="track-match-status match-checking" id="match-${virtualPlaylistId}-${index}">🔍 Pending</td>
                                         <td class="track-download-status" id="download-${virtualPlaylistId}-${index}">-</td>

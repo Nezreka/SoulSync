@@ -2058,7 +2058,7 @@ def handle_settings():
             if 'active_media_server' in new_settings:
                 config_manager.set_active_media_server(new_settings['active_media_server'])
 
-            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'settings', 'database', 'metadata_enhancement', 'playlist_sync', 'tidal']:
+            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal']:
                 if service in new_settings:
                     for key, value in new_settings[service].items():
                         config_manager.set(f'{service}.{key}', value)
@@ -6447,6 +6447,203 @@ def parse_youtube_playlist(url):
 
 
 # ===================================================================
+# FILE ORGANIZATION TEMPLATE ENGINE
+# ===================================================================
+
+def _build_final_path_for_track(context, spotify_artist, album_info, file_ext):
+    """
+    SHARED PATH BUILDER - Used by both post-processing AND verification.
+    This ensures they always produce the same path.
+
+    Returns: (final_path, folder_created_successfully)
+    """
+    transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
+    track_info = context.get("track_info", {})
+    original_search = context.get("original_search_result", {})
+    playlist_folder_mode = track_info.get("_playlist_folder_mode", False)
+
+    # Determine which template type to use
+    if playlist_folder_mode:
+        # PLAYLIST MODE
+        playlist_name = track_info.get("_playlist_name", "Unknown Playlist")
+        track_name = original_search.get('spotify_clean_title') or original_search.get('title', 'Unknown Track')
+
+        template_context = {
+            'artist': spotify_artist["name"] if isinstance(spotify_artist, dict) else spotify_artist.name,
+            'albumartist': spotify_artist["name"] if isinstance(spotify_artist, dict) else spotify_artist.name,
+            'album': track_name,
+            'title': track_name,
+            'playlist_name': playlist_name,
+            'track_number': 1
+        }
+
+        folder_path, filename_base = _get_file_path_from_template(template_context, 'playlist_path')
+        if folder_path and filename_base:
+            final_path = os.path.join(transfer_dir, folder_path, filename_base + file_ext)
+            os.makedirs(os.path.join(transfer_dir, folder_path), exist_ok=True)
+            return final_path, True
+        else:
+            # Fallback
+            playlist_name_sanitized = _sanitize_filename(playlist_name)
+            playlist_dir = os.path.join(transfer_dir, playlist_name_sanitized)
+            os.makedirs(playlist_dir, exist_ok=True)
+            artist_name_sanitized = _sanitize_filename(template_context['artist'])
+            track_name_sanitized = _sanitize_filename(track_name)
+            new_filename = f"{artist_name_sanitized} - {track_name_sanitized}{file_ext}"
+            return os.path.join(playlist_dir, new_filename), True
+
+    elif album_info and album_info.get('is_album'):
+        # ALBUM MODE
+        clean_track_name = album_info.get('clean_track_name', 'Unknown Track')
+        if original_search.get('spotify_clean_title'):
+            clean_track_name = original_search['spotify_clean_title']
+        elif album_info.get('clean_track_name'):
+            clean_track_name = album_info['clean_track_name']
+        else:
+            clean_track_name = original_search.get('title', 'Unknown Track')
+
+        track_number = album_info.get('track_number', 1)
+        if track_number is None or not isinstance(track_number, int) or track_number < 1:
+            track_number = 1
+
+        template_context = {
+            'artist': spotify_artist["name"] if isinstance(spotify_artist, dict) else spotify_artist.name,
+            'albumartist': spotify_artist["name"] if isinstance(spotify_artist, dict) else spotify_artist.name,
+            'album': album_info['album_name'],
+            'title': clean_track_name,
+            'track_number': track_number
+        }
+
+        folder_path, filename_base = _get_file_path_from_template(template_context, 'album_path')
+        if folder_path and filename_base:
+            final_path = os.path.join(transfer_dir, folder_path, filename_base + file_ext)
+            os.makedirs(os.path.join(transfer_dir, folder_path), exist_ok=True)
+            return final_path, True
+        else:
+            # Fallback
+            artist_name_sanitized = _sanitize_filename(template_context['artist'])
+            album_name_sanitized = _sanitize_filename(album_info['album_name'])
+            artist_dir = os.path.join(transfer_dir, artist_name_sanitized)
+            album_folder_name = f"{artist_name_sanitized} - {album_name_sanitized}"
+            album_dir = os.path.join(artist_dir, album_folder_name)
+            os.makedirs(album_dir, exist_ok=True)
+            final_track_name_sanitized = _sanitize_filename(clean_track_name)
+            new_filename = f"{track_number:02d} - {final_track_name_sanitized}{file_ext}"
+            return os.path.join(album_dir, new_filename), True
+
+    else:
+        # SINGLE MODE
+        clean_track_name = album_info.get('clean_track_name', 'Unknown Track') if album_info else 'Unknown Track'
+        if original_search.get('spotify_clean_title'):
+            clean_track_name = original_search['spotify_clean_title']
+        elif album_info and album_info.get('clean_track_name'):
+            clean_track_name = album_info['clean_track_name']
+        else:
+            clean_track_name = original_search.get('title', 'Unknown Track')
+
+        template_context = {
+            'artist': spotify_artist["name"] if isinstance(spotify_artist, dict) else spotify_artist.name,
+            'albumartist': spotify_artist["name"] if isinstance(spotify_artist, dict) else spotify_artist.name,
+            'album': album_info.get('album_name', clean_track_name) if album_info else clean_track_name,
+            'title': clean_track_name,
+            'track_number': 1
+        }
+
+        folder_path, filename_base = _get_file_path_from_template(template_context, 'single_path')
+        if folder_path and filename_base:
+            final_path = os.path.join(transfer_dir, folder_path, filename_base + file_ext)
+            os.makedirs(os.path.join(transfer_dir, folder_path), exist_ok=True)
+            return final_path, True
+        else:
+            # Fallback
+            artist_name_sanitized = _sanitize_filename(template_context['artist'])
+            final_track_name_sanitized = _sanitize_filename(clean_track_name)
+            artist_dir = os.path.join(transfer_dir, artist_name_sanitized)
+            single_folder_name = f"{artist_name_sanitized} - {final_track_name_sanitized}"
+            single_dir = os.path.join(artist_dir, single_folder_name)
+            os.makedirs(single_dir, exist_ok=True)
+            new_filename = f"{final_track_name_sanitized}{file_ext}"
+            return os.path.join(single_dir, new_filename), True
+
+def _apply_path_template(template: str, context: dict) -> str:
+    """
+    Apply template to build file path.
+
+    Args:
+        template: Template string like "$artist/$album/$track - $title"
+        context: Dict with values like {'artist': 'Drake', 'album': 'Scorpion', ...}
+
+    Returns:
+        Processed path string
+    """
+    result = template
+
+    # Replace variables in order from longest to shortest to avoid partial replacements
+    # (e.g., $albumartist must be replaced before $album to prevent "Scorpionartist" from typo "$albumartis")
+
+    # Longest variables first
+    result = result.replace('$albumartist', context.get('albumartist', context.get('artist', 'Unknown Artist')))
+    result = result.replace('$playlist', context.get('playlist_name', ''))
+
+    # Medium length variables
+    result = result.replace('$artist', context.get('artist', 'Unknown Artist'))
+    result = result.replace('$album', context.get('album', 'Unknown Album'))
+    result = result.replace('$title', context.get('title', 'Unknown Track'))
+    result = result.replace('$track', f"{context.get('track_number', 1):02d}")
+
+    return result
+
+def _get_file_path_from_template(context: dict, template_type: str = 'album_path') -> tuple:
+    """
+    Build complete file path using configured templates.
+
+    Args:
+        context: Dict with all track/album metadata
+        template_type: 'album_path', 'single_path', 'compilation_path', 'playlist_path'
+
+    Returns:
+        (folder_path, filename) tuple
+    """
+    # Check if template system is enabled
+    if not config_manager.get('file_organization.enabled', True):
+        # Fallback to hardcoded structure
+        return None, None
+
+    # Get template from config
+    templates = config_manager.get('file_organization.templates', {})
+    template = templates.get(template_type)
+
+    if not template:
+        # Fallback templates if config missing
+        default_templates = {
+            'album_path': '$albumartist/$albumartist - $album/$track - $title',
+            'single_path': '$artist/$artist - $title/$title',
+            'compilation_path': 'Compilations/$album/$track - $artist - $title',
+            'playlist_path': '$playlist/$artist - $title'
+        }
+        template = default_templates.get(template_type, '$artist/$album/$track - $title')
+
+    # Apply template
+    full_path = _apply_path_template(template, context)
+
+    # Split into folder and filename
+    path_parts = full_path.split('/')
+    if len(path_parts) > 1:
+        folder_parts = path_parts[:-1]
+        filename_base = path_parts[-1]
+
+        # Sanitize each folder component
+        sanitized_folders = [_sanitize_filename(part) for part in folder_parts]
+        folder_path = os.path.join(*sanitized_folders)
+
+        # Sanitize filename
+        filename = _sanitize_filename(filename_base)
+
+        return folder_path, filename
+    else:
+        # Single component, treat as filename
+        return '', _sanitize_filename(full_path)
+
 # METADATA & COVER ART HELPERS (Ported from downloads.py)
 # ===================================================================
 from mutagen import File as MutagenFile
@@ -6783,76 +6980,61 @@ def _post_process_matched_download_with_verification(context_key, context, file_
             context['batch_id'] = original_batch_id
         
         # CRITICAL VERIFICATION STEP: Verify the final file exists
-        # Extract the expected final path from the context or reconstruct it
         spotify_artist = context.get("spotify_artist")
         if not spotify_artist:
             raise Exception("Missing spotify_artist context for verification")
 
-        # Check if playlist folder mode is enabled
-        track_info = context.get("track_info", {})
-        playlist_folder_mode = track_info.get("_playlist_folder_mode", False)
+        # Get album info for path calculation
+        is_album_download = context.get("is_album_download", False)
+        has_clean_spotify_data = context.get("has_clean_spotify_data", False)
 
-        # Handle playlist folder mode verification
-        if playlist_folder_mode:
-            playlist_name = track_info.get("_playlist_name", "Unknown Playlist")
-            playlist_name_sanitized = _sanitize_filename(playlist_name)
-
-            transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
-            playlist_dir = os.path.join(transfer_dir, playlist_name_sanitized)
-
+        if is_album_download and has_clean_spotify_data:
             original_search = context.get("original_search_result", {})
-            track_name = original_search.get('spotify_clean_title') or original_search.get('title', 'Unknown Track')
-            track_name_sanitized = _sanitize_filename(track_name)
-            artist_name_sanitized = _sanitize_filename(spotify_artist.get("name", "Unknown Artist") if isinstance(spotify_artist, dict) else spotify_artist.name)
-
-            file_ext = os.path.splitext(file_path)[1]
-            new_filename = f"{artist_name_sanitized} - {track_name_sanitized}{file_ext}"
-            expected_final_path = os.path.join(playlist_dir, new_filename)
-
-            print(f"📁 [Verification - Playlist Mode] Expected path: {expected_final_path}")
-
+            spotify_album = context.get("spotify_album", {})
+            clean_track_name = original_search.get('spotify_clean_title', 'Unknown Track')
+            clean_album_name = original_search.get('spotify_clean_album', 'Unknown Album')
+            album_info = {
+                'is_album': True,
+                'album_name': clean_album_name,
+                'track_number': original_search.get('track_number', 1),
+                'clean_track_name': clean_track_name,
+                'album_image_url': spotify_album.get('image_url'),
+                'confidence': 1.0,
+                'source': 'clean_spotify_metadata'
+            }
+        elif is_album_download:
+            original_search = context.get("original_search_result", {})
+            spotify_album = context.get("spotify_album", {})
+            clean_track_name = original_search.get('spotify_clean_title') or original_search.get('title', 'Unknown Track')
+            album_name = (original_search.get('spotify_clean_album') or
+                         spotify_album.get('name') or
+                         'Unknown Album')
+            album_info = {
+                'is_album': True,
+                'album_name': album_name,
+                'track_number': original_search.get('track_number', 1),
+                'clean_track_name': clean_track_name,
+                'album_image_url': spotify_album.get('image_url'),
+                'confidence': 0.9,
+                'source': 'enhanced_fallback_album_context'
+            }
         else:
-            # Original album/artist folder verification logic
-            is_album_download = context.get("is_album_download", False)
-            has_clean_spotify_data = context.get("has_clean_spotify_data", False)
+            album_info = _detect_album_info_web(context, spotify_artist)
 
-            if is_album_download and has_clean_spotify_data:
-                original_search = context.get("original_search_result", {})
-                spotify_album = context.get("spotify_album", {})
-                clean_track_name = original_search.get('spotify_clean_title', 'Unknown Track')
-                clean_album_name = original_search.get('spotify_clean_album', 'Unknown Album')
-                track_number = original_search.get('track_number', 1)
+        # Apply album grouping if needed
+        if album_info and album_info.get('is_album'):
+            original_album = None
+            if context.get("original_search_result", {}).get("album"):
+                original_album = context["original_search_result"]["album"]
+            consistent_album_name = _resolve_album_group(spotify_artist, album_info, original_album)
+            album_info['album_name'] = consistent_album_name
 
-                # Construct the expected final path
-                artist_name_sanitized = spotify_artist.name.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
-                album_name_sanitized = clean_album_name.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
-                track_name_sanitized = clean_track_name.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
+        # Use shared path builder to get expected final path
+        file_ext = os.path.splitext(file_path)[1]
+        expected_final_path, _ = _build_final_path_for_track(context, spotify_artist, album_info, file_ext)
 
-                transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './transfers'))
-                artist_dir = os.path.join(transfer_dir, artist_name_sanitized)
-                album_folder_name = f"{clean_album_name} ({spotify_album.get('release_date', '').split('-')[0] if spotify_album.get('release_date') else 'Unknown'})"
-                album_folder_name = album_folder_name.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
-                album_dir = os.path.join(artist_dir, album_folder_name)
+        print(f"📁 [Verification] Expected final path: {expected_final_path}")
 
-                file_ext = os.path.splitext(file_path)[1]
-                new_filename = f"{track_number:02d} - {track_name_sanitized}{file_ext}"
-                expected_final_path = os.path.join(album_dir, new_filename)
-
-            else:
-                # For singles or fallback logic
-                original_search = context.get("original_search_result", {})
-                track_name = original_search.get('spotify_clean_title') or original_search.get('title', 'Unknown Track')
-                track_name_sanitized = track_name.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
-
-                transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './transfers'))
-                artist_name_sanitized = spotify_artist.name.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
-                artist_dir = os.path.join(transfer_dir, artist_name_sanitized)
-                single_dir = os.path.join(artist_dir, "Singles")
-
-                file_ext = os.path.splitext(file_path)[1]
-                new_filename = f"{track_name_sanitized}{file_ext}"
-                expected_final_path = os.path.join(single_dir, new_filename)
-        
         # VERIFICATION: Check if file exists at expected final path
         if os.path.exists(expected_final_path):
             print(f"✅ [Verification] File verified at final path: {expected_final_path}")
@@ -6941,28 +7123,13 @@ def _post_process_matched_download(context_key, context, file_path):
             print(f"🔍 [Debug] Post-processing - track_info keys: {list(track_info.keys())}")
 
         if playlist_folder_mode:
-            # Use playlist folder structure: Transfer/Playlist Name/Artist - Track.ext
+            # Use shared path builder for playlist mode
             playlist_name = track_info.get("_playlist_name", "Unknown Playlist")
             print(f"📁 [Playlist Folder Mode] Organizing in playlist folder: {playlist_name}")
 
-            transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
-            playlist_name_sanitized = _sanitize_filename(playlist_name)
-            playlist_dir = os.path.join(transfer_dir, playlist_name_sanitized)
-            os.makedirs(playlist_dir, exist_ok=True)
-
-            # Get track name from context
-            original_search = context.get("original_search_result", {})
-            track_name = original_search.get('spotify_clean_title') or original_search.get('title', 'Unknown Track')
-            track_name_sanitized = _sanitize_filename(track_name)
-            artist_name_sanitized = _sanitize_filename(spotify_artist["name"])
-
-            # Create filename: Artist - Track.ext
             file_ext = os.path.splitext(file_path)[1]
-            new_filename = f"{artist_name_sanitized} - {track_name_sanitized}{file_ext}"
-            final_path = os.path.join(playlist_dir, new_filename)
-
-            print(f"📁 Playlist folder: '{playlist_name_sanitized}'")
-            print(f"🎵 Track filename: '{new_filename}'")
+            final_path, _ = _build_final_path_for_track(context, spotify_artist, None, file_ext)
+            print(f"📁 Playlist mode final path: '{final_path}'")
 
             # Move file to playlist folder
             print(f"🚚 Moving '{os.path.basename(file_path)}' to '{final_path}'")
@@ -7123,18 +7290,12 @@ def _post_process_matched_download(context_key, context, file_path):
             
             # CRITICAL FIX: Update album_info with corrected track_number for metadata enhancement
             album_info['track_number'] = track_number
+            album_info['clean_track_name'] = clean_track_name  # Ensure clean name is in album_info
             print(f"✅ [FIX] Updated album_info track_number to {track_number} for consistent metadata")
 
-            album_folder_name = f"{artist_name_sanitized} - {album_name_sanitized}"
-            album_dir = os.path.join(artist_dir, album_folder_name)
-            os.makedirs(album_dir, exist_ok=True)
-            
-            # Create track filename with number (just track number + clean title, NO artist)
-            new_filename = f"{track_number:02d} - {final_track_name_sanitized}{file_ext}"
-            final_path = os.path.join(album_dir, new_filename)
-            
-            print(f"📁 Album folder created: '{album_folder_name}'")
-            print(f"🎵 Track filename: '{new_filename}'")
+            # Use shared path builder for album mode
+            final_path, _ = _build_final_path_for_track(context, spotify_artist, album_info, file_ext)
+            print(f"📁 Album path: '{final_path}'")
         else:
             # Single track structure: Transfer/ARTIST/ARTIST - SINGLE/SINGLE.ext
             # --- GUI PARITY: Use multiple sources for clean track name ---
@@ -7154,16 +7315,13 @@ def _post_process_matched_download(context_key, context, file_path):
                 clean_track_name = original_search.get('title', 'Unknown Track')
                 print(f"🎵 Using original title as fallback: '{clean_track_name}'")
             
-            final_track_name_sanitized = _sanitize_filename(clean_track_name)
-            single_folder_name = f"{artist_name_sanitized} - {final_track_name_sanitized}"
-            single_dir = os.path.join(artist_dir, single_folder_name) 
-            os.makedirs(single_dir, exist_ok=True)
-            
-            # Create single filename with clean track name
-            new_filename = f"{final_track_name_sanitized}{file_ext}"
-            final_path = os.path.join(single_dir, new_filename)
-            
-            print(f"📁 Single track: {single_folder_name}/{new_filename}")
+            # Ensure clean name is in album_info for path builder
+            if album_info:
+                album_info['clean_track_name'] = clean_track_name
+
+            # Use shared path builder for single mode
+            final_path, _ = _build_final_path_for_track(context, spotify_artist, album_info, file_ext)
+            print(f"📁 Single path: '{final_path}'")
 
         # 3. Enhance metadata, move file, download art, and cleanup
         _enhance_file_metadata(file_path, context, spotify_artist, album_info)
@@ -12097,14 +12255,34 @@ def _add_cancelled_task_to_wishlist(task):
             else:
                 formatted_artists.append({'name': str(artist)})
         
+        # Build album data with all available info
+        album_raw = track_info.get('album', {})
+        if isinstance(album_raw, dict):
+            album_data = {
+                'name': album_raw.get('name', 'Unknown Album'),
+                'album_type': track_info.get('album_type', 'album')
+            }
+            # Preserve images if present in album object
+            if 'images' in album_raw:
+                album_data['images'] = album_raw['images']
+            # Otherwise, try to get from album_image_url
+            elif track_info.get('album_image_url'):
+                album_data['images'] = [{'url': track_info.get('album_image_url')}]
+        else:
+            # album is a string (album name)
+            album_data = {
+                'name': str(album_raw) if album_raw else 'Unknown Album',
+                'album_type': track_info.get('album_type', 'album')
+            }
+            # Add album image if available
+            if track_info.get('album_image_url'):
+                album_data['images'] = [{'url': track_info.get('album_image_url')}]
+
         spotify_track_data = {
             'id': track_info.get('id'),
             'name': track_info.get('name'),
             'artists': formatted_artists,
-            'album': {
-                'name': track_info.get('album'),
-                'album_type': track_info.get('album_type', 'album')  # Use track's album type if available
-            },
+            'album': album_data,
             'duration_ms': track_info.get('duration_ms')
         }
 

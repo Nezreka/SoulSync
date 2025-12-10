@@ -44,6 +44,15 @@
     "enabled": true,
     "embed_album_art": true
   },
+  "file_organization": {
+    "enabled": true,
+    "templates": {
+      "album_path": "$albumartist/$albumartist - $album/$track - $title",
+      "single_path": "$artist/$artist - $title/$title",
+      "compilation_path": "Compilations/$album/$track - $artist - $title",
+      "playlist_path": "$playlist/$artist - $title"
+    }
+  },
   "playlist_sync": {
     "create_backup": true
   },
