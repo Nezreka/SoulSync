@@ -2457,7 +2457,66 @@ def auth_spotify():
             # Get the authorization URL
             auth_url = temp_spotify_client.sp.auth_manager.get_authorize_url()
             add_activity_item("🔐", "Spotify Auth Started", "Please complete OAuth in browser", "Now")
-            return f'<h1>🔐 Spotify Authentication</h1><p>Please visit this URL to authenticate:</p><p><a href="{auth_url}" target="_blank">{auth_url}</a></p><p>After authentication, return to the app.</p>'
+
+            # Detect if accessing remotely
+            host = request.host.split(':')[0]
+            is_remote = host not in ['127.0.0.1', 'localhost']
+
+            if is_remote:
+                # Show instructions for remote access
+                return f'''
+                <html>
+                <head>
+                    <style>
+                        body {{ font-family: Arial, sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; }}
+                        code {{ background: #f0f0f0; padding: 10px; display: block; margin: 10px 0; }}
+                        .highlight {{ background: #e8f5e9; }}
+                        .copy-btn {{
+                            background: #1DB954;
+                            color: white;
+                            border: none;
+                            padding: 8px 16px;
+                            cursor: pointer;
+                            border-radius: 4px;
+                            font-size: 14px;
+                            margin-left: 10px;
+                        }}
+                        .copy-btn:hover {{ background: #1ed760; }}
+                        .copied {{ background: #4CAF50 !important; }}
+                    </style>
+                </head>
+                <body>
+                    <h1>🔐 Spotify Authentication (Remote Access)</h1>
+                    <p><strong>Step 1:</strong> Click the link below to authenticate with Spotify</p>
+                    <p><a href="{auth_url}" target="_blank" style="font-size: 18px; color: #1DB954;">{auth_url}</a></p>
+                    <hr>
+                    <p><strong>Step 2:</strong> After authorizing, you'll see a blank page. The URL will look like:</p>
+                    <code>http://127.0.0.1:8888/callback?code=...</code>
+                    <p><strong>Step 3:</strong> Change <code style="display: inline; background: #ffe6e6; padding: 2px 6px;">127.0.0.1</code> to <code style="display: inline; background: #e8f5e9; padding: 2px 6px;">{host}</code> and press Enter:
+                        <button class="copy-btn" onclick="copyIP()">Copy IP</button>
+                    </p>
+                    <code class="highlight">http://{host}:8888/callback?code=...</code>
+                    <p>Authentication will then complete!</p>
+
+                    <script>
+                        function copyIP() {{
+                            navigator.clipboard.writeText('{host}').then(() => {{
+                                const btn = event.target;
+                                btn.textContent = '✓ Copied!';
+                                btn.classList.add('copied');
+                                setTimeout(() => {{
+                                    btn.textContent = 'Copy IP';
+                                    btn.classList.remove('copied');
+                                }}, 2000);
+                            }});
+                        }}
+                    </script>
+                </body>
+                </html>
+                '''
+            else:
+                # Local access - simple message
+                return f'<h1>🔐 Spotify Authentication</h1><p>Click the link below to authenticate:</p><p><a href="{auth_url}" target="_blank">{auth_url}</a></p><p>After authentication, return to the app.</p>'
         else:
             return "<h1>❌ Spotify Authentication Failed</h1><p>Could not initialize Spotify client. Check your credentials.</p>", 400
     except Exception as e:
