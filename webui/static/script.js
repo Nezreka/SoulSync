@@ -10429,6 +10429,157 @@ function skipMatching() {
     }
 }
 
+function matchSlskdTracksToSpotify(slskdTracks, spotifyTracks) {
+    /**
+     * Matches Soulseek tracks to Spotify tracks based on filename analysis.
+     * Returns enhanced tracks with full Spotify metadata.
+     */
+    console.log(`🎯 Starting track matching: ${slskdTracks.length} Soulseek tracks vs ${spotifyTracks.length} Spotify tracks`);
+
+    const matched = [];
+    const unmatched = [];
+
+    for (const slskdTrack of slskdTracks) {
+        const filename = slskdTrack.filename || slskdTrack.title || '';
+        const parsedMeta = parseTrackFilename(filename);
+
+        console.log(`🔍 Matching: "${filename}" -> parsed as: "${parsedMeta.title}" (track #${parsedMeta.trackNumber})`);
+
+        // Find best matching Spotify track
+        let bestMatch = null;
+        let bestScore = 0;
+
+        for (const spotifyTrack of spotifyTracks) {
+            let score = 0;
+
+            // Match by track number (highest priority if available)
+            if (parsedMeta.trackNumber && spotifyTrack.track_number === parsedMeta.trackNumber) {
+                score += 50;
+                console.log(`   ✓ Track number match: ${parsedMeta.trackNumber} == ${spotifyTrack.track_number} (+50)`);
+            }
+
+            // Match by title similarity
+            const titleScore = calculateStringSimilarity(
+                parsedMeta.title.toLowerCase(),
+                spotifyTrack.name.toLowerCase()
+            );
+            score += titleScore * 50; // Max 50 points for perfect title match
+
+            console.log(`   Spotify track "${spotifyTrack.name}" (${spotifyTrack.track_number}): score ${score.toFixed(2)}`);
+
+            if (score > bestScore) {
+                bestScore = score;
+                bestMatch = spotifyTrack;
+            }
+        }
+
+        // Accept match if score is above threshold (70/100)
+        if (bestMatch && bestScore >= 70) {
+            console.log(`✅ MATCHED: "${filename}" -> "${bestMatch.name}" (score: ${bestScore.toFixed(2)})`);
+            matched.push({
+                slskd_track: slskdTrack,
+                spotify_track: bestMatch,
+                confidence: bestScore / 100
+            });
+        } else {
+            console.log(`❌ NO MATCH: "${filename}" (best score: ${bestScore.toFixed(2)})`);
+            unmatched.push(slskdTrack);
+        }
+    }
+
+    console.log(`🎯 Matching complete: ${matched.length} matched, ${unmatched.length} unmatched`);
+
+    return {
+        matched: matched,
+        unmatched: unmatched,
+        total: slskdTracks.length
+    };
+}
+
+function parseTrackFilename(filename) {
+    /**
+     * Parse track metadata from filename.
+     * Handles common patterns like:
+     * - "01 - Title.flac"
+     * - "01. Title.flac"
+     * - "Artist - Title.flac"
+     * - "Title.flac"
+     */
+    // Remove file extension and path
+    let basename = filename.split('/').pop().split('\\').pop();
+    basename = basename.replace(/\.(flac|mp3|m4a|ogg|wav)$/i, '');
+
+    let trackNumber = null;
+    let title = basename;
+
+    // Pattern 1: "01 - Title" or "01. Title"
+    const pattern1 = /^(\d{1,2})\s*[-\.]\s*(.+)$/;
+    const match1 = basename.match(pattern1);
+    if (match1) {
+        trackNumber = parseInt(match1[1]);
+        title = match1[2].trim();
+        return { title, trackNumber };
+    }
+
+    // Pattern 2: "Artist - Title" (extract title only)
+    const pattern2 = /^.+?\s*[-–]\s*(.+)$/;
+    const match2 = basename.match(pattern2);
+    if (match2) {
+        title = match2[1].trim();
+        return { title, trackNumber };
+    }
+
+    // Fallback: use whole basename as title
+    return { title: basename.trim(), trackNumber };
+}
+
+function calculateStringSimilarity(str1, str2) {
+    /**
+     * Calculate similarity between two strings (0-1 range).
+     * Uses Levenshtein distance for fuzzy matching.
+     */
+    // Normalize strings
+    str1 = str1.trim().toLowerCase();
+    str2 = str2.trim().toLowerCase();
+
+    if (str1 === str2) return 1.0;
+
+    // Simple contains check
+    if (str1.includes(str2) || str2.includes(str1)) {
+        return 0.9;
+    }
+
+    // Levenshtein distance calculation
+    const matrix = [];
+    const len1 = str1.length;
+    const len2 = str2.length;
+
+    for (let i = 0; i <= len1; i++) {
+        matrix[i] = [i];
+    }
+
+    for (let j = 0; j <= len2; j++) {
+        matrix[0][j] = j;
+    }
+
+    for (let i = 1; i <= len1; i++) {
+        for (let j = 1; j <= len2; j++) {
+            const cost = str1[i - 1] === str2[j - 1] ? 0 : 1;
+            matrix[i][j] = Math.min(
+                matrix[i - 1][j] + 1,      // deletion
+                matrix[i][j - 1] + 1,      // insertion
+                matrix[i - 1][j - 1] + cost // substitution
+            );
+        }
+    }
+
+    const maxLen = Math.max(len1, len2);
+    const distance = matrix[len1][len2];
+    const similarity = 1 - (distance / maxLen);
+
+    return Math.max(0, similarity);
+}
+
 async function confirmMatch() {
     if (!currentMatchingData.selectedArtist) {
         showToast('⚠️ Please select an artist first', 'error');
@@ -10441,7 +10592,7 @@ async function confirmMatch() {
     }
 
     const confirmBtn = document.getElementById('confirm-match-btn');
-    const originalText = confirmBtn.textContent; // FIX: Declare outside try block
+    const originalText = confirmBtn.textContent;
 
     try {
         console.log('🎯 Confirming match with:', {
@@ -10452,37 +10603,180 @@ async function confirmMatch() {
         confirmBtn.disabled = true;
         confirmBtn.textContent = 'Starting...';
 
-        // --- THIS IS THE CRITICAL FIX ---
-        // Determine the correct data to send. For albums, we send the full albumResult
-        // which contains the complete list of tracks.
+        // Determine the correct data to send
         const downloadPayload = currentMatchingData.isAlbumDownload
             ? currentMatchingData.albumResult
             : currentMatchingData.searchResult;
-        // --- END OF FIX ---
 
-        const response = await fetch('/api/download/matched', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                search_result: downloadPayload, // Send the correct payload
-                spotify_artist: currentMatchingData.selectedArtist,
-                spotify_album: currentMatchingData.selectedAlbum || null
-            })
-        });
+        // --- NEW: For album downloads, fetch Spotify tracklist and match tracks ---
+        if (currentMatchingData.isAlbumDownload && currentMatchingData.selectedAlbum) {
+            confirmBtn.textContent = 'Matching tracks...';
+            console.log('🎵 Fetching Spotify tracklist for album:', currentMatchingData.selectedAlbum.name);
 
-        const data = await response.json();
+            try {
+                // Fetch Spotify album tracks
+                const artistId = currentMatchingData.selectedArtist.id;
+                const albumId = currentMatchingData.selectedAlbum.id;
+                const tracksResponse = await fetch(`/api/artist/${artistId}/album/${albumId}/tracks`);
 
-        if (data.success) {
-            showToast(`🎯 Matched download started for "${currentMatchingData.selectedArtist.name}"`, 'success');
-            closeMatchingModal();
+                if (!tracksResponse.ok) {
+                    throw new Error(`Failed to fetch Spotify tracks: ${tracksResponse.status}`);
+                }
+
+                const tracksData = await tracksResponse.json();
+                const spotifyTracks = tracksData.tracks || [];
+
+                console.log(`✅ Fetched ${spotifyTracks.length} Spotify tracks for matching`);
+
+                // Match each Soulseek track to a Spotify track
+                const enhancedTracks = matchSlskdTracksToSpotify(
+                    downloadPayload.tracks || [],
+                    spotifyTracks
+                );
+
+                console.log(`🎯 Matched ${enhancedTracks.matched.length}/${enhancedTracks.total} tracks to Spotify`);
+
+                // Send enhanced data with full Spotify track objects
+                confirmBtn.textContent = 'Downloading...';
+                const response = await fetch('/api/download/matched', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        search_result: downloadPayload,
+                        spotify_artist: currentMatchingData.selectedArtist,
+                        spotify_album: currentMatchingData.selectedAlbum,
+                        enhanced_tracks: enhancedTracks.matched, // Send matched tracks with full Spotify data
+                        unmatched_tracks: enhancedTracks.unmatched // Send unmatched tracks for basic processing
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    showToast(`🎯 Matched ${enhancedTracks.matched.length} tracks to Spotify`, 'success');
+                    closeMatchingModal();
+                } else {
+                    throw new Error(data.error || 'Failed to start matched download');
+                }
+
+            } catch (trackMatchError) {
+                console.error('❌ Track matching failed, falling back to simple matching:', trackMatchError);
+                showToast('⚠️ Track matching failed, using basic matching', 'warning');
+
+                // Fallback to simple matching (current behavior)
+                const response = await fetch('/api/download/matched', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        search_result: downloadPayload,
+                        spotify_artist: currentMatchingData.selectedArtist,
+                        spotify_album: currentMatchingData.selectedAlbum || null
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    showToast(`🎯 Matched download started for "${currentMatchingData.selectedArtist.name}"`, 'success');
+                    closeMatchingModal();
+                } else {
+                    throw new Error(data.error || 'Failed to start matched download');
+                }
+            }
         } else {
-            throw new Error(data.error || 'Failed to start matched download');
+            // Single track download - fetch Spotify track for full metadata
+            confirmBtn.textContent = 'Searching Spotify...';
+
+            try {
+                // Parse track name from Soulseek filename
+                const filename = downloadPayload.filename || downloadPayload.title || '';
+                const parsedMeta = parseTrackFilename(filename);
+
+                console.log(`🔍 Searching Spotify for: "${parsedMeta.title}" by ${currentMatchingData.selectedArtist.name}`);
+
+                // Search Spotify for this track
+                const searchQuery = `track:${parsedMeta.title} artist:${currentMatchingData.selectedArtist.name}`;
+                const searchResponse = await fetch(`/api/spotify/search?q=${encodeURIComponent(searchQuery)}&type=track&limit=5`);
+
+                if (!searchResponse.ok) {
+                    throw new Error('Failed to search Spotify for track');
+                }
+
+                const searchData = await searchResponse.json();
+                const spotifyTracks = searchData.tracks?.items || [];
+
+                if (spotifyTracks.length === 0) {
+                    throw new Error('No Spotify tracks found for this search');
+                }
+
+                // Find best match (prefer exact artist match)
+                let bestMatch = spotifyTracks.find(track =>
+                    track.artists.some(artist => artist.id === currentMatchingData.selectedArtist.id)
+                ) || spotifyTracks[0];
+
+                console.log(`✅ Found Spotify track: "${bestMatch.name}" (${bestMatch.id})`);
+
+                // Get full track details with album info
+                const trackResponse = await fetch(`/api/spotify/track/${bestMatch.id}`);
+                if (!trackResponse.ok) {
+                    throw new Error('Failed to fetch Spotify track details');
+                }
+
+                const fullTrack = await trackResponse.json();
+
+                // Send with full Spotify metadata (single track enhanced)
+                confirmBtn.textContent = 'Downloading...';
+                const response = await fetch('/api/download/matched', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        search_result: downloadPayload,
+                        spotify_artist: currentMatchingData.selectedArtist,
+                        spotify_album: null,  // Singles don't have album context
+                        spotify_track: fullTrack,  // Full Spotify track object
+                        is_single_track: true  // Flag for single track processing
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    showToast(`🎯 Matched single: "${fullTrack.name}"`, 'success');
+                    closeMatchingModal();
+                } else {
+                    throw new Error(data.error || 'Failed to start matched download');
+                }
+
+            } catch (singleMatchError) {
+                console.error('❌ Spotify track matching failed, falling back to basic:', singleMatchError);
+                showToast('⚠️ Spotify matching failed, using basic metadata', 'warning');
+
+                // Fallback to basic matching (current behavior)
+                const response = await fetch('/api/download/matched', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        search_result: downloadPayload,
+                        spotify_artist: currentMatchingData.selectedArtist,
+                        spotify_album: currentMatchingData.selectedAlbum || null
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    showToast(`🎯 Matched download started for "${currentMatchingData.selectedArtist.name}"`, 'success');
+                    closeMatchingModal();
+                } else {
+                    throw new Error(data.error || 'Failed to start matched download');
+                }
+            }
         }
 
     } catch (error) {
         console.error('Error starting matched download:', error);
         showToast(`❌ Error starting matched download: ${error.message}`, 'error');
-        
+
         // Re-enable confirm button on failure
         confirmBtn.disabled = false;
         confirmBtn.textContent = originalText;
