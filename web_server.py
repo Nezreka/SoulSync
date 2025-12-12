@@ -3238,28 +3238,49 @@ def start_download():
             tracks = data.get('tracks', [])
             if not tracks:
                 return jsonify({"error": "No tracks found in album."}), 400
-            
+
             started_downloads = 0
             for track_data in tracks:
                 try:
+                    username = track_data.get('username')
+                    filename = track_data.get('filename')
+                    file_size = track_data.get('size', 0)
+
                     download_id = asyncio.run(soulseek_client.download(
-                        track_data.get('username'),
-                        track_data.get('filename'),
-                        track_data.get('size', 0)
+                        username,
+                        filename,
+                        file_size
                     ))
                     if download_id:
+                        # Register download for post-processing (simple transfer to /Transfer)
+                        context_key = f"{username}::{filename}"
+                        with matched_context_lock:
+                            matched_downloads_context[context_key] = {
+                                'search_result': {
+                                    'username': username,
+                                    'filename': filename,
+                                    'size': file_size,
+                                    'title': track_data.get('title', 'Unknown'),
+                                    'artist': track_data.get('artist', 'Unknown'),
+                                    'quality': track_data.get('quality', 'Unknown'),
+                                    'is_simple_download': True  # Flag for simple processing
+                                },
+                                'spotify_artist': None,  # No Spotify metadata
+                                'spotify_album': None,
+                                'track_info': None
+                            }
                         started_downloads += 1
                 except Exception as e:
                     logger.error(f"Failed to start track download: {e}")
                     continue
-            
+
             # Add activity for album download start
             album_name = data.get('album_name', 'Unknown Album')
-            logger.info(f"📥 Starting album download: '{album_name}' with {started_downloads}/{len(tracks)} tracks")
+            logger.info(f"📥 Starting simple album download: '{album_name}' with {started_downloads}/{len(tracks)} tracks")
             add_activity_item("📥", "Album Download Started", f"'{album_name}' - {started_downloads} tracks", "Now")
-            
+
             return jsonify({
-                "success": True, 
+                "success": True,
                 "message": f"Started {started_downloads} downloads from album"
             })
         
@@ -3268,16 +3289,35 @@ def start_download():
             username = data.get('username')
             filename = data.get('filename')
             file_size = data.get('size', 0)
-            
+
             if not username or not filename:
                 return jsonify({"error": "Missing username or filename."}), 400
-            
+
             download_id = asyncio.run(soulseek_client.download(username, filename, file_size))
-            
+
             if download_id:
+                # Register download for post-processing (simple transfer to /Transfer)
+                context_key = f"{username}::{filename}"
+                with matched_context_lock:
+                    matched_downloads_context[context_key] = {
+                        'search_result': {
+                            'username': username,
+                            'filename': filename,
+                            'size': file_size,
+                            'title': data.get('title', 'Unknown'),
+                            'artist': data.get('artist', 'Unknown'),
+                            'quality': data.get('quality', 'Unknown'),
+                            'is_simple_download': True  # Flag for simple processing
+                        },
+                        'spotify_artist': None,  # No Spotify metadata
+                        'spotify_album': None,
+                        'track_info': None
+                    }
+                    logger.info(f"Registered simple download for post-processing: {context_key}")
+
                 # Extract track name from filename for activity
                 track_name = filename.split('/')[-1] if '/' in filename else filename.split('\\')[-1] if '\\' in filename else filename
-                logger.info(f"📥 Starting single track download: '{track_name}'")
+                logger.info(f"📥 Starting simple track download: '{track_name}'")
                 add_activity_item("📥", "Track Download Started", f"'{track_name}'", "Now")
                 return jsonify({"success": True, "message": "Download started"})
             else:
@@ -5444,12 +5484,13 @@ def _start_album_download_tasks(album_result, spotify_artist, spotify_album):
                     # Enhanced context storage with Spotify clean titles (GUI parity)
                     enhanced_context = individual_track_context.copy()
                     enhanced_context['spotify_clean_title'] = individual_track_context.get('title', '')
-                    
+
                     matched_downloads_context[context_key] = {
                         "spotify_artist": spotify_artist,
                         "spotify_album": spotify_album,
                         "original_search_result": enhanced_context, # Contains corrected data + clean title
-                        "is_album_download": True
+                        "is_album_download": True,
+                        "is_search_page_matched_download": True  # Flag for simple transfer (search page only)
                     }
                 print(f"  + Queued track: {filename} (Matched to: '{corrected_meta.get('title')}')")
                 started_count += 1
@@ -5515,13 +5556,15 @@ def start_matched_download():
                     # Enhanced context storage with Spotify clean titles (GUI parity)
                     enhanced_payload = download_payload.copy()
                     enhanced_payload['spotify_clean_title'] = download_payload.get('title', '')
-                    
+
                     matched_downloads_context[context_key] = {
                         "spotify_artist": spotify_artist,
                         "spotify_album": spotify_album, # PRESERVE album context
                         "original_search_result": enhanced_payload,
-                        "is_album_download": False # It's a single track download, not a full album job.
+                        "is_album_download": False, # It's a single track download, not a full album job.
+                        "is_search_page_matched_download": True  # Flag for simple transfer (search page only)
                     }
+                    logger.info(f"Registered search page matched download for simple transfer: {context_key}")
                 return jsonify({"success": True, "message": "Matched download started"})
             else:
                 return jsonify({"success": False, "error": "Failed to start download via slskd"}), 500
@@ -7151,6 +7194,9 @@ def _post_process_matched_download(context_key, context, file_path):
     This is the final, corrected post-processing function. It now mirrors the
     GUI's logic by trusting the pre-matched context for album downloads, which
     solves the track numbering issue.
+
+    Also handles simple downloads (from search page "Download" button) which
+    just move files to /Transfer without metadata enhancement.
     """
     try:
         import os
@@ -7164,6 +7210,78 @@ def _post_process_matched_download(context_key, context, file_path):
         print(f"⏳ Waiting 1 second for file handle release for: {os.path.basename(file_path)}")
         time.sleep(1)
         # --- END OF FIX ---
+
+        # --- SIMPLE DOWNLOAD HANDLING ---
+        # Check if this is a simple download (search page "Download ⬇" button)
+        search_result = context.get('search_result', {})
+        is_simple_download = search_result.get('is_simple_download', False)
+
+        # Check if this is a search page matched download (search page "Matched Download 🎯" button)
+        is_search_page_matched = context.get('is_search_page_matched_download', False)
+
+        if is_simple_download or is_search_page_matched:
+            # Simple transfer: move to Transfer/AlbumName/ folder, no metadata enhancement
+            download_type = "simple download" if is_simple_download else "search page matched download"
+            logger.info(f"Processing {download_type} (no metadata enhancement): {file_path}")
+
+            transfer_path = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
+
+            # Extract album name from context
+            album_name = "Unknown Album"
+            if is_search_page_matched:
+                # Matched downloads have Spotify metadata
+                spotify_album = context.get('spotify_album')
+                if spotify_album and spotify_album.get('name'):
+                    album_name = spotify_album['name']
+                else:
+                    # Fall back to original search result
+                    original_search = context.get('original_search_result', {})
+                    album_name = original_search.get('album', 'Unknown Album')
+            else:
+                # Simple downloads - extract from filename path (parent directory)
+                original_filename = search_result.get('filename', '')
+                if '/' in original_filename or '\\' in original_filename:
+                    # Get parent directory as album name
+                    path_parts = original_filename.replace('\\', '/').split('/')
+                    if len(path_parts) >= 2:
+                        album_name = path_parts[-2]  # Parent directory
+                else:
+                    # No path info, use album from search result if available
+                    album_name = search_result.get('album', 'Unknown Album')
+
+            # Sanitize album name for file system
+            import re
+            album_name = re.sub(r'[<>:"/\\|?*]', '_', album_name).strip()
+            if not album_name:
+                album_name = "Unknown Album"
+
+            # Create album folder structure
+            album_folder = Path(transfer_path) / album_name
+            album_folder.mkdir(parents=True, exist_ok=True)
+
+            # Move file to album folder
+            filename = Path(file_path).name
+            destination = album_folder / filename
+
+            shutil.move(str(file_path), str(destination))
+            logger.info(f"✅ Moved {download_type} to: {destination}")
+
+            # Clean up context
+            with matched_context_lock:
+                if context_key in matched_downloads_context:
+                    del matched_downloads_context[context_key]
+
+            # Trigger library scan (using correct method name)
+            if web_scan_manager:
+                threading.Thread(
+                    target=lambda: web_scan_manager.request_scan(f"{download_type.capitalize()} completed"),
+                    daemon=True
+                ).start()
+
+            add_activity_item("✅", "Download Complete", f"{album_name}/{filename}", "Now")
+            logger.info(f"✅ {download_type.capitalize()} post-processing complete: {album_name}/{filename}")
+            return
+        # --- END SIMPLE DOWNLOAD HANDLING ---
 
         print(f"🎯 Starting robust post-processing for: {context_key}")
 
