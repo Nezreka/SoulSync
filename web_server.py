@@ -5427,6 +5427,101 @@ def search_match():
         return jsonify({"error": str(e)}), 500
 
 
+def _start_enhanced_album_download(enhanced_tracks, unmatched_tracks, spotify_artist, spotify_album):
+    """
+    Download album tracks that have been matched to Spotify with full track metadata.
+    This provides the best possible metadata enhancement and organization.
+    """
+    logger.info(f"🎯 Processing enhanced album download for '{spotify_album['name']}' with {len(enhanced_tracks)} matched tracks")
+
+    started_count = 0
+
+    # Process matched tracks with full Spotify metadata
+    for matched_item in enhanced_tracks:
+        try:
+            slskd_track = matched_item['slskd_track']
+            spotify_track = matched_item['spotify_track']
+
+            username = slskd_track.get('username')
+            filename = slskd_track.get('filename')
+            size = slskd_track.get('size', 0)
+
+            if not username or not filename:
+                logger.warning(f"Skipping track with missing username or filename: {slskd_track}")
+                continue
+
+            # Start download
+            download_id = asyncio.run(soulseek_client.download(username, filename, size))
+
+            if download_id:
+                context_key = f"{username}::{filename}"
+                with matched_context_lock:
+                    # Create context with FULL Spotify track metadata (like Download Missing Tracks modal)
+                    matched_downloads_context[context_key] = {
+                        "spotify_artist": spotify_artist,
+                        "spotify_album": spotify_album,
+                        "track_info": spotify_track,  # Full Spotify track object!
+                        "original_search_result": {
+                            'username': username,
+                            'filename': filename,
+                            'size': size,
+                            'title': spotify_track['name'],  # Use Spotify title
+                            'artist': spotify_artist['name'],
+                            'album': spotify_album['name'],
+                            'track_number': spotify_track['track_number'],  # Use Spotify track number
+                            'spotify_clean_title': spotify_track['name']  # For filename generation
+                        },
+                        "is_album_download": True,
+                        "has_full_spotify_metadata": True  # Flag for robust processing
+                    }
+
+                logger.info(f"✅ Queued matched track: '{spotify_track['name']}' (track #{spotify_track['track_number']})")
+                started_count += 1
+            else:
+                logger.error(f"Failed to queue track: {filename}")
+
+        except Exception as e:
+            logger.error(f"Error processing matched track: {e}")
+            continue
+
+    # Process unmatched tracks with basic cleanup
+    for slskd_track in unmatched_tracks:
+        try:
+            username = slskd_track.get('username')
+            filename = slskd_track.get('filename')
+            size = slskd_track.get('size', 0)
+
+            if not username or not filename:
+                continue
+
+            download_id = asyncio.run(soulseek_client.download(username, filename, size))
+
+            if download_id:
+                context_key = f"{username}::{filename}"
+                with matched_context_lock:
+                    # Basic context for unmatched tracks (simple cleanup)
+                    matched_downloads_context[context_key] = {
+                        'search_result': {
+                            'username': username,
+                            'filename': filename,
+                            'size': size,
+                            'is_simple_download': True  # Falls back to simple transfer
+                        },
+                        'spotify_artist': None,
+                        'spotify_album': None,
+                        'track_info': None
+                    }
+
+                logger.info(f"⚠️ Queued unmatched track (basic cleanup): {filename}")
+                started_count += 1
+
+        except Exception as e:
+            logger.error(f"Error processing unmatched track: {e}")
+            continue
+
+    return started_count
+
+
 def _start_album_download_tasks(album_result, spotify_artist, spotify_album):
     """
     This final version now fetches the official Spotify tracklist and uses it to
@@ -5489,8 +5584,7 @@ def _start_album_download_tasks(album_result, spotify_artist, spotify_album):
                         "spotify_artist": spotify_artist,
                         "spotify_album": spotify_album,
                         "original_search_result": enhanced_context, # Contains corrected data + clean title
-                        "is_album_download": True,
-                        "is_search_page_matched_download": True  # Flag for simple transfer (search page only)
+                        "is_album_download": True
                     }
                 print(f"  + Queued track: {filename} (Matched to: '{corrected_meta.get('title')}')")
                 started_count += 1
@@ -5509,24 +5603,77 @@ def _start_album_download_tasks(album_result, spotify_artist, spotify_album):
 @app.route('/api/download/matched', methods=['POST'])
 def start_matched_download():
     """
-    Starts a matched download. This version corrects a bug where album context
-    was being discarded for individual album track downloads, ensuring they are
-    processed identically to single track downloads.
+    Starts a matched download. Supports:
+    1. Enhanced album downloads with full Spotify track metadata
+    2. Regular album downloads (fallback)
+    3. Single track downloads
     """
     try:
         data = request.get_json()
         download_payload = data.get('search_result', {})
         spotify_artist = data.get('spotify_artist', {})
         spotify_album = data.get('spotify_album', None)
+        enhanced_tracks = data.get('enhanced_tracks', [])  # Album: Matched tracks with Spotify data
+        unmatched_tracks = data.get('unmatched_tracks', [])  # Album: Tracks that didn't match
+        spotify_track = data.get('spotify_track', None)  # Single: Full Spotify track object
+        is_single_track = data.get('is_single_track', False)  # Single: Flag for single track
 
         if not download_payload or not spotify_artist:
             return jsonify({"success": False, "error": "Missing download payload or artist data"}), 400
 
-        # This check is for full album downloads (when the main album card button is clicked)
+        # NEW: Enhanced single track with full Spotify metadata
+        if is_single_track and spotify_track:
+            logger.info(f"🎯 Starting enhanced single track download: '{spotify_track['name']}' by {spotify_artist['name']}")
+
+            username = download_payload.get('username')
+            filename = download_payload.get('filename')
+            size = download_payload.get('size', 0)
+
+            if not username or not filename:
+                return jsonify({"success": False, "error": "Missing username or filename"}), 400
+
+            download_id = asyncio.run(soulseek_client.download(username, filename, size))
+
+            if download_id:
+                context_key = f"{username}::{filename}"
+                with matched_context_lock:
+                    # Create context with FULL Spotify track metadata (like Download Missing Tracks modal)
+                    matched_downloads_context[context_key] = {
+                        "spotify_artist": spotify_artist,
+                        "spotify_album": spotify_track.get('album'),  # Single's album from Spotify
+                        "track_info": spotify_track,  # Full Spotify track object!
+                        "original_search_result": {
+                            'username': username,
+                            'filename': filename,
+                            'size': size,
+                            'title': spotify_track['name'],
+                            'artist': spotify_artist['name'],
+                            'album': spotify_track.get('album', {}).get('name', 'Unknown Album'),
+                            'track_number': spotify_track.get('track_number', 1),
+                            'spotify_clean_title': spotify_track['name']
+                        },
+                        "is_album_download": False,  # It's a single
+                        "has_full_spotify_metadata": True  # Flag for robust processing
+                    }
+
+                logger.info(f"✅ Queued enhanced single track: '{spotify_track['name']}'")
+                return jsonify({"success": True, "message": "Enhanced single track download started"})
+            else:
+                return jsonify({"success": False, "error": "Failed to start download via slskd"}), 500
+
+        # NEW: Enhanced album download with track-to-track matching
+        if enhanced_tracks:
+            logger.info(f"🎯 Starting enhanced album download: {len(enhanced_tracks)} matched tracks, {len(unmatched_tracks)} unmatched")
+            started_count = _start_enhanced_album_download(enhanced_tracks, unmatched_tracks, spotify_artist, spotify_album)
+            if started_count > 0:
+                return jsonify({"success": True, "message": f"Queued {started_count} tracks with full Spotify metadata."})
+            else:
+                return jsonify({"success": False, "error": "Failed to queue any tracks from the album."}), 500
+
+        # Regular album download (fallback if matching fails)
         is_full_album_download = bool(spotify_album and download_payload.get('result_type') == 'album')
 
         if is_full_album_download:
-            # This logic for full album downloads is correct and remains unchanged.
             started_count = _start_album_download_tasks(download_payload, spotify_artist, spotify_album)
             if started_count > 0:
                 return jsonify({"success": True, "message": f"Queued {started_count} tracks for matched album download."})
@@ -5561,10 +5708,8 @@ def start_matched_download():
                         "spotify_artist": spotify_artist,
                         "spotify_album": spotify_album, # PRESERVE album context
                         "original_search_result": enhanced_payload,
-                        "is_album_download": False, # It's a single track download, not a full album job.
-                        "is_search_page_matched_download": True  # Flag for simple transfer (search page only)
+                        "is_album_download": False # It's a single track download, not a full album job.
                     }
-                    logger.info(f"Registered search page matched download for simple transfer: {context_key}")
                 return jsonify({"success": True, "message": "Matched download started"})
             else:
                 return jsonify({"success": False, "error": "Failed to start download via slskd"}), 500
@@ -7212,42 +7357,27 @@ def _post_process_matched_download(context_key, context, file_path):
         # --- END OF FIX ---
 
         # --- SIMPLE DOWNLOAD HANDLING ---
-        # Check if this is a simple download (search page "Download ⬇" button)
+        # Check if this is a simple download (search page "Download ⬇" button only)
         search_result = context.get('search_result', {})
         is_simple_download = search_result.get('is_simple_download', False)
 
-        # Check if this is a search page matched download (search page "Matched Download 🎯" button)
-        is_search_page_matched = context.get('is_search_page_matched_download', False)
-
-        if is_simple_download or is_search_page_matched:
+        if is_simple_download:
             # Simple transfer: move to Transfer/AlbumName/ folder, no metadata enhancement
-            download_type = "simple download" if is_simple_download else "search page matched download"
-            logger.info(f"Processing {download_type} (no metadata enhancement): {file_path}")
+            logger.info(f"Processing simple download (no metadata enhancement): {file_path}")
 
             transfer_path = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
 
-            # Extract album name from context
+            # Extract album name from filename path (parent directory)
             album_name = "Unknown Album"
-            if is_search_page_matched:
-                # Matched downloads have Spotify metadata
-                spotify_album = context.get('spotify_album')
-                if spotify_album and spotify_album.get('name'):
-                    album_name = spotify_album['name']
-                else:
-                    # Fall back to original search result
-                    original_search = context.get('original_search_result', {})
-                    album_name = original_search.get('album', 'Unknown Album')
+            original_filename = search_result.get('filename', '')
+            if '/' in original_filename or '\\' in original_filename:
+                # Get parent directory as album name
+                path_parts = original_filename.replace('\\', '/').split('/')
+                if len(path_parts) >= 2:
+                    album_name = path_parts[-2]  # Parent directory
             else:
-                # Simple downloads - extract from filename path (parent directory)
-                original_filename = search_result.get('filename', '')
-                if '/' in original_filename or '\\' in original_filename:
-                    # Get parent directory as album name
-                    path_parts = original_filename.replace('\\', '/').split('/')
-                    if len(path_parts) >= 2:
-                        album_name = path_parts[-2]  # Parent directory
-                else:
-                    # No path info, use album from search result if available
-                    album_name = search_result.get('album', 'Unknown Album')
+                # No path info, use album from search result if available
+                album_name = search_result.get('album', 'Unknown Album')
 
             # Sanitize album name for file system
             import re
@@ -7264,7 +7394,7 @@ def _post_process_matched_download(context_key, context, file_path):
             destination = album_folder / filename
 
             shutil.move(str(file_path), str(destination))
-            logger.info(f"✅ Moved {download_type} to: {destination}")
+            logger.info(f"✅ Moved simple download to: {destination}")
 
             # Clean up context
             with matched_context_lock:
@@ -7274,12 +7404,12 @@ def _post_process_matched_download(context_key, context, file_path):
             # Trigger library scan (using correct method name)
             if web_scan_manager:
                 threading.Thread(
-                    target=lambda: web_scan_manager.request_scan(f"{download_type.capitalize()} completed"),
+                    target=lambda: web_scan_manager.request_scan("Simple download completed"),
                     daemon=True
                 ).start()
 
             add_activity_item("✅", "Download Complete", f"{album_name}/{filename}", "Now")
-            logger.info(f"✅ {download_type.capitalize()} post-processing complete: {album_name}/{filename}")
+            logger.info(f"✅ Simple download post-processing complete: {album_name}/{filename}")
             return
         # --- END SIMPLE DOWNLOAD HANDLING ---
 
