@@ -3226,7 +3226,7 @@ async function loadBeatportChartsFromBackend() {
                         if (spotifyTracks.length > 0) {
                             await openDownloadMissingModalForYouTube(
                                 convertedPlaylistId,
-                                `[Beatport] ${chartInfo.name}`,
+                                chartInfo.name,
                                 spotifyTracks
                             );
 
@@ -4668,8 +4668,9 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
     };
 
     // Generate hero section with dynamic source detection
-    const source = playlistName.includes('[Beatport]') ? 'Beatport' :
-                   playlistName.includes('[Tidal]') ? 'Tidal' :
+    const source = virtualPlaylistId.startsWith('beatport_') ? 'Beatport' :
+                   virtualPlaylistId.startsWith('tidal_') ? 'Tidal' :
+                   virtualPlaylistId.startsWith('listenbrainz_') ? 'ListenBrainz' :
                    virtualPlaylistId.startsWith('discover_') ? 'SoulSync' :
                    virtualPlaylistId.startsWith('seasonal_') ? 'SoulSync' :
                    virtualPlaylistId.startsWith('build_playlist_') ? 'SoulSync' :
@@ -11943,8 +11944,8 @@ async function rehydrateTidalDownloadModal(playlistId, state) {
         }
         
         const virtualPlaylistId = state.convertedSpotifyPlaylistId;
-        const playlistName = `[Tidal] ${state.playlist.name}`;
-        
+        const playlistName = state.playlist.name;
+
         // Create the download modal
         await openDownloadMissingModalForTidal(virtualPlaylistId, playlistName, spotifyTracks);
         
@@ -12387,8 +12388,8 @@ async function loadTidalPlaylistStatesFromBackend() {
                         
                         if (spotifyTracks.length > 0) {
                             await openDownloadMissingModalForTidal(
-                                convertedPlaylistId, 
-                                `[Tidal] ${playlistData.name}`, 
+                                convertedPlaylistId,
+                                playlistData.name,
                                 spotifyTracks
                             );
                             
@@ -12835,7 +12836,7 @@ async function startTidalDownloadMissing(urlHash) {
 
         // Create a virtual playlist for the download system
         const virtualPlaylistId = `tidal_${state.tidal_playlist_id}`;
-        const playlistName = `[Tidal] ${state.playlist.name}`;
+        const playlistName = state.playlist.name;
 
         // Store reference for card navigation (same as YouTube)
         state.convertedSpotifyPlaylistId = virtualPlaylistId;
@@ -12903,10 +12904,20 @@ async function openDownloadMissingModalForTidal(virtualPlaylistId, playlistName,
         tracks: spotifyTracks
     };
 
-    // Generate hero section for Tidal playlist context (same as YouTube/Beatport)
+    // Generate hero section with dynamic source detection (same as YouTube/Beatport)
+    const source = virtualPlaylistId.startsWith('beatport_') ? 'Beatport' :
+                   virtualPlaylistId.startsWith('tidal_') ? 'Tidal' :
+                   virtualPlaylistId.startsWith('listenbrainz_') ? 'ListenBrainz' :
+                   virtualPlaylistId.startsWith('discover_') ? 'SoulSync' :
+                   virtualPlaylistId.startsWith('seasonal_') ? 'SoulSync' :
+                   virtualPlaylistId.startsWith('build_playlist_') ? 'SoulSync' :
+                   virtualPlaylistId.startsWith('decade_') ? 'SoulSync' :
+                   virtualPlaylistId === 'build_playlist_custom' ? 'SoulSync' :
+                   'YouTube';
+
     const heroContext = {
         type: 'playlist',
-        playlist: { name: playlistName, owner: 'Tidal' },
+        playlist: { name: playlistName, owner: source },
         trackCount: spotifyTracks.length,
         playlistId: virtualPlaylistId
     };
@@ -14531,7 +14542,7 @@ async function rehydrateBeatportDownloadModal(chartHash, ytState) {
         }
 
         const virtualPlaylistId = ytState.convertedSpotifyPlaylistId;
-        const playlistName = `[Beatport] ${ytState.playlist.name}`;
+        const playlistName = ytState.playlist.name;
 
         // Create the download modal
         await openDownloadMissingModalForYouTube(virtualPlaylistId, playlistName, spotifyTracks);
@@ -14918,7 +14929,7 @@ async function startBeatportDownloadMissing(urlHash) {
 
         // Create a virtual playlist for the download system
         const virtualPlaylistId = `beatport_${urlHash}`;
-        const playlistName = `[Beatport] ${state.playlist.name}`;
+        const playlistName = state.playlist.name;
 
         // Store reference for card navigation (but don't change phase yet)
         state.convertedSpotifyPlaylistId = virtualPlaylistId;
@@ -16352,7 +16363,7 @@ function handleYouTubeCardClick(urlHash) {
                                 console.log(`✅ Loaded ${state.discoveryResults.length} discovery results`);
                                 
                                 // Now open the modal with the loaded data
-                                const playlistName = `[YouTube] ${state.playlist.name}`;
+                                const playlistName = state.playlist.name;
                                 const spotifyTracks = state.discoveryResults
                                     .filter(result => result.spotify_data)
                                     .map(result => result.spotify_data);
@@ -16368,7 +16379,7 @@ function handleYouTubeCardClick(urlHash) {
                         });
                 } else {
                     // Use the YouTube-specific function to maintain proper state linking
-                    const playlistName = `[YouTube] ${state.playlist.name}`;
+                    const playlistName = state.playlist.name;
                     const spotifyTracks = state.discoveryResults
                         .filter(result => result.spotify_data)
                         .map(result => result.spotify_data);
@@ -17428,11 +17439,10 @@ async function startYouTubeDownloadMissing(urlHash) {
             return;
         }
 
-        // Determine source type
+        // Determine source type (prefix removed - no longer needed)
         const isListenBrainz = state.is_listenbrainz_playlist;
         const isBeatport = state.is_beatport_playlist;
         const isTidal = state.is_tidal_playlist;
-        const sourcePrefix = isListenBrainz ? '[ListenBrainz]' : (isBeatport ? '[Beatport]' : (isTidal ? '[Tidal]' : '[YouTube]'));
 
         // Convert discovery results to a format compatible with the download modal
         const spotifyTracks = discoveryResults
@@ -17469,8 +17479,8 @@ async function startYouTubeDownloadMissing(urlHash) {
 
         // Create a virtual playlist for the download system
         const virtualPlaylistId = isListenBrainz ? `listenbrainz_${urlHash}` : (isBeatport ? `beatport_${urlHash}` : (isTidal ? `tidal_${urlHash}` : `youtube_${urlHash}`));
-        const playlistName = `${sourcePrefix} ${state.playlist.name}`;
-        
+        const playlistName = state.playlist.name;
+
         // Store reference for card navigation
         state.convertedSpotifyPlaylistId = virtualPlaylistId;
         
@@ -29387,7 +29397,7 @@ async function openDownloadModalForListenBrainzPlaylist(identifier, title) {
                     if (spotifyTracks.length > 0) {
                         await openDownloadMissingModalForYouTube(
                             convertedPlaylistId,
-                            `[ListenBrainz] ${title}`,
+                            title,
                             spotifyTracks
                         );
 
@@ -29408,7 +29418,7 @@ async function openDownloadModalForListenBrainzPlaylist(identifier, title) {
 
                             // Add to discover download sidebar if this has discoverMetadata
                             if (process.discoverMetadata) {
-                                const playlistName = `[ListenBrainz] ${title}`;
+                                const playlistName = title;
                                 const imageUrl = process.discoverMetadata.imageUrl;
                                 const type = process.discoverMetadata.type || 'album';
                                 addDiscoverDownload(convertedPlaylistId, playlistName, type, imageUrl);
