@@ -13900,7 +13900,7 @@ def start_tidal_sync(playlist_id):
         # Start the sync using existing sync infrastructure
         sync_data = {
             'playlist_id': sync_playlist_id,
-            'playlist_name': f"[Tidal] {playlist_name}",
+            'playlist_name': playlist_name,
             'tracks': spotify_tracks
         }
         
@@ -14691,7 +14691,7 @@ def start_youtube_sync(url_hash):
         # Start the sync using existing sync infrastructure
         sync_data = {
             'playlist_id': sync_playlist_id,
-            'playlist_name': f"[YouTube] {playlist_name}",
+            'playlist_name': playlist_name,
             'tracks': spotify_tracks
         }
         
@@ -18139,7 +18139,7 @@ def start_listenbrainz_sync(playlist_mbid):
         # Start the sync using existing sync infrastructure
         sync_data = {
             'playlist_id': sync_playlist_id,
-            'playlist_name': f"[ListenBrainz] {playlist_name}",
+            'playlist_name': playlist_name,
             'tracks': spotify_tracks
         }
 
@@ -20282,7 +20282,7 @@ def start_beatport_sync(url_hash):
         # Create sync job using existing infrastructure
         sync_data = {
             'id': sync_playlist_id,
-            'name': f"Beatport: {state['chart']['name']}",
+            'name': state['chart']['name'],
             'tracks': spotify_tracks,
             'source': 'beatport',
             'source_id': url_hash
