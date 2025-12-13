@@ -8810,13 +8810,15 @@ def get_wishlist_tracks():
 
     Query Parameters:
         category (optional): 'singles' or 'albums' - filters tracks by album type
+        limit (optional): Maximum number of tracks to return (for performance)
     """
     try:
         from core.wishlist_service import get_wishlist_service
         from database.music_database import MusicDatabase
 
-        # Get category filter from query params
+        # Get category filter and limit from query params
         category = request.args.get('category', None)  # None = all tracks
+        limit = request.args.get('limit', type=int, default=None)  # None = no limit
 
         # Clean duplicates ONLY if no active wishlist download is running
         # This prevents count mismatches during active downloads
@@ -8879,10 +8881,16 @@ def get_wishlist_tracks():
                 elif category == 'albums' and is_album:
                     filtered_tracks.append(track)
 
-            print(f"📊 Wishlist filter: {len(filtered_tracks)}/{len(sanitized_tracks)} tracks in '{category}' category")
+                # Apply limit early for performance
+                if limit and len(filtered_tracks) >= limit:
+                    break
+
+            print(f"📊 Wishlist filter: {len(filtered_tracks)}/{len(sanitized_tracks)} tracks in '{category}' category (limit: {limit or 'none'})")
             return jsonify({"tracks": filtered_tracks, "category": category})
 
-        return jsonify({"tracks": sanitized_tracks})
+        # Apply limit to non-filtered results
+        result_tracks = sanitized_tracks[:limit] if limit else sanitized_tracks
+        return jsonify({"tracks": result_tracks})
     except Exception as e:
         print(f"Error getting wishlist tracks: {e}")
         return jsonify({"error": str(e)}), 500

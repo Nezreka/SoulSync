@@ -5160,8 +5160,9 @@ async function openWishlistOverviewModal() {
         }
 
         // Fetch album covers for mosaic backgrounds
-        const albumCoversPromise = fetch('/api/wishlist/tracks?category=albums').then(r => r.json());
-        const singleCoversPromise = fetch('/api/wishlist/tracks?category=singles').then(r => r.json());
+        // Limit to 50 tracks per category (enough to get 20 unique covers while being efficient)
+        const albumCoversPromise = fetch('/api/wishlist/tracks?category=albums&limit=50').then(r => r.json());
+        const singleCoversPromise = fetch('/api/wishlist/tracks?category=singles&limit=50').then(r => r.json());
 
         const [albumTracksData, singleTracksData] = await Promise.all([albumCoversPromise, singleCoversPromise]);
 
