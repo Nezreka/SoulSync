@@ -5364,8 +5364,27 @@ async function selectWishlistCategory(category) {
                 }
 
                 const albumName = spotifyData?.album?.name || 'Unknown Album';
-                const artistName = spotifyData?.artists?.[0]?.name || 'Unknown Artist';
-                const artistId = spotifyData?.artists?.[0]?.id || null;
+
+                // Handle both object format {name: '...'} and sanitized string format
+                let artistName = 'Unknown Artist';
+                let artistId = null;
+                if (spotifyData?.artists?.[0]?.name) {
+                    // Object format from Spotify API
+                    artistName = spotifyData.artists[0].name;
+                    artistId = spotifyData.artists[0].id;
+                } else if (spotifyData?.artists?.[0] && typeof spotifyData.artists[0] === 'string') {
+                    // Sanitized string format
+                    artistName = spotifyData.artists[0];
+                } else if (Array.isArray(track.artists) && track.artists.length > 0) {
+                    // Fallback to track.artists
+                    if (typeof track.artists[0] === 'string') {
+                        artistName = track.artists[0];
+                    } else if (track.artists[0]?.name) {
+                        artistName = track.artists[0].name;
+                        artistId = track.artists[0].id;
+                    }
+                }
+
                 const albumImage = spotifyData?.album?.images?.[0]?.url || '';
 
                 // Use album ID if available, otherwise create unique key from album + artist
