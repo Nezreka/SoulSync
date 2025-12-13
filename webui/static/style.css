@@ -7627,6 +7627,122 @@ body {
     transition: all 0.3s ease;
     position: relative;
     overflow: hidden;
+    min-height: 250px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Mosaic Background with Scrolling Rows */
+.wishlist-mosaic-background {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    z-index: 0;
+}
+
+.wishlist-mosaic-row-wrapper {
+    flex: 1;
+    overflow: hidden;
+    position: relative;
+}
+
+.wishlist-mosaic-row {
+    display: flex;
+    width: fit-content;
+    height: 100%;
+    opacity: 0;
+    animation: fadeInRow 1s ease-out forwards, infiniteScroll var(--speed, 30s) linear infinite;
+}
+
+.wishlist-mosaic-row.scroll-right {
+    animation-direction: normal, reverse;
+}
+
+.wishlist-mosaic-tile {
+    width: 80px;
+    height: 100%;
+    flex-shrink: 0;
+    overflow: hidden;
+}
+
+.wishlist-mosaic-image {
+    width: 100%;
+    height: 100%;
+    background-size: cover;
+    background-position: center;
+    transition: transform 0.5s ease;
+}
+
+/* Fallback gradient for small collections */
+.wishlist-mosaic-fallback {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(135deg,
+        rgba(29, 185, 84, 0.1) 0%,
+        rgba(138, 43, 226, 0.1) 50%,
+        rgba(255, 20, 147, 0.1) 100%);
+    background-size: 200% 200%;
+    animation: gradientShift 8s ease infinite;
+    z-index: 0;
+}
+
+@keyframes gradientShift {
+    0%, 100% {
+        background-position: 0% 50%;
+    }
+    50% {
+        background-position: 100% 50%;
+    }
+}
+
+/* Overlay for text readability */
+.wishlist-mosaic-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(135deg,
+        rgba(0, 0, 0, 0.85) 0%,
+        rgba(0, 0, 0, 0.75) 100%);
+    z-index: 1;
+    pointer-events: none;
+}
+
+/* Content layer above mosaic */
+.wishlist-category-content {
+    position: relative;
+    z-index: 2;
+    width: 100%;
+}
+
+/* Fade in rows initially */
+@keyframes fadeInRow {
+    0% {
+        opacity: 0;
+    }
+    100% {
+        opacity: 0.7;
+    }
+}
+
+/* Infinite scrolling animation */
+/* Content is duplicated 3x, animation moves by -33.333% (one set) for seamless loop */
+@keyframes infiniteScroll {
+    0% {
+        transform: translateX(0);
+    }
+    100% {
+        transform: translateX(-33.333%);
+    }
 }
 
 .wishlist-category-card::before {
@@ -7646,12 +7762,19 @@ body {
 }
 
 .wishlist-category-card:hover {
-    background: linear-gradient(135deg,
-        rgba(29, 185, 84, 0.1) 0%,
-        rgba(18, 18, 18, 0.98) 100%);
     border-color: rgba(29, 185, 84, 0.3);
     transform: translateY(-4px);
     box-shadow: 0 8px 24px rgba(29, 185, 84, 0.2);
+}
+
+.wishlist-category-card:hover .wishlist-mosaic-image {
+    transform: scale(1.1);
+}
+
+.wishlist-category-card:hover .wishlist-mosaic-overlay {
+    background: linear-gradient(135deg,
+        rgba(29, 185, 84, 0.2) 0%,
+        rgba(0, 0, 0, 0.8) 100%);
 }
 
 .wishlist-category-card.next-in-queue {
@@ -8101,6 +8224,11 @@ body {
 
     .wishlist-category-card {
         padding: 24px 20px;
+        min-height: 200px;
+    }
+
+    .wishlist-mosaic-tile {
+        width: 60px; /* Smaller tiles on mobile */
     }
 
     .wishlist-category-icon {

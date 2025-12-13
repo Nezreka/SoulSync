@@ -5036,6 +5036,106 @@ async function closeDownloadMissingModal(playlistId) {
 }
 
 /**
+ * Extract unique album cover images from tracks
+ */
+function extractUniqueCoverImages(tracks, maxCovers = 20) {
+    const uniqueCovers = new Set();
+    const covers = [];
+
+    for (const track of tracks) {
+        if (covers.length >= maxCovers) break;
+
+        let coverUrl = null;
+        let spotifyData = track.spotify_data;
+
+        // Parse spotify_data if it's a string
+        if (typeof spotifyData === 'string') {
+            try {
+                spotifyData = JSON.parse(spotifyData);
+            } catch (e) {
+                continue;
+            }
+        }
+
+        // Extract cover URL
+        coverUrl = spotifyData?.album?.images?.[0]?.url;
+
+        // Add to list if unique and valid
+        if (coverUrl && !uniqueCovers.has(coverUrl)) {
+            uniqueCovers.add(coverUrl);
+            covers.push(coverUrl);
+        }
+    }
+
+    return covers;
+}
+
+/**
+ * Shuffle array using Fisher-Yates algorithm
+ */
+function shuffleArray(array) {
+    const shuffled = [...array];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled;
+}
+
+/**
+ * Generate mosaic grid background HTML with continuous scrolling rows
+ */
+function generateMosaicBackground(coverUrls) {
+    // If less than 3 covers, use gradient fallback
+    if (!coverUrls || coverUrls.length < 3) {
+        return `
+            <div class="wishlist-mosaic-fallback"></div>
+            <div class="wishlist-mosaic-overlay"></div>
+        `;
+    }
+
+    const rows = 4;
+    let mosaicHTML = '<div class="wishlist-mosaic-background">';
+
+    // Calculate scroll speed based on number of images
+    // More images = longer duration to maintain consistent visual speed
+    // Minimum 40s to prevent scrolling too fast
+    const scrollSpeed = Math.max(40, coverUrls.length * 2);
+
+    for (let row = 0; row < rows; row++) {
+        const isEvenRow = row % 2 === 0;
+        const direction = isEvenRow ? 'left' : 'right';
+
+        // Randomize order for each row
+        const shuffledCovers = shuffleArray(coverUrls);
+
+        // Create row wrapper
+        mosaicHTML += `<div class="wishlist-mosaic-row-wrapper">`;
+        mosaicHTML += `<div class="wishlist-mosaic-row scroll-${direction}" style="--speed: ${scrollSpeed}s;">`;
+
+        // Generate tiles - duplicate 3 times for smooth infinite scroll
+        for (let duplicate = 0; duplicate < 3; duplicate++) {
+            for (let i = 0; i < shuffledCovers.length; i++) {
+                const coverUrl = shuffledCovers[i];
+                mosaicHTML += `
+                    <div class="wishlist-mosaic-tile">
+                        <div class="wishlist-mosaic-image" style="background-image: url('${coverUrl}');"></div>
+                    </div>
+                `;
+            }
+        }
+
+        mosaicHTML += '</div>'; // Close row
+        mosaicHTML += '</div>'; // Close wrapper
+    }
+
+    mosaicHTML += '</div>';
+    mosaicHTML += '<div class="wishlist-mosaic-overlay"></div>'; // Dark overlay for readability
+
+    return mosaicHTML;
+}
+
+/**
  * Open wishlist overview modal showing category breakdown
  * This is the NEW entry point for wishlist from dashboard
  */
@@ -5058,6 +5158,16 @@ async function openWishlistOverviewModal() {
             showToast('Wishlist is empty. No tracks to process.', 'info');
             return;
         }
+
+        // Fetch album covers for mosaic backgrounds
+        const albumCoversPromise = fetch('/api/wishlist/tracks?category=albums').then(r => r.json());
+        const singleCoversPromise = fetch('/api/wishlist/tracks?category=singles').then(r => r.json());
+
+        const [albumTracksData, singleTracksData] = await Promise.all([albumCoversPromise, singleCoversPromise]);
+
+        // Extract unique album covers (max 20 per category)
+        const albumCovers = extractUniqueCoverImages(albumTracksData.tracks || [], 20);
+        const singleCovers = extractUniqueCoverImages(singleTracksData.tracks || [], 20);
 
         // Create modal if it doesn't exist
         let modal = document.getElementById('wishlist-overview-modal');
@@ -5095,18 +5205,24 @@ async function openWishlistOverviewModal() {
                     <div class="wishlist-category-grid">
                         <!-- Albums/EPs Category -->
                         <div class="wishlist-category-card ${currentCycle === 'albums' ? 'next-in-queue' : ''}" data-category="albums" onclick="selectWishlistCategory('albums')">
-                            <div class="wishlist-category-icon">💿</div>
-                            <div class="wishlist-category-title">Albums / EPs</div>
-                            <div class="wishlist-category-count">${albums} tracks</div>
-                            ${currentCycle === 'albums' ? '<div class="wishlist-category-badge">Next in Queue</div>' : ''}
+                            ${generateMosaicBackground(albumCovers)}
+                            <div class="wishlist-category-content">
+                                <div class="wishlist-category-icon">💿</div>
+                                <div class="wishlist-category-title">Albums / EPs</div>
+                                <div class="wishlist-category-count">${albums} tracks</div>
+                                ${currentCycle === 'albums' ? '<div class="wishlist-category-badge">Next in Queue</div>' : ''}
+                            </div>
                         </div>
 
                         <!-- Singles Category -->
                         <div class="wishlist-category-card ${currentCycle === 'singles' ? 'next-in-queue' : ''}" data-category="singles" onclick="selectWishlistCategory('singles')">
-                            <div class="wishlist-category-icon">🎵</div>
-                            <div class="wishlist-category-title">Singles</div>
-                            <div class="wishlist-category-count">${singles} tracks</div>
-                            ${currentCycle === 'singles' ? '<div class="wishlist-category-badge">Next in Queue</div>' : ''}
+                            ${generateMosaicBackground(singleCovers)}
+                            <div class="wishlist-category-content">
+                                <div class="wishlist-category-icon">🎵</div>
+                                <div class="wishlist-category-title">Singles</div>
+                                <div class="wishlist-category-count">${singles} tracks</div>
+                                ${currentCycle === 'singles' ? '<div class="wishlist-category-badge">Next in Queue</div>' : ''}
+                            </div>
                         </div>
                     </div>
 
