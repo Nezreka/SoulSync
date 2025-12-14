@@ -110,10 +110,31 @@ class WishlistService:
             
             # Sort by artist name, then track name for consistent display order
             try:
-                wishlist_tracks.sort(key=lambda x: (
-                    x['spotify_data'].get('artists', [{}])[0].get('name', '').lower(),
-                    x['spotify_data'].get('name', '').lower()
-                ))
+                def get_sort_key(track):
+                    spotify_data = track['spotify_data']
+                    # Parse JSON string if needed
+                    if isinstance(spotify_data, str):
+                        import json
+                        try:
+                            spotify_data = json.loads(spotify_data)
+                        except:
+                            return ('', '')  # Fallback for invalid JSON
+
+                    artist_name = ''
+                    track_name = ''
+
+                    if isinstance(spotify_data, dict):
+                        artists = spotify_data.get('artists', [])
+                        if artists and len(artists) > 0:
+                            if isinstance(artists[0], dict):
+                                artist_name = artists[0].get('name', '')
+                            elif isinstance(artists[0], str):
+                                artist_name = artists[0]
+                        track_name = spotify_data.get('name', '')
+
+                    return (artist_name.lower(), track_name.lower())
+
+                wishlist_tracks.sort(key=get_sort_key)
                 logger.debug(f"Successfully sorted {len(wishlist_tracks)} wishlist tracks by artist/track name")
             except Exception as sort_error:
                 logger.warning(f"Failed to sort wishlist tracks, using original order: {sort_error}")
