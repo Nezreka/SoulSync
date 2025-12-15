@@ -9337,7 +9337,8 @@ body {
     flex-direction: column;
     padding: 16px 28px 25px 28px;
     gap: 20px;
-    overflow: hidden;
+    overflow-y: auto; /* Allow vertical scrolling */
+    overflow-x: hidden;
 }
 
 /* Dashboard Stats Section */
