@@ -5836,6 +5836,7 @@ async function openDownloadMissingWishlistModal(category = null) {
             process.modalElement.style.display = 'flex';
             WishlistModalState.setVisible(); // Track that modal is now visible
         }
+        hideLoadingOverlay(); // Always hide overlay before returning
         return; // Don't create a new one
     }
 
@@ -5868,6 +5869,7 @@ async function openDownloadMissingWishlistModal(category = null) {
         
     } catch (error) {
         showToast(`Failed to fetch wishlist data: ${error.message}`, 'error');
+        hideLoadingOverlay();
         return;
     }
     
