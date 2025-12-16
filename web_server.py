@@ -7334,6 +7334,47 @@ def _post_process_matched_download_with_verification(context_key, context, file_
         _on_download_completed(batch_id, task_id, success=False)
 
 
+def _safe_move_file(src, dst):
+    """
+    Safely move a file across different filesystems/volumes.
+    Handles Docker volume mount issues where shutil.move() fails on metadata preservation.
+
+    Args:
+        src: Source file path (str or Path)
+        dst: Destination file path (str or Path)
+    """
+    import shutil
+    from pathlib import Path
+
+    src = Path(src)
+    dst = Path(dst)
+
+    try:
+        # Try standard move first (works if same filesystem)
+        shutil.move(str(src), str(dst))
+        return
+    except (OSError, PermissionError) as e:
+        # If it's a cross-device link error or permission error, do manual copy
+        if "cross-device" in str(e).lower() or "operation not permitted" in str(e).lower():
+            logger.warning(f"⚠️ Cross-device move detected, using fallback copy method: {e}")
+            try:
+                # Simple copy without metadata preservation (avoids permission errors)
+                with open(src, 'rb') as f_src:
+                    with open(dst, 'wb') as f_dst:
+                        shutil.copyfileobj(f_src, f_dst)
+
+                # Delete source after successful copy
+                src.unlink()
+                logger.info(f"✅ Successfully moved file using fallback method: {src} -> {dst}")
+                return
+            except Exception as fallback_error:
+                logger.error(f"❌ Fallback copy also failed: {fallback_error}")
+                raise
+        else:
+            # Re-raise if it's a different error
+            raise
+
+
 def _post_process_matched_download(context_key, context, file_path):
     """
     This is the final, corrected post-processing function. It now mirrors the
@@ -7393,7 +7434,7 @@ def _post_process_matched_download(context_key, context, file_path):
             filename = Path(file_path).name
             destination = album_folder / filename
 
-            shutil.move(str(file_path), str(destination))
+            _safe_move_file(file_path, destination)
             logger.info(f"✅ Moved simple download to: {destination}")
 
             # Clean up context
@@ -7444,7 +7485,7 @@ def _post_process_matched_download(context_key, context, file_path):
                 print(f"⚠️ File already exists, overwriting: {os.path.basename(final_path)}")
                 os.remove(final_path)
 
-            shutil.move(file_path, final_path)
+            _safe_move_file(file_path, final_path)
 
             # Clean up empty directories in downloads folder
             downloads_path = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
@@ -7653,8 +7694,8 @@ def _post_process_matched_download(context_key, context, file_path):
             except Exception as check_error:
                 print(f"⚠️ [Protection] Error checking existing file metadata, proceeding with overwrite: {check_error}")
                 os.remove(final_path)
-        
-        shutil.move(file_path, final_path)
+
+        _safe_move_file(file_path, final_path)
 
         _download_cover_art(album_info, os.path.dirname(final_path))
 
