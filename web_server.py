@@ -2058,7 +2058,7 @@ def handle_settings():
             if 'active_media_server' in new_settings:
                 config_manager.set_active_media_server(new_settings['active_media_server'])
 
-            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal']:
+            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'listenbrainz']:
                 if service in new_settings:
                     for key, value in new_settings[service].items():
                         config_manager.set(f'{service}.{key}', value)
