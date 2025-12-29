@@ -19154,6 +19154,13 @@ body {
     padding: 16px 20px;
 }
 
+/* Responsive: tighter padding on narrow screens */
+@media (max-width: 700px) {
+    .enhanced-dropdown-content {
+        padding: 12px 16px;
+    }
+}
+
 .enhanced-dropdown-content::-webkit-scrollbar {
     width: 6px;
 }
@@ -19245,16 +19252,25 @@ body {
     margin-bottom: 24px;
 }
 
+/* Responsive: stack on narrow screens */
+@media (max-width: 900px) {
+    .enh-artists-wrapper {
+        grid-template-columns: 1fr;
+        gap: 16px;
+    }
+}
+
 .enh-artist-section {
     margin-bottom: 0 !important;
 }
 
 .enh-compact-list.artists-grid {
     display: flex;
-    gap: 16px;
+    gap: 20px;
     flex-wrap: nowrap;
     overflow-x: auto;
     padding-bottom: 4px;
+    align-items: flex-start;
 }
 
 .enh-compact-list.artists-grid::-webkit-scrollbar {
@@ -19266,75 +19282,71 @@ body {
     border-radius: 2px;
 }
 
+/* Artist cards: Circular Spotify-style */
 .enh-compact-item.artist-card {
-    display: flex;
+    display: inline-flex;
     flex-direction: column;
-    position: relative;
-    width: 170px;
-    height: 170px;
-    background: linear-gradient(135deg, #1e1e1e 0%, #2a2a2a 100%);
+    align-items: center;
+    padding: 12px;
+    background: transparent;
     border-radius: 8px;
     cursor: pointer;
-    transition: all 0.2s ease;
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    transition: background 0.2s ease;
+    border: none;
     flex-shrink: 0;
-    overflow: hidden;
+    width: auto;
+    height: auto;
+    max-height: fit-content;
 }
 
 .enh-compact-item.artist-card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.4);
-    border-color: rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.1);
 }
 
 .enh-item-image.artist-image {
-    width: 100%;
-    height: 110px;
+    width: 96px;
+    height: 96px;
+    border-radius: 50%;
     object-fit: cover;
-    border-radius: 8px 8px 0 0;
     border: none;
+    margin-bottom: 8px;
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.4);
 }
 
 .enh-item-image-placeholder.artist-placeholder {
-    width: 100%;
-    height: 110px;
+    width: 96px;
+    height: 96px;
+    border-radius: 50%;
     background: rgba(40, 40, 40, 1);
     display: flex;
     align-items: center;
     justify-content: center;
     font-size: 40px;
     border: none;
-    border-radius: 8px 8px 0 0;
+    margin-bottom: 8px;
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.4);
 }
 
 .enh-compact-item.artist-card .enh-item-info {
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    padding: 10px 12px;
-    background: linear-gradient(to top, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0.6) 70%, transparent 100%);
+    text-align: center;
+    min-width: 96px;
+    max-width: 180px;
+    flex-grow: 0;
 }
 
 .enh-compact-item.artist-card .enh-item-name {
     font-size: 14px;
     font-weight: 600;
     color: #ffffff;
-    margin-bottom: 2px;
+    margin: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    width: 100%;
+    line-height: 1.2;
 }
 
 .enh-compact-item.artist-card .enh-item-meta {
-    display: block;
-    font-size: 12px;
-    font-weight: 500;
-    color: rgba(255, 255, 255, 0.7);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    display: none;
 }
 
 .enh-compact-item.artist-card .enh-item-badge {
@@ -19350,6 +19362,21 @@ body {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
     gap: 16px;
+}
+
+/* Responsive: smaller album cards on narrow screens */
+@media (max-width: 900px) {
+    .enh-compact-list.albums-grid {
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        gap: 12px;
+    }
+}
+
+@media (max-width: 600px) {
+    .enh-compact-list.albums-grid {
+        grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+        gap: 10px;
+    }
 }
 
 .enh-compact-item.album-card {
@@ -19422,6 +19449,14 @@ body {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
     gap: 4px 12px;
+}
+
+/* Responsive: single column on narrow screens */
+@media (max-width: 700px) {
+    .enh-compact-list.tracks-list {
+        grid-template-columns: 1fr;
+        gap: 4px;
+    }
 }
 
 .enh-compact-item.track-item {
