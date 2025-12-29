@@ -18,7 +18,7 @@ class SearchResult:
     filename: str
     size: int
     bitrate: Optional[int]
-    duration: Optional[int]
+    duration: Optional[int]  # Duration in milliseconds (converted from slskd's seconds)
     quality: str
     free_upload_slots: int
     upload_speed: int
@@ -429,12 +429,16 @@ class SoulseekClient:
                 quality = file_ext if file_ext in ['flac', 'mp3', 'ogg', 'aac', 'wma'] else 'unknown'
                 
                 # Create TrackResult
+                # Convert duration from seconds to milliseconds (slskd returns seconds, Spotify uses ms)
+                raw_duration = file_data.get('length')
+                duration_ms = raw_duration * 1000 if raw_duration else None
+
                 track = TrackResult(
                     username=username,
                     filename=filename,
                     size=size,
                     bitrate=file_data.get('bitRate'),
-                    duration=file_data.get('length'),
+                    duration=duration_ms,
                     quality=quality,
                     free_upload_slots=response_data.get('freeUploadSlots', 0),
                     upload_speed=response_data.get('uploadSpeed', 0),
