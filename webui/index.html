@@ -1273,36 +1273,94 @@
 
                         <!-- Enhanced Search Section (New) -->
                         <div id="enhanced-search-section" class="search-section">
-                            <!-- Enhanced Search Bar -->
-                            <div class="enhanced-search-bar-container">
-                                <div class="enhanced-search-wrapper">
-                                    <div class="enhanced-search-icon">✨</div>
-                                    <input type="text" id="enhanced-search-input" placeholder="Enter artist, album, or track name for intelligent search...">
-                                    <button id="enhanced-cancel-btn" class="enhanced-cancel-btn hidden">✕</button>
+                            <!-- Enhanced Search Bar with Dropdown -->
+                            <div class="enhanced-search-input-wrapper">
+                                <div class="enhanced-search-bar-container">
+                                    <div class="enhanced-search-wrapper">
+                                        <div class="enhanced-search-icon">✨</div>
+                                        <input type="text" id="enhanced-search-input" placeholder="Search for artists, albums, or tracks...">
+                                        <button id="enhanced-cancel-btn" class="enhanced-cancel-btn hidden">✕</button>
+                                    </div>
+                                    <button id="enhanced-search-btn" class="enhanced-search-btn">
+                                        <span class="btn-icon">🔍</span>
+                                        <span class="btn-text">Search</span>
+                                    </button>
                                 </div>
-                                <button id="enhanced-search-btn" class="enhanced-search-btn">
-                                    <span class="btn-icon">🔍</span>
-                                    <span class="btn-text">Search</span>
-                                </button>
+
+                                <!-- Enhanced Search Dropdown (Overlay Panel) -->
+                                <div id="enhanced-dropdown" class="enhanced-dropdown hidden">
+                                    <div class="enhanced-dropdown-content">
+                                        <!-- Loading State -->
+                                        <div id="enhanced-loading" class="enhanced-loading hidden">
+                                            <div class="spinner"></div>
+                                            <p>Searching across Spotify and your library...</p>
+                                        </div>
+
+                                        <!-- Empty State -->
+                                        <div id="enhanced-empty" class="enhanced-empty hidden">
+                                            <div class="empty-icon">🔍</div>
+                                            <p>No results found</p>
+                                        </div>
+
+                                        <!-- Results Container -->
+                                        <div id="enhanced-results-container" class="enhanced-results-container hidden">
+
+                                            <!-- Artists Container (Side by Side) -->
+                                            <div class="enh-artists-wrapper">
+                                                <!-- DB Artists -->
+                                                <div id="enh-db-artists-section" class="enh-dropdown-section enh-artist-section hidden">
+                                                    <div class="enh-section-header">
+                                                        <span class="enh-section-icon">📚</span>
+                                                        <h4 class="enh-section-title">In Your Library</h4>
+                                                        <span class="enh-section-count" id="enh-db-artists-count">0</span>
+                                                    </div>
+                                                    <div class="enh-compact-list" id="enh-db-artists-list"></div>
+                                                </div>
+
+                                                <!-- Spotify Artists -->
+                                                <div id="enh-spotify-artists-section" class="enh-dropdown-section enh-artist-section hidden">
+                                                    <div class="enh-section-header">
+                                                        <span class="enh-section-icon">🎤</span>
+                                                        <h4 class="enh-section-title">Artists</h4>
+                                                        <span class="enh-section-count" id="enh-spotify-artists-count">0</span>
+                                                    </div>
+                                                    <div class="enh-compact-list" id="enh-spotify-artists-list"></div>
+                                                </div>
+                                            </div>
+
+                                            <!-- Albums -->
+                                            <div id="enh-albums-section" class="enh-dropdown-section hidden">
+                                                <div class="enh-section-header">
+                                                    <span class="enh-section-icon">💿</span>
+                                                    <h4 class="enh-section-title">Albums</h4>
+                                                    <span class="enh-section-count" id="enh-albums-count">0</span>
+                                                </div>
+                                                <div class="enh-compact-list" id="enh-albums-list"></div>
+                                            </div>
+
+                                            <!-- Tracks -->
+                                            <div id="enh-tracks-section" class="enh-dropdown-section hidden">
+                                                <div class="enh-section-header">
+                                                    <span class="enh-section-icon">🎵</span>
+                                                    <h4 class="enh-section-title">Tracks</h4>
+                                                    <span class="enh-section-count" id="enh-tracks-count">0</span>
+                                                </div>
+                                                <div class="enh-compact-list" id="enh-tracks-list"></div>
+                                            </div>
+
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
 
-                            <!-- Enhanced Search Status -->
-                            <div class="enhanced-search-status">
-                                <div class="enhanced-status-indicator"></div>
-                                <p id="enhanced-search-status-text">Ready • Enhanced search provides intelligent filtering and ranking</p>
-                            </div>
-
-                            <!-- Enhanced Search Results -->
-                            <div class="enhanced-search-results-container">
-                                <div class="enhanced-results-header">
-                                    <h3>Enhanced Results</h3>
-                                    <div class="results-count-badge" id="enhanced-results-count">0 results</div>
+                            <!-- Main Search Results Area (for slskd results) -->
+                            <div class="search-results-container">
+                                <div class="search-results-header">
+                                    <h3>Search Results</h3>
                                 </div>
-                                <div class="enhanced-results-scroll-area" id="enhanced-search-results-area">
-                                    <div class="enhanced-results-placeholder">
-                                        <div class="placeholder-icon">✨</div>
-                                        <p class="placeholder-title">Enhanced Search Ready</p>
-                                        <p class="placeholder-subtitle">Intelligent filtering • Smart ranking • Better results</p>
+                                <div class="search-results-scroll-area" id="enhanced-main-results-area">
+                                    <div class="search-results-placeholder">
+                                        <p>Search results will appear here when you select an album or track.</p>
                                     </div>
                                 </div>
                             </div>

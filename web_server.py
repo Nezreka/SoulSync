@@ -3224,6 +3224,102 @@ def search_music():
         print(f"Search error: {e}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/enhanced-search', methods=['POST'])
+def enhanced_search():
+    """
+    Unified search across Spotify and local database for enhanced search mode.
+    Returns categorized results: DB artists, Spotify artists, albums, and tracks.
+    """
+    data = request.get_json()
+    query = data.get('query', '').strip()
+
+    if not query:
+        return jsonify({
+            "db_artists": [],
+            "spotify_artists": [],
+            "spotify_albums": [],
+            "spotify_tracks": []
+        })
+
+    logger.info(f"Enhanced search initiated for: '{query}'")
+
+    try:
+        # Search local database for artists
+        database = get_database()
+        db_artists_objs = database.search_artists(query, limit=5)
+
+        # Convert database artists to dictionaries
+        db_artists = []
+        for artist in db_artists_objs:
+            image_url = None
+            if hasattr(artist, 'thumb_url') and artist.thumb_url:
+                image_url = fix_artist_image_url(artist.thumb_url)
+
+            db_artists.append({
+                "id": artist.id,
+                "name": artist.name,
+                "image_url": image_url
+            })
+            logger.debug(f"DB Artist: {artist.name}, thumb_url: {artist.thumb_url if hasattr(artist, 'thumb_url') else None}, fixed_url: {image_url}")
+
+        # Search Spotify for artists, albums, tracks
+        spotify_artists = []
+        spotify_albums = []
+        spotify_tracks = []
+
+        if spotify_client and spotify_client.is_authenticated():
+            # Search for artists
+            artist_objs = spotify_client.search_artists(query, limit=5)
+            for artist in artist_objs:
+                spotify_artists.append({
+                    "id": artist.id,
+                    "name": artist.name,
+                    "image_url": artist.image_url
+                })
+
+            # Search for albums
+            album_objs = spotify_client.search_albums(query, limit=10)
+            for album in album_objs:
+                # Album has 'artists' (list), convert to string
+                artist_name = ', '.join(album.artists) if album.artists else 'Unknown Artist'
+
+                spotify_albums.append({
+                    "id": album.id,
+                    "name": album.name,
+                    "artist": artist_name,
+                    "image_url": album.image_url,
+                    "release_date": album.release_date,
+                    "total_tracks": album.total_tracks
+                })
+
+            # Search for tracks
+            track_objs = spotify_client.search_tracks(query, limit=10)
+            for track in track_objs:
+                # Track has 'artists' (list), convert to string
+                artist_name = ', '.join(track.artists) if track.artists else 'Unknown Artist'
+
+                spotify_tracks.append({
+                    "id": track.id,
+                    "name": track.name,
+                    "artist": artist_name,
+                    "album": track.album,
+                    "duration_ms": track.duration_ms,
+                    "image_url": track.image_url
+                })
+
+        logger.info(f"Enhanced search results: {len(db_artists)} DB artists, {len(spotify_artists)} Spotify artists, {len(spotify_albums)} albums, {len(spotify_tracks)} tracks")
+
+        return jsonify({
+            "db_artists": db_artists,
+            "spotify_artists": spotify_artists,
+            "spotify_albums": spotify_albums,
+            "spotify_tracks": spotify_tracks
+        })
+
+    except Exception as e:
+        logger.error(f"Enhanced search error: {e}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/api/download', methods=['POST'])
 def start_download():
     """Simple download route"""
