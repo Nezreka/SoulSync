@@ -2273,6 +2273,16 @@
                                         <label>API Key:</label>
                                         <input type="password" id="soulseek-api-key" placeholder="Slskd API Key">
                                     </div>
+                                    <div class="form-group">
+                                        <label>Search Timeout (seconds):</label>
+                                        <input type="number" id="soulseek-search-timeout" placeholder="60" min="15" max="300" value="60">
+                                        <small style="color: #888; display: block; margin-top: 5px;">How long to search for tracks (15-300 seconds)</small>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Search Timeout Buffer (seconds):</label>
+                                        <input type="number" id="soulseek-search-timeout-buffer" placeholder="15" min="5" max="60" value="15">
+                                        <small style="color: #888; display: block; margin-top: 5px;">Extra time to wait for late results (5-60 seconds)</small>
+                                    </div>
                                 </div>
 
                                 <!-- ListenBrainz Settings -->

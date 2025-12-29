@@ -30,7 +30,9 @@
     "slskd_url": "http://host.docker.internal:5030",
     "api_key": "SoulseekAPIKey",
     "download_path": "/app/downloads",
-    "transfer_path": "/app/Transfer"
+    "transfer_path": "/app/Transfer",
+    "search_timeout": 60,
+    "search_timeout_buffer": 15
   },
   "logging": {
     "path": "logs/app.log",
