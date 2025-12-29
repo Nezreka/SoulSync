@@ -5505,7 +5505,11 @@ async function selectWishlistCategory(category) {
                 const albumImage = spotifyData?.album?.images?.[0]?.url || '';
 
                 // Use album ID if available, otherwise create unique key from album + artist
-                const albumId = spotifyData?.album?.id || `${albumName}_${artistName}`.replace(/\s+/g, '_').toLowerCase();
+                // Sanitize the ID to remove all special characters that could break DOM IDs or CSS selectors
+                const albumId = spotifyData?.album?.id || `${albumName}_${artistName}`
+                    .replace(/[^a-zA-Z0-9\s_-]/g, '')  // Remove all special chars except spaces, underscores, hyphens
+                    .replace(/\s+/g, '_')               // Replace spaces with underscores
+                    .toLowerCase();
 
                 if (!albumGroups[albumId]) {
                     albumGroups[albumId] = {
@@ -5542,10 +5546,16 @@ async function selectWishlistCategory(category) {
                     </div>
                 `).join('');
 
+                // Handle missing album images with a placeholder
+                const albumImageStyle = albumData.albumImage
+                    ? `background-image: url('${albumData.albumImage}')`
+                    : `background: linear-gradient(135deg, rgba(30, 30, 30, 0.9) 0%, rgba(50, 50, 50, 0.9) 100%); display: flex; align-items: center; justify-content: center; font-size: 40px;`;
+                const albumImageContent = albumData.albumImage ? '' : '<span style="opacity: 0.3;">💿</span>';
+
                 albumsHTML += `
                     <div class="wishlist-album-card">
                         <div class="wishlist-album-header" onclick="toggleAlbumTracks('${albumId}')">
-                            <div class="wishlist-album-image" style="background-image: url('${albumData.albumImage}')"></div>
+                            <div class="wishlist-album-image" style="${albumImageStyle}">${albumImageContent}</div>
                             <div class="wishlist-album-info">
                                 <div class="wishlist-album-name">${albumData.albumName}</div>
                                 <div class="wishlist-album-artist">${albumData.artistName}</div>
