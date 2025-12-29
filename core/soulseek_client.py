@@ -602,17 +602,22 @@ class SoulseekClient:
         
         return None
     
-    async def search(self, query: str, timeout: int = 60, progress_callback=None) -> tuple[List[TrackResult], List[AlbumResult]]:
+    async def search(self, query: str, timeout: int = None, progress_callback=None) -> tuple[List[TrackResult], List[AlbumResult]]:
         if not self.base_url:
             logger.error("Soulseek client not configured")
             return [], []
-        
+
+        # Get timeout from config if not specified
+        if timeout is None:
+            from config.settings import config_manager
+            timeout = config_manager.get('soulseek.search_timeout', 60)
+
         # Apply rate limiting before search
         await self._wait_for_rate_limit()
-        
+
         try:
-            logger.info(f"Starting search for: '{query}'")
-            
+            logger.info(f"Starting search for: '{query}' (slskd timeout: {timeout}s)")
+
             search_data = {
                 'searchText': query,
                 'timeout': timeout * 1000,  # slskd expects milliseconds
@@ -645,13 +650,24 @@ class SoulseekClient:
             
             # Track this search as active
             self.active_searches[search_id] = True
-            
+
+            # Get timeout buffer from config
+            from config.settings import config_manager
+            timeout_buffer = config_manager.get('soulseek.search_timeout_buffer', 15)
+
             # Poll for results - process and emit results immediately when found
             all_responses = []
             all_tracks = []
             all_albums = []
-            poll_interval = 1  # Check every 1.5 seconds for more responsive updates
-            max_polls = int(timeout / poll_interval)  # 20 attempts over 30 seconds
+            poll_interval = 1  # Check every 1 second for responsive updates
+
+            # IMPORTANT: Poll for LONGER than slskd searches to catch all results
+            # slskd timeout: how long slskd searches for
+            # polling timeout: how long WE wait for slskd to finish (with buffer)
+            polling_timeout = timeout + timeout_buffer
+            max_polls = int(polling_timeout / poll_interval)
+
+            logger.info(f"Polling for up to {polling_timeout}s (slskd timeout: {timeout}s + buffer: {timeout_buffer}s)")
             
             for poll_count in range(max_polls):
                 # Check if search was cancelled

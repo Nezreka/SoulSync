@@ -1629,6 +1629,8 @@ async function loadSettingsData() {
         // Populate Soulseek settings
         document.getElementById('soulseek-url').value = settings.soulseek?.slskd_url || '';
         document.getElementById('soulseek-api-key').value = settings.soulseek?.api_key || '';
+        document.getElementById('soulseek-search-timeout').value = settings.soulseek?.search_timeout || 60;
+        document.getElementById('soulseek-search-timeout-buffer').value = settings.soulseek?.search_timeout_buffer || 15;
 
         // Populate ListenBrainz settings
         document.getElementById('listenbrainz-token').value = settings.listenbrainz?.token || '';
@@ -2004,7 +2006,9 @@ async function saveSettings() {
             slskd_url: document.getElementById('soulseek-url').value,
             api_key: document.getElementById('soulseek-api-key').value,
             download_path: document.getElementById('download-path').value,
-            transfer_path: document.getElementById('transfer-path').value
+            transfer_path: document.getElementById('transfer-path').value,
+            search_timeout: parseInt(document.getElementById('soulseek-search-timeout').value) || 60,
+            search_timeout_buffer: parseInt(document.getElementById('soulseek-search-timeout-buffer').value) || 15
         },
         listenbrainz: {
             token: document.getElementById('listenbrainz-token').value
