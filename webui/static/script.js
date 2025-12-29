@@ -2342,7 +2342,15 @@ function initializeSearch() {
 // SEARCH MODE TOGGLE
 // ===============================
 
+let searchModeToggleInitialized = false;
+
 function initializeSearchModeToggle() {
+    // Only initialize once to prevent duplicate event listeners
+    if (searchModeToggleInitialized) {
+        console.log('Search mode toggle already initialized, skipping...');
+        return;
+    }
+
     const toggleContainer = document.querySelector('.search-mode-toggle');
     const modeBtns = document.querySelectorAll('.search-mode-btn');
     const basicSection = document.getElementById('basic-search-section');
@@ -2352,6 +2360,9 @@ function initializeSearchModeToggle() {
         console.warn('Search mode toggle elements not found');
         return;
     }
+
+    searchModeToggleInitialized = true;
+    console.log('✅ Initializing search mode toggle (first time only)');
 
     modeBtns.forEach(btn => {
         btn.addEventListener('click', () => {
@@ -2426,12 +2437,30 @@ function initializeSearchModeToggle() {
     }
 
     if (enhancedSearchBtn) {
-        enhancedSearchBtn.addEventListener('click', () => {
-            const query = enhancedInput.value.trim();
-            if (query.length >= 2) {
-                performEnhancedSearch(query);
+        enhancedSearchBtn.addEventListener('click', (e) => {
+            // Prevent click from bubbling to document (which would close the dropdown)
+            e.stopPropagation();
+
+            // Get fresh references (in case we navigated away and back)
+            const dropdown = document.getElementById('enhanced-dropdown');
+            const results = document.getElementById('enhanced-results-container');
+
+            if (!dropdown) return;
+
+            // Toggle the dropdown visibility to show/hide previous search results
+            if (dropdown.classList.contains('hidden')) {
+                // Check if there are results to show by looking for actual content
+                const hasResults = results &&
+                                   !results.classList.contains('hidden') &&
+                                   results.children.length > 0;
+
+                if (hasResults) {
+                    showDropdown();
+                } else {
+                    showToast('No previous results to show. Type to search!', 'info');
+                }
             } else {
-                showToast('Please enter at least 2 characters', 'error');
+                hideDropdown();
             }
         });
     }
@@ -2446,7 +2475,8 @@ function initializeSearchModeToggle() {
 
     // Close dropdown when clicking outside
     document.addEventListener('click', (e) => {
-        if (enhancedDropdown && !enhancedDropdown.classList.contains('hidden')) {
+        const dropdown = document.getElementById('enhanced-dropdown');
+        if (dropdown && !dropdown.classList.contains('hidden')) {
             const isClickInside = e.target.closest('.enhanced-search-input-wrapper');
             if (!isClickInside) {
                 hideDropdown();
@@ -3009,14 +3039,39 @@ function initializeSearchModeToggle() {
     }
 
     function showDropdown() {
-        if (enhancedDropdown) {
-            enhancedDropdown.classList.remove('hidden');
+        const dropdown = document.getElementById('enhanced-dropdown');
+        if (dropdown) {
+            dropdown.classList.remove('hidden');
+            updateToggleButtonState();
         }
     }
 
     function hideDropdown() {
-        if (enhancedDropdown) {
-            enhancedDropdown.classList.add('hidden');
+        const dropdown = document.getElementById('enhanced-dropdown');
+        if (dropdown) {
+            dropdown.classList.add('hidden');
+            updateToggleButtonState();
+        }
+    }
+
+    function updateToggleButtonState() {
+        // Get fresh references
+        const btn = document.getElementById('enhanced-search-btn');
+        const dropdown = document.getElementById('enhanced-dropdown');
+
+        if (!btn || !dropdown) return;
+
+        const btnIcon = btn.querySelector('.btn-icon');
+        const btnText = btn.querySelector('.btn-text');
+
+        if (dropdown.classList.contains('hidden')) {
+            // Dropdown is hidden - button should say "Show Results"
+            if (btnIcon) btnIcon.textContent = '👁️';
+            if (btnText) btnText.textContent = 'Show Results';
+        } else {
+            // Dropdown is visible - button should say "Hide Results"
+            if (btnIcon) btnIcon.textContent = '🙈';
+            if (btnText) btnText.textContent = 'Hide Results';
         }
     }
 }
