@@ -61,9 +61,18 @@ class Track:
     popularity: int
     preview_url: Optional[str] = None
     external_urls: Optional[Dict[str, str]] = None
-    
+    image_url: Optional[str] = None
+
     @classmethod
     def from_spotify_track(cls, track_data: Dict[str, Any]) -> 'Track':
+        # Extract album image (medium size preferred)
+        album_image_url = None
+        if 'album' in track_data and 'images' in track_data['album']:
+            images = track_data['album']['images']
+            if images:
+                # Get medium size image (usually index 1), or largest if not available
+                album_image_url = images[1]['url'] if len(images) > 1 else images[0]['url']
+
         return cls(
             id=track_data['id'],
             name=track_data['name'],
@@ -72,7 +81,8 @@ class Track:
             duration_ms=track_data['duration_ms'],
             popularity=track_data['popularity'],
             preview_url=track_data.get('preview_url'),
-            external_urls=track_data.get('external_urls')
+            external_urls=track_data.get('external_urls'),
+            image_url=album_image_url
         )
 
 @dataclass

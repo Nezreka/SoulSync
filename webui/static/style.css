@@ -18885,6 +18885,12 @@ body {
 /* ENHANCED SEARCH STYLING */
 /* ========================================= */
 
+/* Enhanced Search Input Wrapper (relative for dropdown positioning) */
+.enhanced-search-input-wrapper {
+    position: relative;
+    margin-bottom: 20px;
+}
+
 /* Enhanced Search Bar */
 .enhanced-search-bar-container {
     background: linear-gradient(135deg, rgba(138, 43, 226, 0.15), rgba(75, 0, 130, 0.15));
@@ -19108,5 +19114,786 @@ body {
     font-size: 13px;
     color: rgba(255, 255, 255, 0.6);
     margin: 0;
+}
+
+/* ========================================= */
+/* ENHANCED SEARCH DROPDOWN OVERLAY        */
+/* ========================================= */
+
+.enhanced-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    margin-top: 8px;
+    background: rgba(24, 24, 24, 0.98);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+    max-height: 600px;
+    overflow: hidden;
+    z-index: 1000;
+    backdrop-filter: blur(40px);
+    animation: slideDown 0.15s ease-out;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.enhanced-dropdown-content {
+    max-height: 600px;
+    overflow-y: auto;
+    padding: 16px 20px;
+}
+
+.enhanced-dropdown-content::-webkit-scrollbar {
+    width: 6px;
+}
+
+.enhanced-dropdown-content::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.enhanced-dropdown-content::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 3px;
+}
+
+.enhanced-dropdown-content::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+/* Loading and Empty States */
+.enhanced-loading,
+.enhanced-empty {
+    text-align: center;
+    padding: 40px 20px;
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.enhanced-loading .spinner {
+    width: 40px;
+    height: 40px;
+    margin: 0 auto 16px;
+    border: 3px solid rgba(138, 43, 226, 0.2);
+    border-top-color: rgba(138, 43, 226, 0.8);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.empty-icon {
+    font-size: 48px;
+    margin-bottom: 12px;
+    opacity: 0.5;
+}
+
+/* Dropdown Sections */
+.enh-dropdown-section {
+    margin-bottom: 24px;
+}
+
+.enh-dropdown-section:last-child {
+    margin-bottom: 0;
+}
+
+.enh-section-header {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    padding: 0;
+    margin-bottom: 12px;
+}
+
+.enh-section-icon {
+    display: none;
+}
+
+.enh-section-title {
+    flex-grow: 1;
+    font-size: 16px;
+    font-weight: 700;
+    color: #ffffff;
+    margin: 0;
+    text-transform: none;
+    letter-spacing: -0.2px;
+}
+
+.enh-section-count {
+    display: none;
+}
+
+/* ========================================= */
+/* ARTIST CARDS - Clean Spotify Style       */
+/* ========================================= */
+
+.enh-artists-wrapper {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 24px;
+}
+
+.enh-artist-section {
+    margin-bottom: 0 !important;
+}
+
+.enh-compact-list.artists-grid {
+    display: flex;
+    gap: 16px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 4px;
+}
+
+.enh-compact-list.artists-grid::-webkit-scrollbar {
+    height: 4px;
+}
+
+.enh-compact-list.artists-grid::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 2px;
+}
+
+.enh-compact-item.artist-card {
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    width: 170px;
+    height: 170px;
+    background: linear-gradient(135deg, #1e1e1e 0%, #2a2a2a 100%);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    flex-shrink: 0;
+    overflow: hidden;
+}
+
+.enh-compact-item.artist-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.4);
+    border-color: rgba(255, 255, 255, 0.2);
+}
+
+.enh-item-image.artist-image {
+    width: 100%;
+    height: 110px;
+    object-fit: cover;
+    border-radius: 8px 8px 0 0;
+    border: none;
+}
+
+.enh-item-image-placeholder.artist-placeholder {
+    width: 100%;
+    height: 110px;
+    background: rgba(40, 40, 40, 1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 40px;
+    border: none;
+    border-radius: 8px 8px 0 0;
+}
+
+.enh-compact-item.artist-card .enh-item-info {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 10px 12px;
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0.6) 70%, transparent 100%);
+}
+
+.enh-compact-item.artist-card .enh-item-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: #ffffff;
+    margin-bottom: 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    width: 100%;
+}
+
+.enh-compact-item.artist-card .enh-item-meta {
+    display: block;
+    font-size: 12px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.7);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.enh-compact-item.artist-card .enh-item-badge {
+    display: none;
+}
+
+
+/* ========================================= */
+/* ALBUM CARDS - Clean Grid                 */
+/* ========================================= */
+
+.enh-compact-list.albums-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+    gap: 16px;
+}
+
+.enh-compact-item.album-card {
+    display: flex;
+    flex-direction: column;
+    padding: 12px;
+    background: transparent;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.2s ease;
+    border: none;
+}
+
+.enh-compact-item.album-card:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.enh-item-image.album-cover {
+    width: 100%;
+    aspect-ratio: 1;
+    border-radius: 4px;
+    object-fit: cover;
+    margin-bottom: 12px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+.enh-item-image-placeholder.album-placeholder {
+    width: 100%;
+    aspect-ratio: 1;
+    border-radius: 4px;
+    background: rgba(40, 40, 40, 1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 56px;
+    margin-bottom: 12px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+.enh-compact-item.album-card .enh-item-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: #ffffff;
+    margin-bottom: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    line-height: 1.3;
+    max-height: 2.6em;
+}
+
+.enh-compact-item.album-card .enh-item-meta {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.6);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    line-height: 1.3;
+}
+
+/* ========================================= */
+/* TRACK ITEMS - Two Column Grid            */
+/* ========================================= */
+
+.enh-compact-list.tracks-list {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 4px 12px;
+}
+
+.enh-compact-item.track-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px;
+    background: transparent;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.2s ease;
+    border: none;
+}
+
+.enh-compact-item.track-item:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.enh-item-image.track-cover {
+    width: 48px;
+    height: 48px;
+    border-radius: 4px;
+    object-fit: cover;
+    flex-shrink: 0;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.enh-item-image-placeholder.track-placeholder {
+    width: 48px;
+    height: 48px;
+    border-radius: 4px;
+    flex-shrink: 0;
+    background: rgba(40, 40, 40, 1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.enh-item-info {
+    flex-grow: 1;
+    min-width: 0;
+}
+
+.enh-compact-item.track-item .enh-item-name {
+    font-size: 14px;
+    font-weight: 500;
+    color: #ffffff;
+    margin-bottom: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.enh-compact-item.track-item .enh-item-meta {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.6);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ========================================= */
+/* ENHANCED SEARCH CATEGORIZED RESULTS      */
+/* (OLD - REMOVE IF NOT NEEDED)             */
+/* ========================================= */
+
+/* Categorized Container */
+.enh-sr-categorized-container {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+}
+
+/* Category Section */
+.enh-sr-category-section {
+    background: rgba(30, 30, 30, 0.5);
+    border-radius: 12px;
+    padding: 20px;
+    border: 1px solid rgba(138, 43, 226, 0.2);
+}
+
+.enh-sr-category-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid rgba(138, 43, 226, 0.2);
+}
+
+.enh-sr-category-icon {
+    font-size: 20px;
+}
+
+.enh-sr-category-title {
+    flex-grow: 1;
+    font-size: 16px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.95);
+    margin: 0;
+}
+
+.enh-sr-category-count {
+    background: linear-gradient(135deg, rgba(138, 43, 226, 0.4), rgba(123, 31, 162, 0.4));
+    border: 1px solid rgba(138, 43, 226, 0.5);
+    border-radius: 12px;
+    padding: 4px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.9);
+}
+
+/* Artist Grid (for both DB and Spotify artists) */
+.enh-sr-artist-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 16px;
+}
+
+.enh-sr-artist-card {
+    background: linear-gradient(135deg, rgba(40, 40, 40, 0.8), rgba(30, 30, 30, 0.8));
+    border-radius: 12px;
+    padding: 16px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    border: 2px solid transparent;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+}
+
+.enh-sr-artist-card:hover {
+    transform: translateY(-4px);
+    border-color: rgba(138, 43, 226, 0.6);
+    box-shadow: 0 8px 24px rgba(138, 43, 226, 0.3);
+}
+
+.enh-sr-artist-image-container {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    overflow: hidden;
+    margin-bottom: 12px;
+    border: 3px solid rgba(138, 43, 226, 0.3);
+}
+
+.enh-sr-artist-image {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.enh-sr-artist-placeholder {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, rgba(138, 43, 226, 0.4), rgba(123, 31, 162, 0.4));
+    font-size: 36px;
+}
+
+.enh-sr-artist-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.95);
+    margin-bottom: 6px;
+    word-wrap: break-word;
+}
+
+.enh-sr-artist-badge {
+    font-size: 11px;
+    padding: 4px 8px;
+    border-radius: 8px;
+    font-weight: 600;
+}
+
+.enh-sr-artist-badge-library {
+    background: linear-gradient(135deg, rgba(29, 185, 84, 0.3), rgba(24, 156, 71, 0.3));
+    border: 1px solid rgba(29, 185, 84, 0.5);
+    color: rgba(29, 185, 84, 1);
+}
+
+.enh-sr-artist-badge-spotify {
+    background: linear-gradient(135deg, rgba(138, 43, 226, 0.3), rgba(123, 31, 162, 0.3));
+    border: 1px solid rgba(138, 43, 226, 0.5);
+    color: rgba(138, 43, 226, 1);
+}
+
+/* Album Grid */
+.enh-sr-album-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 16px;
+}
+
+.enh-sr-album-card {
+    background: linear-gradient(135deg, rgba(40, 40, 40, 0.8), rgba(30, 30, 30, 0.8));
+    border-radius: 12px;
+    padding: 12px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    border: 2px solid transparent;
+}
+
+.enh-sr-album-card:hover {
+    transform: translateY(-4px);
+    border-color: rgba(138, 43, 226, 0.6);
+    box-shadow: 0 8px 24px rgba(138, 43, 226, 0.3);
+}
+
+.enh-sr-album-cover {
+    width: 100%;
+    aspect-ratio: 1;
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 12px;
+    background: linear-gradient(135deg, rgba(138, 43, 226, 0.3), rgba(123, 31, 162, 0.3));
+}
+
+.enh-sr-album-cover img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.enh-sr-album-placeholder {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 48px;
+}
+
+.enh-sr-album-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.95);
+    margin-bottom: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.enh-sr-album-artist {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.6);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin-bottom: 6px;
+}
+
+.enh-sr-album-meta {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.5);
+    display: flex;
+    justify-content: space-between;
+}
+
+/* Track List */
+.enh-sr-track-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.enh-sr-track-item {
+    background: linear-gradient(135deg, rgba(40, 40, 40, 0.6), rgba(30, 30, 30, 0.6));
+    border-radius: 10px;
+    padding: 12px 16px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border: 2px solid transparent;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.enh-sr-track-item:hover {
+    border-color: rgba(138, 43, 226, 0.6);
+    background: linear-gradient(135deg, rgba(50, 50, 50, 0.8), rgba(40, 40, 40, 0.8));
+    transform: translateX(4px);
+}
+
+.enh-sr-track-cover {
+    width: 48px;
+    height: 48px;
+    border-radius: 6px;
+    overflow: hidden;
+    flex-shrink: 0;
+    background: linear-gradient(135deg, rgba(138, 43, 226, 0.3), rgba(123, 31, 162, 0.3));
+}
+
+.enh-sr-track-cover img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.enh-sr-track-placeholder {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+}
+
+.enh-sr-track-info {
+    flex-grow: 1;
+    min-width: 0;
+}
+
+.enh-sr-track-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.95);
+    margin-bottom: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.enh-sr-track-meta {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.6);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.enh-sr-track-duration {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
+    flex-shrink: 0;
+    margin-left: 12px;
+}
+
+/* ========================================= */
+/* SLSKD SEARCH RESULTS VIEW                */
+/* ========================================= */
+
+.enh-sr-slskd-view {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.enh-sr-back-btn {
+    background: rgba(40, 40, 40, 0.8);
+    border: 1px solid rgba(138, 43, 226, 0.4);
+    border-radius: 10px;
+    padding: 10px 20px;
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.2s ease;
+    align-self: flex-start;
+}
+
+.enh-sr-back-btn:hover {
+    background: rgba(50, 50, 50, 0.9);
+    border-color: rgba(138, 43, 226, 0.6);
+    transform: translateX(-4px);
+}
+
+.enh-sr-back-icon {
+    font-size: 16px;
+}
+
+.enh-sr-slskd-header {
+    background: linear-gradient(135deg, rgba(138, 43, 226, 0.15), rgba(75, 0, 130, 0.15));
+    border-radius: 12px;
+    padding: 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border: 1px solid rgba(138, 43, 226, 0.3);
+}
+
+.enh-sr-slskd-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.95);
+    margin: 0;
+}
+
+.enh-sr-slskd-badge {
+    background: linear-gradient(135deg, rgba(138, 43, 226, 0.4), rgba(123, 31, 162, 0.4));
+    border: 1px solid rgba(138, 43, 226, 0.5);
+    border-radius: 12px;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.enh-sr-slskd-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+/* Slskd Result Item (reuses download manager card styles with enh-sr prefix) */
+.enh-sr-download-card {
+    background: linear-gradient(135deg, rgba(40, 40, 40, 0.8), rgba(30, 30, 30, 0.8));
+    border-radius: 12px;
+    padding: 16px;
+    border: 2px solid rgba(138, 43, 226, 0.2);
+    transition: all 0.3s ease;
+}
+
+.enh-sr-download-card:hover {
+    border-color: rgba(138, 43, 226, 0.5);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(138, 43, 226, 0.2);
+}
+
+.enh-sr-download-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 12px;
+}
+
+.enh-sr-download-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.95);
+    margin: 0;
+    flex-grow: 1;
+}
+
+.enh-sr-download-btn {
+    background: linear-gradient(135deg, rgba(138, 43, 226, 0.8), rgba(123, 31, 162, 0.8));
+    border: none;
+    border-radius: 8px;
+    padding: 8px 16px;
+    color: #ffffff;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    margin-left: 12px;
+}
+
+.enh-sr-download-btn:hover {
+    background: linear-gradient(135deg, rgba(138, 43, 226, 1), rgba(123, 31, 162, 1));
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(138, 43, 226, 0.4);
+}
+
+.enh-sr-download-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.enh-sr-meta-badge {
+    background: rgba(50, 50, 50, 0.6);
+    border-radius: 6px;
+    padding: 4px 8px;
 }
 

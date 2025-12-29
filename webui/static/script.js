@@ -2373,30 +2373,418 @@ function initializeSearchModeToggle() {
         });
     });
 
-    // Initialize enhanced search input handlers
+    // Initialize enhanced search
     const enhancedInput = document.getElementById('enhanced-search-input');
     const enhancedSearchBtn = document.getElementById('enhanced-search-btn');
     const enhancedCancelBtn = document.getElementById('enhanced-cancel-btn');
+    const enhancedDropdown = document.getElementById('enhanced-dropdown');
+    const loadingState = document.getElementById('enhanced-loading');
+    const emptyState = document.getElementById('enhanced-empty');
+    const resultsContainer = document.getElementById('enhanced-results-container');
 
-    if (enhancedSearchBtn && enhancedInput) {
-        enhancedSearchBtn.addEventListener('click', () => {
-            console.log('Enhanced search clicked - functionality to be implemented');
-            showToast('Enhanced search coming soon!', 'info');
+    let debounceTimer = null;
+    let abortController = null;
+
+    // Live search with debouncing
+    if (enhancedInput) {
+        enhancedInput.addEventListener('input', (e) => {
+            const query = e.target.value.trim();
+
+            // Show/hide cancel button
+            if (enhancedCancelBtn) {
+                enhancedCancelBtn.classList.toggle('hidden', query.length === 0);
+            }
+
+            // Clear debounce timer
+            clearTimeout(debounceTimer);
+
+            // Hide dropdown if query too short
+            if (query.length < 2) {
+                hideDropdown();
+                return;
+            }
+
+            // Debounce search
+            debounceTimer = setTimeout(() => {
+                performEnhancedSearch(query);
+            }, 300);
         });
 
         enhancedInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
-                console.log('Enhanced search Enter pressed - functionality to be implemented');
-                showToast('Enhanced search coming soon!', 'info');
+                const query = e.target.value.trim();
+                if (query.length >= 2) {
+                    clearTimeout(debounceTimer);
+                    performEnhancedSearch(query);
+                }
+            }
+        });
+    }
+
+    if (enhancedSearchBtn) {
+        enhancedSearchBtn.addEventListener('click', () => {
+            const query = enhancedInput.value.trim();
+            if (query.length >= 2) {
+                performEnhancedSearch(query);
+            } else {
+                showToast('Please enter at least 2 characters', 'error');
             }
         });
     }
 
     if (enhancedCancelBtn) {
         enhancedCancelBtn.addEventListener('click', () => {
-            console.log('Enhanced search cancelled');
-            // Cancel logic will be added when functionality is implemented
+            enhancedInput.value = '';
+            enhancedCancelBtn.classList.add('hidden');
+            hideDropdown();
         });
+    }
+
+    // Close dropdown when clicking outside
+    document.addEventListener('click', (e) => {
+        if (enhancedDropdown && !enhancedDropdown.classList.contains('hidden')) {
+            const isClickInside = e.target.closest('.enhanced-search-input-wrapper');
+            if (!isClickInside) {
+                hideDropdown();
+            }
+        }
+    });
+
+    async function performEnhancedSearch(query) {
+        console.log('Enhanced search:', query);
+
+        // Show loading state
+        showDropdown();
+        loadingState.classList.remove('hidden');
+        emptyState.classList.add('hidden');
+        resultsContainer.classList.add('hidden');
+
+        // Abort previous request
+        if (abortController) {
+            abortController.abort();
+        }
+        abortController = new AbortController();
+
+        try {
+            const response = await fetch('/api/enhanced-search', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query }),
+                signal: abortController.signal
+            });
+
+            if (!response.ok) throw new Error('Search failed');
+
+            const data = await response.json();
+            console.log('Enhanced results:', data);
+
+            // Calculate total
+            const total = (data.db_artists?.length || 0) +
+                         (data.spotify_artists?.length || 0) +
+                         (data.spotify_albums?.length || 0) +
+                         (data.spotify_tracks?.length || 0);
+
+            // Hide loading
+            loadingState.classList.add('hidden');
+
+            if (total === 0) {
+                emptyState.classList.remove('hidden');
+            } else {
+                renderDropdownResults(data);
+                resultsContainer.classList.remove('hidden');
+            }
+
+        } catch (error) {
+            if (error.name !== 'AbortError') {
+                console.error('Enhanced search error:', error);
+                loadingState.classList.add('hidden');
+                emptyState.classList.remove('hidden');
+            }
+        }
+    }
+
+    function renderDropdownResults(data) {
+        // Render DB Artists
+        renderCompactSection(
+            'enh-db-artists-section',
+            'enh-db-artists-list',
+            'enh-db-artists-count',
+            data.db_artists || [],
+            (artist) => ({
+                image: artist.image_url,
+                placeholder: '📚',
+                name: artist.name,
+                meta: 'In Your Library',
+                badge: { text: 'Library', class: 'enh-badge-library' },
+                onClick: () => {
+                    hideDropdown();
+                    navigateToPage('library');
+                }
+            })
+        );
+
+        // Render Spotify Artists
+        renderCompactSection(
+            'enh-spotify-artists-section',
+            'enh-spotify-artists-list',
+            'enh-spotify-artists-count',
+            data.spotify_artists || [],
+            (artist) => ({
+                image: artist.image_url,
+                placeholder: '🎤',
+                name: artist.name,
+                meta: 'Artist',
+                badge: { text: 'Spotify', class: 'enh-badge-spotify' },
+                onClick: () => {
+                    hideDropdown();
+                    navigateToPage('artists');
+                    setTimeout(() => {
+                        const input = document.getElementById('artist-search-input');
+                        if (input) {
+                            input.value = artist.name;
+                            input.dispatchEvent(new Event('input', { bubbles: true }));
+                        }
+                    }, 100);
+                }
+            })
+        );
+
+        // Render Albums
+        renderCompactSection(
+            'enh-albums-section',
+            'enh-albums-list',
+            'enh-albums-count',
+            data.spotify_albums || [],
+            (album) => ({
+                image: album.image_url,
+                placeholder: '💿',
+                name: album.name,
+                meta: `${album.artist} • ${album.release_date ? album.release_date.substring(0, 4) : 'N/A'}`,
+                onClick: () => searchSlskdFor('album', album)
+            })
+        );
+
+        // Render Tracks
+        renderCompactSection(
+            'enh-tracks-section',
+            'enh-tracks-list',
+            'enh-tracks-count',
+            data.spotify_tracks || [],
+            (track) => ({
+                image: track.image_url,
+                placeholder: '🎵',
+                name: track.name,
+                meta: `${track.artist} • ${track.album}`,
+                onClick: () => searchSlskdFor('track', track)
+            })
+        );
+    }
+
+    function renderCompactSection(sectionId, listId, countId, items, mapItem) {
+        const section = document.getElementById(sectionId);
+        const list = document.getElementById(listId);
+        const count = document.getElementById(countId);
+
+        if (!list) return;
+
+        list.innerHTML = '';
+
+        if (!items || items.length === 0) {
+            section.classList.add('hidden');
+            return;
+        }
+
+        section.classList.remove('hidden');
+        count.textContent = items.length;
+
+        // Determine type based on section ID
+        const isArtist = sectionId.includes('artists');
+        const isAlbum = sectionId.includes('albums');
+        const isTrack = sectionId.includes('tracks');
+
+        // Add appropriate grid class to list
+        if (isArtist) {
+            list.classList.add('artists-grid');
+        } else if (isAlbum) {
+            list.classList.add('albums-grid');
+        } else if (isTrack) {
+            list.classList.add('tracks-list');
+        }
+
+        items.forEach(item => {
+            const config = mapItem(item);
+            const elem = document.createElement('div');
+
+            // Add appropriate card class
+            if (isArtist) {
+                elem.className = 'enh-compact-item artist-card';
+            } else if (isAlbum) {
+                elem.className = 'enh-compact-item album-card';
+            } else if (isTrack) {
+                elem.className = 'enh-compact-item track-item';
+            }
+
+            // Build image HTML with type-specific classes
+            let imageClass = 'enh-item-image';
+            let placeholderClass = 'enh-item-image-placeholder';
+
+            if (isArtist) {
+                imageClass += ' artist-image';
+                placeholderClass += ' artist-placeholder';
+            } else if (isAlbum) {
+                imageClass += ' album-cover';
+                placeholderClass += ' album-placeholder';
+            } else if (isTrack) {
+                imageClass += ' track-cover';
+                placeholderClass += ' track-placeholder';
+            }
+
+            const imageHtml = config.image
+                ? `<img src="${escapeHtml(config.image)}" class="${imageClass}" alt="${escapeHtml(config.name)}">`
+                : `<div class="${placeholderClass}">${config.placeholder}</div>`;
+
+            const badgeHtml = config.badge
+                ? `<div class="enh-item-badge ${config.badge.class}">${config.badge.text}</div>`
+                : '';
+
+            elem.innerHTML = `
+                ${imageHtml}
+                <div class="enh-item-info">
+                    <div class="enh-item-name">${escapeHtml(config.name)}</div>
+                    <div class="enh-item-meta">${escapeHtml(config.meta)}</div>
+                </div>
+                ${badgeHtml}
+            `;
+
+            elem.addEventListener('click', config.onClick);
+            list.appendChild(elem);
+        });
+    }
+
+    async function searchSlskdFor(type, item) {
+        const mainResultsArea = document.getElementById('enhanced-main-results-area');
+        if (!mainResultsArea) return;
+
+        // Show loading in main results area
+        mainResultsArea.innerHTML = `
+            <div style="text-align: center; padding: 60px 20px; color: rgba(255,255,255,0.7);">
+                <div style="width: 40px; height: 40px; margin: 0 auto 16px; border: 3px solid rgba(138,43,226,0.2); border-top-color: rgba(138,43,226,0.8); border-radius: 50%; animation: spin 1s linear infinite;"></div>
+                <p>Searching for ${type === 'album' ? 'album' : 'track'}...</p>
+            </div>
+        `;
+
+        const query = `${item.artist} ${item.name}`;
+
+        try {
+            const response = await fetch('/api/search', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query })
+            });
+
+            const data = await response.json();
+
+            if (data.error) {
+                showToast(`Search error: ${data.error}`, 'error');
+                return;
+            }
+
+            // Filter results
+            const filtered = data.results.filter(r => r.result_type === type);
+
+            // Render slskd results in main area
+            renderSlskdInMainArea(filtered, type, item);
+
+        } catch (error) {
+            console.error('Slskd search error:', error);
+            showToast('Search failed', 'error');
+            mainResultsArea.innerHTML = '<div class="search-results-placeholder"><p>Search failed. Please try again.</p></div>';
+        }
+    }
+
+    function renderSlskdInMainArea(results, type, originalItem) {
+        const mainResultsArea = document.getElementById('enhanced-main-results-area');
+        if (!mainResultsArea) return;
+
+        if (!results || results.length === 0) {
+            mainResultsArea.innerHTML = '<div class="search-results-placeholder"><p>No matches found for this ' + type + '.</p></div>';
+            return;
+        }
+
+        // Render results using same style as basic search
+        mainResultsArea.innerHTML = results.map(result => {
+            const title = type === 'album'
+                ? `${result.album_title} (${result.tracks ? result.tracks.length : 0} tracks)`
+                : result.title;
+
+            return `
+                <div class="result-card">
+                    <div class="result-card-header">
+                        <h4 class="result-title">${escapeHtml(title)}</h4>
+                        <button class="download-result-btn" data-result='${JSON.stringify(result).replace(/'/g, "&#39;")}' data-type="${type}">
+                            💾 Download
+                        </button>
+                    </div>
+                    <div class="result-meta">
+                        ${result.bitrate ? `<span class="meta-badge">${result.bitrate} kbps</span>` : ''}
+                        ${result.format ? `<span class="meta-badge">${result.format.toUpperCase()}</span>` : ''}
+                        ${result.size ? `<span class="meta-badge">${(result.size / 1024 / 1024).toFixed(1)} MB</span>` : ''}
+                        ${result.username ? `<span class="meta-badge">👤 ${escapeHtml(result.username)}</span>` : ''}
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        // Attach download handlers
+        mainResultsArea.querySelectorAll('.download-result-btn').forEach(btn => {
+            btn.addEventListener('click', async function() {
+                const result = JSON.parse(this.dataset.result);
+                const type = this.dataset.type;
+
+                this.disabled = true;
+                this.textContent = 'Downloading...';
+
+                try {
+                    const downloadData = type === 'album'
+                        ? { result_type: 'album', tracks: result.tracks || [] }
+                        : { result_type: 'track', username: result.username, filename: result.filename, size: result.size };
+
+                    const response = await fetch('/api/download', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(downloadData)
+                    });
+
+                    const data = await response.json();
+
+                    if (data.error) {
+                        showToast(`Download error: ${data.error}`, 'error');
+                        this.disabled = false;
+                        this.innerHTML = '💾 Download';
+                    } else {
+                        showToast('Download started!', 'success');
+                        this.innerHTML = '✅ Added';
+                    }
+                } catch (error) {
+                    console.error('Download error:', error);
+                    showToast('Download failed', 'error');
+                    this.disabled = false;
+                    this.innerHTML = '💾 Download';
+                }
+            });
+        });
+    }
+
+    function showDropdown() {
+        if (enhancedDropdown) {
+            enhancedDropdown.classList.remove('hidden');
+        }
+    }
+
+    function hideDropdown() {
+        if (enhancedDropdown) {
+            enhancedDropdown.classList.add('hidden');
+        }
     }
 }
 
