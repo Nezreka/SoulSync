@@ -3293,7 +3293,7 @@ def enhanced_search():
                 })
 
             # Search for tracks
-            track_objs = spotify_client.search_tracks(query, limit=10)
+            track_objs = spotify_client.search_tracks(query, limit=20)
             for track in track_objs:
                 # Track has 'artists' (list), convert to string
                 artist_name = ', '.join(track.artists) if track.artists else 'Unknown Artist'
