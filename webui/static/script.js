@@ -2563,7 +2563,7 @@ function initializeSearchModeToggle() {
                 placeholder: '💿',
                 name: album.name,
                 meta: `${album.artist} • ${album.release_date ? album.release_date.substring(0, 4) : 'N/A'}`,
-                onClick: () => searchSlskdFor('album', album)
+                onClick: () => handleEnhancedSearchAlbumClick(album)
             })
         );
 
@@ -2573,14 +2573,26 @@ function initializeSearchModeToggle() {
             'enh-tracks-list',
             'enh-tracks-count',
             data.spotify_tracks || [],
-            (track) => ({
-                image: track.image_url,
-                placeholder: '🎵',
-                name: track.name,
-                meta: `${track.artist} • ${track.album}`,
-                onClick: () => searchSlskdFor('track', track)
-            })
+            (track) => {
+                const duration = formatDuration(track.duration_ms);
+                return {
+                    image: track.image_url,
+                    placeholder: '🎵',
+                    name: track.name,
+                    meta: `${track.artist} • ${track.album}`,
+                    duration: duration,
+                    onClick: () => searchSlskdFor('track', track)
+                };
+            }
         );
+    }
+
+    function formatDuration(durationMs) {
+        if (!durationMs) return '';
+        const totalSeconds = Math.floor(durationMs / 1000);
+        const minutes = Math.floor(totalSeconds / 60);
+        const seconds = totalSeconds % 60;
+        return `${minutes}:${seconds.toString().padStart(2, '0')}`;
     }
 
     function renderCompactSection(sectionId, listId, countId, items, mapItem) {
@@ -2650,18 +2662,119 @@ function initializeSearchModeToggle() {
                 ? `<div class="enh-item-badge ${config.badge.class}">${config.badge.text}</div>`
                 : '';
 
+            const durationHtml = config.duration && isTrack
+                ? `<div class="enh-item-duration">${escapeHtml(config.duration)}</div>`
+                : '';
+
             elem.innerHTML = `
                 ${imageHtml}
                 <div class="enh-item-info">
                     <div class="enh-item-name">${escapeHtml(config.name)}</div>
                     <div class="enh-item-meta">${escapeHtml(config.meta)}</div>
                 </div>
+                ${durationHtml}
                 ${badgeHtml}
             `;
 
             elem.addEventListener('click', config.onClick);
             list.appendChild(elem);
         });
+    }
+
+    async function handleEnhancedSearchAlbumClick(album) {
+        console.log(`💿 Enhanced search album clicked: ${album.name} by ${album.artist}`);
+
+        hideDropdown();
+        showLoadingOverlay('Loading album...');
+
+        try {
+            // Fetch full album data with tracks from Spotify
+            const response = await fetch(`/api/spotify/album/${album.id}`);
+
+            if (!response.ok) {
+                if (response.status === 401) {
+                    throw new Error('Spotify not authenticated. Please check your API settings.');
+                }
+                throw new Error(`Failed to load album: ${response.status}`);
+            }
+
+            const albumData = await response.json();
+
+            if (!albumData || !albumData.tracks || albumData.tracks.length === 0) {
+                throw new Error('No tracks found for this album');
+            }
+
+            console.log(`✅ Loaded ${albumData.tracks.length} tracks for ${albumData.name}`);
+
+            // Create virtual playlist ID for enhanced search albums
+            const virtualPlaylistId = `enhanced_search_album_${album.id}`;
+
+            // Check if modal already exists and show it
+            if (activeDownloadProcesses[virtualPlaylistId]) {
+                console.log(`📱 Reopening existing modal for ${album.name}`);
+                const process = activeDownloadProcesses[virtualPlaylistId];
+                if (process.modalElement) {
+                    if (process.status === 'complete') {
+                        showToast('Showing previous results. Close this modal to start a new analysis.', 'info');
+                    }
+                    process.modalElement.style.display = 'flex';
+                    hideLoadingOverlay();
+                    return;
+                }
+            }
+
+            // Enrich each track with full album object (needed for wishlist functionality)
+            const enrichedTracks = albumData.tracks.map(track => ({
+                ...track,
+                album: {
+                    name: albumData.name,
+                    id: albumData.id,
+                    album_type: albumData.album_type || 'album',
+                    images: albumData.images || [],
+                    release_date: albumData.release_date,
+                    total_tracks: albumData.total_tracks
+                }
+            }));
+
+            console.log(`📦 Enriched ${enrichedTracks.length} tracks with album metadata`);
+
+            // Format playlist name
+            const playlistName = `[${album.artist}] ${albumData.name}`;
+
+            // Create minimal artist object for the modal
+            const artistObject = {
+                id: null, // No artist ID from enhanced search
+                name: album.artist
+            };
+
+            // Prepare full album object for modal
+            const fullAlbumObject = {
+                name: albumData.name,
+                id: albumData.id,
+                album_type: albumData.album_type || 'album',
+                images: albumData.images || [],
+                release_date: albumData.release_date,
+                total_tracks: albumData.total_tracks,
+                artists: albumData.artists || [{ name: album.artist }]
+            };
+
+            // Open download missing tracks modal
+            await openDownloadMissingModalForArtistAlbum(
+                virtualPlaylistId,
+                playlistName,
+                enrichedTracks,
+                fullAlbumObject,
+                artistObject,
+                false // Don't show loading overlay, we already have one
+            );
+
+            hideLoadingOverlay();
+
+        } catch (error) {
+            hideLoadingOverlay();
+            console.error('❌ Error handling enhanced search album click:', error);
+            showToast(`Error opening album: ${error.message}`, 'error');
+        }
     }
 
     async function searchSlskdFor(type, item) {
