@@ -1176,8 +1176,25 @@
                             <p class="downloads-subtitle">Search, discover, and download high-quality music</p>
                         </div>
 
-                        <!-- Search Bar: Replicates create_elegant_search_bar() -->
-                        <div class="search-bar-container">
+                        <!-- Search Mode Toggle -->
+                        <div class="search-mode-toggle-container">
+                            <div class="search-mode-toggle">
+                                <button class="search-mode-btn active" data-mode="basic">
+                                    <span class="mode-icon">🔍</span>
+                                    <span class="mode-label">Basic Search</span>
+                                </button>
+                                <button class="search-mode-btn" data-mode="enhanced">
+                                    <span class="mode-icon">✨</span>
+                                    <span class="mode-label">Enhanced Search</span>
+                                </button>
+                                <div class="toggle-slider"></div>
+                            </div>
+                        </div>
+
+                        <!-- Basic Search Section (Current) -->
+                        <div id="basic-search-section" class="search-section active">
+                            <!-- Search Bar: Replicates create_elegant_search_bar() -->
+                            <div class="search-bar-container">
                             <input type="text" id="downloads-search-input" placeholder="Search for music... (e.g., 'Virtual Mage', 'Queen Bohemian Rhapsody')">
                             <button id="downloads-cancel-btn" class="hidden">✕ Cancel</button>
                             <button id="downloads-search-btn">🔍 Search</button>
@@ -1251,6 +1268,46 @@
                                 </div>
                             </div>
                         </div>
+                        </div>
+                        <!-- End Basic Search Section -->
+
+                        <!-- Enhanced Search Section (New) -->
+                        <div id="enhanced-search-section" class="search-section">
+                            <!-- Enhanced Search Bar -->
+                            <div class="enhanced-search-bar-container">
+                                <div class="enhanced-search-wrapper">
+                                    <div class="enhanced-search-icon">✨</div>
+                                    <input type="text" id="enhanced-search-input" placeholder="Enter artist, album, or track name for intelligent search...">
+                                    <button id="enhanced-cancel-btn" class="enhanced-cancel-btn hidden">✕</button>
+                                </div>
+                                <button id="enhanced-search-btn" class="enhanced-search-btn">
+                                    <span class="btn-icon">🔍</span>
+                                    <span class="btn-text">Search</span>
+                                </button>
+                            </div>
+
+                            <!-- Enhanced Search Status -->
+                            <div class="enhanced-search-status">
+                                <div class="enhanced-status-indicator"></div>
+                                <p id="enhanced-search-status-text">Ready • Enhanced search provides intelligent filtering and ranking</p>
+                            </div>
+
+                            <!-- Enhanced Search Results -->
+                            <div class="enhanced-search-results-container">
+                                <div class="enhanced-results-header">
+                                    <h3>Enhanced Results</h3>
+                                    <div class="results-count-badge" id="enhanced-results-count">0 results</div>
+                                </div>
+                                <div class="enhanced-results-scroll-area" id="enhanced-search-results-area">
+                                    <div class="enhanced-results-placeholder">
+                                        <div class="placeholder-icon">✨</div>
+                                        <p class="placeholder-title">Enhanced Search Ready</p>
+                                        <p class="placeholder-subtitle">Intelligent filtering • Smart ranking • Better results</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- End Enhanced Search Section -->
                     </div>
 
                     <!-- ======================================================= -->
