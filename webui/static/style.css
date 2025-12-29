@@ -19485,6 +19485,14 @@ body {
     white-space: nowrap;
 }
 
+.enh-item-duration {
+    font-size: 13px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.5);
+    flex-shrink: 0;
+    margin-left: 8px;
+}
+
 /* ========================================= */
 /* ENHANCED SEARCH CATEGORIZED RESULTS      */
 /* (OLD - REMOVE IF NOT NEEDED)             */
