@@ -3476,10 +3476,39 @@ def get_download_status():
                                         print(f"🎯 Found completed matched file on disk: {found_path}")
                                         completed_matched_downloads.append((context_key, context, found_path))
                                         # Don't add to _processed_download_ids yet - wait until thread starts successfully
+
+                                        # Clean up retry tracking if file was found after retries
+                                        with _download_retry_lock:
+                                            if context_key in _download_retry_attempts:
+                                                retry_count = _download_retry_attempts[context_key]['count']
+                                                elapsed = time.time() - _download_retry_attempts[context_key]['first_attempt']
+                                                print(f"✅ File found after {retry_count} retry attempt(s) ({elapsed:.1f}s): {os.path.basename(filename_from_api)}")
+                                                del _download_retry_attempts[context_key]
                                     else:
-                                        print(f"❌ CRITICAL: Could not find '{os.path.basename(filename_from_api)}' on disk. Post-processing skipped.")
-                                        # Mark as processed to prevent endless retries
-                                        _processed_download_ids.add(context_key)
+                                        # File not found yet - implement retry logic instead of immediate give-up
+                                        # This fixes race condition where slskd reports completion before file is written to disk
+                                        with _download_retry_lock:
+                                            if context_key not in _download_retry_attempts:
+                                                # First retry attempt
+                                                _download_retry_attempts[context_key] = {
+                                                    'count': 1,
+                                                    'first_attempt': time.time()
+                                                }
+                                                print(f"⏳ File not found yet: '{os.path.basename(filename_from_api)}' - Will retry (attempt 1/{_download_retry_max})")
+                                            else:
+                                                # Increment retry count
+                                                _download_retry_attempts[context_key]['count'] += 1
+                                                retry_count = _download_retry_attempts[context_key]['count']
+                                                elapsed = time.time() - _download_retry_attempts[context_key]['first_attempt']
+
+                                                if retry_count >= _download_retry_max:
+                                                    # Max retries reached, give up
+                                                    print(f"❌ CRITICAL: Could not find '{os.path.basename(filename_from_api)}' after {retry_count} attempts over {elapsed:.1f}s. Giving up.")
+                                                    _processed_download_ids.add(context_key)
+                                                    # Clean up retry tracking
+                                                    del _download_retry_attempts[context_key]
+                                                else:
+                                                    print(f"⏳ File not found yet: '{os.path.basename(filename_from_api)}' - Will retry (attempt {retry_count}/{_download_retry_max}, elapsed: {elapsed:.1f}s)")
 
         # If we found completed matched downloads, start processing them in background threads
         if completed_matched_downloads:
@@ -7747,6 +7776,13 @@ def _post_process_matched_download(context_key, context, file_path):
 # Keep track of processed downloads to avoid re-processing
 _processed_download_ids = set()
 
+# --- File Discovery Retry System ---
+# Prevents race condition where slskd reports completion before file is written to disk
+# Tracks retry attempts per download to give files time to finish writing
+_download_retry_attempts = {}  # {context_key: {'count': N, 'first_attempt': timestamp}}
+_download_retry_max = 10  # Max retries before giving up (10 seconds with 1s poll interval)
+_download_retry_lock = threading.Lock()
+
 def _check_and_remove_from_wishlist(context):
     """
     Check if a successfully downloaded track should be removed from wishlist.
@@ -8057,7 +8093,19 @@ def _simple_monitor_task():
                 # Use app_context to safely call endpoint logic from a thread
                 with app.app_context():
                     get_download_status()
-            
+
+            # Cleanup stale retry attempts (older than 60 seconds)
+            # This prevents memory leaks from stuck/failed downloads
+            with _download_retry_lock:
+                current_time = time.time()
+                stale_keys = [
+                    key for key, data in _download_retry_attempts.items()
+                    if current_time - data['first_attempt'] > 60
+                ]
+                for key in stale_keys:
+                    print(f"🧹 Cleaning up stale retry attempt: {key}")
+                    del _download_retry_attempts[key]
+
             # Automatic search cleanup every hour (or initial cleanup)
             current_time = time.time()
             should_cleanup = (current_time - last_search_cleanup > search_cleanup_interval) or not initial_cleanup_done

@@ -431,6 +431,7 @@ async function loadPageData(pageId) {
                 break;
             case 'downloads':
                 initializeSearch();
+                initializeSearchModeToggle();
                 initializeFilters();
                 await loadDownloadsData();
                 break;
@@ -2329,6 +2330,72 @@ function initializeSearch() {
                 searchAbortController.abort(); // This cancels the fetch request
                 console.log("Search cancelled by user.");
             }
+        });
+    }
+}
+
+// ===============================
+// SEARCH MODE TOGGLE
+// ===============================
+
+function initializeSearchModeToggle() {
+    const toggleContainer = document.querySelector('.search-mode-toggle');
+    const modeBtns = document.querySelectorAll('.search-mode-btn');
+    const basicSection = document.getElementById('basic-search-section');
+    const enhancedSection = document.getElementById('enhanced-search-section');
+
+    if (!toggleContainer || !modeBtns.length || !basicSection || !enhancedSection) {
+        console.warn('Search mode toggle elements not found');
+        return;
+    }
+
+    modeBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const mode = btn.dataset.mode;
+
+            // Update button active states
+            modeBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+
+            // Update toggle slider position
+            toggleContainer.setAttribute('data-active', mode);
+
+            // Toggle sections
+            if (mode === 'basic') {
+                basicSection.classList.add('active');
+                enhancedSection.classList.remove('active');
+                console.log('Switched to basic search mode');
+            } else {
+                basicSection.classList.remove('active');
+                enhancedSection.classList.add('active');
+                console.log('Switched to enhanced search mode');
+            }
+        });
+    });
+
+    // Initialize enhanced search input handlers
+    const enhancedInput = document.getElementById('enhanced-search-input');
+    const enhancedSearchBtn = document.getElementById('enhanced-search-btn');
+    const enhancedCancelBtn = document.getElementById('enhanced-cancel-btn');
+
+    if (enhancedSearchBtn && enhancedInput) {
+        enhancedSearchBtn.addEventListener('click', () => {
+            console.log('Enhanced search clicked - functionality to be implemented');
+            showToast('Enhanced search coming soon!', 'info');
+        });
+
+        enhancedInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                console.log('Enhanced search Enter pressed - functionality to be implemented');
+                showToast('Enhanced search coming soon!', 'info');
+            }
+        });
+    }
+
+    if (enhancedCancelBtn) {
+        enhancedCancelBtn.addEventListener('click', () => {
+            console.log('Enhanced search cancelled');
+            // Cancel logic will be added when functionality is implemented
         });
     }
 }
