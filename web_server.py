@@ -15909,6 +15909,197 @@ def hydrate_artist_bubbles():
             'error': str(e)
         }), 500
 
+# --- Search Bubble Snapshot System ---
+
+@app.route('/api/search_bubbles/snapshot', methods=['POST'])
+def save_search_bubble_snapshot():
+    """
+    Saves a snapshot of current search bubble state for persistence across page refreshes.
+    """
+    try:
+        import os
+        import json
+        from datetime import datetime
+
+        data = request.json
+        if not data or 'bubbles' not in data:
+            return jsonify({'success': False, 'error': 'No bubble data provided'}), 400
+
+        bubbles = data['bubbles']
+
+        # Create snapshot with timestamp
+        snapshot = {
+            'bubbles': bubbles,
+            'timestamp': datetime.now().isoformat(),
+            'snapshot_id': datetime.now().strftime('%Y%m%d_%H%M%S')
+        }
+
+        # Save to file
+        snapshot_file = os.path.join(os.path.dirname(__file__), 'search_bubble_snapshots.json')
+        with open(snapshot_file, 'w') as f:
+            json.dump(snapshot, f, indent=2)
+
+        bubble_count = len(bubbles)
+        print(f"📸 Saved search bubble snapshot: {bubble_count} albums/tracks")
+
+        return jsonify({
+            'success': True,
+            'message': f'Snapshot saved with {bubble_count} search bubbles',
+            'timestamp': snapshot['timestamp']
+        })
+
+    except Exception as e:
+        print(f"❌ Error saving search bubble snapshot: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/search_bubbles/hydrate', methods=['GET'])
+def hydrate_search_bubbles():
+    """
+    Loads search bubbles with live status by cross-referencing snapshots with active processes.
+    """
+    try:
+        import os
+        import json
+        from datetime import datetime, timedelta
+
+        snapshot_file = os.path.join(os.path.dirname(__file__), 'search_bubble_snapshots.json')
+
+        # Load snapshot if it exists
+        if not os.path.exists(snapshot_file):
+            return jsonify({
+                'success': True,
+                'bubbles': {},
+                'message': 'No snapshots found'
+            })
+
+        with open(snapshot_file, 'r') as f:
+            snapshot_data = json.load(f)
+
+        saved_bubbles = snapshot_data.get('bubbles', {})
+        snapshot_time = snapshot_data.get('timestamp', '')
+
+        # Clean up old snapshots (older than 48 hours)
+        try:
+            if snapshot_time:
+                snapshot_dt = datetime.fromisoformat(snapshot_time.replace('Z', '+00:00'))
+                cutoff = datetime.now() - timedelta(hours=48)
+                if snapshot_dt < cutoff:
+                    print(f"🧹 Cleaning up old search snapshot from {snapshot_time}")
+                    os.remove(snapshot_file)
+                    return jsonify({
+                        'success': True,
+                        'bubbles': {},
+                        'message': 'Old snapshot cleaned up'
+                    })
+        except (ValueError, OSError) as e:
+            print(f"⚠️ Error checking snapshot age: {e}")
+
+        # Get current active download processes for live status
+        current_processes = {}
+        try:
+            with tasks_lock:
+                for batch_id, batch_data in download_batches.items():
+                    if batch_data.get('phase') not in ['complete', 'error', 'cancelled']:
+                        playlist_id = batch_data.get('playlist_id')
+                        if playlist_id:
+                            current_processes[playlist_id] = {
+                                'status': 'in_progress' if batch_data.get('phase') == 'downloading' else 'analyzing',
+                                'batch_id': batch_id,
+                                'phase': batch_data.get('phase')
+                            }
+        except Exception as e:
+            print(f"⚠️ Error fetching active processes for hydration: {e}")
+
+        # If no active processes exist, the app likely restarted - clean up snapshots
+        if not current_processes:
+            print(f"🧹 No active processes found - app likely restarted, cleaning up search snapshot")
+            try:
+                os.remove(snapshot_file)
+                return jsonify({
+                    'success': True,
+                    'bubbles': {},
+                    'message': 'Snapshot cleaned up after app restart'
+                })
+            except OSError as e:
+                print(f"⚠️ Error removing snapshot file: {e}")
+
+            return jsonify({
+                'success': True,
+                'bubbles': {},
+                'message': 'No active processes - returning empty bubbles'
+            })
+
+        # Update bubble statuses with live data (artist-grouped structure)
+        hydrated_bubbles = {}
+        for artist_name, bubble_data in saved_bubbles.items():
+            hydrated_bubble = {
+                'artist': bubble_data['artist'],
+                'downloads': []
+            }
+
+            for download in bubble_data.get('downloads', []):
+                virtual_playlist_id = download['virtualPlaylistId']
+
+                # Determine current live status
+                if virtual_playlist_id in current_processes:
+                    process_info = current_processes[virtual_playlist_id]
+                    live_status = 'in_progress'
+                    print(f"🔄 Found active process for {download['item']['name']}: {process_info['phase']}")
+                else:
+                    # No active process - likely completed
+                    live_status = 'view_results'
+                    print(f"✅ No active process for {download['item']['name']} - marking as completed")
+
+                # Create updated download entry
+                updated_download = {
+                    'virtualPlaylistId': virtual_playlist_id,
+                    'item': download['item'],
+                    'type': download.get('type', 'album'),
+                    'status': live_status,
+                    'startTime': download.get('startTime', datetime.now().isoformat())
+                }
+
+                hydrated_bubble['downloads'].append(updated_download)
+
+            # Only include artists that still have downloads
+            if hydrated_bubble['downloads']:
+                hydrated_bubbles[artist_name] = hydrated_bubble
+
+        bubble_count = len(hydrated_bubbles)
+        active_count = sum(1 for bubble in hydrated_bubbles.values()
+                          for download in bubble['downloads']
+                          if download['status'] == 'in_progress')
+        completed_count = sum(1 for bubble in hydrated_bubbles.values()
+                             for download in bubble['downloads']
+                             if download['status'] == 'view_results')
+
+        print(f"🔄 Hydrated {bubble_count} search bubbles (artists): {active_count} active, {completed_count} completed")
+
+        return jsonify({
+            'success': True,
+            'bubbles': hydrated_bubbles,
+            'stats': {
+                'total_items': bubble_count,
+                'active_downloads': active_count,
+                'completed_downloads': completed_count,
+                'snapshot_time': snapshot_time
+            }
+        })
+
+    except Exception as e:
+        print(f"❌ Error hydrating search bubbles: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 # --- Watchlist API Endpoints ---
 
 @app.route('/api/watchlist/count', methods=['GET'])

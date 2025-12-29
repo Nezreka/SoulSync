@@ -81,6 +81,10 @@ let artistsPageState = {
 let artistDownloadBubbles = {}; // Track artist download bubbles: artistId -> { artist, downloads: [], element }
 let artistDownloadModalOpen = false; // Track if artist download modal is open
 let downloadsUpdateTimeout = null; // Debounce downloads section updates
+
+// --- Search Downloads Management State ---
+let searchDownloadBubbles = {}; // Track search download bubbles: artistName -> { artist, downloads: [] }
+let searchDownloadModalOpen = false; // Track if search download modal is open
 let artistsSearchTimeout = null;
 let artistsSearchController = null;
 let artistCompletionController = null; // Track ongoing completion check to cancel when navigating away
@@ -2581,7 +2585,7 @@ function initializeSearchModeToggle() {
                     name: track.name,
                     meta: `${track.artist} • ${track.album}`,
                     duration: duration,
-                    onClick: () => searchSlskdFor('track', track)
+                    onClick: () => handleEnhancedSearchTrackClick(track)
                 };
             }
         );
@@ -2768,12 +2772,125 @@ function initializeSearchModeToggle() {
                 false // Don't show loading overlay, we already have one
             );
 
+            // Register this download in search bubbles
+            registerSearchDownload(
+                {
+                    id: album.id,
+                    name: albumData.name,
+                    artist: album.artist,
+                    image_url: albumData.images?.[0]?.url || null,
+                    images: albumData.images || []
+                },
+                'album',
+                virtualPlaylistId,
+                album.artist // artistName for grouping
+            );
+
             hideLoadingOverlay();
 
         } catch (error) {
             hideLoadingOverlay();
             console.error('❌ Error handling enhanced search album click:', error);
             showToast(`Error opening album: ${error.message}`, 'error');
+        }
+    }
+
+    async function handleEnhancedSearchTrackClick(track) {
+        console.log(`🎵 Enhanced search track clicked: ${track.name} by ${track.artist}`);
+
+        hideDropdown();
+        showLoadingOverlay('Loading track...');
+
+        try {
+            // Create virtual playlist ID for enhanced search tracks
+            const virtualPlaylistId = `enhanced_search_track_${track.id}`;
+
+            // Check if modal already exists and show it
+            if (activeDownloadProcesses[virtualPlaylistId]) {
+                console.log(`📱 Reopening existing modal for ${track.name}`);
+                const process = activeDownloadProcesses[virtualPlaylistId];
+                if (process.modalElement) {
+                    if (process.status === 'complete') {
+                        showToast('Showing previous results. Close this modal to start a new analysis.', 'info');
+                    }
+                    process.modalElement.style.display = 'flex';
+                    hideLoadingOverlay();
+                    return;
+                }
+            }
+
+            // Enrich track with album object (needed for wishlist functionality)
+            const enrichedTrack = {
+                id: track.id,
+                name: track.name,
+                artists: [track.artist], // Convert string to array for modal compatibility
+                album: {
+                    name: track.album,
+                    id: null,
+                    album_type: 'single',
+                    images: track.image_url ? [{ url: track.image_url }] : [],
+                    release_date: null,
+                    total_tracks: 1
+                },
+                duration_ms: track.duration_ms,
+                popularity: track.popularity || 0,
+                preview_url: track.preview_url || null,
+                external_urls: track.external_urls || null,
+                image_url: track.image_url
+            };
+
+            console.log(`📦 Enriched track with album metadata`);
+
+            // Format playlist name
+            const playlistName = `${track.artist} - ${track.name}`;
+
+            // Create minimal artist object for the modal
+            const artistObject = {
+                id: null,
+                name: track.artist
+            };
+
+            // Prepare album object for modal (single track)
+            const albumObject = {
+                name: track.album,
+                id: null,
+                album_type: 'single',
+                images: track.image_url ? [{ url: track.image_url }] : [],
+                release_date: null,
+                total_tracks: 1,
+                artists: [{ name: track.artist }]
+            };
+
+            // Open download missing tracks modal with single track
+            await openDownloadMissingModalForArtistAlbum(
+                virtualPlaylistId,
+                playlistName,
+                [enrichedTrack], // Array with single track
+                albumObject,
+                artistObject,
+                false
+            );
+
+            // Register this download in search bubbles
+            registerSearchDownload(
+                {
+                    id: track.id,
+                    name: track.name,
+                    artist: track.artist,
+                    image_url: track.image_url,
+                    images: track.image_url ? [{ url: track.image_url }] : []
+                },
+                'track',
+                virtualPlaylistId,
+                track.artist // artistName for grouping
+            );
+
+            hideLoadingOverlay();
+
+        } catch (error) {
+            hideLoadingOverlay();
+            console.error('❌ Error handling enhanced search track click:', error);
+            showToast(`Error opening track: ${error.message}`, 'error');
         }
     }
 
@@ -3027,6 +3144,9 @@ async function loadInitialData() {
     try {
         // Load artist bubble state first
         await hydrateArtistBubblesFromSnapshot();
+
+        // Load search bubble state
+        await hydrateSearchBubblesFromSnapshot();
 
         // Load discover download state
         await hydrateDiscoverDownloadsFromSnapshot();
@@ -3372,6 +3492,154 @@ async function rehydrateDiscoverPlaylistModal(virtualPlaylistId, playlistName, b
     }
 }
 
+async function rehydrateEnhancedSearchModal(virtualPlaylistId, playlistName, batchId) {
+    /**
+     * Rehydrates an enhanced search download modal from backend process data.
+     * Fetches item data from searchDownloadBubbles and recreates the modal.
+     */
+    try {
+        console.log(`💧 Rehydrating enhanced search modal: ${virtualPlaylistId} (${playlistName})`);
+
+        // Find the download in searchDownloadBubbles
+        let downloadData = null;
+        for (const artistName in searchDownloadBubbles) {
+            const bubble = searchDownloadBubbles[artistName];
+            const download = bubble.downloads.find(d => d.virtualPlaylistId === virtualPlaylistId);
+            if (download) {
+                downloadData = download;
+                break;
+            }
+        }
+
+        if (!downloadData) {
+            console.warn(`⚠️ No download data found in searchDownloadBubbles for ${virtualPlaylistId}`);
+            return;
+        }
+
+        const { item, type } = downloadData;
+
+        if (type === 'album') {
+            // For albums, fetch tracks from Spotify API
+            console.log(`💧 Album download - fetching album ${item.id}...`);
+
+            try {
+                const response = await fetch(`/api/spotify/album/${item.id}`);
+                if (!response.ok) {
+                    console.error(`❌ Failed to fetch album: ${response.status}`);
+                    return;
+                }
+
+                const albumData = await response.json();
+                if (!albumData.tracks || albumData.tracks.length === 0) {
+                    console.error(`❌ No tracks in album`);
+                    return;
+                }
+
+                const spotifyTracks = albumData.tracks.map(track => ({
+                    id: track.id,
+                    name: track.name,
+                    artists: track.artists || [{ name: item.artists?.[0]?.name || item.artist || 'Unknown Artist' }],
+                    album: {
+                        name: item.name,
+                        images: item.image_url ? [{ url: item.image_url }] : []
+                    },
+                    duration_ms: track.duration_ms || 0
+                }));
+
+                console.log(`✅ Retrieved ${spotifyTracks.length} tracks for album`);
+
+                // Create modal
+                await openDownloadMissingModalForArtistAlbum(
+                    virtualPlaylistId,
+                    item.name,
+                    spotifyTracks,
+                    item,
+                    { name: item.artists?.[0]?.name || item.artist || 'Unknown Artist' },
+                    false // Don't show loading overlay
+                );
+
+                // Update process
+                const process = activeDownloadProcesses[virtualPlaylistId];
+                if (process) {
+                    process.status = 'running';
+                    process.batchId = batchId;
+
+                    const beginBtn = document.getElementById(`begin-analysis-btn-${virtualPlaylistId}`);
+                    const cancelBtn = document.getElementById(`cancel-all-btn-${virtualPlaylistId}`);
+                    if (beginBtn) beginBtn.style.display = 'none';
+                    if (cancelBtn) cancelBtn.style.display = 'inline-block';
+
+                    // Hide modal for background rehydration
+                    if (process.modalElement) {
+                        process.modalElement.style.display = 'none';
+                        console.log(`🔍 Hiding rehydrated modal for background processing: ${playlistName}`);
+                    }
+
+                    // Start polling for live updates
+                    startModalDownloadPolling(virtualPlaylistId);
+
+                    console.log(`✅ Rehydrated enhanced search album modal: ${playlistName}`);
+                } else {
+                    console.error(`❌ Failed to find rehydrated process for ${virtualPlaylistId}`);
+                }
+
+            } catch (error) {
+                console.error(`❌ Error fetching album:`, error);
+            }
+
+        } else {
+            // For tracks, create enriched track and open modal
+            console.log(`💧 Track download - creating modal for ${item.name}...`);
+
+            const enrichedTrack = {
+                id: item.id,
+                name: item.name,
+                artists: item.artists || [{ name: item.artist || 'Unknown Artist' }],
+                album: item.album || {
+                    name: item.album?.name || 'Unknown Album',
+                    images: item.image_url ? [{ url: item.image_url }] : []
+                },
+                duration_ms: item.duration_ms || 0
+            };
+
+            // Create modal
+            await openDownloadMissingModalForYouTube(
+                virtualPlaylistId,
+                `${enrichedTrack.name} - ${enrichedTrack.artists[0].name || enrichedTrack.artists[0]}`,
+                [enrichedTrack]
+            );
+
+            // Update process
+            const process = activeDownloadProcesses[virtualPlaylistId];
+            if (process) {
+                process.status = 'running';
+                process.batchId = batchId;
+
+                const beginBtn = document.getElementById(`begin-analysis-btn-${virtualPlaylistId}`);
+                const cancelBtn = document.getElementById(`cancel-all-btn-${virtualPlaylistId}`);
+                if (beginBtn) beginBtn.style.display = 'none';
+                if (cancelBtn) cancelBtn.style.display = 'inline-block';
+
+                // Hide modal for background rehydration
+                if (process.modalElement) {
+                    process.modalElement.style.display = 'none';
+                    console.log(`🔍 Hiding rehydrated modal for background processing: ${playlistName}`);
+                }
+
+                // Start polling for live updates
+                startModalDownloadPolling(virtualPlaylistId);
+
+                console.log(`✅ Rehydrated enhanced search track modal: ${playlistName}`);
+            } else {
+                console.error(`❌ Failed to find rehydrated process for ${virtualPlaylistId}`);
+            }
+        }
+
+    } catch (error) {
+        console.error(`❌ Error rehydrating enhanced search modal:`, error);
+    }
+}
+
 async function rehydrateModal(processInfo, userRequested = false) {
     const { playlist_id, playlist_name, batch_id, current_cycle } = processInfo;
     console.log(`💧 Rehydrating modal for "${playlist_name}" (batch: ${batch_id}) - User requested: ${userRequested}`);
@@ -3399,6 +3667,13 @@ async function rehydrateModal(processInfo, userRequested = false) {
     if (playlist_id.startsWith('discover_')) {
         console.log(`💧 Rehydrating discover playlist: ${playlist_id}`);
         await rehydrateDiscoverPlaylistModal(playlist_id, playlist_name, batch_id);
+        return;
+    }
+
+    // Handle enhanced search virtual playlists (albums and tracks)
+    if (playlist_id.startsWith('enhanced_search_album_') || playlist_id.startsWith('enhanced_search_track_')) {
+        console.log(`💧 Rehydrating enhanced search virtual playlist: ${playlist_id}`);
+        await rehydrateEnhancedSearchModal(playlist_id, playlist_name, batch_id);
         return;
     }
 
@@ -5594,6 +5869,13 @@ async function closeDownloadMissingModal(playlistId) {
             console.log(`🧹 [MODAL CLOSE] Cleaning up artist download for completed modal: ${playlistId}`);
             cleanupArtistDownload(playlistId);
             console.log(`✅ [MODAL CLOSE] Artist download cleanup completed for: ${playlistId}`);
+        }
+
+        // Clean up search download if this is an enhanced search playlist
+        if (playlistId.startsWith('enhanced_search_')) {
+            console.log(`🧹 [MODAL CLOSE] Cleaning up search download for completed modal: ${playlistId}`);
+            cleanupSearchDownload(playlistId);
+            console.log(`✅ [MODAL CLOSE] Search download cleanup completed for: ${playlistId}`);
         }
 
         // Remove from discover download sidebar if this is a discover page download
@@ -20850,6 +21132,693 @@ async function hydrateArtistBubblesFromSnapshot() {
     } catch (error) {
         console.error('❌ Error hydrating artist bubbles from snapshot:', error);
     }
+}
+
+// --- Search Bubble Snapshot System ---
+
+async function saveSearchBubbleSnapshot() {
+    /**
+     * Saves current searchDownloadBubbles state to backend for persistence.
+     */
+    try {
+        // Rate limit saves to avoid spamming backend
+        if (saveSearchBubbleSnapshot.lastSaveTime) {
+            const timeSinceLastSave = Date.now() - saveSearchBubbleSnapshot.lastSaveTime;
+            if (timeSinceLastSave < 2000) {
+                console.log('⏱️ Skipping search bubble snapshot save (rate limited)');
+                return;
+            }
+        }
+
+        const bubbleCount = Object.keys(searchDownloadBubbles).length;
+
+        if (bubbleCount === 0) {
+            console.log('📸 Skipping snapshot save - no search bubbles to save');
+            return;
+        }
+
+        console.log(`📸 Saving search bubble snapshot: ${bubbleCount} artists`);
+
+        // Convert search bubbles to plain objects for serialization
+        const bubblesToSave = {};
+        for (const [artistName, bubbleData] of Object.entries(searchDownloadBubbles)) {
+            bubblesToSave[artistName] = {
+                artist: bubbleData.artist,
+                downloads: bubbleData.downloads.map(d => ({
+                    virtualPlaylistId: d.virtualPlaylistId,
+                    item: d.item,
+                    type: d.type,
+                    status: d.status,
+                    startTime: d.startTime
+                }))
+            };
+        }
+
+        const response = await fetch('/api/search_bubbles/snapshot', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ bubbles: bubblesToSave })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            console.log(`✅ Search bubble snapshot saved: ${bubbleCount} artists`);
+            saveSearchBubbleSnapshot.lastSaveTime = Date.now();
+        } else {
+            console.error('❌ Failed to save search bubble snapshot:', data.error);
+        }
+
+    } catch (error) {
+        console.error('❌ Error saving search bubble snapshot:', error);
+    }
+}
+
+async function hydrateSearchBubblesFromSnapshot() {
+    /**
+     * Hydrates search download bubbles from backend snapshot with live status.
+     */
+    try {
+        console.log('🔄 Loading search bubble snapshot from backend...');
+
+        const response = await fetch('/api/search_bubbles/hydrate');
+        const data = await response.json();
+
+        if (!data.success) {
+            console.error('❌ Failed to load search bubble snapshot:', data.error);
+            return;
+        }
+
+        const bubbles = data.bubbles || {};
+        const stats = data.stats || {};
+
+        if (Object.keys(bubbles).length === 0) {
+            console.log('ℹ️ No search bubbles to hydrate');
+            return;
+        }
+
+        // Clear and restore search bubbles
+        searchDownloadBubbles = {};
+
+        for (const [artistName, bubbleData] of Object.entries(bubbles)) {
+            searchDownloadBubbles[artistName] = {
+                artist: bubbleData.artist,
+                downloads: bubbleData.downloads || []
+            };
+
+            console.log(`🔄 Hydrated artist: ${artistName} (${bubbleData.downloads.length} downloads)`);
+
+            // Setup monitoring for each download
+            for (const download of bubbleData.downloads) {
+                if (download.status === 'in_progress') {
+                    monitorSearchDownload(artistName, download.virtualPlaylistId);
+                }
+            }
+        }
+
+        const totalArtists = Object.keys(searchDownloadBubbles).length;
+        console.log(`✅ Successfully hydrated ${totalArtists} search download bubbles`);
+
+        // Refresh display
+        showSearchDownloadBubbles();
+
+    } catch (error) {
+        console.error('❌ Error hydrating search bubbles from snapshot:', error);
+    }
+}
+
+/**
+ * Register a new search download for bubble management (grouped by artist)
+ */
+function registerSearchDownload(item, type, virtualPlaylistId, artistName) {
+    console.log(`📝 [REGISTER] Registering search download: ${item.name} (${type}) by ${artistName}`);
+
+    // Initialize artist bubble if it doesn't exist
+    if (!searchDownloadBubbles[artistName]) {
+        searchDownloadBubbles[artistName] = {
+            artist: {
+                name: artistName,
+                image_url: item.image_url || (item.images && item.images[0]?.url) || null
+            },
+            downloads: []
+        };
+    }
+
+    // Add this download to the artist's downloads
+    const downloadInfo = {
+        virtualPlaylistId: virtualPlaylistId,
+        item: item,
+        type: type, // 'album' or 'track'
+        status: 'in_progress',
+        startTime: new Date().toISOString()
+    };
+
+    searchDownloadBubbles[artistName].downloads.push(downloadInfo);
+
+    console.log(`✅ [REGISTER] Registered search download for ${artistName} - ${item.name}`);
+
+    // Save snapshot
+    saveSearchBubbleSnapshot();
+
+    // Setup monitoring
+    monitorSearchDownload(artistName, virtualPlaylistId);
+
+    // Refresh display
+    updateSearchDownloadsSection();
+}
+
+/**
+ * Debounced update for search downloads section
+ */
+function updateSearchDownloadsSection() {
+    if (window.searchUpdateTimeout) {
+        clearTimeout(window.searchUpdateTimeout);
+    }
+    window.searchUpdateTimeout = setTimeout(() => {
+        showSearchDownloadBubbles();
+    }, 300);
+}
+
+/**
+ * Monitor a search download for completion status changes
+ */
+function monitorSearchDownload(artistName, virtualPlaylistId) {
+    const checkCompletion = setInterval(() => {
+        const process = activeDownloadProcesses[virtualPlaylistId];
+
+        if (!process || !searchDownloadBubbles[artistName]) {
+            clearInterval(checkCompletion);
+            return;
+        }
+
+        // Find the download in the artist's downloads
+        const download = searchDownloadBubbles[artistName].downloads.find(
+            d => d.virtualPlaylistId === virtualPlaylistId
+        );
+
+        if (!download) {
+            clearInterval(checkCompletion);
+            return;
+        }
+
+        // Update status
+        const newStatus = process.status === 'complete' || process.status === 'view_results'
+            ? 'view_results'
+            : 'in_progress';
+
+        if (download.status !== newStatus) {
+            console.log(`🔄 [MONITOR] Status changed for ${download.item.name}: ${download.status} -> ${newStatus}`);
+            download.status = newStatus;
+
+            // Save snapshot and refresh
+            saveSearchBubbleSnapshot();
+            updateSearchDownloadsSection();
+        }
+    }, 2000);
+}
+
+/**
+ * Show or update the search downloads bubble section
+ */
+function showSearchDownloadBubbles() {
+    console.log(`🔄 [SHOW] showSearchDownloadBubbles() called`);
+
+    const resultsArea = document.getElementById('enhanced-main-results-area');
+    if (!resultsArea) {
+        console.log(`⏭️ [SHOW] Skipping - no enhanced-main-results-area found`);
+        return;
+    }
+
+    // Count active artists (those with downloads)
+    const activeArtists = Object.keys(searchDownloadBubbles).filter(artistName =>
+        searchDownloadBubbles[artistName].downloads.length > 0
+    );
+
+    if (activeArtists.length === 0) {
+        // Show placeholder
+        resultsArea.innerHTML = `
+            <div class="search-results-placeholder">
+                <p>Search results will appear here when you select an album or track.</p>
+            </div>
+        `;
+        return;
+    }
+
+    // Create bubbles display
+    const bubblesHTML = activeArtists.map(artistName =>
+        createSearchBubbleCard(searchDownloadBubbles[artistName])
+    ).join('');
+
+    resultsArea.innerHTML = `
+        <div class="search-bubble-section">
+            <div class="search-bubble-header">
+                <h3 class="search-bubble-title">Active Downloads</h3>
+                <span class="search-bubble-count">${activeArtists.length}</span>
+            </div>
+            <div class="search-bubble-container" id="search-bubble-container">
+                ${bubblesHTML}
+            </div>
+        </div>
+    `;
+
+    console.log(`✅ [SHOW] Displayed ${activeArtists.length} search bubbles`);
+}
+
+/**
+ * Create HTML for a search bubble card (grouped by artist)
+ */
+function createSearchBubbleCard(artistBubbleData) {
+    const { artist, downloads } = artistBubbleData;
+    const activeCount = downloads.filter(d => d.status === 'in_progress').length;
+    const completedCount = downloads.filter(d => d.status === 'view_results').length;
+    const allCompleted = activeCount === 0 && completedCount > 0;
+
+    console.log(`🔵 [BUBBLE] Creating bubble for ${artist.name}:`, {
+        totalDownloads: downloads.length,
+        activeCount,
+        completedCount,
+        allCompleted
+    });
+
+    const imageUrl = artist.image_url || '';
+    const backgroundStyle = imageUrl ?
+        `background-image: url('${escapeHtml(imageUrl)}');` :
+        `background: linear-gradient(135deg, rgba(29, 185, 84, 0.3) 0%, rgba(24, 156, 71, 0.2) 100%);`;
+
+    return `
+        <div class="search-bubble-card ${allCompleted ? 'all-completed' : ''}"
+             data-artist-name="${escapeHtml(artist.name)}"
+             onclick="openSearchDownloadModal('${escapeHtml(artist.name)}')"
+             title="Click to manage downloads for ${escapeHtml(artist.name)}">
+            <div class="search-bubble-image" style="${backgroundStyle}"></div>
+            <div class="search-bubble-overlay"></div>
+            <div class="search-bubble-content">
+                <div class="search-bubble-name">${escapeHtml(artist.name)}</div>
+                <div class="search-bubble-status">
+                    ${activeCount > 0 ? `${activeCount} active` : ''}
+                    ${completedCount > 0 ? `${completedCount} completed` : ''}
+                </div>
+            </div>
+            ${allCompleted ? `
+                <div class="bulk-complete-indicator"
+                     onclick="event.stopPropagation(); bulkCompleteSearchDownloads('${escapeHtml(artist.name)}')"
+                     title="Complete all downloads">
+                    <span class="bulk-complete-icon">✅</span>
+                </div>
+            ` : ''}
+        </div>
+    `;
+}
+
+/**
+ * Open modal showing all downloads for an artist
+ */
+async function openSearchDownloadModal(artistName) {
+    const artistBubbleData = searchDownloadBubbles[artistName];
+    if (!artistBubbleData || searchDownloadModalOpen) return;
+
+    console.log(`🎵 [MODAL OPEN] Opening search download modal for: ${artistBubbleData.artist.name}`);
+
+    searchDownloadModalOpen = true;
+
+    const modal = document.createElement('div');
+    modal.id = 'search-download-management-modal';
+    modal.className = 'artist-download-management-modal';
+    modal.innerHTML = `
+        <div class="artist-download-modal-content">
+            <div class="artist-download-modal-hero">
+                <div class="artist-download-modal-hero-bg" ${artistBubbleData.artist.image_url ? `style="background-image: url('${escapeHtml(artistBubbleData.artist.image_url)}')"` : ''}></div>
+                <div class="artist-download-modal-hero-overlay">
+                    <div class="artist-download-modal-hero-content">
+                        <div class="artist-download-modal-hero-avatar">
+                            ${artistBubbleData.artist.image_url
+                                ? `<img src="${escapeHtml(artistBubbleData.artist.image_url)}" alt="${escapeHtml(artistBubbleData.artist.name)}" class="artist-download-modal-hero-image" loading="lazy">`
+                                : '<div class="artist-download-modal-hero-fallback">🎵</div>'
+                            }
+                        </div>
+                        <div class="artist-download-modal-hero-info">
+                            <h2 class="artist-download-modal-hero-title">${escapeHtml(artistBubbleData.artist.name)}</h2>
+                            <p class="artist-download-modal-hero-subtitle">${artistBubbleData.downloads.length} active download${artistBubbleData.downloads.length !== 1 ? 's' : ''}</p>
+                        </div>
+                    </div>
+                    <span class="artist-download-modal-close" onclick="closeSearchDownloadModal()">&times;</span>
+                </div>
+            </div>
+
+            <div class="artist-download-modal-body">
+                <div class="artist-download-items" id="search-download-items">
+                    ${artistBubbleData.downloads.map((download, index) => createSearchDownloadItem(download, index)).join('')}
+                </div>
+            </div>
+        </div>
+        <div class="artist-download-modal-overlay" onclick="closeSearchDownloadModal()"></div>
+    `;
+
+    document.body.appendChild(modal);
+    modal.style.display = 'flex';
+
+    // Start monitoring for status changes
+    monitorSearchDownloadModal(artistName);
+}
+
+/**
+ * Create HTML for a download item in the search modal
+ */
+function createSearchDownloadItem(download, index) {
+    const { item, type, status, virtualPlaylistId } = download;
+    const buttonText = status === 'view_results' ? 'View Results' : 'View Progress';
+    const buttonClass = status === 'view_results' ? 'completed' : 'active';
+    const typeLabel = type === 'album' ? 'Album' : type === 'single' ? 'Single' : 'Track';
+
+    return `
+        <div class="artist-download-item" data-playlist-id="${virtualPlaylistId}">
+            <div class="download-item-artwork">
+                ${item.image_url
+                    ? `<img src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.name)}" class="download-item-image" loading="lazy">`
+                    : `<div class="download-item-fallback">
+                         ${type === 'album' ? '💿' : '🎵'}
+                       </div>`
+                }
+            </div>
+            <div class="download-item-info">
+                <div class="download-item-name">${escapeHtml(item.name)}</div>
+                <div class="download-item-type">${typeLabel}</div>
+            </div>
+            <div class="download-item-actions">
+                <button class="download-item-btn ${buttonClass}"
+                        onclick="reopenDownloadModal('${virtualPlaylistId}')">
+                    ${buttonText}
+                </button>
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * Reopen an individual download modal from the artist modal
+ */
+async function reopenDownloadModal(virtualPlaylistId) {
+    const process = activeDownloadProcesses[virtualPlaylistId];
+
+    // If process exists, show the existing modal
+    if (process && process.modalElement) {
+        console.log(`✅ [REOPEN] Showing existing modal for ${virtualPlaylistId}`);
+        closeSearchDownloadModal();
+        setTimeout(() => {
+            process.modalElement.style.display = 'flex';
+        }, 100);
+        return;
+    }
+
+    // Process doesn't exist (after page refresh) - recreate it
+    console.log(`🔄 [REOPEN] Modal not found, recreating for ${virtualPlaylistId}`);
+
+    // Find the download in searchDownloadBubbles
+    let downloadData = null;
+    for (const artistName in searchDownloadBubbles) {
+        const bubble = searchDownloadBubbles[artistName];
+        const download = bubble.downloads.find(d => d.virtualPlaylistId === virtualPlaylistId);
+        if (download) {
+            downloadData = download;
+            break;
+        }
+    }
+
+    if (!downloadData) {
+        console.warn(`⚠️ No download data found for ${virtualPlaylistId}`);
+        return;
+    }
+
+    // Close search modal first
+    closeSearchDownloadModal();
+
+    // Recreate the modal based on type
+    const { item, type } = downloadData;
+
+    if (type === 'album') {
+        // For albums, we need to fetch the tracks
+        console.log(`📥 [REOPEN] Recreating album modal for: ${item.name}`);
+
+        // Fetch album tracks from Spotify API
+        showLoadingOverlay(`Loading ${item.name}...`);
+
+        try {
+            const response = await fetch(`/api/spotify/album/${item.id}`);
+            if (!response.ok) {
+                throw new Error('Failed to fetch album tracks');
+            }
+
+            const albumData = await response.json();
+            if (!albumData.tracks || albumData.tracks.length === 0) {
+                throw new Error('No tracks found in album');
+            }
+
+            const spotifyTracks = albumData.tracks.map(track => ({
+                id: track.id,
+                name: track.name,
+                artists: track.artists || [{ name: item.artists?.[0]?.name || item.artist || 'Unknown Artist' }],
+                album: {
+                    name: item.name,
+                    images: item.image_url ? [{ url: item.image_url }] : []
+                },
+                duration_ms: track.duration_ms || 0
+            }));
+
+            hideLoadingOverlay();
+
+            // Open the modal
+            await openDownloadMissingModalForArtistAlbum(
+                virtualPlaylistId,
+                item.name,
+                spotifyTracks,
+                item,
+                { name: item.artists?.[0]?.name || item.artist || 'Unknown Artist' },
+                false // Don't show loading overlay again
+            );
+
+            // Sync with backend to check for active batch process
+            const process = activeDownloadProcesses[virtualPlaylistId];
+            if (process) {
+                try {
+                    const processResponse = await fetch('/api/active-processes');
+                    if (processResponse.ok) {
+                        const processData = await processResponse.json();
+                        const activeProcess = processData.active_processes?.find(p => p.playlist_id === virtualPlaylistId);
+
+                        if (activeProcess) {
+                            console.log(`📡 [REOPEN] Found active batch for album: ${activeProcess.batch_id}`);
+                            process.status = 'running';
+                            process.batchId = activeProcess.batch_id;
+
+                            // Update UI to show running state
+                            const beginBtn = document.getElementById(`begin-analysis-btn-${virtualPlaylistId}`);
+                            const cancelBtn = document.getElementById(`cancel-all-btn-${virtualPlaylistId}`);
+                            if (beginBtn) beginBtn.style.display = 'none';
+                            if (cancelBtn) cancelBtn.style.display = 'inline-block';
+
+                            // Start polling for live updates
+                            startModalDownloadPolling(virtualPlaylistId);
+                        }
+                    }
+                } catch (err) {
+                    console.warn('Could not check for active processes:', err);
+                }
+            }
+
+        } catch (error) {
+            hideLoadingOverlay();
+            showToast(`Failed to load album: ${error.message}`, 'error');
+            console.error('Error loading album:', error);
+        }
+
+    } else {
+        // For tracks, create enriched track and open modal
+        console.log(`🎵 [REOPEN] Recreating track modal for: ${item.name}`);
+
+        const enrichedTrack = {
+            id: item.id,
+            name: item.name,
+            artists: item.artists || [{ name: item.artist || 'Unknown Artist' }],
+            album: item.album || {
+                name: item.album?.name || 'Unknown Album',
+                images: item.image_url ? [{ url: item.image_url }] : []
+            },
+            duration_ms: item.duration_ms || 0
+        };
+
+        await openDownloadMissingModalForYouTube(
+            virtualPlaylistId,
+            `${enrichedTrack.name} - ${enrichedTrack.artists[0].name || enrichedTrack.artists[0]}`,
+            [enrichedTrack]
+        );
+
+        // Sync with backend to check for active batch process
+        const process = activeDownloadProcesses[virtualPlaylistId];
+        if (process) {
+            try {
+                const processResponse = await fetch('/api/active-processes');
+                if (processResponse.ok) {
+                    const processData = await processResponse.json();
+                    const activeProcess = processData.active_processes?.find(p => p.playlist_id === virtualPlaylistId);
+
+                    if (activeProcess) {
+                        console.log(`📡 [REOPEN] Found active batch for track: ${activeProcess.batch_id}`);
+                        process.status = 'running';
+                        process.batchId = activeProcess.batch_id;
+
+                        // Update UI to show running state
+                        const beginBtn = document.getElementById(`begin-analysis-btn-${virtualPlaylistId}`);
+                        const cancelBtn = document.getElementById(`cancel-all-btn-${virtualPlaylistId}`);
+                        if (beginBtn) beginBtn.style.display = 'none';
+                        if (cancelBtn) cancelBtn.style.display = 'inline-block';
+
+                        // Start polling for live updates
+                        startModalDownloadPolling(virtualPlaylistId);
+                    }
+                }
+            } catch (err) {
+                console.warn('Could not check for active processes:', err);
+            }
+        }
+    }
+}
+
+/**
+ * Monitor search download modal for status changes
+ */
+function monitorSearchDownloadModal(artistName) {
+    const updateModal = () => {
+        if (!searchDownloadModalOpen) return;
+
+        const modal = document.getElementById('search-download-management-modal');
+        const itemsContainer = document.getElementById('search-download-items');
+
+        if (!modal || !itemsContainer || !searchDownloadBubbles[artistName]) return;
+
+        const downloads = searchDownloadBubbles[artistName].downloads;
+
+        // If no downloads at all, close modal
+        if (downloads.length === 0) {
+            closeSearchDownloadModal();
+            return;
+        }
+
+        // Update modal content and sync status with active processes
+        let statusChanged = false;
+        itemsContainer.innerHTML = downloads.map((download, index) => {
+            const process = activeDownloadProcesses[download.virtualPlaylistId];
+
+            // Only update status if process exists (otherwise keep current status)
+            if (process) {
+                const newStatus = process.status === 'complete' || process.status === 'view_results'
+                    ? 'view_results'
+                    : 'in_progress';
+
+                if (download.status !== newStatus) {
+                    console.log(`🔄 [MODAL MONITOR] Status changed: ${download.item.name} ${download.status} -> ${newStatus}`);
+                    download.status = newStatus;
+                    statusChanged = true;
+                }
+            }
+
+            return createSearchDownloadItem(download, index);
+        }).join('');
+
+        // If status changed, refresh bubble display and save
+        if (statusChanged) {
+            updateSearchDownloadsSection();
+            saveSearchBubbleSnapshot();
+        }
+
+        // Continue monitoring
+        setTimeout(updateModal, 2000);
+    };
+
+    setTimeout(updateModal, 1000);
+}
+
+/**
+ * Close the search download modal
+ */
+function closeSearchDownloadModal() {
+    const modal = document.getElementById('search-download-management-modal');
+    if (modal) {
+        modal.style.display = 'none';
+        if (modal.parentElement) {
+            modal.parentElement.removeChild(modal);
+        }
+    }
+    searchDownloadModalOpen = false;
+}
+
+/**
+ * Bulk complete all downloads for an artist (called when user clicks green checkmark)
+ */
+function bulkCompleteSearchDownloads(artistName) {
+    console.log(`🎯 Bulk completing downloads for artist: ${artistName}`);
+
+    const artistBubbleData = searchDownloadBubbles[artistName];
+    if (!artistBubbleData) {
+        console.warn(`❌ No artist bubble data found for ${artistName}`);
+        return;
+    }
+
+    // Find all completed downloads
+    const completedDownloads = artistBubbleData.downloads.filter(d => d.status === 'view_results');
+    console.log(`📋 Found ${completedDownloads.length} completed downloads to close:`,
+                completedDownloads.map(d => d.item.name));
+
+    if (completedDownloads.length === 0) {
+        console.warn(`⚠️ No completed downloads found for bulk close`);
+        showToast('No completed downloads to close', 'info');
+        return;
+    }
+
+    // Close all completed modals
+    completedDownloads.forEach(download => {
+        const process = activeDownloadProcesses[download.virtualPlaylistId];
+        if (process && process.modalElement) {
+            console.log(`🗑️ Closing modal for: ${download.item.name}`);
+            closeDownloadMissingModal(download.virtualPlaylistId);
+        }
+    });
+
+    showToast(`Completed ${completedDownloads.length} downloads for ${artistBubbleData.artist.name}`, 'success');
+}
+
+/**
+ * Cleanup search download when modal is closed
+ */
+function cleanupSearchDownload(virtualPlaylistId) {
+    console.log(`🔍 [CLEANUP] Looking for search download to cleanup: ${virtualPlaylistId}`);
+
+    // Find which artist this download belongs to
+    for (const artistName in searchDownloadBubbles) {
+        const downloads = searchDownloadBubbles[artistName].downloads;
+        const downloadIndex = downloads.findIndex(d => d.virtualPlaylistId === virtualPlaylistId);
+
+        if (downloadIndex !== -1) {
+            console.log(`🧹 [CLEANUP] Found download in artist ${artistName}: ${downloads[downloadIndex].item.name}`);
+
+            // Remove this download
+            downloads.splice(downloadIndex, 1);
+            console.log(`🗑️ [CLEANUP] Removed download from ${artistName}'s bubble`);
+
+            // If no more downloads for this artist, remove the bubble
+            if (downloads.length === 0) {
+                delete searchDownloadBubbles[artistName];
+                console.log(`🧹 [CLEANUP] No more downloads - removed artist bubble: ${artistName}`);
+            }
+
+            // Save snapshot and refresh
+            saveSearchBubbleSnapshot();
+            updateSearchDownloadsSection();
+
+            return;
+        }
+    }
+
+    console.log(`⚠️ [CLEANUP] No matching search download found for: ${virtualPlaylistId}`);
 }
 
 /**
