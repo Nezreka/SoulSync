@@ -2517,8 +2517,9 @@ function initializeSearchModeToggle() {
                 meta: 'In Your Library',
                 badge: { text: 'Library', class: 'enh-badge-library' },
                 onClick: () => {
+                    console.log(`🎵 Opening library artist detail: ${artist.name} (ID: ${artist.id})`);
                     hideDropdown();
-                    navigateToPage('library');
+                    navigateToArtistDetail(artist.id, artist.name);
                 }
             })
         );
@@ -2535,16 +2536,18 @@ function initializeSearchModeToggle() {
                 name: artist.name,
                 meta: 'Artist',
                 badge: { text: 'Spotify', class: 'enh-badge-spotify' },
-                onClick: () => {
+                onClick: async () => {
+                    console.log(`🎵 Opening Spotify artist detail: ${artist.name} (ID: ${artist.id})`);
                     hideDropdown();
+
+                    // Navigate to Artists page
                     navigateToPage('artists');
-                    setTimeout(() => {
-                        const input = document.getElementById('artist-search-input');
-                        if (input) {
-                            input.value = artist.name;
-                            input.dispatchEvent(new Event('input', { bubbles: true }));
-                        }
-                    }, 100);
+
+                    // Small delay to let the page load
+                    await new Promise(resolve => setTimeout(resolve, 100));
+
+                    // Load the artist details (same pattern as discover page)
+                    await selectArtistForDetail(artist);
                 }
             })
         );
