@@ -3320,6 +3320,118 @@ def enhanced_search():
         logger.error(f"Enhanced search error: {e}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/enhanced-search/stream-track', methods=['POST'])
+def stream_enhanced_search_track():
+    """
+    Quick slskd search for a single track to stream from enhanced search.
+    Uses multi-query retry strategy to work around Soulseek keyword filtering.
+    Returns the best matching result from Soulseek.
+    """
+    data = request.get_json()
+    track_name = data.get('track_name', '').strip()
+    artist_name = data.get('artist_name', '').strip()
+    album_name = data.get('album_name', '').strip()
+    duration_ms = data.get('duration_ms', 0)
+
+    if not track_name or not artist_name:
+        return jsonify({"error": "Track name and artist name are required"}), 400
+
+    logger.info(f"▶️ Enhanced search stream request: '{track_name}' by '{artist_name}'")
+
+    try:
+        # Create a temporary SpotifyTrack-like object for the matching engine
+        temp_track = type('TempTrack', (), {
+            'name': track_name,
+            'artists': [artist_name],
+            'album': album_name if album_name else None,
+            'duration_ms': duration_ms
+        })()
+
+        # Generate search queries - TRACK NAME ONLY (artist is used for matching, not searching)
+        # This avoids Soulseek keyword filtering on artist names like "Kendrick Lamar"
+        search_queries = []
+        import re
+
+        # Primary query: Full track name
+        if track_name.strip():
+            search_queries.append(track_name.strip())
+
+        # Cleaned query: Remove parentheses and brackets
+        cleaned_name = re.sub(r'\s*\([^)]*\)', '', track_name).strip()
+        cleaned_name = re.sub(r'\s*\[[^\]]*\]', '', cleaned_name).strip()
+
+        if cleaned_name and cleaned_name.lower() != track_name.lower():
+            search_queries.append(cleaned_name.strip())
+
+        # Remove duplicates while preserving order
+        unique_queries = []
+        seen = set()
+        for query in search_queries:
+            if query and query.lower() not in seen:
+                unique_queries.append(query)
+                seen.add(query.lower())
+
+        search_queries = unique_queries
+        logger.info(f"🔍 Searching by track name only (will match with artist): {search_queries}")
+
+        # Try queries sequentially until we find a good match
+        for query_index, query in enumerate(search_queries):
+            logger.info(f"🔍 Query {query_index + 1}/{len(search_queries)}: '{query}'")
+
+            try:
+                # Search slskd with timeout
+                tracks_result, _ = asyncio.run(soulseek_client.search(query, timeout=15))
+
+                if tracks_result:
+                    logger.info(f"✅ Found {len(tracks_result)} results for query: '{query}'")
+
+                    # Use matching engine to find best match
+                    best_matches = matching_engine.find_best_slskd_matches_enhanced(temp_track, tracks_result)
+
+                    if best_matches:
+                        # Get the first (best) result
+                        best_result = best_matches[0]
+
+                        # Convert to dictionary for JSON response (same format as basic search)
+                        result_dict = {
+                            "username": best_result.username,
+                            "filename": best_result.filename,
+                            "size": best_result.size,
+                            "bitrate": best_result.bitrate,
+                            "duration": best_result.duration,
+                            "quality": best_result.quality,
+                            "free_upload_slots": best_result.free_upload_slots,
+                            "upload_speed": best_result.upload_speed,
+                            "queue_length": best_result.queue_length,
+                            "result_type": "track"
+                        }
+
+                        logger.info(f"✅ Returning best match from query '{query}': {best_result.filename} ({best_result.quality})")
+
+                        return jsonify({
+                            "success": True,
+                            "result": result_dict
+                        })
+                    else:
+                        logger.info(f"⏭️ No suitable matches for query '{query}', trying next query...")
+                else:
+                    logger.info(f"⏭️ No results for query '{query}', trying next query...")
+
+            except Exception as search_error:
+                logger.warning(f"⚠️ Error searching with query '{query}': {search_error}")
+                continue
+
+        # If we get here, none of the queries found a suitable match
+        logger.warning(f"❌ No suitable matches found after trying {len(search_queries)} queries")
+        return jsonify({
+            "success": False,
+            "error": "No suitable track found on Soulseek after trying multiple search strategies"
+        }), 404
+
+    except Exception as e:
+        logger.error(f"❌ Error streaming enhanced search track: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/api/download', methods=['POST'])
 def start_download():
     """Simple download route"""

@@ -1178,21 +1178,21 @@
 
                         <!-- Search Mode Toggle -->
                         <div class="search-mode-toggle-container">
-                            <div class="search-mode-toggle">
-                                <button class="search-mode-btn active" data-mode="basic">
-                                    <span class="mode-icon">🔍</span>
-                                    <span class="mode-label">Basic Search</span>
-                                </button>
-                                <button class="search-mode-btn" data-mode="enhanced">
+                            <div class="search-mode-toggle" data-active="enhanced">
+                                <button class="search-mode-btn active" data-mode="enhanced">
                                     <span class="mode-icon">✨</span>
                                     <span class="mode-label">Enhanced Search</span>
+                                </button>
+                                <button class="search-mode-btn" data-mode="basic">
+                                    <span class="mode-icon">🔍</span>
+                                    <span class="mode-label">Basic Search</span>
                                 </button>
                                 <div class="toggle-slider"></div>
                             </div>
                         </div>
 
                         <!-- Basic Search Section (Current) -->
-                        <div id="basic-search-section" class="search-section active">
+                        <div id="basic-search-section" class="search-section">
                             <!-- Search Bar: Replicates create_elegant_search_bar() -->
                             <div class="search-bar-container">
                             <input type="text" id="downloads-search-input" placeholder="Search for music... (e.g., 'Virtual Mage', 'Queen Bohemian Rhapsody')">
@@ -1272,7 +1272,7 @@
                         <!-- End Basic Search Section -->
 
                         <!-- Enhanced Search Section (New) -->
-                        <div id="enhanced-search-section" class="search-section">
+                        <div id="enhanced-search-section" class="search-section active">
                             <!-- Enhanced Search Bar with Dropdown -->
                             <div class="enhanced-search-input-wrapper">
                                 <div class="enhanced-search-bar-container">

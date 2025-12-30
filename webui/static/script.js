@@ -2615,7 +2615,8 @@ function initializeSearchModeToggle() {
                     name: track.name,
                     meta: `${track.artist} • ${track.album}`,
                     duration: duration,
-                    onClick: () => handleEnhancedSearchTrackClick(track)
+                    onClick: () => handleEnhancedSearchTrackClick(track),
+                    onPlay: () => streamEnhancedSearchTrack(track)
                 };
             }
         );
@@ -2697,7 +2698,10 @@ function initializeSearchModeToggle() {
                 : '';
 
             const durationHtml = config.duration && isTrack
-                ? `<div class="enh-item-duration">${escapeHtml(config.duration)}</div>`
+                ? `<div class="enh-item-duration">
+                     ${escapeHtml(config.duration)}
+                     <button class="enh-item-play-btn" title="Stream this track">▶</button>
+                   </div>`
                 : '';
 
             elem.innerHTML = `
@@ -2711,6 +2715,18 @@ function initializeSearchModeToggle() {
             `;
 
             elem.addEventListener('click', config.onClick);
+
+            // Add play button handler for tracks
+            if (isTrack && config.onPlay) {
+                const playBtn = elem.querySelector('.enh-item-play-btn');
+                if (playBtn) {
+                    playBtn.addEventListener('click', (e) => {
+                        e.stopPropagation(); // Don't trigger main onClick
+                        config.onPlay();
+                    });
+                }
+            }
+
             list.appendChild(elem);
         });
     }
@@ -2822,6 +2838,63 @@ function initializeSearchModeToggle() {
             hideLoadingOverlay();
             console.error('❌ Error handling enhanced search album click:', error);
             showToast(`Error opening album: ${error.message}`, 'error');
+        }
+    }
+
+    async function streamEnhancedSearchTrack(track) {
+        console.log(`▶️ Stream enhanced search track: ${track.name} by ${track.artist}`);
+
+        hideDropdown();
+        showLoadingOverlay(`Searching for ${track.name}...`);
+
+        try {
+            // Send track metadata to backend for quick slskd search
+            const response = await fetch('/api/enhanced-search/stream-track', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    track_name: track.name,
+                    artist_name: track.artist,
+                    album_name: track.album,
+                    duration_ms: track.duration_ms
+                })
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || 'Failed to search for track');
+            }
+
+            const data = await response.json();
+
+            if (!data.success || !data.result) {
+                throw new Error('No suitable track found on Soulseek');
+            }
+
+            const slskdResult = data.result;
+
+            // Check if audio format is supported
+            if (slskdResult.filename && !isAudioFormatSupported(slskdResult.filename)) {
+                const format = getFileExtension(slskdResult.filename);
+                hideLoadingOverlay();
+                showToast(`Sorry, ${format.toUpperCase()} format is not supported in your browser. Try downloading instead.`, 'error');
+                return;
+            }
+
+            console.log(`✅ Found track to stream:`, slskdResult);
+            console.log(`🎵 Track details - Username: ${slskdResult.username}, Filename: ${slskdResult.filename}`);
+
+            hideLoadingOverlay();
+
+            // Use existing startStream function to play the track
+            console.log(`📡 Calling startStream() with result...`);
+            await startStream(slskdResult);
+            console.log(`✅ startStream() completed`);
+
+        } catch (error) {
+            hideLoadingOverlay();
+            console.error('❌ Error streaming enhanced search track:', error);
+            showToast(`Failed to stream track: ${error.message}`, 'error');
         }
     }
 
