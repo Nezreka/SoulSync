@@ -9537,12 +9537,15 @@ def remove_album_from_wishlist():
             track_album_id = spotify_data.get('album', {}).get('id')
 
             if not track_album_id:
-                # Create custom ID matching frontend logic: album_name_artist_name (lowercase, consecutive spaces -> single underscore)
+                # Create custom ID matching frontend logic exactly
                 album_name = spotify_data.get('album', {}).get('name', 'Unknown Album')
                 artist_name = spotify_data.get('artists', [{}])[0].get('name', 'Unknown Artist') if spotify_data.get('artists') else 'Unknown Artist'
                 custom_id = f"{album_name}_{artist_name}"
-                # Match frontend regex: /\s+/g -> replace consecutive whitespace with single underscore
-                track_album_id = re.sub(r'\s+', '_', custom_id).lower()
+                # Match frontend regex exactly:
+                # 1. Remove all special chars except spaces, underscores, hyphens: /[^a-zA-Z0-9\s_-]/g
+                # 2. Replace consecutive whitespace with single underscore: /\s+/g
+                track_album_id = re.sub(r'[^a-zA-Z0-9\s_-]', '', custom_id)  # Remove special chars
+                track_album_id = re.sub(r'\s+', '_', track_album_id).lower()  # Replace spaces & lowercase
 
             # Match by album ID
             if track_album_id == album_id:
