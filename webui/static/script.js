@@ -380,7 +380,10 @@ function navigateToPage(pageId) {
     document.querySelectorAll('.nav-button').forEach(btn => {
         btn.classList.remove('active');
     });
-    const navButton = document.querySelector(`[data-page="${pageId}"]`);
+
+    // Handle artist-detail page specially - it should highlight the 'library' nav button
+    const navPageId = pageId === 'artist-detail' ? 'library' : pageId;
+    const navButton = document.querySelector(`[data-page="${navPageId}"]`);
     if (navButton) {
         navButton.classList.add('active');
     }
