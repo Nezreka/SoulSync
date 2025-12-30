@@ -4789,6 +4789,7 @@ def get_artist_album_tracks(artist_id, album_id):
                 'id': album_data.get('id'),
                 'name': album_data.get('name'),
                 'image_url': album_data.get('images', [{}])[0].get('url') if album_data.get('images') else None,
+                'images': album_data.get('images', []),  # Include images array for wishlist cover art
                 'release_date': album_data.get('release_date'),
                 'album_type': album_data.get('album_type'),
                 'total_tracks': album_data.get('total_tracks')
@@ -4799,6 +4800,7 @@ def get_artist_album_tracks(artist_id, album_id):
                 'id': album_data.id,
                 'name': album_data.name,
                 'image_url': album_data.image_url,
+                'images': album_data.images if hasattr(album_data, 'images') else [],  # Include images array for wishlist cover art
                 'release_date': album_data.release_date,
                 'album_type': album_data.album_type,
                 'total_tracks': album_data.total_tracks
