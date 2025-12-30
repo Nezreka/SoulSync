@@ -15433,7 +15433,13 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json):
                     
                     # Try each artist (same logic as original)
                     for artist in spotify_track.artists:
-                        artist_name = artist if isinstance(artist, str) else str(artist)
+                        # Extract artist name from both string and dict formats
+                        if isinstance(artist, str):
+                            artist_name = artist
+                        elif isinstance(artist, dict) and 'name' in artist:
+                            artist_name = artist['name']
+                        else:
+                            artist_name = str(artist)
                         
                         db_track, confidence = db.check_track_exists(
                             original_title, artist_name, 
