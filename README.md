@@ -10,9 +10,16 @@
 
 > 📢 **Development Focus**: New features are developed for the **Web UI** version. The Desktop GUI receives maintenance and bug fixes only.
 
+## 💬 Community
+
+Join the Discord server for support, feature requests, and discussions:
+- **Discord**: [https://discord.gg/ePx7xYuV](https://discord.gg/ePx7xYuV)
+
 ## ✨ Core Features
 
-**Sync & Download**
+**Search & Download**
+- **Enhanced Search**: Unified search across Spotify, your library, and Soulseek with categorized results (artists, albums, tracks)
+- **Basic Search**: Direct Soulseek search with instant streaming and download
 - Auto-sync playlists from Spotify/Tidal/YouTube to your media server
 - Smart matching against your existing library
 - FLAC-priority downloads from Soulseek with automatic fallback
