@@ -3269,7 +3269,7 @@ def enhanced_search():
 
         if spotify_client and spotify_client.is_authenticated():
             # Search for artists
-            artist_objs = spotify_client.search_artists(query, limit=5)
+            artist_objs = spotify_client.search_artists(query, limit=10)
             for artist in artist_objs:
                 spotify_artists.append({
                     "id": artist.id,
@@ -3278,7 +3278,7 @@ def enhanced_search():
                 })
 
             # Search for albums
-            album_objs = spotify_client.search_albums(query, limit=10)
+            album_objs = spotify_client.search_albums(query, limit=20)
             for album in album_objs:
                 # Album has 'artists' (list), convert to string
                 artist_name = ', '.join(album.artists) if album.artists else 'Unknown Artist'

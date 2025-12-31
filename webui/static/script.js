@@ -2731,6 +2731,13 @@ function initializeSearchModeToggle() {
             }
 
             list.appendChild(elem);
+
+            // Extract colors from image for dynamic glow effect
+            if (config.image) {
+                extractImageColors(config.image, (colors) => {
+                    applyDynamicGlow(elem, colors);
+                });
+            }
         });
     }
 
