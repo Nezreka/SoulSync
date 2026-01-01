@@ -1,5 +1,11 @@
 version: '3.8'
 
+# BREAKING CHANGE (v1.3+): Database volume mount changed from /app/database to /app/data
+# If upgrading from a previous version, update your docker-compose.yml:
+#   OLD: - soulsync_database:/app/database
+#   NEW: - soulsync_database:/app/data
+# Your data will be preserved - it's the same volume, just mounted at a different path.
+
 services:
   soulsync:
     image: boulderbadgedad/soulsync:latest
@@ -26,7 +32,8 @@ services:
       - ./logs:/app/logs
       - ./downloads:/app/downloads
       # Use named volume for database persistence (separate from host database)
-      - soulsync_database:/app/database
+      # NOTE: Changed from /app/database to /app/data to avoid overwriting Python package
+      - soulsync_database:/app/data
       # IMPORTANT: Mount the drives containing your download and transfer folders
       # If your download/transfer paths are on E: drive, mount E: drive:
       - /mnt/e:/host/mnt/e:rw
