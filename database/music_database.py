@@ -134,7 +134,12 @@ class RecentRelease:
 class MusicDatabase:
     """SQLite database manager for SoulSync music library data"""
     
-    def __init__(self, database_path: str = "database/music_library.db"):
+    def __init__(self, database_path: str = None):
+        import os
+        # Use env var if path is None OR if it's the default path
+        # This ensures Docker containers use the correct mounted volume location
+        if database_path is None or database_path == "database/music_library.db":
+            database_path = os.environ.get('DATABASE_PATH', 'database/music_library.db')
         self.database_path = Path(database_path)
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
         
@@ -3572,10 +3577,21 @@ class MusicDatabase:
 _database_instances: Dict[int, MusicDatabase] = {}  # Thread ID -> Database instance
 _database_lock = threading.Lock()
 
-def get_database(database_path: str = "database/music_library.db") -> MusicDatabase:
-    """Get thread-local database instance"""
+def get_database(database_path: str = None) -> MusicDatabase:
+    """Get thread-local database instance
+
+    Args:
+        database_path: Path to database file. If None or default path, uses DATABASE_PATH env var
+                      or defaults to "database/music_library.db". Custom paths are used as-is.
+    """
+    import os
+    # Use env var if path is None OR if it's the default path
+    # This ensures Docker containers use the correct mounted volume location
+    if database_path is None or database_path == "database/music_library.db":
+        database_path = os.environ.get('DATABASE_PATH', 'database/music_library.db')
+
     thread_id = threading.get_ident()
-    
+
     with _database_lock:
         if thread_id not in _database_instances:
             _database_instances[thread_id] = MusicDatabase(database_path)
