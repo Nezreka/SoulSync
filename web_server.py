@@ -8796,11 +8796,18 @@ def _process_wishlist_automatically():
         print(f"❌ Error in automatic wishlist processing: {e}")
         import traceback
         traceback.print_exc()
-        
+
         with wishlist_timer_lock:
             wishlist_auto_processing = False
             wishlist_auto_processing_timestamp = 0
-        schedule_next_wishlist_processing()
+
+        # CRITICAL: Wrap rescheduling in try/except to prevent timer thread death
+        try:
+            schedule_next_wishlist_processing()
+        except Exception as schedule_error:
+            print(f"❌ [CRITICAL] Failed to schedule next wishlist processing: {schedule_error}")
+            import traceback
+            traceback.print_exc()
 
 # ===============================
 # == DATABASE UPDATER API      ==
@@ -10826,8 +10833,13 @@ def _process_failed_tracks_to_wishlist_exact_with_auto_completion(batch_id):
 
         # Schedule next automatic processing cycle
         print("⏰ [Auto-Wishlist] Scheduling next automatic cycle in 30 minutes")
-        schedule_next_wishlist_processing()
-        
+        try:
+            schedule_next_wishlist_processing()
+        except Exception as schedule_error:
+            print(f"❌ [CRITICAL] Failed to schedule next wishlist processing: {schedule_error}")
+            import traceback
+            traceback.print_exc()
+
         return completion_summary
         
     except Exception as e:
@@ -10842,8 +10854,13 @@ def _process_failed_tracks_to_wishlist_exact_with_auto_completion(batch_id):
 
         # Schedule next cycle even after error to maintain continuity
         print("⏰ [Auto-Wishlist] Scheduling next cycle after error (30 minutes)")
-        schedule_next_wishlist_processing()
-        
+        try:
+            schedule_next_wishlist_processing()
+        except Exception as schedule_error:
+            print(f"❌ [CRITICAL] Failed to schedule next wishlist processing: {schedule_error}")
+            import traceback
+            traceback.print_exc()
+
         return {'tracks_added': 0, 'errors': 1, 'total_failed': 0}
 
 def _on_download_completed(batch_id, task_id, success=True):
@@ -11209,7 +11226,12 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
             with wishlist_timer_lock:
                 wishlist_auto_processing = False
                 wishlist_auto_processing_timestamp = 0
-            schedule_next_wishlist_processing()
+            try:
+                schedule_next_wishlist_processing()
+            except Exception as schedule_error:
+                print(f"❌ [CRITICAL] Failed to schedule next wishlist processing: {schedule_error}")
+                import traceback
+                traceback.print_exc()
 
 def _run_post_processing_worker(task_id, batch_id):
     """
@@ -12969,7 +12991,12 @@ def cancel_batch(batch_id):
                         wishlist_auto_processing_timestamp = 0
                     print(f"🔓 [Wishlist Cancel] Reset wishlist auto-processing flag for cancelled auto-batch")
                     # Schedule next cycle since this one was cancelled
-                    schedule_next_wishlist_processing()
+                    try:
+                        schedule_next_wishlist_processing()
+                    except Exception as schedule_error:
+                        print(f"❌ [CRITICAL] Failed to schedule next wishlist processing: {schedule_error}")
+                        import traceback
+                        traceback.print_exc()
                 else:
                     print(f"ℹ️ [Wishlist Cancel] Manual wishlist batch cancelled (no flag reset needed)")
 
