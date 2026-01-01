@@ -28,7 +28,8 @@ RUN pip install --no-cache-dir --upgrade pip && \
 COPY . .
 
 # Create necessary directories with proper permissions
-RUN mkdir -p /app/config /app/database /app/logs /app/downloads /app/Transfer && \
+# NOTE: /app/data is for database FILES, /app/database is the Python package
+RUN mkdir -p /app/config /app/data /app/logs /app/downloads /app/Transfer && \
     chown -R soulsync:soulsync /app
 
 # Create defaults directory and copy template files
@@ -39,7 +40,8 @@ RUN mkdir -p /defaults && \
     chmod 644 /defaults/config.json /defaults/settings.py
 
 # Create volume mount points
-VOLUME ["/app/config", "/app/database", "/app/logs", "/app/downloads", "/app/Transfer"]
+# NOTE: Changed /app/database to /app/data to avoid overwriting Python package
+VOLUME ["/app/config", "/app/data", "/app/logs", "/app/downloads", "/app/Transfer"]
 
 # Copy and set up entrypoint script
 COPY entrypoint.sh /entrypoint.sh
@@ -59,6 +61,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 ENV PYTHONPATH=/app
 ENV FLASK_APP=web_server.py
 ENV FLASK_ENV=production
+ENV DATABASE_PATH=/app/data/music_library.db
 ENV PUID=1000
 ENV PGID=1000
 ENV UMASK=022

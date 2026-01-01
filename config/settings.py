@@ -10,7 +10,10 @@ class ConfigManager:
         self.config_path = Path(config_path)
         self.config_data: Dict[str, Any] = {}
         self.encryption_key: Optional[bytes] = None
-        self.database_path = Path("database/music_library.db")  # Hardcoded - same as MusicDatabase
+        # Use DATABASE_PATH env var, fallback to database/music_library.db
+        import os
+        db_path = os.environ.get('DATABASE_PATH', 'database/music_library.db')
+        self.database_path = Path(db_path)
         self._load_config()
 
     def _get_encryption_key(self) -> bytes:
@@ -150,7 +153,7 @@ class ConfigManager:
                 "level": "INFO"
             },
             "database": {
-                "path": "database/music_library.db",
+                "path": os.environ.get('DATABASE_PATH', 'database/music_library.db'),
                 "max_workers": 5
             },
             "metadata_enhancement": {
