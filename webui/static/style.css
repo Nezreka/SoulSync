@@ -1846,6 +1846,18 @@ body {
 .downloads-header {
     padding: 16px 0;
 }
+
+.downloads-header-content {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 20px;
+}
+
+.downloads-header-text {
+    flex: 1;
+}
+
 .downloads-header .downloads-title {
     font-family: 'Segoe UI', sans-serif;
     font-size: 28px;
@@ -1859,6 +1871,113 @@ body {
     color: rgba(255, 255, 255, 0.85);
     font-weight: 300;
     margin-top: 4px;
+}
+
+/* Toggle Download Manager Button */
+.toggle-manager-btn {
+    background: linear-gradient(135deg,
+        rgba(35, 35, 35, 0.8) 0%,
+        rgba(25, 25, 25, 0.9) 100%);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 50%;
+    width: 44px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    flex-shrink: 0;
+    box-shadow:
+        0 4px 12px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.toggle-manager-btn:hover {
+    background: linear-gradient(135deg,
+        rgba(45, 45, 45, 0.9) 0%,
+        rgba(35, 35, 35, 0.95) 100%);
+    border-color: rgba(29, 185, 84, 0.4);
+    transform: scale(1.05);
+    box-shadow:
+        0 6px 16px rgba(0, 0, 0, 0.4),
+        0 0 20px rgba(29, 185, 84, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+
+.toggle-manager-btn:active {
+    transform: scale(0.95);
+}
+
+.toggle-icon {
+    font-size: 20px;
+    font-weight: 600;
+    color: #ffffff;
+    transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    line-height: 1;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+/* When manager is hidden, rotate the icon */
+.downloads-content.manager-hidden .toggle-icon {
+    transform: rotate(180deg);
+}
+
+/* Hide side panel when toggled */
+.downloads-content.manager-hidden {
+    grid-template-columns: 1fr; /* Only show main panel */
+}
+
+.downloads-content.manager-hidden .downloads-side-panel {
+    display: none;
+}
+
+/* Responsive: Mobile adjustments for toggle button */
+@media (max-width: 768px) {
+    .downloads-header-content {
+        gap: 12px;
+    }
+
+    .toggle-manager-btn {
+        width: 40px;
+        height: 40px;
+    }
+
+    .toggle-icon {
+        font-size: 20px;
+    }
+
+    .downloads-header .downloads-title {
+        font-size: 24px;
+    }
+
+    .downloads-header .downloads-subtitle {
+        font-size: 12px;
+    }
+}
+
+@media (max-width: 480px) {
+    .downloads-header-content {
+        gap: 10px;
+    }
+
+    .toggle-manager-btn {
+        width: 36px;
+        height: 36px;
+    }
+
+    .toggle-icon {
+        font-size: 18px;
+    }
+
+    .downloads-header .downloads-title {
+        font-size: 20px;
+    }
+
+    .downloads-header .downloads-subtitle {
+        font-size: 11px;
+    }
 }
 
 /* Search Bar: Replicates create_elegant_search_bar() */
@@ -9296,6 +9415,85 @@ body {
     .download-control-btn {
         flex: 1;
         max-width: 200px;
+    }
+}
+
+/* Small height screens (below 800px height) - Better scrollability */
+@media (max-height: 800px) {
+    .download-missing-modal-content {
+        height: 95vh;
+        max-height: 95vh;
+    }
+
+    .download-dashboard-stats {
+        padding: 16px;
+        gap: 16px;
+    }
+
+    .download-progress-section {
+        padding: 16px;
+    }
+
+    .download-tracks-section {
+        min-height: 300px; /* Ensure tracks list is always usable */
+    }
+
+    .download-tracks-table-container {
+        min-height: 200px; /* Ensure at least 200px for the table */
+    }
+}
+
+/* Very small height screens (below 600px height) - Compact mode */
+@media (max-height: 600px) {
+    .download-missing-modal-content {
+        height: 98vh;
+        max-height: 98vh;
+    }
+
+    .download-missing-modal-hero {
+        min-height: auto;
+        padding: 12px 20px;
+    }
+
+    .download-dashboard-stats {
+        padding: 12px;
+        gap: 12px;
+        grid-template-columns: repeat(2, 1fr); /* 2 columns on very small heights */
+    }
+
+    .dashboard-stat-number {
+        font-size: 24px;
+    }
+
+    .dashboard-stat-label {
+        font-size: 11px;
+    }
+
+    .download-progress-section {
+        padding: 12px;
+        gap: 10px;
+    }
+
+    .progress-label {
+        font-size: 13px;
+    }
+
+    .download-tracks-section {
+        min-height: 250px; /* Smaller but still usable */
+    }
+
+    .download-tracks-table-container {
+        min-height: 150px;
+    }
+
+    .download-tracks-table th,
+    .download-tracks-table td {
+        padding: 8px 10px;
+        font-size: 12px;
+    }
+
+    .download-missing-modal-footer {
+        padding: 12px 20px;
     }
 }
 
@@ -19161,6 +19359,137 @@ body {
 @media (max-width: 700px) {
     .enhanced-dropdown-content {
         padding: 12px 16px;
+    }
+
+    /* Adjust search bar for mobile */
+    .enhanced-search-bar-container {
+        flex-direction: column;
+        padding: 16px;
+        gap: 12px;
+    }
+
+    .enhanced-search-btn {
+        width: 100%;
+        justify-content: center;
+        padding: 12px 20px;
+    }
+
+    #enhanced-search-input {
+        font-size: 14px;
+    }
+
+    /* Better spacing for search results */
+    .enhanced-search-results-container {
+        padding: 16px;
+    }
+
+    .enhanced-results-header {
+        flex-direction: column;
+        gap: 8px;
+        align-items: flex-start;
+    }
+}
+
+/* Very small screens (mobile portrait) */
+@media (max-width: 480px) {
+    .enhanced-search-bar-container {
+        padding: 12px;
+    }
+
+    .enhanced-search-wrapper {
+        padding: 0 12px;
+    }
+
+    #enhanced-search-input {
+        font-size: 13px;
+        padding: 12px 0;
+    }
+
+    .enhanced-search-icon {
+        font-size: 18px;
+        margin-right: 8px;
+    }
+
+    .enhanced-search-btn {
+        padding: 10px 16px;
+        font-size: 13px;
+    }
+
+    .btn-icon {
+        font-size: 14px;
+    }
+
+    /* Compact dropdown on mobile */
+    .enhanced-dropdown {
+        max-height: min(60vh, 500px);
+    }
+
+    .enhanced-dropdown-content {
+        max-height: min(60vh, 500px);
+        padding: 10px 12px;
+    }
+
+    /* Better album/track results on mobile */
+    .album-result-item {
+        margin-bottom: 8px;
+    }
+
+    .album-item__header {
+        padding: 12px;
+        gap: 12px;
+    }
+
+    .album-item__icon {
+        width: 40px;
+        height: 40px;
+        font-size: 20px;
+    }
+
+    .album-item__title {
+        font-size: 11px;
+    }
+
+    .album-item__details {
+        font-size: 9px;
+    }
+
+    .album-action-btn {
+        height: 32px;
+        width: 140px;
+        font-size: 11px;
+    }
+
+    .track-item {
+        margin: 2px 12px 6px 50px;
+        padding: 6px 10px;
+    }
+
+    .track-item__title {
+        font-size: 10px;
+    }
+
+    .track-item__details {
+        font-size: 8px;
+    }
+
+    .track-item .action-btn {
+        width: 28px;
+        height: 28px;
+        font-size: 11px;
+    }
+
+    /* Search results area */
+    .enhanced-search-results-container {
+        padding: 12px;
+    }
+
+    .search-results-scroll-area {
+        padding-right: 3px;
+    }
+
+    .search-result-item {
+        padding: 12px;
+        border-radius: 14px;
     }
 }
 

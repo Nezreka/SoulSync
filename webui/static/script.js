@@ -296,13 +296,14 @@ const API = {
 
 document.addEventListener('DOMContentLoaded', function() {
     console.log('SoulSync WebUI initializing...');
-    
+
     // Initialize components
     initializeNavigation();
     initializeMediaPlayer();
     initializeDonationWidget();
     initializeSyncPage();
     initializeWatchlist();
+    initializeDownloadManagerToggle();
 
     // Initialize Beatport rebuild slider if it's the active tab by default
     const activeRebuildTab = document.querySelector('.beatport-tab-button.active[data-beatport-tab="rebuild"]');
@@ -363,14 +364,45 @@ function initializeWatchlist() {
     if (watchlistButton) {
         watchlistButton.addEventListener('click', showWatchlistModal);
     }
-    
+
     // Update watchlist count initially
     updateWatchlistButtonCount();
-    
+
     // Update count every 30 seconds
     setInterval(updateWatchlistButtonCount, 30000);
-    
+
     console.log('Watchlist system initialized');
+}
+
+function initializeDownloadManagerToggle() {
+    const toggleButton = document.getElementById('toggle-download-manager-btn');
+    const downloadsContent = document.querySelector('.downloads-content');
+
+    if (!toggleButton || !downloadsContent) {
+        console.log('Download manager toggle not found on this page');
+        return;
+    }
+
+    // Load saved state from localStorage
+    const isHidden = localStorage.getItem('downloadManagerHidden') === 'true';
+    if (isHidden) {
+        downloadsContent.classList.add('manager-hidden');
+    }
+
+    // Add click handler
+    toggleButton.addEventListener('click', () => {
+        const isCurrentlyHidden = downloadsContent.classList.contains('manager-hidden');
+
+        if (isCurrentlyHidden) {
+            downloadsContent.classList.remove('manager-hidden');
+            localStorage.setItem('downloadManagerHidden', 'false');
+        } else {
+            downloadsContent.classList.add('manager-hidden');
+            localStorage.setItem('downloadManagerHidden', 'true');
+        }
+    });
+
+    console.log('Download manager toggle initialized');
 }
 
 function navigateToPage(pageId) {
