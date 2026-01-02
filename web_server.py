@@ -65,12 +65,48 @@ if os.path.exists(config_path):
             print(f"🔴 FAILED to re-initialize config_manager: {e}")
 else:
     print(f"🔴 WARNING: config.json not found at {config_path}. Using default settings.")
+
 # Correctly point to the 'webui' directory for templates and static files
 app = Flask(
     __name__,
     template_folder=os.path.join(base_dir, 'webui'),
     static_folder=os.path.join(base_dir, 'webui', 'static')
 )
+
+#
+# Hack-ish support for custom base urls
+#
+# This is generally supported out of the box by proper werkzeug configuration or more production ready WSGI servers (gunicorn)
+# where the Flask app needs to be configured and returned as function or attributem but not 'run'. 
+# (Run is handled by the WSGI server)
+#
+class PrefixMiddleware(object):
+    def __init__(self, app, prefix=''):
+        self.app = app
+        self.prefix = prefix
+
+    def __call__(self, environ, start_response):
+
+        if environ['PATH_INFO'].startswith(self.prefix):
+            environ['PATH_INFO'] = environ['PATH_INFO'][len(self.prefix):]
+            environ['SCRIPT_NAME'] = self.prefix
+            return self.app(environ, start_response)
+        else:
+            start_response('404', [('Content-Type', 'text/plain')])
+            return ["This url does not belong to the app.".encode()]
+
+base_url = '/'
+if 'SOULSYNC_BASE_URL' in os.environ:
+    base_url = os.environ['SOULSYNC_BASE_URL']
+
+if base_url != '/': # the middleware seems to misbehave if the base_url is the default path
+    app.wsgi_app = PrefixMiddleware(app.wsgi_app, prefix=base_url)
+
+# Inject the base_url into the context so it can be used in the template rendering
+@app.context_processor
+def inject_base_url():
+    return dict(base_url=base_url)
+
 
 # --- Docker Helper Functions ---
 def docker_resolve_path(path_str):
