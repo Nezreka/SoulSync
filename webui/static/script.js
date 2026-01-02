@@ -1484,9 +1484,9 @@ function validateFileOrganizationTemplates() {
 
     // Valid variables for each template type
     const validVars = {
-        album: ['$artist', '$albumartist', '$album', '$title', '$track'],
-        single: ['$artist', '$albumartist', '$album', '$title'],
-        playlist: ['$artist', '$playlist', '$title']
+        album: ['$artist', '$albumartist', '$album', '$title', '$track', '$year'],
+        single: ['$artist', '$albumartist', '$album', '$title', '$year'],
+        playlist: ['$artist', '$playlist', '$title', '$year']
     };
 
     // Get template values
@@ -7219,7 +7219,8 @@ async function startMissingTracksProcess(playlistId) {
         };
 
         // If this is an artist album download, use album name and include full context
-        if (playlistId.startsWith('artist_album_')) {
+        // Match both 'artist_album_' and 'enhanced_search_album_' prefixes
+        if (playlistId.startsWith('artist_album_') || playlistId.startsWith('enhanced_search_album_')) {
             requestBody.playlist_name = process.album?.name || process.playlist.name;
             requestBody.is_album_download = true;
             requestBody.album_context = process.album;   // Full Spotify album object
