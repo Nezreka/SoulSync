@@ -6948,6 +6948,14 @@ def _build_final_path_for_track(context, spotify_artist, album_info, file_ext):
     original_search = context.get("original_search_result", {})
     playlist_folder_mode = track_info.get("_playlist_folder_mode", False)
 
+    # Extract year from spotify_album for template use (safe for all modes)
+    year = 'Unknown'
+    spotify_album = context.get("spotify_album", {})
+    if spotify_album and spotify_album.get('release_date'):
+        release_date = spotify_album['release_date']
+        if release_date and len(release_date) >= 4:
+            year = release_date[:4]
+
     # Determine which template type to use
     if playlist_folder_mode:
         # PLAYLIST MODE
@@ -6960,7 +6968,8 @@ def _build_final_path_for_track(context, spotify_artist, album_info, file_ext):
             'album': track_name,
             'title': track_name,
             'playlist_name': playlist_name,
-            'track_number': 1
+            'track_number': 1,
+            'year': year
         }
 
         folder_path, filename_base = _get_file_path_from_template(template_context, 'playlist_path')
@@ -6997,7 +7006,8 @@ def _build_final_path_for_track(context, spotify_artist, album_info, file_ext):
             'albumartist': spotify_artist["name"] if isinstance(spotify_artist, dict) else spotify_artist.name,
             'album': album_info['album_name'],
             'title': clean_track_name,
-            'track_number': track_number
+            'track_number': track_number,
+            'year': year
         }
 
         folder_path, filename_base = _get_file_path_from_template(template_context, 'album_path')
@@ -7032,7 +7042,8 @@ def _build_final_path_for_track(context, spotify_artist, album_info, file_ext):
             'albumartist': spotify_artist["name"] if isinstance(spotify_artist, dict) else spotify_artist.name,
             'album': album_info.get('album_name', clean_track_name) if album_info else clean_track_name,
             'title': clean_track_name,
-            'track_number': 1
+            'track_number': 1,
+            'year': year
         }
 
         folder_path, filename_base = _get_file_path_from_template(template_context, 'single_path')
@@ -7076,6 +7087,7 @@ def _apply_path_template(template: str, context: dict) -> str:
     result = result.replace('$album', context.get('album', 'Unknown Album'))
     result = result.replace('$title', context.get('title', 'Unknown Track'))
     result = result.replace('$track', f"{context.get('track_number', 1):02d}")
+    result = result.replace('$year', str(context.get('year', 'Unknown')))
 
     return result
 
