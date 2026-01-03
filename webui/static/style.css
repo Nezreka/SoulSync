@@ -17298,6 +17298,25 @@ body {
     transform: scale(1.1);
 }
 
+.discover-page-help-button {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    z-index: 10;
+    width: 32px;
+    height: 32px;
+    font-size: 16px;
+    background-color: rgba(0, 0, 0, 0.6);
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    backdrop-filter: blur(10px);
+}
+
+.discover-page-help-button:hover {
+    background-color: #1db954;
+    border-color: #1db954;
+    transform: scale(1.15);
+}
+
 .tool-help-modal {
     display: none;
     position: fixed;

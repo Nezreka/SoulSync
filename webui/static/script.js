@@ -12461,6 +12461,168 @@ const TOOL_HELP_CONTENT = {
             <h4>Scan workflow</h4>
             <p>This tool replicates the same scan process that runs automatically after completing a download modal - ensuring your new tracks are immediately available in your library!</p>
         `
+    },
+    'discover-page': {
+        title: 'Discover Page Guide',
+        content: `
+            <h4>What is the Discover page?</h4>
+            <p>The Discover page is your personalized music discovery hub. It uses your watchlist, library listening history, and <strong>MusicMap</strong> to surface new music, create curated playlists, and organize your collection in dynamic ways.</p>
+
+            <h4>🎯 Hero Section (Featured Artists)</h4>
+            <p>The rotating hero showcases <strong>similar artists</strong> discovered via MusicMap. These are artists you don't already have in your library but might enjoy based on your watchlist.</p>
+            <ul>
+                <li>Auto-rotates every 8 seconds through 10 featured artists</li>
+                <li>Similar artists sourced from MusicMap and matched to Spotify</li>
+                <li>Click arrows to navigate manually</li>
+                <li>Add artists to watchlist or view their full discography</li>
+                <li>Data refreshed when watchlist scanner runs</li>
+            </ul>
+
+            <h4>📀 Recent Releases</h4>
+            <p>New albums from artists you're watching <strong>and their MusicMap similar artists</strong>. Cached from Spotify and updated during watchlist scans.</p>
+            <ul>
+                <li>Shows up to 20 recent albums</li>
+                <li>Click any album to view tracks and add to wishlist</li>
+                <li>Automatically filtered to show albums released in the last 90 days</li>
+                <li>Includes both watchlist artists and similar artists from MusicMap</li>
+            </ul>
+
+            <h4>🍂 Seasonal Content (Auto-detected)</h4>
+            <p>Seasonal albums and playlists that appear automatically based on the current season (Winter, Spring, Summer, Fall).</p>
+            <ul>
+                <li><strong>Seasonal Albums:</strong> Albums matching the current season's vibe</li>
+                <li><strong>Seasonal Playlist:</strong> Curated playlist that refreshes with each season</li>
+                <li>Only visible during the matching season</li>
+                <li>Can download and sync to your media server</li>
+            </ul>
+
+            <h4>🎵 Fresh Tape (Release Radar)</h4>
+            <p>Curated playlist of <strong>brand new releases</strong> from your discovery pool. Focuses on tracks released in the past 30 days.</p>
+            <ul>
+                <li>50 tracks, refreshed weekly by watchlist scanner</li>
+                <li>Stays consistent until next update (not random)</li>
+                <li>Download missing tracks or sync to media server</li>
+                <li>Tracks from watchlist artists and MusicMap similar artists</li>
+            </ul>
+
+            <h4>📚 The Archives (Discovery Weekly)</h4>
+            <p>Curated playlist from your <strong>entire discovery pool</strong> - a mix of new and catalog tracks from MusicMap discoveries.</p>
+            <ul>
+                <li>50 tracks, refreshed weekly by watchlist scanner</li>
+                <li>Stays consistent until next update (not random)</li>
+                <li>Broader selection than Fresh Tape (includes older releases)</li>
+                <li>Download missing tracks or sync to media server</li>
+            </ul>
+
+            <h4>📊 Personalized Library Playlists</h4>
+            <p>Playlists generated from <strong>your existing library</strong> using listening statistics:</p>
+            <ul>
+                <li><strong>Recently Added:</strong> Latest 50 tracks added to your library</li>
+                <li><strong>Your Top 50:</strong> All-time most played tracks (requires play count data)</li>
+                <li><strong>Forgotten Favorites:</strong> Tracks you loved but haven't played recently</li>
+            </ul>
+
+            <h4>🎲 Discovery Pool Playlists</h4>
+            <p>Playlists generated from your <strong>discovery pool</strong> (tracks from watchlist/similar artists you don't own yet):</p>
+            <ul>
+                <li><strong>Popular Picks:</strong> High-popularity tracks (Spotify popularity 70+)</li>
+                <li><strong>Hidden Gems:</strong> Underground discoveries (Spotify popularity &lt;40)</li>
+                <li><strong>Discovery Shuffle:</strong> 50 random tracks - different every time you load</li>
+                <li><strong>Familiar Favorites:</strong> Reliable, mid-popularity tracks (40-70)</li>
+            </ul>
+
+            <h4>🎨 Build a Playlist</h4>
+            <p>Create custom playlists using <strong>MusicMap similar artists</strong> from seed artists you select.</p>
+            <ul>
+                <li>Search for any artist on Spotify (even if not in your library)</li>
+                <li>Select 1-5 seed artists</li>
+                <li>Choose playlist size: 25, 50, 75, or 100 tracks</li>
+                <li>Uses cached MusicMap similar artists from your database</li>
+                <li>Pulls albums from those similar artists to build the playlist</li>
+                <li>Download and sync like any other discover playlist</li>
+            </ul>
+
+            <h4>🧠 ListenBrainz Playlists</h4>
+            <p>Access playlists from your ListenBrainz account (requires ListenBrainz authentication).</p>
+            <ul>
+                <li><strong>Created For You:</strong> Playlists generated by ListenBrainz for you</li>
+                <li><strong>Your Playlists:</strong> Playlists you've created on ListenBrainz</li>
+                <li><strong>Collaborative:</strong> Collaborative playlists you're part of</li>
+                <li>Cached locally for performance - click Refresh to update from ListenBrainz</li>
+                <li>Click any playlist to view tracks and download/sync</li>
+            </ul>
+
+            <h4>⏰ Time Machine (Browse by Decade)</h4>
+            <p>Explore your discovery pool organized by release decade.</p>
+            <ul>
+                <li>Dynamically generated tabs for decades with available content (1950s-2020s)</li>
+                <li>Each decade shows up to 100 tracks from that era</li>
+                <li>Great for discovering older catalog releases from your favorite artists</li>
+            </ul>
+
+            <h4>🎵 Browse by Genre</h4>
+            <p>Explore your discovery pool filtered by music genre.</p>
+            <ul>
+                <li>Shows top genres from your discovery pool</li>
+                <li>Click any genre tab to see up to 100 tracks in that genre</li>
+                <li>Genres sourced from Spotify metadata</li>
+            </ul>
+
+            <h4>💾 What is the Discovery Pool?</h4>
+            <p>The <strong>discovery pool</strong> is a database of tracks from:</p>
+            <ul>
+                <li>Artists in your watchlist</li>
+                <li>Similar artists found via <strong>MusicMap</strong></li>
+                <li>Populated during watchlist scanner runs (scrapes music-map.com, matches to Spotify)</li>
+                <li>Filtered to exclude tracks already in your library</li>
+                <li>Used to generate Fresh Tape, The Archives, and discovery pool playlists</li>
+                <li>Caches up to 50 top similar artists across your watchlist</li>
+            </ul>
+
+            <h4>🗺️ How MusicMap Integration Works</h4>
+            <p>SoulSync uses <strong>MusicMap</strong> (music-map.com) instead of Spotify's recommendation API to find similar artists:</p>
+            <ul>
+                <li>During watchlist scans, each watchlist artist is looked up on MusicMap</li>
+                <li>MusicMap's artist similarity graph is scraped to find related artists</li>
+                <li>Similar artist names are matched to Spotify IDs</li>
+                <li>Up to 10 similar artists per watchlist artist are cached (refreshed every 30 days)</li>
+                <li>These cached similar artists power all discovery features</li>
+                <li>This approach gives you more diverse, community-driven recommendations</li>
+            </ul>
+
+            <h4>⬇️ Download & Sync Features</h4>
+            <p>Most discover playlists support two actions:</p>
+            <ul>
+                <li><strong>Download:</strong> Opens modal to match tracks to Soulseek and add to download queue</li>
+                <li><strong>Sync:</strong> Downloads tracks and automatically transfers them to your media server</li>
+                <li>Sync progress persists - you can close the page and it continues in the background</li>
+                <li>Sync status shows: ✓ completed, ⏳ pending, ✗ failed</li>
+            </ul>
+
+            <h4>🔄 When is data refreshed?</h4>
+            <ul>
+                <li><strong>MusicMap Similar Artists:</strong> Fetched during watchlist scans, cached for 30 days</li>
+                <li><strong>Hero, Recent Releases, Fresh Tape, The Archives:</strong> Updated during watchlist scanner runs (Dashboard page)</li>
+                <li><strong>Discovery Pool:</strong> Fully refreshed every 24 hours during watchlist scans (50 top similar artists, 10 albums each)</li>
+                <li><strong>Seasonal Content:</strong> Auto-detected based on current date</li>
+                <li><strong>Personalized Library Playlists:</strong> Generated on-demand from current library data</li>
+                <li><strong>Discovery Pool Playlists:</strong> Generated on-demand from current discovery pool</li>
+                <li><strong>Build a Playlist:</strong> Generated on-demand from cached MusicMap similar artists</li>
+                <li><strong>ListenBrainz:</strong> Cached locally, manually refreshed via Refresh button</li>
+                <li><strong>Time Machine & Genre:</strong> Generated on-demand from current discovery pool</li>
+            </ul>
+
+            <h4>💡 Pro Tips</h4>
+            <ul>
+                <li>Curated playlists (Fresh Tape, The Archives) stay consistent until next watchlist scan - great for weekly listening routines</li>
+                <li>Discovery Shuffle changes every page load - perfect when you want spontaneous recommendations</li>
+                <li>Use Build a Playlist to explore artists not in your watchlist (if seed artist isn't in watchlist, MusicMap data must be cached first)</li>
+                <li>The discovery pool only includes tracks you <strong>don't own yet</strong> - download them to build your collection!</li>
+                <li>Sync feature is ideal for batch downloading entire playlists to your media server</li>
+                <li>MusicMap provides more diverse recommendations than Spotify's algorithm - expect deeper cuts and underground artists!</li>
+                <li>Add more artists to your watchlist to expand your discovery pool with their MusicMap similar artists</li>
+            </ul>
+        `
     }
 };
 
