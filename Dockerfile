@@ -14,6 +14,7 @@ RUN apt-get update && apt-get install -y \
     libssl-dev \
     curl \
     gosu \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user for security
