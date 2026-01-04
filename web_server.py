@@ -496,25 +496,47 @@ class WebUIDownloadMonitor:
         self._validate_worker_counts()
     
     def _get_live_transfers(self):
-        """Get current transfer status from slskd API"""
+        """Get current transfer status from slskd API and YouTube client"""
         try:
             # Check if we should stop due to shutdown
             if not self.monitoring:
                 return {}
-                
-            transfers_data = asyncio.run(soulseek_client._make_request('GET', 'transfers/downloads'))
-            if not transfers_data:
-                return {}
-                
+
             live_transfers = {}
-            for user_data in transfers_data:
-                username = user_data.get('username', 'Unknown')
-                if 'directories' in user_data:
-                    for directory in user_data['directories']:
-                        if 'files' in directory:
-                            for file_info in directory['files']:
-                                key = f"{username}::{extract_filename(file_info.get('filename', ''))}"
-                                live_transfers[key] = file_info
+
+            # Get Soulseek downloads from API
+            transfers_data = asyncio.run(soulseek_client._make_request('GET', 'transfers/downloads'))
+            if transfers_data:
+                for user_data in transfers_data:
+                    username = user_data.get('username', 'Unknown')
+                    if 'directories' in user_data:
+                        for directory in user_data['directories']:
+                            if 'files' in directory:
+                                for file_info in directory['files']:
+                                    key = f"{username}::{extract_filename(file_info.get('filename', ''))}"
+                                    live_transfers[key] = file_info
+
+            # Also get YouTube downloads (through orchestrator)
+            try:
+                all_downloads = asyncio.run(soulseek_client.get_all_downloads())
+                for download in all_downloads:
+                    # Only add YouTube downloads (Soulseek ones are already in the lookup)
+                    if download.username == 'youtube':
+                        key = f"{download.username}::{extract_filename(download.filename)}"
+                        # Convert DownloadStatus to transfer dict format for monitor compatibility
+                        live_transfers[key] = {
+                            'id': download.id,
+                            'filename': download.filename,
+                            'username': download.username,
+                            'state': download.state,
+                            'percentComplete': download.progress,
+                            'size': download.size,
+                            'bytesTransferred': download.transferred,
+                            'averageSpeed': download.speed,
+                        }
+            except Exception as yt_error:
+                print(f"⚠️ Monitor: Could not fetch YouTube downloads: {yt_error}")
+
             return live_transfers
         except Exception as e:
             # If we get shutdown-related errors, stop monitoring immediately
