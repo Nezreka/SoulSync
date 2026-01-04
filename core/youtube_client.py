@@ -530,7 +530,15 @@ class YouTubeClient:
         )
         
         # Add thumbnail for frontend (surgical addition)
-        track_result.thumbnail = entry.get('thumbnail')
+        # In fast mode (extract_flat), 'thumbnail' might be missing, but 'thumbnails' list exists
+        thumbnail = entry.get('thumbnail')
+        if not thumbnail and entry.get('thumbnails'):
+            # Pick the last thumbnail (usually highest quality)
+            thumbs = entry.get('thumbnails')
+            if isinstance(thumbs, list) and thumbs:
+                thumbnail = thumbs[-1].get('url')
+        
+        track_result.thumbnail = thumbnail
         
         return track_result
 
@@ -556,7 +564,7 @@ class YouTubeClient:
                 ydl_opts = {
                     'quiet': True,
                     'no_warnings': True,
-                    'extract_flat': False,
+                    'extract_flat': True, # Fast mode: Don't fetch formats (massive speedup)
                     'default_search': 'ytsearch',
                     # Bot detection bypass (same as download options)
                     'extractor_args': {
