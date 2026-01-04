@@ -31,6 +31,7 @@ from core.plex_client import PlexClient
 from core.jellyfin_client import JellyfinClient
 from core.navidrome_client import NavidromeClient
 from core.soulseek_client import SoulseekClient
+from core.download_orchestrator import DownloadOrchestrator
 from core.tidal_client import TidalClient # Added import for Tidal
 from core.matching_engine import MusicMatchingEngine
 from core.database_update_worker import DatabaseUpdateWorker, DatabaseStatsWorker
@@ -106,7 +107,8 @@ try:
     plex_client = PlexClient()
     jellyfin_client = JellyfinClient()
     navidrome_client = NavidromeClient()
-    soulseek_client = SoulseekClient()
+    # Use DownloadOrchestrator instead of SoulseekClient directly (routes between Soulseek/YouTube)
+    soulseek_client = DownloadOrchestrator()
     tidal_client = TidalClient()
     matching_engine = MusicMatchingEngine()
     sync_service = PlaylistSyncService(spotify_client, plex_client, soulseek_client, jellyfin_client, navidrome_client)
@@ -268,6 +270,7 @@ def get_cached_transfer_data():
         # Cache expired or empty, fetch new data
         live_transfers_lookup = {}
         try:
+            # First, get Soulseek downloads from API
             transfers_data = asyncio.run(soulseek_client._make_request('GET', 'transfers/downloads'))
             if transfers_data:
                 all_transfers = []
@@ -282,7 +285,28 @@ def get_cached_transfer_data():
                 for transfer in all_transfers:
                     key = f"{transfer.get('username')}::{extract_filename(transfer.get('filename', ''))}"
                     live_transfers_lookup[key] = transfer
-            
+
+            # Also add YouTube downloads (through orchestrator)
+            try:
+                all_downloads = asyncio.run(soulseek_client.get_all_downloads())
+                for download in all_downloads:
+                    # Only add YouTube downloads (Soulseek ones are already in the lookup)
+                    if download.username == 'youtube':
+                        key = f"{download.username}::{extract_filename(download.filename)}"
+                        # Convert DownloadStatus to transfer dict format
+                        live_transfers_lookup[key] = {
+                            'id': download.id,
+                            'filename': download.filename,
+                            'username': download.username,
+                            'state': download.state,
+                            'percentComplete': download.progress,
+                            'size': download.size,
+                            'bytesTransferred': download.transferred,
+                            'averageSpeed': download.speed,
+                        }
+            except Exception as e:
+                print(f"⚠️ Could not fetch YouTube downloads: {e}")
+
             # Update cache
             transfer_data_cache['data'] = live_transfers_lookup
             transfer_data_cache['last_update'] = current_time
@@ -2058,7 +2082,7 @@ def handle_settings():
             if 'active_media_server' in new_settings:
                 config_manager.set_active_media_server(new_settings['active_media_server'])
 
-            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'listenbrainz']:
+            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'listenbrainz']:
                 if service in new_settings:
                     for key, value in new_settings[service].items():
                         config_manager.set(f'{service}.{key}', value)
@@ -2073,7 +2097,8 @@ def handle_settings():
             spotify_client._setup_client()
             plex_client.server = None
             jellyfin_client.server = None
-            soulseek_client._setup_client()
+            # Reload orchestrator settings (download source mode, hybrid_primary, etc.)
+            soulseek_client.reload_settings()
             # FIX: Re-instantiate the global tidal_client to pick up new settings
             tidal_client = TidalClient()
             print("✅ Service clients re-initialized with new settings.")
@@ -3551,7 +3576,7 @@ def _find_completed_file_robust(download_dir, api_filename, transfer_dir=None):
     Robustly finds a completed file on disk, accounting for name variations and
     unexpected subdirectories. This version uses the superior normalization logic
     from the GUI's matching_engine.py to ensure consistency.
-    
+
     First searches in download_dir, then optionally searches in transfer_dir if provided.
     Returns tuple (file_path, location) where location is 'downloads' or 'transfer'.
     """
@@ -3559,6 +3584,14 @@ def _find_completed_file_robust(download_dir, api_filename, transfer_dir=None):
     import os
     from difflib import SequenceMatcher
     from unidecode import unidecode
+
+    # YOUTUBE SUPPORT: Handle encoded filename format "video_id||title"
+    # Extract just the title part for file matching
+    if '||' in api_filename:
+        print(f"🎵 Detected YouTube encoded filename: {api_filename}")
+        _, title = api_filename.split('||', 1)
+        api_filename = title  # Use just the title for file searching
+        print(f"🎵 Extracted title for search: {api_filename}")
 
     def normalize_for_finding(text: str) -> str:
         """A powerful normalization function adapted from matching_engine.py."""
@@ -6949,7 +6982,7 @@ def _build_final_path_for_track(context, spotify_artist, album_info, file_ext):
     playlist_folder_mode = track_info.get("_playlist_folder_mode", False)
 
     # Extract year from spotify_album for template use (safe for all modes)
-    year = 'Unknown'
+    year = ''  # Empty string instead of 'Unknown' to avoid "Unknown albumName"
     spotify_album = context.get("spotify_album", {})
     if spotify_album and spotify_album.get('release_date'):
         release_date = spotify_album['release_date']
@@ -7087,7 +7120,13 @@ def _apply_path_template(template: str, context: dict) -> str:
     result = result.replace('$album', context.get('album', 'Unknown Album'))
     result = result.replace('$title', context.get('title', 'Unknown Track'))
     result = result.replace('$track', f"{context.get('track_number', 1):02d}")
-    result = result.replace('$year', str(context.get('year', 'Unknown')))
+    result = result.replace('$year', str(context.get('year', '')))  # Empty string instead of 'Unknown'
+
+    # Clean up extra spaces that might result from empty variables
+    import re
+    result = re.sub(r'\s+', ' ', result)  # Multiple spaces to single space
+    result = re.sub(r'\s*-\s*-\s*', ' - ', result)  # Clean up double dashes
+    result = result.strip()  # Remove leading/trailing spaces
 
     return result
 
@@ -7476,7 +7515,40 @@ def _post_process_matched_download_with_verification(context_key, context, file_
             context['task_id'] = original_task_id
         if original_batch_id:
             context['batch_id'] = original_batch_id
-        
+
+        # Check if simple download handler already completed everything
+        if context.get('_simple_download_completed'):
+            print(f"✅ [Verification] Simple download handler already completed - verifying at custom path")
+            expected_final_path = context.get('_final_path')
+
+            if expected_final_path and os.path.exists(expected_final_path):
+                print(f"✅ [Verification] File verified at simple download path: {expected_final_path}")
+                with tasks_lock:
+                    if task_id in download_tasks:
+                        _mark_task_completed(task_id, context.get('track_info'))
+                        print(f"✅ [Verification] Task {task_id} marked as completed (simple download)")
+
+                with matched_context_lock:
+                    if context_key in matched_downloads_context:
+                        del matched_downloads_context[context_key]
+                        print(f"🗑️ [Verification] Cleaned up context after simple download completion: {context_key}")
+
+                _on_download_completed(batch_id, task_id, success=True)
+                return
+            else:
+                print(f"❌ [Verification] Simple download file not found at: {expected_final_path}")
+                with tasks_lock:
+                    if task_id in download_tasks:
+                        download_tasks[task_id]['status'] = 'failed'
+                        download_tasks[task_id]['error_message'] = "Simple download file not found after processing."
+
+                with matched_context_lock:
+                    if context_key in matched_downloads_context:
+                        del matched_downloads_context[context_key]
+
+                _on_download_completed(batch_id, task_id, success=False)
+                return
+
         # CRITICAL VERIFICATION STEP: Verify the final file exists
         spotify_artist = context.get("spotify_artist")
         if not spotify_artist:
@@ -7702,6 +7774,10 @@ def _post_process_matched_download(context_key, context, file_path):
 
             add_activity_item("✅", "Download Complete", f"{album_name}/{filename}", "Now")
             logger.info(f"✅ Simple download post-processing complete: {album_name}/{filename}")
+
+            # Set flag in context so verification function knows this was fully handled
+            context['_simple_download_completed'] = True
+            context['_final_path'] = str(destination)
             return
         # --- END SIMPLE DOWNLOAD HANDLING ---
 
@@ -7756,7 +7832,7 @@ def _post_process_matched_download(context_key, context, file_path):
 
         is_album_download = context.get("is_album_download", False)
         has_clean_spotify_data = context.get("has_clean_spotify_data", False)
-        
+
         if is_album_download and has_clean_spotify_data:
             # Build album_info directly from clean Spotify metadata (GUI PARITY)
             print("✅ Album context with clean Spotify data found - using direct album info")
@@ -10383,19 +10459,26 @@ def get_valid_candidates(results, spotify_track, query):
     if not initial_candidates:
         return []
 
-    # Filter by user's quality profile before artist verification
-    # Use shared soulseek_client method for consistency
-    from core.soulseek_client import SoulseekClient
-    temp_client = SoulseekClient()
-    quality_filtered_candidates = temp_client.filter_results_by_quality_preference(initial_candidates)
+    # Skip quality filtering for YouTube results (always MP3 320kbps - no quality options)
+    is_youtube_source = initial_candidates[0].username == "youtube" if initial_candidates else False
 
-    # IMPORTANT: Respect empty results from quality filter
-    # If user has strict quality requirements (e.g., FLAC-only with fallback disabled),
-    # and no results match, we should fail the download rather than force a fallback.
-    # The quality filter already has its own fallback logic controlled by the user's settings.
-    if not quality_filtered_candidates:
-        print(f"⚠️ [Quality Filter] No candidates match quality profile - download will fail per user preferences")
-        return []
+    if is_youtube_source:
+        print(f"🎵 [YouTube] Skipping quality filter - YouTube always provides MP3 320kbps")
+        quality_filtered_candidates = initial_candidates
+    else:
+        # Filter by user's quality profile before artist verification (Soulseek only)
+        # Use shared soulseek_client method for consistency
+        from core.soulseek_client import SoulseekClient
+        temp_client = SoulseekClient()
+        quality_filtered_candidates = temp_client.filter_results_by_quality_preference(initial_candidates)
+
+        # IMPORTANT: Respect empty results from quality filter
+        # If user has strict quality requirements (e.g., FLAC-only with fallback disabled),
+        # and no results match, we should fail the download rather than force a fallback.
+        # The quality filter already has its own fallback logic controlled by the user's settings.
+        if not quality_filtered_candidates:
+            print(f"⚠️ [Quality Filter] No candidates match quality profile - download will fail per user preferences")
+            return []
 
     verified_candidates = []
     spotify_artist_name = spotify_track.artists[0] if spotify_track.artists else ""

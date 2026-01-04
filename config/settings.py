@@ -145,6 +145,11 @@ class ConfigManager:
                 "download_path": "./downloads",
                 "transfer_path": "./Transfer"
             },
+            "download_source": {
+                "mode": "soulseek",  # Options: "soulseek", "youtube", "hybrid"
+                "hybrid_primary": "soulseek",  # Which source to try first in hybrid mode
+                "youtube_min_confidence": 0.65  # Minimum confidence for YouTube matches
+            },
             "listenbrainz": {
                 "token": ""
             },
