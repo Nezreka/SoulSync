@@ -63,6 +63,7 @@ environment:
   - FLASK_ENV=production              # Flask environment
   - PYTHONPATH=/app                   # Python path
   - SOULSYNC_CONFIG_PATH=/app/config/config.json  # Config file location
+  - SOULSYNC_BASE_URL=/               # Configure the endpoint base_url, useful for reverse proxies
   - TZ=America/New_York               # Timezone
 ```
 

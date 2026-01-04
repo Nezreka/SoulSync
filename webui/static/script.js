@@ -290,6 +290,12 @@ const API = {
     }
 };
 
+// Wrap fetch to add server url prefix
+async function callServer(resource, config = {}) {
+	const res = APP_BASE_URL && APP_BASE_URL != '/' ? APP_BASE_URL + resource : resource;
+	return await fetch(res, config);
+}
+
 // ===============================
 // INITIALIZATION
 // ===============================
@@ -857,7 +863,7 @@ async function startStream(searchResult) {
         setLoadingProgress(0);
         
         // Start streaming request
-        const response = await fetch(API.stream.start, {
+        const response = await callServer(API.stream.start, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(searchResult)
@@ -918,7 +924,7 @@ async function updateStreamStatus() {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 10000); // 10-second timeout
         
-        const response = await fetch(API.stream.status, {
+        const response = await callServer(API.stream.status, {
             signal: controller.signal
         });
         
@@ -1155,7 +1161,7 @@ async function stopStream() {
         }
         
         // Call backend stop endpoint
-        const response = await fetch(API.stream.stop, { method: 'POST' });
+        const response = await callServer(API.stream.stop, { method: 'POST' });
         if (response.ok) {
             const data = await response.json();
             console.log('🛑 Stream stopped:', data.message);
@@ -1615,7 +1621,7 @@ function validateFileOrganizationTemplates() {
 
 async function loadSettingsData() {
     try {
-        const response = await fetch(API.settings);
+        const response = await callServer(API.settings);
         const settings = await response.json();
         
         // Populate Spotify settings
@@ -1709,7 +1715,7 @@ async function loadSettingsData() {
 
         // Load Discovery Lookback Period setting
         try {
-            const lookbackResponse = await fetch('/api/discovery/lookback-period');
+            const lookbackResponse = await callServer('/api/discovery/lookback-period');
             const lookbackData = await lookbackResponse.json();
             if (lookbackData.period) {
                 document.getElementById('discovery-lookback-period').value = lookbackData.period;
@@ -1720,7 +1726,7 @@ async function loadSettingsData() {
 
         // Load current log level
         try {
-            const logLevelResponse = await fetch('/api/settings/log-level');
+            const logLevelResponse = await callServer('/api/settings/log-level');
             const logLevelData = await logLevelResponse.json();
             if (logLevelData.success && logLevelData.level) {
                 document.getElementById('log-level-select').value = logLevelData.level;
@@ -1740,7 +1746,7 @@ async function changeLogLevel() {
     const level = selector.value;
 
     try {
-        const response = await fetch('/api/settings/log-level', {
+        const response = await callServer('/api/settings/log-level', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ level: level })
@@ -1817,7 +1823,7 @@ let currentQualityProfile = null;
 
 async function loadQualityProfile() {
     try {
-        const response = await fetch('/api/quality-profile');
+        const response = await callServer('/api/quality-profile');
         const data = await response.json();
 
         if (data.success) {
@@ -1936,7 +1942,7 @@ async function applyQualityPreset(presetName) {
     try {
         showLoadingOverlay(`Applying ${presetName} preset...`);
 
-        const response = await fetch(`/api/quality-profile/preset/${presetName}`, {
+        const response = await callServer(`/api/quality-profile/preset/${presetName}`, {
             method: 'POST'
         });
 
@@ -1993,7 +1999,7 @@ async function saveQualityProfile() {
     try {
         const profile = collectQualityProfileFromUI();
 
-        const response = await fetch('/api/quality-profile', {
+        const response = await callServer('/api/quality-profile', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -2102,7 +2108,7 @@ async function saveSettings() {
         showLoadingOverlay('Saving settings...');
 
         // Save main settings
-        const response = await fetch(API.settings, {
+        const response = await callServer(API.settings, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(settings)
@@ -2117,7 +2123,7 @@ async function saveSettings() {
         let lookbackSaved = true;
         try {
             const lookbackPeriod = document.getElementById('discovery-lookback-period').value;
-            const lookbackResponse = await fetch('/api/discovery/lookback-period', {
+            const lookbackResponse = await callServer('/api/discovery/lookback-period', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ period: lookbackPeriod })
@@ -2154,7 +2160,7 @@ async function testConnection(service) {
     try {
         showLoadingOverlay(`Testing ${service} connection...`);
         
-        const response = await fetch(API.testConnection, {
+        const response = await callServer(API.testConnection, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ service })
@@ -2187,7 +2193,7 @@ async function testDashboardConnection(service) {
     try {
         showLoadingOverlay(`Testing ${service} service...`);
         
-        const response = await fetch(API.testDashboardConnection, {
+        const response = await callServer(API.testDashboardConnection, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ service })
@@ -2213,7 +2219,7 @@ async function autoDetectPlex() {
     try {
         showLoadingOverlay('Auto-detecting Plex server...');
         
-        const response = await fetch('/api/detect-media-server', {
+        const response = await callServer('/api/detect-media-server', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ server_type: 'plex' })
@@ -2240,7 +2246,7 @@ async function autoDetectJellyfin() {
     try {
         showLoadingOverlay('Auto-detecting Jellyfin server...');
         
-        const response = await fetch('/api/detect-media-server', {
+        const response = await callServer('/api/detect-media-server', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ server_type: 'jellyfin' })
@@ -2267,7 +2273,7 @@ async function autoDetectNavidrome() {
     try {
         showLoadingOverlay('Auto-detecting Navidrome server...');
 
-        const response = await fetch('/api/detect-media-server', {
+        const response = await callServer('/api/detect-media-server', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ server_type: 'navidrome' })
@@ -2294,7 +2300,7 @@ async function autoDetectSlskd() {
     try {
         showLoadingOverlay('Auto-detecting Soulseek (slskd) server...');
         
-        const response = await fetch('/api/detect-soulseek', {
+        const response = await callServer('/api/detect-soulseek', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
         });
@@ -2560,7 +2566,7 @@ function initializeSearchModeToggle() {
         abortController = new AbortController();
 
         try {
-            const response = await fetch('/api/enhanced-search', {
+            const response = await callServer('/api/enhanced-search', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ query }),
@@ -2806,7 +2812,7 @@ function initializeSearchModeToggle() {
 
         try {
             // Fetch full album data with tracks from Spotify
-            const response = await fetch(`/api/spotify/album/${album.id}`);
+            const response = await callServer(`/api/spotify/album/${album.id}`);
 
             if (!response.ok) {
                 if (response.status === 401) {
@@ -3079,7 +3085,7 @@ function initializeSearchModeToggle() {
         const query = `${item.artist} ${item.name}`;
 
         try {
-            const response = await fetch('/api/search', {
+            const response = await callServer('/api/search', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ query })
@@ -3152,7 +3158,7 @@ function initializeSearchModeToggle() {
                         ? { result_type: 'album', tracks: result.tracks || [] }
                         : { result_type: 'track', username: result.username, filename: result.filename, size: result.size };
 
-                    const response = await fetch('/api/download', {
+                    const response = await callServer('/api/download', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(downloadData)
@@ -3227,7 +3233,7 @@ async function performSearch() {
         showLoadingOverlay('Searching...');
         displaySearchResults([]);  // Clear previous results
         
-        const response = await fetch(API.search, {
+        const response = await callServer(API.search, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ query })
@@ -3312,7 +3318,7 @@ async function startDownload(index) {
     if (!result) return;
     
     try {
-        const response = await fetch('/api/downloads/start', {
+        const response = await callServer('/api/downloads/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(result)
@@ -3355,7 +3361,7 @@ async function loadInitialData() {
 
 async function loadDashboardData() {
     try {
-        const response = await fetch(API.activity);
+        const response = await callServer(API.activity);
         const data = await response.json();
         
         const activityFeed = document.getElementById('activity-feed');
@@ -3399,7 +3405,7 @@ async function loadSyncData() {
 
 async function checkForActiveProcesses() {
     try {
-        const response = await fetch('/api/active-processes');
+        const response = await callServer('/api/active-processes');
         if (!response.ok) return;
 
         const data = await response.json();
@@ -3452,7 +3458,7 @@ async function rehydrateArtistAlbumModal(virtualPlaylistId, playlistName, batchI
         
         // Fetch the album tracks to get proper artist and album data
         try {
-            const response = await fetch(`/api/artist/${artistId}/album/${albumId}/tracks`);
+            const response = await callServer(`/api/artist/${artistId}/album/${albumId}/tracks`);
             const data = await response.json();
             
             if (!data.success || !data.album || !data.tracks) {
@@ -3522,7 +3528,7 @@ async function rehydrateDiscoverPlaylistModal(virtualPlaylistId, playlistName, b
             console.log(`💧 Album download - fetching album ${albumId}...`);
 
             try {
-                const albumResponse = await fetch(`/api/spotify/album/${albumId}`);
+                const albumResponse = await callServer(`/api/spotify/album/${albumId}`);
                 if (!albumResponse.ok) {
                     console.error(`❌ Failed to fetch album: ${albumResponse.status}`);
                     return;
@@ -3612,7 +3618,7 @@ async function rehydrateDiscoverPlaylistModal(virtualPlaylistId, playlistName, b
 
         // Fetch tracks from API
         console.log(`📡 Fetching tracks from ${apiEndpoint}...`);
-        const response = await fetch(apiEndpoint);
+        const response = await callServer(apiEndpoint);
         if (!response.ok) {
             console.error(`❌ Failed to fetch discover playlist data: ${response.status}`);
             return;
@@ -3718,7 +3724,7 @@ async function rehydrateEnhancedSearchModal(virtualPlaylistId, playlistName, bat
             console.log(`💧 Album download - fetching album ${item.id}...`);
 
             try {
-                const response = await fetch(`/api/spotify/album/${item.id}`);
+                const response = await callServer(`/api/spotify/album/${item.id}`);
                 if (!response.ok) {
                     console.error(`❌ Failed to fetch album: ${response.status}`);
                     return;
@@ -3978,7 +3984,7 @@ async function loadYouTubePlaylistsFromBackend() {
     try {
         console.log('📋 Loading YouTube playlists from backend...');
         
-        const response = await fetch('/api/youtube/playlists');
+        const response = await callServer('/api/youtube/playlists');
         if (!response.ok) {
             const error = await response.json();
             throw new Error(error.error || 'Failed to fetch YouTube playlists');
@@ -4017,7 +4023,7 @@ async function loadYouTubePlaylistsFromBackend() {
                     (!state.discoveryResults || state.discoveryResults.length === 0)) {
                     try {
                         console.log(`🔍 Fetching missing discovery results for existing card: ${playlistInfo.playlist.name}`);
-                        const stateResponse = await fetch(`/api/youtube/state/${urlHash}`);
+                        const stateResponse = await callServer(`/api/youtube/state/${urlHash}`);
                         if (stateResponse.ok) {
                             const fullState = await stateResponse.json();
                             if (fullState.discovery_results) {
@@ -4042,7 +4048,7 @@ async function loadYouTubePlaylistsFromBackend() {
             if (playlistInfo.phase !== 'fresh' && playlistInfo.phase !== 'discovering') {
                 try {
                     console.log(`🔍 Fetching discovery results for: ${playlistInfo.playlist.name}`);
-                    const stateResponse = await fetch(`/api/youtube/state/${urlHash}`);
+                    const stateResponse = await callServer(`/api/youtube/state/${urlHash}`);
                     if (stateResponse.ok) {
                         const fullState = await stateResponse.json();
                         console.log(`📋 Retrieved full state with ${fullState.discovery_results?.length || 0} discovery results`);
@@ -4128,7 +4134,7 @@ async function loadBeatportChartsFromBackend() {
     try {
         console.log('📋 Loading Beatport charts from backend...');
 
-        const response = await fetch('/api/beatport/charts');
+        const response = await callServer('/api/beatport/charts');
         if (!response.ok) {
             const error = await response.json();
             throw new Error(error.error || 'Failed to fetch Beatport charts');
@@ -4168,7 +4174,7 @@ async function loadBeatportChartsFromBackend() {
             if (chartInfo.phase !== 'fresh') {
                 try {
                     console.log(`🔍 Fetching full state for: ${chartInfo.name}`);
-                    const stateResponse = await fetch(`/api/beatport/charts/status/${chartHash}`);
+                    const stateResponse = await callServer(`/api/beatport/charts/status/${chartHash}`);
                     if (stateResponse.ok) {
                         const fullState = await stateResponse.json();
                         console.log(`📋 Retrieved full state with ${fullState.discovery_results?.length || 0} discovery results`);
@@ -4328,7 +4334,7 @@ async function loadListenBrainzPlaylistsFromBackend() {
     try {
         console.log('📋 Loading ListenBrainz playlists from backend...');
 
-        const response = await fetch('/api/listenbrainz/playlists');
+        const response = await callServer('/api/listenbrainz/playlists');
         if (!response.ok) {
             const error = await response.json();
             throw new Error(error.error || 'Failed to fetch ListenBrainz playlists');
@@ -4355,7 +4361,7 @@ async function loadListenBrainzPlaylistsFromBackend() {
             if (playlistInfo.phase !== 'fresh') {
                 try {
                     console.log(`🔍 Fetching full state for: ${playlistInfo.playlist.name}`);
-                    const stateResponse = await fetch(`/api/listenbrainz/state/${playlistMbid}`);
+                    const stateResponse = await callServer(`/api/listenbrainz/state/${playlistMbid}`);
                     if (stateResponse.ok) {
                         const fullState = await stateResponse.json();
                         console.log(`📋 Retrieved full state with ${fullState.discovery_results?.length || 0} discovery results`);
@@ -4491,7 +4497,7 @@ async function rehydrateBeatportChart(chartInfo, userRequested = false) {
         // Get full state from backend including discovery results
         let fullState;
         try {
-            const stateResponse = await fetch(`/api/beatport/charts/status/${chartHash}`);
+            const stateResponse = await callServer(`/api/beatport/charts/status/${chartHash}`);
             if (stateResponse.ok) {
                 fullState = await stateResponse.json();
                 console.log(`📋 [Rehydration] Retrieved full backend state with ${fullState.discovery_results?.length || 0} discovery results`);
@@ -4718,7 +4724,7 @@ async function rehydrateYouTubePlaylist(playlistInfo, userRequested = false) {
             // Since playlistInfo from active processes doesn't have full playlist data,
             // we need to fetch it from the backend first
             try {
-                const stateResponse = await fetch(`/api/youtube/state/${urlHash}`);
+                const stateResponse = await callServer(`/api/youtube/state/${urlHash}`);
                 if (stateResponse.ok) {
                     const fullPlaylistState = await stateResponse.json();
                     createYouTubeCardFromBackendState(fullPlaylistState);
@@ -4737,7 +4743,7 @@ async function rehydrateYouTubePlaylist(playlistInfo, userRequested = false) {
         if (phase !== 'fresh' && phase !== 'discovering') {
             try {
                 console.log(`🔍 Fetching full backend state for: ${playlistName}`);
-                const stateResponse = await fetch(`/api/youtube/state/${urlHash}`);
+                const stateResponse = await callServer(`/api/youtube/state/${urlHash}`);
                 if (stateResponse.ok) {
                     fullState = await stateResponse.json();
                     console.log(`📋 Retrieved full state with ${fullState.discovery_results?.length || 0} discovery results`);
@@ -4820,7 +4826,7 @@ async function removeYouTubePlaylistFromBackend(event, urlHash) {
     try {
         console.log(`🗑️ Removing YouTube playlist from backend: ${playlistName}`);
         
-        const response = await fetch(`/api/youtube/delete/${urlHash}`, {
+        const response = await callServer(`/api/youtube/delete/${urlHash}`, {
             method: 'DELETE'
         });
         
@@ -4874,7 +4880,7 @@ async function loadSpotifyPlaylists() {
     refreshBtn.textContent = '🔄 Loading...';
 
     try {
-        const response = await fetch('/api/spotify/playlists');
+        const response = await callServer('/api/spotify/playlists');
         if (!response.ok) {
             const error = await response.json();
             throw new Error(error.error || 'Failed to fetch playlists');
@@ -5007,7 +5013,7 @@ async function cleanupDownloadProcess(playlistId) {
     if (process.batchId) {
         try {
             console.log(`🚀 Sending cleanup request to server for batch: ${process.batchId}`);
-            await fetch('/api/playlists/cleanup_batch', {
+            await callServer('/api/playlists/cleanup_batch', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ batch_id: process.batchId })
@@ -5093,7 +5099,7 @@ async function openPlaylistDetailsModal(event, playlistId) {
         } else {
             console.log(`Cache MISS for playlist ${playlistId}. Fetching from server...`);
             // Fetch from the server if not in cache
-            const response = await fetch(`/api/spotify/playlist/${playlistId}`);
+            const response = await callServer(`/api/spotify/playlist/${playlistId}`);
             const fullPlaylist = await response.json();
             if (fullPlaylist.error) throw new Error(fullPlaylist.error);
 
@@ -5348,7 +5354,7 @@ async function openDownloadMissingModal(playlistId) {
     let tracks = playlistTrackCache[playlistId];
     if (!tracks) {
         try {
-            const response = await fetch(`/api/spotify/playlist/${playlistId}`);
+            const response = await callServer(`/api/spotify/playlist/${playlistId}`);
             const fullPlaylist = await response.json();
             if (fullPlaylist.error) throw new Error(fullPlaylist.error);
             tracks = fullPlaylist.tracks;
@@ -5531,7 +5537,7 @@ async function autoSavePlaylistM3U(playlistId) {
     const playlistName = process.playlist?.name || process.playlistName || 'Playlist';
 
     try {
-        const response = await fetch('/api/save-playlist-m3u', {
+        const response = await callServer('/api/save-playlist-m3u', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -5898,7 +5904,7 @@ async function closeDownloadMissingModal(playlistId) {
             
             // Update backend state to prevent rehydration issues on page refresh (similar to Tidal fix)
             try {
-                const response = await fetch(`/api/youtube/update_phase/${urlHash}`, {
+                const response = await callServer(`/api/youtube/update_phase/${urlHash}`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -5940,7 +5946,7 @@ async function closeDownloadMissingModal(playlistId) {
 
                     // Update backend state
                     try {
-                        await fetch(`/api/beatport/charts/update-phase/${chartHash}`, {
+                        await callServer(`/api/beatport/charts/update-phase/${chartHash}`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ phase: 'discovered' })
@@ -5994,7 +6000,7 @@ async function closeDownloadMissingModal(playlistId) {
             
             // Update backend state to prevent rehydration issues on page refresh
             try {
-                const response = await fetch(`/api/tidal/update_phase/${tidalPlaylistId}`, {
+                const response = await callServer(`/api/tidal/update_phase/${tidalPlaylistId}`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -6036,7 +6042,7 @@ async function closeDownloadMissingModal(playlistId) {
 
                     // Update backend state
                     try {
-                        await fetch(`/api/listenbrainz/update-phase/${playlistMbid}`, {
+                        await callServer(`/api/listenbrainz/update-phase/${playlistMbid}`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ phase: 'discovered' })
@@ -6196,7 +6202,7 @@ async function openWishlistOverviewModal() {
         showLoadingOverlay('Loading wishlist...');
 
         // Fetch wishlist stats
-        const statsResponse = await fetch('/api/wishlist/stats');
+        const statsResponse = await callServer('/api/wishlist/stats');
         const statsData = await statsResponse.json();
 
         if (!statsResponse.ok) {
@@ -6213,8 +6219,8 @@ async function openWishlistOverviewModal() {
 
         // Fetch album covers for mosaic backgrounds
         // Limit to 50 tracks per category (enough to get 20 unique covers while being efficient)
-        const albumCoversPromise = fetch('/api/wishlist/tracks?category=albums&limit=50').then(r => r.json());
-        const singleCoversPromise = fetch('/api/wishlist/tracks?category=singles&limit=50').then(r => r.json());
+        const albumCoversPromise = callServer('/api/wishlist/tracks?category=albums&limit=50').then(r => r.json());
+        const singleCoversPromise = callServer('/api/wishlist/tracks?category=singles&limit=50').then(r => r.json());
 
         const [albumTracksData, singleTracksData] = await Promise.all([albumCoversPromise, singleCoversPromise]);
 
@@ -6232,7 +6238,7 @@ async function openWishlistOverviewModal() {
         }
 
         // Fetch current cycle
-        const cycleResponse = await fetch('/api/wishlist/cycle');
+        const cycleResponse = await callServer('/api/wishlist/cycle');
         const cycleData = await cycleResponse.json();
         const currentCycle = cycleData.cycle || 'albums';
 
@@ -6338,12 +6344,12 @@ function startWishlistCountdownTimer(currentCycle, initialSeconds) {
         if (remainingSeconds <= 0) {
             // Timer expired, fetch fresh data
             try {
-                const response = await fetch('/api/wishlist/stats');
+                const response = await callServer('/api/wishlist/stats');
                 const data = await response.json();
                 remainingSeconds = data.next_run_in_seconds || 0;
 
                 // Also update cycle in case it changed
-                const cycleResponse = await fetch('/api/wishlist/cycle');
+                const cycleResponse = await callServer('/api/wishlist/cycle');
                 const cycleData = await cycleResponse.json();
                 const newCycle = cycleData.cycle || 'albums';
                 const newCycleText = newCycle === 'albums' ? 'Albums/EPs' : 'Singles';
@@ -6401,7 +6407,7 @@ async function cleanupWishlistOverview() {
     try {
         showLoadingOverlay('Cleaning up wishlist...');
 
-        const response = await fetch('/api/wishlist/cleanup', {
+        const response = await callServer('/api/wishlist/cleanup', {
             method: 'POST'
         });
 
@@ -6417,7 +6423,7 @@ async function cleanupWishlistOverview() {
             }
 
             // Check if wishlist is now empty
-            const statsResponse = await fetch('/api/wishlist/stats');
+            const statsResponse = await callServer('/api/wishlist/stats');
             const statsData = await statsResponse.json();
 
             if (statsData.total === 0) {
@@ -6456,7 +6462,7 @@ async function clearEntireWishlist() {
         showLoadingOverlay('Clearing wishlist...');
         console.log('Loading overlay shown');
 
-        const response = await fetch('/api/wishlist/clear', {
+        const response = await callServer('/api/wishlist/clear', {
             method: 'POST'
         });
         console.log('API response received:', response.status);
@@ -6506,7 +6512,7 @@ async function selectWishlistCategory(category) {
 
         tracksList.innerHTML = '<div class="loading-indicator">Loading tracks...</div>';
 
-        const response = await fetch(`/api/wishlist/tracks?category=${category}`);
+        const response = await callServer(`/api/wishlist/tracks?category=${category}`);
         const data = await response.json();
 
         if (!response.ok) throw new Error(data.error || 'Failed to fetch tracks');
@@ -6800,7 +6806,7 @@ async function removeTrackFromWishlist(spotifyTrackId, event) {
     }
 
     try {
-        const response = await fetch('/api/wishlist/remove-track', {
+        const response = await callServer('/api/wishlist/remove-track', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ spotify_track_id: spotifyTrackId })
@@ -6844,7 +6850,7 @@ async function removeAlbumFromWishlist(albumId, event) {
     }
 
     try {
-        const response = await fetch('/api/wishlist/remove-album', {
+        const response = await callServer('/api/wishlist/remove-album', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ album_id: albumId })
@@ -6913,7 +6919,7 @@ async function openDownloadMissingWishlistModal(category = null) {
         // Build API URL with optional category filter
         const apiUrl = category ? `/api/wishlist/tracks?category=${category}` : '/api/wishlist/tracks';
 
-        const response = await fetch('/api/wishlist/count');
+        const response = await callServer('/api/wishlist/count');
         const countData = await response.json();
         if (countData.count === 0) {
             showToast('Wishlist is empty. No tracks to download.', 'info');
@@ -6922,7 +6928,7 @@ async function openDownloadMissingWishlistModal(category = null) {
         }
 
         // Fetch the actual wishlist tracks for display (filtered by category if specified)
-        const tracksResponse = await fetch(apiUrl);
+        const tracksResponse = await callServer(apiUrl);
         if (!tracksResponse.ok) {
             throw new Error('Failed to fetch wishlist tracks');
         }
@@ -7100,7 +7106,7 @@ async function startWishlistMissingTracksProcess(playlistId) {
         const trackIds = process.tracks ? process.tracks.map(t => t.spotify_track_id || t.id).filter(id => id) : null;
         console.log(`🎯 [Wishlist] Sending ${trackIds ? trackIds.length : 'all'} specific track IDs to prevent race condition`);
 
-        const response = await fetch('/api/wishlist/download_missing', {
+        const response = await callServer('/api/wishlist/download_missing', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -7201,7 +7207,7 @@ async function startMissingTracksProcess(playlistId) {
 
                 // Update backend state
                 try {
-                    fetch(`/api/beatport/charts/update-phase/${chartHash}`, {
+                    callServer(`/api/beatport/charts/update-phase/${chartHash}`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ phase: 'downloading' })
@@ -7225,7 +7231,7 @@ async function startMissingTracksProcess(playlistId) {
 
                 // Update backend state
                 try {
-                    fetch(`/api/listenbrainz/update-phase/${playlistMbid}`, {
+                    callServer(`/api/listenbrainz/update-phase/${playlistMbid}`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ phase: 'downloading' })
@@ -7293,7 +7299,7 @@ async function startMissingTracksProcess(playlistId) {
             }
         }
 
-        const response = await fetch(`/api/playlists/${playlistId}/start-missing-process`, {
+        const response = await callServer(`/api/playlists/${playlistId}/start-missing-process`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(requestBody)
@@ -7317,7 +7323,7 @@ async function startMissingTracksProcess(playlistId) {
             if (state && state.is_beatport_playlist) {
                 const chartHash = state.beatport_chart_hash || urlHash;
                 try {
-                    fetch(`/api/beatport/charts/update-phase/${chartHash}`, {
+                    callServer(`/api/beatport/charts/update-phase/${chartHash}`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
@@ -7343,7 +7349,7 @@ async function startMissingTracksProcess(playlistId) {
 
                 // Update backend state
                 try {
-                    fetch(`/api/listenbrainz/update-phase/${playlistMbid}`, {
+                    callServer(`/api/listenbrainz/update-phase/${playlistMbid}`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
@@ -7435,7 +7441,7 @@ function startGlobalDownloadPolling() {
         // Special handling for open wishlist modal - check for new auto-processing
         if (hasOpenWishlistModal) {
             try {
-                const response = await fetch('/api/active-processes');
+                const response = await callServer('/api/active-processes');
                 if (response.ok) {
                     const data = await response.json();
                     const processes = data.active_processes || [];
@@ -7459,7 +7465,7 @@ function startGlobalDownloadPolling() {
         try {
             // Single batched API call for all active processes
             const queryParams = activeBatchIds.map(id => `batch_ids=${id}`).join('&');
-            const response = await fetch(`/api/download_status/batch?${queryParams}`);
+            const response = await callServer(`/api/download_status/batch?${queryParams}`);
             
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -7547,7 +7553,7 @@ function startGlobalDownloadPollingWithInterval(interval) {
         // Special handling for open wishlist modal - check for new auto-processing
         if (hasOpenWishlistModal) {
             try {
-                const response = await fetch('/api/active-processes');
+                const response = await callServer('/api/active-processes');
                 if (response.ok) {
                     const data = await response.json();
                     const processes = data.active_processes || [];
@@ -7570,7 +7576,7 @@ function startGlobalDownloadPollingWithInterval(interval) {
         
         try {
             const queryParams = activeBatchIds.map(id => `batch_ids=${id}`).join('&');
-            const response = await fetch(`/api/download_status/batch?${queryParams}`);
+            const response = await callServer(`/api/download_status/batch?${queryParams}`);
             
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -7927,7 +7933,7 @@ function processModalStatusUpdate(playlistId, data) {
 
                         // Update backend state
                         try {
-                            fetch(`/api/beatport/charts/update-phase/${chartHash}`, {
+                            callServer(`/api/beatport/charts/update-phase/${chartHash}`, {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({
@@ -8052,7 +8058,7 @@ async function updateModalWithLiveDownloadProgress() {
         if (!currentDownloadBatchId) return;
         
         // Fetch live download data from the downloads API
-        const response = await fetch('/api/downloads/status');
+        const response = await callServer('/api/downloads/status');
         const downloadData = await response.json();
         
         if (downloadData.error) return;
@@ -8131,7 +8137,7 @@ async function cancelAllOperations(playlistId) {
     if (process.batchId) {
         try {
             // Cancel the batch (stops new downloads from starting)
-            const cancelResponse = await fetch(`/api/playlists/${process.batchId}/cancel_batch`, {
+            const cancelResponse = await callServer(`/api/playlists/${process.batchId}/cancel_batch`, {
                 method: 'POST'
             });
             if (cancelResponse.ok) {
@@ -8246,7 +8252,7 @@ async function cancelTrackDownloadV2(playlistId, trackIndex) {
     }
     
     try {
-        const response = await fetch('/api/downloads/cancel_task_v2', {
+        const response = await callServer('/api/downloads/cancel_task_v2', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
@@ -8321,7 +8327,7 @@ async function cancelTrackDownload(playlistId, trackIndex) {
     document.getElementById(`actions-${playlistId}-${trackIndex}`).innerHTML = '-';
     
     try {
-        const response = await fetch('/api/downloads/cancel_task', {
+        const response = await callServer('/api/downloads/cancel_task', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ task_id: taskId })
@@ -8373,7 +8379,7 @@ async function startPlaylistSync(playlistId) {
         const trackFetchStart = Date.now();
         console.log(`🔄 [${new Date().toTimeString().split(' ')[0]}] Cache miss - fetching tracks for playlist ${playlistId}`);
         try {
-            const response = await fetch(`/api/spotify/playlist/${playlistId}`);
+            const response = await callServer(`/api/spotify/playlist/${playlistId}`);
             const fullPlaylist = await response.json();
             if (fullPlaylist.error) throw new Error(fullPlaylist.error);
             tracks = fullPlaylist.tracks;
@@ -8394,7 +8400,7 @@ async function startPlaylistSync(playlistId) {
     try {
         const syncStartTime = Date.now();
         console.log(`🔄 [${new Date().toTimeString().split(' ')[0]}] Making API call to /api/sync/start with ${tracks.length} tracks`);
-        const response = await fetch('/api/sync/start', {
+        const response = await callServer('/api/sync/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -8448,7 +8454,7 @@ function startSyncPolling(playlistId) {
     activeSyncPollers[playlistId] = setInterval(async () => {
         try {
             console.log(`📊 Polling sync status for: ${playlistId}`);
-            const response = await fetch(`/api/sync/status/${playlistId}`);
+            const response = await callServer(`/api/sync/status/${playlistId}`);
             const state = await response.json();
             console.log(`📊 Poll response:`, state);
 
@@ -8746,7 +8752,7 @@ function stopDownloadPolling() {
 
 async function updateDownloadQueues() {
     try {
-        const response = await fetch('/api/downloads/status');
+        const response = await callServer('/api/downloads/status');
         const data = await response.json();
 
         if (data.error) {
@@ -8924,7 +8930,7 @@ function switchDownloadTab(button) {
 
 async function cancelDownloadItem(downloadId, username) {
     try {
-        const response = await fetch('/api/downloads/cancel', {
+        const response = await callServer('/api/downloads/cancel', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ download_id: downloadId, username: username })
@@ -8950,7 +8956,7 @@ async function clearFinishedDownloads() {
     }
     
     try {
-        const response = await fetch('/api/downloads/clear-finished', {
+        const response = await callServer('/api/downloads/clear-finished', {
             method: 'POST'
         });
         const result = await response.json();
@@ -8996,7 +9002,7 @@ async function performDownloadsSearch() {
         displayDownloadsResults([]); // Clear previous results
 
         // --- 2. Perform the Fetch Request ---
-        const response = await fetch('/api/search', {
+        const response = await callServer('/api/search', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ query }),
@@ -9160,7 +9166,7 @@ async function downloadTrack(index) {
     const track = results[index];
     
     try {
-        const response = await fetch('/api/download', {
+        const response = await callServer('/api/download', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(track)
@@ -9186,7 +9192,7 @@ async function downloadAlbum(index) {
     const album = results[index];
     
     try {
-        const response = await fetch('/api/download', {
+        const response = await callServer('/api/download', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(album)
@@ -9275,7 +9281,7 @@ async function downloadAlbumTrack(albumIndex, trackIndex) {
     const track = results[albumIndex].tracks[trackIndex];
     
     try {
-        const response = await fetch('/api/download', {
+        const response = await callServer('/api/download', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -9391,7 +9397,7 @@ async function streamAlbumTrack(albumIndex, trackIndex) {
 
 async function loadArtistsData() {
     try {
-        const response = await fetch(API.artists);
+        const response = await callServer(API.artists);
         const data = await response.json();
         
         const artistsGrid = document.getElementById('artists-grid');
@@ -9511,7 +9517,7 @@ async function showVersionInfo() {
         console.log('Fetching version info...');
         
         // Fetch version data from API
-        const response = await fetch('/api/version-info');
+        const response = await callServer('/api/version-info');
         if (!response.ok) {
             throw new Error('Failed to fetch version info');
         }
@@ -9960,7 +9966,7 @@ async function searchDiscoveryFix() {
         const query = `${artistInput} ${trackInput}`.trim();
 
         // Call Spotify search API
-        const response = await fetch(`/api/spotify/search_tracks?query=${encodeURIComponent(query)}&limit=20`);
+        const response = await callServer(`/api/spotify/search_tracks?query=${encodeURIComponent(query)}&limit=20`);
         const data = await response.json();
 
         if (data.error) {
@@ -10046,7 +10052,7 @@ async function selectDiscoveryFixTrack(track) {
         console.log('📡 Request body:', requestBody);
         console.log('📡 Backend identifier:', backendIdentifier);
 
-        const response = await fetch(`/api/${platform}/discovery/update_match`, {
+        const response = await callServer(`/api/${platform}/discovery/update_match`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(requestBody)
@@ -10243,7 +10249,7 @@ async function handlePostDownloadAutomation(playlistId, process) {
         showToast('🗑️ Clearing completed downloads...', 'info', 3000);
 
         try {
-            const clearResponse = await fetch('/api/downloads/clear-finished', {
+            const clearResponse = await callServer('/api/downloads/clear-finished', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' }
             });
@@ -10262,7 +10268,7 @@ async function handlePostDownloadAutomation(playlistId, process) {
         showToast('📡 Scanning media server library...', 'info', 5000);
 
         try {
-            const scanResponse = await fetch('/api/scan/request', {
+            const scanResponse = await callServer('/api/scan/request', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -10518,7 +10524,7 @@ async function handleAddToWishlist() {
 
                 console.log(`🔄 Adding track with formatted artists:`, formattedTrack.name, formattedTrack.artists);
 
-                const response = await fetch('/api/add-album-to-wishlist', {
+                const response = await callServer('/api/add-album-to-wishlist', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -10709,7 +10715,7 @@ async function addModalTracksToWishlist(playlistId) {
                     trackAlbumType = 'album';
                 }
 
-                const response = await fetch('/api/add-album-to-wishlist', {
+                const response = await callServer('/api/add-album-to-wishlist', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -11271,7 +11277,7 @@ async function fetchArtistSuggestions() {
     try {
         showLoadingCards('artist-suggestions', 'Finding artist...');
         
-        const response = await fetch('/api/match/suggestions', {
+        const response = await callServer('/api/match/suggestions', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -11300,7 +11306,7 @@ async function fetchAlbumSuggestions() {
     try {
         showLoadingCards('album-suggestions', 'Finding album...');
         
-        const response = await fetch('/api/match/suggestions', {
+        const response = await callServer('/api/match/suggestions', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -11524,7 +11530,7 @@ async function performArtistSearch(query) {
         };
         console.log('Manual search request:', requestBody);
 
-        const response = await fetch('/api/match/search', {
+        const response = await callServer('/api/match/search', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(requestBody)
@@ -11550,7 +11556,7 @@ async function performAlbumSearch(query) {
     try {
         showLoadingCards('album-manual-results', 'Searching albums...');
         
-        const response = await fetch('/api/match/search', {
+        const response = await callServer('/api/match/search', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -11819,7 +11825,7 @@ async function confirmMatch() {
                 // Fetch Spotify album tracks
                 const artistId = currentMatchingData.selectedArtist.id;
                 const albumId = currentMatchingData.selectedAlbum.id;
-                const tracksResponse = await fetch(`/api/artist/${artistId}/album/${albumId}/tracks`);
+                const tracksResponse = await callServer(`/api/artist/${artistId}/album/${albumId}/tracks`);
 
                 if (!tracksResponse.ok) {
                     throw new Error(`Failed to fetch Spotify tracks: ${tracksResponse.status}`);
@@ -11840,7 +11846,7 @@ async function confirmMatch() {
 
                 // Send enhanced data with full Spotify track objects
                 confirmBtn.textContent = 'Downloading...';
-                const response = await fetch('/api/download/matched', {
+                const response = await callServer('/api/download/matched', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -11866,7 +11872,7 @@ async function confirmMatch() {
                 showToast('⚠️ Track matching failed, using basic matching', 'warning');
 
                 // Fallback to simple matching (current behavior)
-                const response = await fetch('/api/download/matched', {
+                const response = await callServer('/api/download/matched', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -11898,7 +11904,7 @@ async function confirmMatch() {
 
                 // Search Spotify for this track
                 const searchQuery = `track:${parsedMeta.title} artist:${currentMatchingData.selectedArtist.name}`;
-                const searchResponse = await fetch(`/api/spotify/search?q=${encodeURIComponent(searchQuery)}&type=track&limit=5`);
+                const searchResponse = await callServer(`/api/spotify/search?q=${encodeURIComponent(searchQuery)}&type=track&limit=5`);
 
                 if (!searchResponse.ok) {
                     throw new Error('Failed to search Spotify for track');
@@ -11919,7 +11925,7 @@ async function confirmMatch() {
                 console.log(`✅ Found Spotify track: "${bestMatch.name}" (${bestMatch.id})`);
 
                 // Get full track details with album info
-                const trackResponse = await fetch(`/api/spotify/track/${bestMatch.id}`);
+                const trackResponse = await callServer(`/api/spotify/track/${bestMatch.id}`);
                 if (!trackResponse.ok) {
                     throw new Error('Failed to fetch Spotify track details');
                 }
@@ -11928,7 +11934,7 @@ async function confirmMatch() {
 
                 // Send with full Spotify metadata (single track enhanced)
                 confirmBtn.textContent = 'Downloading...';
-                const response = await fetch('/api/download/matched', {
+                const response = await callServer('/api/download/matched', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -11954,7 +11960,7 @@ async function confirmMatch() {
                 showToast('⚠️ Spotify matching failed, using basic metadata', 'warning');
 
                 // Fallback to basic matching (current behavior)
-                const response = await fetch('/api/download/matched', {
+                const response = await callServer('/api/download/matched', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -12065,7 +12071,7 @@ async function handleQualityScanButtonClick() {
         try {
             button.disabled = true;
             button.textContent = 'Starting...';
-            const response = await fetch('/api/quality-scanner/start', {
+            const response = await callServer('/api/quality-scanner/start', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ scope: scope })
@@ -12089,7 +12095,7 @@ async function handleQualityScanButtonClick() {
 
     } else { // "Stop Scan"
         try {
-            const response = await fetch('/api/quality-scanner/stop', { method: 'POST' });
+            const response = await callServer('/api/quality-scanner/stop', { method: 'POST' });
             if (response.ok) {
                 showToast('Stop request sent.', 'info');
             } else {
@@ -12103,7 +12109,7 @@ async function handleQualityScanButtonClick() {
 
 async function checkAndUpdateQualityScanProgress() {
     try {
-        const response = await fetch('/api/quality-scanner/status', {
+        const response = await callServer('/api/quality-scanner/status', {
             signal: AbortSignal.timeout(10000) // 10 second timeout
         });
         if (!response.ok) return;
@@ -12194,7 +12200,7 @@ async function handleDuplicateCleanButtonClick() {
         try {
             button.disabled = true;
             button.textContent = 'Starting...';
-            const response = await fetch('/api/duplicate-cleaner/start', {
+            const response = await callServer('/api/duplicate-cleaner/start', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' }
             });
@@ -12217,7 +12223,7 @@ async function handleDuplicateCleanButtonClick() {
 
     } else { // "Stop Cleaning"
         try {
-            const response = await fetch('/api/duplicate-cleaner/stop', { method: 'POST' });
+            const response = await callServer('/api/duplicate-cleaner/stop', { method: 'POST' });
             if (response.ok) {
                 showToast('Stop request sent.', 'info');
             } else {
@@ -12231,7 +12237,7 @@ async function handleDuplicateCleanButtonClick() {
 
 async function checkAndUpdateDuplicateCleanProgress() {
     try {
-        const response = await fetch('/api/duplicate-cleaner/status', {
+        const response = await callServer('/api/duplicate-cleaner/status', {
             signal: AbortSignal.timeout(10000) // 10 second timeout
         });
         if (!response.ok) return;
@@ -12886,7 +12892,7 @@ async function loadDashboardData() {
 
 async function fetchAndUpdateDbStats() {
     try {
-        const response = await fetch('/api/database/stats');
+        const response = await callServer('/api/database/stats');
         if (!response.ok) return;
         
         const stats = await response.json();
@@ -12943,7 +12949,7 @@ function updateDbUpdaterCardInfo(stats) {
 
 async function updateWishlistCount() {
     try {
-        const response = await fetch('/api/wishlist/count');
+        const response = await callServer('/api/wishlist/count');
         if (!response.ok) return;
         
         const data = await response.json();
@@ -12986,7 +12992,7 @@ async function checkForAutoInitiatedWishlistProcess() {
         }
         
         // Check for active wishlist processes
-        const response = await fetch('/api/active-processes');
+        const response = await callServer('/api/active-processes');
         if (!response.ok) return;
         
         const data = await response.json();
@@ -13019,7 +13025,7 @@ async function checkForAutoInitiatedWishlistProcess() {
 
 async function checkAndUpdateDbProgress() {
     try {
-        const response = await fetch('/api/database/update/status', {
+        const response = await callServer('/api/database/update/status', {
             signal: AbortSignal.timeout(10000) // 10 second timeout
         });
         if (!response.ok) return;
@@ -13091,7 +13097,7 @@ async function loadTidalPlaylists() {
     refreshBtn.textContent = '🔄 Loading...';
 
     try {
-        const response = await fetch('/api/tidal/playlists');
+        const response = await callServer('/api/tidal/playlists');
         if (!response.ok) {
             const error = await response.json();
             throw new Error(error.error || 'Failed to fetch Tidal playlists');
@@ -13212,7 +13218,7 @@ async function handleTidalCardClick(playlistId) {
             
             // Try to fetch from backend as fallback
             try {
-                const stateResponse = await fetch(`/api/tidal/state/${playlistId}`);
+                const stateResponse = await callServer(`/api/tidal/state/${playlistId}`);
                 if (stateResponse.ok) {
                     const fullState = await stateResponse.json();
                     if (fullState.discovery_results) {
@@ -13278,7 +13284,7 @@ async function rehydrateTidalDownloadModal(playlistId, state) {
         // Get discovery results from backend if not already loaded
         if (!state.discovery_results) {
             console.log(`🔍 Fetching discovery results from backend for Tidal playlist: ${playlistId}`);
-            const stateResponse = await fetch(`/api/tidal/state/${playlistId}`);
+            const stateResponse = await callServer(`/api/tidal/state/${playlistId}`);
             if (stateResponse.ok) {
                 const fullState = await stateResponse.json();
                 state.discovery_results = fullState.discovery_results;
@@ -13337,7 +13343,7 @@ async function rehydrateTidalDownloadModal(playlistId, state) {
                     
                     // For completed downloads, fetch the final results once to populate the modal
                     try {
-                        const response = await fetch(`/api/playlists/${state.download_process_id}/download_status`);
+                        const response = await callServer(`/api/playlists/${state.download_process_id}/download_status`);
                         if (response.ok) {
                             const data = await response.json();
                             if (data.phase === 'complete' && data.tasks) {
@@ -13561,7 +13567,7 @@ async function openTidalDiscoveryModal(playlistId, playlistData) {
         try {
             console.log(`🔍 Starting Tidal discovery for: ${playlistData.name}`);
             
-            const response = await fetch(`/api/tidal/discovery/start/${playlistId}`, {
+            const response = await callServer(`/api/tidal/discovery/start/${playlistId}`, {
                 method: 'POST'
             });
             
@@ -13615,7 +13621,7 @@ function startTidalDiscoveryPolling(fakeUrlHash, playlistId) {
     
     const pollInterval = setInterval(async () => {
         try {
-            const response = await fetch(`/api/tidal/discovery/status/${playlistId}`);
+            const response = await callServer(`/api/tidal/discovery/status/${playlistId}`);
             const status = await response.json();
             
             if (status.error) {
@@ -13706,7 +13712,7 @@ async function loadTidalPlaylistStatesFromBackend() {
     try {
         console.log('🎵 Loading Tidal playlist states from backend...');
         
-        const response = await fetch('/api/tidal/playlists/states');
+        const response = await callServer('/api/tidal/playlists/states');
         if (!response.ok) {
             const error = await response.json();
             throw new Error(error.error || 'Failed to fetch Tidal playlist states');
@@ -13825,7 +13831,7 @@ async function applyTidalPlaylistState(stateInfo) {
         if (phase !== 'fresh' && phase !== 'discovering') {
             try {
                 console.log(`🔍 Fetching full discovery results for Tidal playlist: ${playlistData.name}`);
-                const stateResponse = await fetch(`/api/tidal/state/${playlist_id}`);
+                const stateResponse = await callServer(`/api/tidal/state/${playlist_id}`);
                 if (stateResponse.ok) {
                     const fullState = await stateResponse.json();
                     console.log(`📋 Retrieved full Tidal state with ${fullState.discovery_results?.length || 0} discovery results`);
@@ -13913,7 +13919,7 @@ async function startTidalPlaylistSync(urlHash) {
         }
         
         const playlistId = state.tidal_playlist_id;
-        const response = await fetch(`/api/tidal/sync/start/${playlistId}`, {
+        const response = await callServer(`/api/tidal/sync/start/${playlistId}`, {
             method: 'POST'
         });
         
@@ -13953,7 +13959,7 @@ function startTidalSyncPolling(urlHash) {
     // Define the polling function
     const pollFunction = async () => {
         try {
-            const response = await fetch(`/api/tidal/sync/status/${playlistId}`);
+            const response = await callServer(`/api/tidal/sync/status/${playlistId}`);
             const status = await response.json();
             
             if (status.error) {
@@ -14037,7 +14043,7 @@ async function cancelTidalSync(urlHash) {
         }
         
         const playlistId = state.tidal_playlist_id;
-        const response = await fetch(`/api/tidal/sync/cancel/${playlistId}`, {
+        const response = await callServer(`/api/tidal/sync/cancel/${playlistId}`, {
             method: 'POST'
         });
         
@@ -14626,7 +14632,7 @@ async function handleDbUpdateButtonClick() {
         try {
             button.disabled = true;
             button.textContent = 'Starting...';
-            const response = await fetch('/api/database/update', {
+            const response = await callServer('/api/database/update', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ full_refresh: isFullRefresh })
@@ -14650,7 +14656,7 @@ async function handleDbUpdateButtonClick() {
 
     } else { // "Stop Update"
         try {
-            const response = await fetch('/api/database/update/stop', { method: 'POST' });
+            const response = await callServer('/api/database/update/stop', { method: 'POST' });
             if (response.ok) {
                 showToast('Stop request sent.', 'info');
             } else {
@@ -14669,7 +14675,7 @@ async function handleWishlistButtonClick() {
         console.log('🎵 [Wishlist Button] User clicked wishlist button - checking server state first');
         
         // STEP 1: Always check server state first to detect any active wishlist processes
-        const response = await fetch('/api/active-processes');
+        const response = await callServer('/api/active-processes');
         if (!response.ok) {
             throw new Error(`Failed to fetch active processes: ${response.status}`);
         }
@@ -14711,7 +14717,7 @@ async function handleWishlistButtonClick() {
         // STEP 3: No active server process - check wishlist count and create fresh modal
         console.log('📭 [Wishlist Button] No active server process, checking wishlist content');
         
-        const countResponse = await fetch('/api/wishlist/count');
+        const countResponse = await callServer('/api/wishlist/count');
         if (!countResponse.ok) {
             throw new Error(`Failed to fetch wishlist count: ${countResponse.status}`);
         }
@@ -14754,7 +14760,7 @@ async function cleanupWishlist(playlistId) {
             cleanupBtn.textContent = '🧹 Cleaning...';
         }
         
-        const response = await fetch('/api/wishlist/cleanup', {
+        const response = await callServer('/api/wishlist/cleanup', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -14819,7 +14825,7 @@ async function clearWishlist(playlistId) {
         }
         
         // Call the clear API endpoint
-        const response = await fetch('/api/wishlist/clear', {
+        const response = await callServer('/api/wishlist/clear', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -14955,7 +14961,7 @@ async function clearBeatportPlaylists() {
         // Clear backend state for all charts
         for (const chartHash of chartHashesToClear) {
             try {
-                await fetch(`/api/beatport/charts/delete/${chartHash}`, {
+                await callServer(`/api/beatport/charts/delete/${chartHash}`, {
                     method: 'DELETE'
                 });
                 console.log(`🗑️ Deleted backend state for Beatport chart: ${chartHash}`);
@@ -15018,7 +15024,7 @@ async function loadBeatportGenres() {
     try {
         // First, fetch genres quickly without images
         console.log('🚀 Fetching genres without images for fast loading...');
-        const fastResponse = await fetch('/api/beatport/genres');
+        const fastResponse = await callServer('/api/beatport/genres');
         if (!fastResponse.ok) {
             throw new Error(`API returned ${fastResponse.status}: ${fastResponse.statusText}`);
         }
@@ -15095,7 +15101,7 @@ async function loadGenreImagesProgressively(genres) {
     async function processImage(genre) {
         try {
             // Fetch individual genre image from backend
-            const response = await fetch(`/api/beatport/genre-image/${genre.slug}/${genre.id}`);
+            const response = await callServer(`/api/beatport/genre-image/${genre.slug}/${genre.id}`);
 
             if (response.ok) {
                 const data = await response.json();
@@ -15261,7 +15267,7 @@ async function handleHomepageChartTypeClick(chartType, chartEndpoint, chartName)
         showLoadingOverlay(`Loading ${chartConfig.name}...`);
 
         // Fetch tracks from the specific endpoint (following genre page pattern)
-        const response = await fetch(`${chartConfig.endpoint}?limit=${chartConfig.limit}`);
+        const response = await callServer(`${chartConfig.endpoint}?limit=${chartConfig.limit}`);
         if (!response.ok) {
             throw new Error(`Failed to fetch ${chartConfig.name}: ${response.status}`);
         }
@@ -15334,7 +15340,7 @@ async function openBeatportDiscoveryModal(chartHash, chartData) {
         updateBeatportCardPhase(chartHash, 'discovering');
 
         // Call the discovery start endpoint with chart data
-        const response = await fetch(`/api/beatport/discovery/start/${chartHash}`, {
+        const response = await callServer(`/api/beatport/discovery/start/${chartHash}`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -15382,7 +15388,7 @@ function startBeatportDiscoveryPolling(urlHash) {
 
     const pollInterval = setInterval(async () => {
         try {
-            const response = await fetch(`/api/beatport/discovery/status/${urlHash}`);
+            const response = await callServer(`/api/beatport/discovery/status/${urlHash}`);
             const status = await response.json();
 
             if (status.error) {
@@ -15751,7 +15757,7 @@ async function handleBeatportCardClick(chartHash) {
 
             try {
                 // Fetch the full state from backend
-                const stateResponse = await fetch(`/api/beatport/charts/status/${chartHash}`);
+                const stateResponse = await callServer(`/api/beatport/charts/status/${chartHash}`);
                 if (stateResponse.ok) {
                     const fullState = await stateResponse.json();
 
@@ -15860,7 +15866,7 @@ async function rehydrateBeatportDownloadModal(chartHash, ytState) {
         // Get discovery results from backend if not already loaded
         if (!ytState.discovery_results) {
             console.log(`🔍 Fetching discovery results from backend for Beatport chart: ${chartHash}`);
-            const stateResponse = await fetch(`/api/beatport/charts/status/${chartHash}`);
+            const stateResponse = await callServer(`/api/beatport/charts/status/${chartHash}`);
             if (stateResponse.ok) {
                 const fullState = await stateResponse.json();
                 ytState.discovery_results = fullState.discovery_results;
@@ -16016,7 +16022,7 @@ async function startBeatportPlaylistSync(urlHash) {
         }
 
         // Call Beatport sync endpoint
-        const response = await fetch(`/api/beatport/sync/start/${urlHash}`, {
+        const response = await callServer(`/api/beatport/sync/start/${urlHash}`, {
             method: 'POST'
         });
 
@@ -16052,7 +16058,7 @@ function startBeatportSyncPolling(urlHash) {
     // Define the polling function
     const pollFunction = async () => {
         try {
-            const response = await fetch(`/api/beatport/sync/status/${urlHash}`);
+            const response = await callServer(`/api/beatport/sync/status/${urlHash}`);
             const status = await response.json();
 
             if (status.error) {
@@ -16127,7 +16133,7 @@ async function cancelBeatportSync(urlHash) {
             return;
         }
 
-        const response = await fetch(`/api/beatport/sync/cancel/${urlHash}`, {
+        const response = await callServer(`/api/beatport/sync/cancel/${urlHash}`, {
             method: 'POST'
         });
 
@@ -16301,7 +16307,7 @@ async function startBeatportDownloadMissing(urlHash) {
         const chartHash = state.beatport_chart_hash || urlHash;
         if (beatportChartStates[chartHash]) {
             try {
-                await fetch(`/api/beatport/charts/update-phase/${chartHash}`, {
+                await callServer(`/api/beatport/charts/update-phase/${chartHash}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -16357,7 +16363,7 @@ async function handleBeatportChartClick(chartType, chartId, chartName, chartEndp
         console.log(`🔍 Loading ${chartName} tracks from ${chartEndpoint}...`);
         showToast(`Loading ${chartName}...`, 'info');
 
-        const response = await fetch(`${chartEndpoint}?limit=100`);
+        const response = await callServer(`${chartEndpoint}?limit=100`);
         if (!response.ok) {
             throw new Error(`Failed to fetch ${chartName}: ${response.status}`);
         }
@@ -16575,7 +16581,7 @@ async function loadNewChartsInline(genreSlug, genreId, genreName) {
         console.log(`🔍 Loading inline charts for ${genreName}...`);
 
         // Fetch charts from the new-charts endpoint
-        const response = await fetch(`/api/beatport/genre/${genreSlug}/${genreId}/new-charts?limit=20`);
+        const response = await callServer(`/api/beatport/genre/${genreSlug}/${genreId}/new-charts?limit=20`);
         if (!response.ok) {
             throw new Error(`Failed to fetch charts: ${response.status}`);
         }
@@ -16665,7 +16671,7 @@ async function loadDJChartsInline() {
         console.log('🔍 Loading DJ charts...');
 
         // Fetch charts from the dj-charts-improved endpoint
-        const response = await fetch('/api/beatport/dj-charts-improved?limit=20');
+        const response = await callServer('/api/beatport/dj-charts-improved?limit=20');
         if (!response.ok) {
             throw new Error(`Failed to fetch DJ charts: ${response.status}`);
         }
@@ -16757,7 +16763,7 @@ async function loadFeaturedChartsInline() {
         console.log('🔍 Loading Featured charts...');
 
         // Fetch charts from the homepage/featured-charts endpoint
-        const response = await fetch('/api/beatport/homepage/featured-charts?limit=20');
+        const response = await callServer('/api/beatport/homepage/featured-charts?limit=20');
         if (!response.ok) {
             throw new Error(`Failed to fetch Featured charts: ${response.status}`);
         }
@@ -16857,7 +16863,7 @@ function setupDJChartItemHandlers() {
                 showLoadingOverlay(`Loading ${chartName}...`);
 
                 // Extract tracks from the DJ chart
-                const response = await fetch('/api/beatport/chart/extract', {
+                const response = await callServer('/api/beatport/chart/extract', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -16957,7 +16963,7 @@ function setupFeaturedChartItemHandlers() {
                 showLoadingOverlay(`Loading ${chartName}...`);
 
                 // Extract tracks from the Featured chart
-                const response = await fetch('/api/beatport/chart/extract', {
+                const response = await callServer('/api/beatport/chart/extract', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -17061,7 +17067,7 @@ function setupNewChartItemHandlers(genreSlug, genreId, genreName) {
                 showLoadingOverlay(`Loading ${chartName}...`);
 
                 // Use the new chart extraction endpoint with the actual chart URL
-                const response = await fetch('/api/beatport/chart/extract', {
+                const response = await callServer('/api/beatport/chart/extract', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -17184,7 +17190,7 @@ async function loadGenreChartsList(genreSlug, genreId, genreName) {
         console.log(`🔍 Loading charts for ${genreName}...`);
 
         // Fetch charts from the new-charts endpoint
-        const response = await fetch(`/api/beatport/genre/${genreSlug}/${genreId}/new-charts?limit=50`);
+        const response = await callServer(`/api/beatport/genre/${genreSlug}/${genreId}/new-charts?limit=50`);
         if (!response.ok) {
             throw new Error(`Failed to fetch charts: ${response.status}`);
         }
@@ -17280,7 +17286,7 @@ function setupGenreChartItemHandlers(genreSlug, genreId, genreName) {
                 showLoadingOverlay(`Loading ${chartName}...`);
 
                 // Use the new chart extraction endpoint with the actual chart URL
-                const response = await fetch('/api/beatport/chart/extract', {
+                const response = await callServer('/api/beatport/chart/extract', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -17418,7 +17424,7 @@ async function handleGenreChartTypeClick(genreSlug, genreId, genreName, chartTyp
         showLoadingOverlay(`Loading ${chartConfig.name}...`);
 
         // Fetch tracks from the specific endpoint
-        const response = await fetch(`${chartConfig.endpoint}?limit=${chartConfig.limit}`);
+        const response = await callServer(`${chartConfig.endpoint}?limit=${chartConfig.limit}`);
         if (!response.ok) {
             throw new Error(`Failed to fetch ${chartConfig.name}: ${response.status}`);
         }
@@ -17487,7 +17493,7 @@ async function parseYouTubePlaylist() {
         createYouTubeCard(url, 'fresh');
         
         // Parse playlist via API
-        const response = await fetch('/api/youtube/parse', {
+        const response = await callServer('/api/youtube/parse', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -17718,7 +17724,7 @@ function handleYouTubeCardClick(urlHash) {
                 // Check if we have discovery results, if not load them first
                 if (!state.discoveryResults || state.discoveryResults.length === 0) {
                     console.log('🔍 Loading discovery results for download modal...');
-                    fetch(`/api/youtube/state/${urlHash}`)
+                    callServer(`/api/youtube/state/${urlHash}`)
                         .then(response => response.json())
                         .then(fullState => {
                             if (fullState.discovery_results) {
@@ -17800,7 +17806,7 @@ async function startYouTubeDiscovery(urlHash) {
     try {
         console.log('🔍 Starting YouTube Spotify discovery for:', urlHash);
         
-        const response = await fetch(`/api/youtube/discovery/start/${urlHash}`, {
+        const response = await callServer(`/api/youtube/discovery/start/${urlHash}`, {
             method: 'POST'
         });
         
@@ -17831,7 +17837,7 @@ function startYouTubeDiscoveryPolling(urlHash) {
     
     const pollInterval = setInterval(async () => {
         try {
-            const response = await fetch(`/api/youtube/discovery/status/${urlHash}`);
+            const response = await callServer(`/api/youtube/discovery/status/${urlHash}`);
             const status = await response.json();
             
             if (status.error) {
@@ -18520,7 +18526,7 @@ function closeYouTubeDiscoveryModal(urlHash) {
 
                     // Update backend state
                     try {
-                        fetch(`/api/tidal/update-phase/${tidalPlaylistId}`, {
+                        callServer(`/api/tidal/update-phase/${tidalPlaylistId}`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ phase: 'discovered' })
@@ -18538,7 +18544,7 @@ function closeYouTubeDiscoveryModal(urlHash) {
 
                     // Update backend state
                     try {
-                        fetch(`/api/beatport/charts/update-phase/${chartHash}`, {
+                        callServer(`/api/beatport/charts/update-phase/${chartHash}`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ phase: 'discovered' })
@@ -18553,7 +18559,7 @@ function closeYouTubeDiscoveryModal(urlHash) {
 
                 // Update backend state
                 try {
-                    fetch(`/api/youtube/update-phase/${urlHash}`, {
+                    callServer(`/api/youtube/update-phase/${urlHash}`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ phase: 'discovered' })
@@ -18581,7 +18587,7 @@ async function startYouTubePlaylistSync(urlHash) {
     try {
         console.log('🔄 Starting YouTube playlist sync:', urlHash);
         
-        const response = await fetch(`/api/youtube/sync/start/${urlHash}`, {
+        const response = await callServer(`/api/youtube/sync/start/${urlHash}`, {
             method: 'POST'
         });
         
@@ -18618,7 +18624,7 @@ function startYouTubeSyncPolling(urlHash) {
     // Define the polling function
     const pollFunction = async () => {
         try {
-            const response = await fetch(`/api/youtube/sync/status/${urlHash}`);
+            const response = await callServer(`/api/youtube/sync/status/${urlHash}`);
             const status = await response.json();
             
             if (status.error) {
@@ -18679,7 +18685,7 @@ async function cancelYouTubeSync(urlHash) {
     try {
         console.log('❌ Cancelling YouTube sync:', urlHash);
         
-        const response = await fetch(`/api/youtube/sync/cancel/${urlHash}`, {
+        const response = await callServer(`/api/youtube/sync/cancel/${urlHash}`, {
             method: 'POST'
         });
         
@@ -18873,7 +18879,7 @@ async function resetYouTubePlaylist(urlHash) {
         console.log(`🔄 Resetting YouTube playlist to fresh state: ${state.playlist.name}`);
         
         // Call backend reset endpoint
-        const response = await fetch(`/api/youtube/reset/${urlHash}`, {
+        const response = await callServer(`/api/youtube/reset/${urlHash}`, {
             method: 'POST'
         });
         
@@ -18931,7 +18937,7 @@ async function resetBeatportChart(urlHash) {
 
         // Call backend reset endpoint for Beatport
         const chartHash = state.beatport_chart_hash || urlHash;
-        const response = await fetch(`/api/beatport/charts/update-phase/${chartHash}`, {
+        const response = await callServer(`/api/beatport/charts/update-phase/${chartHash}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -19000,7 +19006,7 @@ function startListenBrainzDiscoveryPolling(playlistMbid) {
 
     const pollInterval = setInterval(async () => {
         try {
-            const response = await fetch(`/api/listenbrainz/discovery/status/${playlistMbid}`);
+            const response = await callServer(`/api/listenbrainz/discovery/status/${playlistMbid}`);
             const status = await response.json();
 
             if (status.error) {
@@ -19053,7 +19059,7 @@ function startListenBrainzDiscoveryPolling(playlistMbid) {
 
                 // Update phase in backend for persistence (like Beatport does)
                 try {
-                    await fetch(`/api/listenbrainz/update-phase/${playlistMbid}`, {
+                    await callServer(`/api/listenbrainz/update-phase/${playlistMbid}`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ phase: 'discovered' })
@@ -19102,7 +19108,7 @@ function startListenBrainzSyncPolling(playlistMbid) {
     // Define the polling function
     const pollFunction = async () => {
         try {
-            const response = await fetch(`/api/listenbrainz/sync/status/${playlistMbid}`);
+            const response = await callServer(`/api/listenbrainz/sync/status/${playlistMbid}`);
             const status = await response.json();
 
             if (status.error) {
@@ -19167,7 +19173,7 @@ async function startListenBrainzDiscovery(playlistMbid) {
         state.status = 'discovering';
 
         // Call backend to start discovery worker
-        const response = await fetch(`/api/listenbrainz/discovery/start/${playlistMbid}`, {
+        const response = await callServer(`/api/listenbrainz/discovery/start/${playlistMbid}`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
@@ -19231,7 +19237,7 @@ async function startListenBrainzPlaylistSync(playlistMbid) {
         }
 
         // Call backend to start sync
-        const response = await fetch(`/api/listenbrainz/sync/start/${playlistMbid}`, {
+        const response = await callServer(`/api/listenbrainz/sync/start/${playlistMbid}`, {
             method: 'POST'
         });
 
@@ -19269,7 +19275,7 @@ function startListenBrainzListingSyncPolling(playlistMbid, listingPlaylistId) {
 
     const pollInterval = setInterval(async () => {
         try {
-            const response = await fetch(`/api/listenbrainz/sync/status/${playlistMbid}`);
+            const response = await callServer(`/api/listenbrainz/sync/status/${playlistMbid}`);
             const status = await response.json();
 
             if (status.error) {
@@ -19548,7 +19554,7 @@ async function performArtistsSearch(query) {
         // Set up abort controller
         artistsSearchController = new AbortController();
         
-        const response = await fetch('/api/match/search', {
+        const response = await callServer('/api/match/search', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -19773,7 +19779,7 @@ async function loadArtistDiscography(artistId) {
         showDiscographyLoading();
         
         // Call the real API endpoint
-        const response = await fetch(`/api/artist/${artistId}/discography`);
+        const response = await callServer(`/api/artist/${artistId}/discography`);
         
         if (!response.ok) {
             if (response.status === 401) {
@@ -19939,7 +19945,7 @@ async function loadSimilarArtists(artistName) {
         const url = `/api/artist/similar/${encodeURIComponent(artistName)}/stream`;
         console.log(`📡 Streaming from: ${url}`);
 
-        const response = await fetch(url, {
+        const response = await callServer(url, {
             signal: similarArtistsController.signal
         });
 
@@ -20193,7 +20199,7 @@ async function checkDiscographyCompletion(artistId, discography) {
         artistCompletionController = new AbortController();
 
         // Use fetch with streaming response
-        const response = await fetch(`/api/artist/${artistId}/completion-stream`, {
+        const response = await callServer(`/api/artist/${artistId}/completion-stream`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -20772,7 +20778,7 @@ async function toggleArtistDetailWatchlist(event, artistId, artistName) {
     
     try {
         // Check current status
-        const checkResponse = await fetch('/api/watchlist/check', {
+        const checkResponse = await callServer('/api/watchlist/check', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ artist_id: artistId })
@@ -20791,7 +20797,7 @@ async function toggleArtistDetailWatchlist(event, artistId, artistName) {
             { artist_id: artistId } : 
             { artist_id: artistId, artist_name: artistName };
         
-        const response = await fetch(endpoint, {
+        const response = await callServer(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
@@ -20851,7 +20857,7 @@ async function updateArtistDetailWatchlistButton(artistId) {
     try {
         console.log(`🔍 Checking watchlist status for artist: ${artistId}`);
         
-        const response = await fetch('/api/watchlist/check', {
+        const response = await callServer('/api/watchlist/check', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ artist_id: artistId })
@@ -21081,7 +21087,7 @@ async function createArtistAlbumVirtualPlaylist(album, albumType) {
         // Loading overlay already shown by handleArtistAlbumClick
         
         // Fetch album tracks from backend
-        const response = await fetch(`/api/artist/${artist.id}/album/${album.id}/tracks`);
+        const response = await callServer(`/api/artist/${artist.id}/album/${album.id}/tracks`);
         
         if (!response.ok) {
             if (response.status === 401) {
@@ -21402,7 +21408,7 @@ async function saveArtistBubbleSnapshot() {
                 };
             }
             
-            const response = await fetch('/api/artist_bubbles/snapshot', {
+            const response = await callServer('/api/artist_bubbles/snapshot', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -21434,7 +21440,7 @@ async function hydrateArtistBubblesFromSnapshot() {
     try {
         console.log('🔄 Loading artist bubble snapshot from backend...');
         
-        const response = await fetch('/api/artist_bubbles/hydrate');
+        const response = await callServer('/api/artist_bubbles/hydrate');
         const data = await response.json();
         
         if (!data.success) {
@@ -21532,7 +21538,7 @@ async function saveSearchBubbleSnapshot() {
             };
         }
 
-        const response = await fetch('/api/search_bubbles/snapshot', {
+        const response = await callServer('/api/search_bubbles/snapshot', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ bubbles: bubblesToSave })
@@ -21559,7 +21565,7 @@ async function hydrateSearchBubblesFromSnapshot() {
     try {
         console.log('🔄 Loading search bubble snapshot from backend...');
 
-        const response = await fetch('/api/search_bubbles/hydrate');
+        const response = await callServer('/api/search_bubbles/hydrate');
         const data = await response.json();
 
         if (!data.success) {
@@ -21921,7 +21927,7 @@ async function reopenDownloadModal(virtualPlaylistId) {
         showLoadingOverlay(`Loading ${item.name}...`);
 
         try {
-            const response = await fetch(`/api/spotify/album/${item.id}`);
+            const response = await callServer(`/api/spotify/album/${item.id}`);
             if (!response.ok) {
                 throw new Error('Failed to fetch album tracks');
             }
@@ -21958,7 +21964,7 @@ async function reopenDownloadModal(virtualPlaylistId) {
             const process = activeDownloadProcesses[virtualPlaylistId];
             if (process) {
                 try {
-                    const processResponse = await fetch('/api/active-processes');
+                    const processResponse = await callServer('/api/active-processes');
                     if (processResponse.ok) {
                         const processData = await processResponse.json();
                         const activeProcess = processData.active_processes?.find(p => p.playlist_id === virtualPlaylistId);
@@ -22014,7 +22020,7 @@ async function reopenDownloadModal(virtualPlaylistId) {
         const process = activeDownloadProcesses[virtualPlaylistId];
         if (process) {
             try {
-                const processResponse = await fetch('/api/active-processes');
+                const processResponse = await callServer('/api/active-processes');
                 if (processResponse.ok) {
                     const processData = await processResponse.json();
                     const activeProcess = processData.active_processes?.find(p => p.playlist_id === virtualPlaylistId);
@@ -22843,7 +22849,7 @@ function escapeHtml(text) {
 
 async function fetchAndUpdateServiceStatus() {
     try {
-        const response = await fetch('/status');
+        const response = await callServer('/status');
         if (!response.ok) return;
         
         const data = await response.json();
@@ -22907,7 +22913,7 @@ function updateSidebarServiceStatus(service, statusData) {
 
 async function fetchAndUpdateSystemStats() {
     try {
-        const response = await fetch('/api/system/stats');
+        const response = await callServer('/api/system/stats');
         if (!response.ok) return;
         
         const data = await response.json();
@@ -22942,7 +22948,7 @@ function updateStatCard(cardId, value, subtitle) {
 
 async function fetchAndUpdateActivityFeed() {
     try {
-        const response = await fetch('/api/activity/feed');
+        const response = await callServer('/api/activity/feed');
         if (!response.ok) {
             console.warn('Activity feed response not ok:', response.status, response.statusText);
             return;
@@ -23011,7 +23017,7 @@ function updateActivityFeed(activities) {
 
 async function checkForActivityToasts() {
     try {
-        const response = await fetch('/api/activity/toasts');
+        const response = await callServer('/api/activity/toasts');
         if (!response.ok) return;
         
         const data = await response.json();
@@ -23057,7 +23063,7 @@ async function toggleWatchlist(event, artistId, artistName) {
     
     try {
         // Check current status
-        const checkResponse = await fetch('/api/watchlist/check', {
+        const checkResponse = await callServer('/api/watchlist/check', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ artist_id: artistId })
@@ -23076,7 +23082,7 @@ async function toggleWatchlist(event, artistId, artistName) {
             { artist_id: artistId } : 
             { artist_id: artistId, artist_name: artistName };
         
-        const response = await fetch(endpoint, {
+        const response = await callServer(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
@@ -23125,7 +23131,7 @@ async function toggleWatchlist(event, artistId, artistName) {
  */
 async function updateWatchlistButtonCount() {
     try {
-        const response = await fetch('/api/watchlist/count');
+        const response = await callServer('/api/watchlist/count');
         const data = await response.json();
 
         if (data.success) {
@@ -23155,7 +23161,7 @@ async function updateArtistCardWatchlistStatus() {
         if (!artistId) continue;
         
         try {
-            const response = await fetch('/api/watchlist/check', {
+            const response = await callServer('/api/watchlist/check', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ artist_id: artistId })
@@ -23189,7 +23195,7 @@ async function updateArtistCardWatchlistStatus() {
 async function showWatchlistModal() {
     try {
         // Check if watchlist has any artists
-        const countResponse = await fetch('/api/watchlist/count');
+        const countResponse = await callServer('/api/watchlist/count');
         const countData = await countResponse.json();
         
         if (!countData.success) {
@@ -23204,7 +23210,7 @@ async function showWatchlistModal() {
         }
         
         // Get watchlist artists
-        const artistsResponse = await fetch('/api/watchlist/artists');
+        const artistsResponse = await callServer('/api/watchlist/artists');
         const artistsData = await artistsResponse.json();
         
         if (!artistsData.success) {
@@ -23222,7 +23228,7 @@ async function showWatchlistModal() {
         }
         
         // Get scan status
-        const statusResponse = await fetch('/api/watchlist/scan/status');
+        const statusResponse = await callServer('/api/watchlist/scan/status');
         const statusData = await statusResponse.json();
         const scanStatus = statusData.success ? statusData.status : 'idle';
 
@@ -23403,7 +23409,7 @@ function startWatchlistCountdownTimer(initialSeconds) {
         if (remainingSeconds <= 0) {
             // Timer expired, fetch fresh data
             try {
-                const response = await fetch('/api/watchlist/count');
+                const response = await callServer('/api/watchlist/count');
                 const data = await response.json();
                 remainingSeconds = data.next_run_in_seconds || 0;
 
@@ -23452,7 +23458,7 @@ async function openWatchlistArtistConfigModal(artistId, artistName) {
         console.log(`🎨 Opening config modal for artist: ${artistName} (${artistId})`);
 
         // Fetch artist config and info
-        const response = await fetch(`/api/watchlist/artist/${artistId}/config`);
+        const response = await callServer(`/api/watchlist/artist/${artistId}/config`);
         const data = await response.json();
 
         if (!data.success) {
@@ -23572,7 +23578,7 @@ async function saveWatchlistArtistConfig(artistId) {
         }
 
         // Send update to backend
-        const response = await fetch(`/api/watchlist/artist/${artistId}/config`, {
+        const response = await callServer(`/api/watchlist/artist/${artistId}/config`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -23652,7 +23658,7 @@ async function startWatchlistScan() {
         button.disabled = true;
         button.textContent = 'Starting scan...';
         
-        const response = await fetch('/api/watchlist/scan', {
+        const response = await callServer('/api/watchlist/scan', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
         });
@@ -23687,7 +23693,7 @@ async function startWatchlistScan() {
  */
 async function pollWatchlistScanStatus() {
     try {
-        const response = await fetch('/api/watchlist/scan/status');
+        const response = await callServer('/api/watchlist/scan/status');
         const data = await response.json();
         
         if (data.success) {
@@ -23837,7 +23843,7 @@ async function updateSimilarArtists() {
         button.textContent = 'Updating...';
         if (scanButton) scanButton.disabled = true;
 
-        const response = await fetch('/api/watchlist/update-similar-artists', {
+        const response = await callServer('/api/watchlist/update-similar-artists', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
         });
@@ -23870,7 +23876,7 @@ async function updateSimilarArtists() {
  */
 async function pollSimilarArtistsUpdate() {
     try {
-        const response = await fetch('/api/watchlist/similar-artists-status');
+        const response = await callServer('/api/watchlist/similar-artists-status');
         const data = await response.json();
 
         if (data.success) {
@@ -23927,7 +23933,7 @@ async function pollSimilarArtistsUpdate() {
  */
 async function removeFromWatchlistModal(artistId, artistName) {
     try {
-        const response = await fetch('/api/watchlist/remove', {
+        const response = await callServer('/api/watchlist/remove', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ artist_id: artistId })
@@ -23978,7 +23984,7 @@ async function handleMetadataUpdateButtonClick() {
             button.disabled = true;
             button.textContent = 'Starting...';
             
-            const response = await fetch('/api/metadata/start', {
+            const response = await callServer('/api/metadata/start', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ refresh_interval_days: refreshIntervalDays })
@@ -24006,7 +24012,7 @@ async function handleMetadataUpdateButtonClick() {
             button.disabled = true;
             button.textContent = 'Stopping...';
             
-            const response = await fetch('/api/metadata/stop', {
+            const response = await callServer('/api/metadata/stop', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' }
             });
@@ -24052,7 +24058,7 @@ function stopMetadataUpdatePolling() {
  */
 async function checkMetadataUpdateStatus() {
     try {
-        const response = await fetch('/api/metadata/status');
+        const response = await callServer('/api/metadata/status');
         const data = await response.json();
         
         if (data.success && data.status) {
@@ -24145,7 +24151,7 @@ function updateMetadataProgressUI(status) {
  */
 async function checkAndHideMetadataUpdaterForNonPlex() {
     try {
-        const response = await fetch('/api/active-media-server');
+        const response = await callServer('/api/active-media-server');
         const data = await response.json();
 
         if (data.success) {
@@ -24189,7 +24195,7 @@ async function checkAndShowMediaScanForPlex() {
      * Show media scan tool only for Plex (Jellyfin/Navidrome auto-scan)
      */
     try {
-        const response = await fetch('/api/active-media-server');
+        const response = await callServer('/api/active-media-server');
         const data = await response.json();
 
         if (data.success) {
@@ -24233,7 +24239,7 @@ async function handleMediaScanButtonClick() {
         statusValue.style.color = '#1db954';
 
         // Request scan
-        const response = await fetch('/api/scan/request', {
+        const response = await callServer('/api/scan/request', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -24312,7 +24318,7 @@ async function handleMediaScanButtonClick() {
                         }
 
                         try {
-                            const statusResponse = await fetch('/api/scan/status');
+                            const statusResponse = await callServer('/api/scan/status');
                             const statusData = await statusResponse.json();
 
                             if (statusData.success && statusData.status) {
@@ -24369,7 +24375,7 @@ async function handleMediaScanButtonClick() {
  */
 async function checkAndRestoreMetadataUpdateState() {
     try {
-        const response = await fetch('/api/metadata/status');
+        const response = await callServer('/api/metadata/status');
         const data = await response.json();
         
         if (data.success && data.status) {
@@ -24442,7 +24448,7 @@ function stopLogPolling() {
  */
 async function loadLogs() {
     try {
-        const response = await fetch('/api/logs');
+        const response = await callServer('/api/logs');
         const data = await response.json();
 
         if (data.logs && Array.isArray(data.logs)) {
@@ -24609,7 +24615,7 @@ async function loadLibraryArtists() {
         });
 
         // Fetch artists from API
-        const response = await fetch(`/api/library/artists?${params}`);
+        const response = await callServer(`/api/library/artists?${params}`);
         const data = await response.json();
 
         if (!data.success) {
@@ -24847,7 +24853,7 @@ async function loadArtistDetailData(artistId, artistName) {
 
     try {
         // Call API to get artist discography data
-        const response = await fetch(`/api/artist-detail/${artistId}`);
+        const response = await callServer(`/api/artist-detail/${artistId}`);
 
         if (!response.ok) {
             throw new Error(`Failed to load artist data: ${response.statusText}`);
@@ -25314,7 +25320,7 @@ function createReleaseCard(release) {
             }
 
             // Load tracks for the album
-            const response = await fetch(`/api/artist/${currentArtist.id}/album/${albumData.id}/tracks`);
+            const response = await callServer(`/api/artist/${currentArtist.id}/album/${albumData.id}/tracks`);
             if (!response.ok) {
                 throw new Error(`Failed to load album tracks: ${response.status}`);
             }
@@ -25460,7 +25466,7 @@ async function toggleLibraryWatchlist(event, artistId, artistName) {
 
     try {
         // Check current status
-        const checkResponse = await fetch('/api/watchlist/check', {
+        const checkResponse = await callServer('/api/watchlist/check', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ artist_id: artistId })
@@ -25479,7 +25485,7 @@ async function toggleLibraryWatchlist(event, artistId, artistName) {
             { artist_id: artistId } :
             { artist_id: artistId, artist_name: artistName };
 
-        const response = await fetch(endpoint, {
+        const response = await callServer(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
@@ -25533,7 +25539,7 @@ async function updateLibraryWatchlistButtonStatus(artistId) {
     if (!button) return;
 
     try {
-        const response = await fetch('/api/watchlist/check', {
+        const response = await callServer('/api/watchlist/check', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ artist_id: artistId })
@@ -25606,7 +25612,7 @@ async function loadBeatportHeroTracks() {
     console.log('🎯 Loading real Beatport hero tracks...');
 
     try {
-        const response = await fetch('/api/beatport/hero-tracks');
+        const response = await callServer('/api/beatport/hero-tracks');
         const data = await response.json();
 
         if (data.success && data.tracks && data.tracks.length > 0) {
@@ -25941,7 +25947,7 @@ async function loadBeatportNewReleases() {
     try {
         console.log('📡 Fetching new releases data...');
 
-        const response = await fetch('/api/beatport/new-releases');
+        const response = await callServer('/api/beatport/new-releases');
         const data = await response.json();
 
         if (data.success && data.releases && data.releases.length > 0) {
@@ -26277,7 +26283,7 @@ async function loadBeatportHypePicks() {
     try {
         console.log('🔥 Fetching hype picks data...');
 
-        const response = await fetch('/api/beatport/hype-picks');
+        const response = await callServer('/api/beatport/hype-picks');
         const data = await response.json();
 
         if (data.success && data.releases && data.releases.length > 0) {
@@ -26615,7 +26621,7 @@ function initializeBeatportChartsSlider() {
 async function loadBeatportFeaturedCharts() {
     try {
         console.log('📊 Loading featured charts data...');
-        const response = await fetch('/api/beatport/featured-charts');
+        const response = await callServer('/api/beatport/featured-charts');
         const data = await response.json();
 
         if (data.success && data.charts && data.charts.length > 0) {
@@ -26909,7 +26915,7 @@ function initializeBeatportDJSlider() {
 async function loadBeatportDJCharts() {
     try {
         console.log('🎧 Loading DJ charts data...');
-        const response = await fetch('/api/beatport/dj-charts');
+        const response = await callServer('/api/beatport/dj-charts');
         const data = await response.json();
 
         if (data.success && data.charts && data.charts.length > 0) {
@@ -27150,7 +27156,7 @@ function cleanupBeatportDJSlider() {
 async function loadBeatportTop10Lists() {
     try {
         console.log('🏆 Loading top 10 lists data...');
-        const response = await fetch('/api/beatport/homepage/top-10-lists');
+        const response = await callServer('/api/beatport/homepage/top-10-lists');
         const data = await response.json();
 
         if (data.success) {
@@ -27300,7 +27306,7 @@ function showTop10ListsError(errorMessage) {
 async function loadBeatportTop10Releases() {
     try {
         console.log('💿 Loading top 10 releases data...');
-        const response = await fetch('/api/beatport/homepage/top-10-releases-cards');
+        const response = await callServer('/api/beatport/homepage/top-10-releases-cards');
         const data = await response.json();
 
         if (data.success) {
@@ -27425,7 +27431,7 @@ async function handleBeatportReleaseCardClick(cardElement, release) {
 
         // Get track data from this single release
         console.log(`🎵 Fetching tracks from release: ${release.url}`);
-        const response = await fetch('/api/beatport/scrape-releases', {
+        const response = await callServer('/api/beatport/scrape-releases', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -27516,7 +27522,7 @@ async function handleBeatportChartCardClick(cardElement, chart) {
 
         // Get track data from this chart URL (charts contain multiple tracks)
         console.log(`📊 Fetching tracks from chart: ${chart.url}`);
-        const response = await fetch('/api/beatport/chart/extract', {
+        const response = await callServer('/api/beatport/chart/extract', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -27607,7 +27613,7 @@ async function handleBeatportDJChartCardClick(cardElement, chart) {
 
         // Get track data from this DJ chart URL
         console.log(`🎧 Fetching tracks from DJ chart: ${chart.url}`);
-        const response = await fetch('/api/beatport/chart/extract', {
+        const response = await callServer('/api/beatport/chart/extract', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -27693,7 +27699,7 @@ async function handleBeatportTop100Click() {
 
         // Get track data from Beatport Top 100 API
         console.log('💯 Fetching tracks from Beatport Top 100');
-        const response = await fetch('/api/beatport/top-100', {
+        const response = await callServer('/api/beatport/top-100', {
             method: 'GET'
         });
 
@@ -27769,7 +27775,7 @@ async function handleHypeTop100Click() {
 
         // Get track data from Hype Top 100 API
         console.log('🔥 Fetching tracks from Hype Top 100');
-        const response = await fetch('/api/beatport/hype-top-100', {
+        const response = await callServer('/api/beatport/hype-top-100', {
             method: 'GET'
         });
 
@@ -27946,7 +27952,7 @@ async function loadGenreBrowserGenres() {
     try {
         // First, fetch genres quickly without images
         console.log('🚀 Fetching genres without images for fast loading...');
-        const fastResponse = await fetch('/api/beatport/genres');
+        const fastResponse = await callServer('/api/beatport/genres');
         if (!fastResponse.ok) {
             throw new Error(`API returned ${fastResponse.status}: ${fastResponse.statusText}`);
         }
@@ -28135,7 +28141,7 @@ async function loadGenreBrowserImagesProgressively(genres) {
     async function processImage(genre) {
         try {
             // Fetch individual genre image from backend
-            const response = await fetch(`/api/beatport/genre-image/${genre.slug}/${genre.id}`);
+            const response = await callServer(`/api/beatport/genre-image/${genre.slug}/${genre.id}`);
 
             if (response.ok) {
                 const data = await response.json();
@@ -28402,7 +28408,7 @@ async function loadGenreHeroSlider(genreSlug, genreId, genreName) {
         `;
 
         // Fetch hero slider data from API
-        const response = await fetch(`/api/beatport/genre/${genreSlug}/${genreId}/hero`);
+        const response = await callServer(`/api/beatport/genre/${genreSlug}/${genreId}/hero`);
         if (!response.ok) {
             throw new Error(`API returned ${response.status}: ${response.statusText}`);
         }
@@ -28708,7 +28714,7 @@ async function loadGenreTop10Lists(genreSlug, genreId, genreName) {
     }
 
     try {
-        const response = await fetch(`/api/beatport/genre/${genreSlug}/${genreId}/top-10-lists`);
+        const response = await callServer(`/api/beatport/genre/${genreSlug}/${genreId}/top-10-lists`);
         const data = await response.json();
 
         if (!data.success) {
@@ -29038,7 +29044,7 @@ async function handleGenreTop100Click(genreSlug, genreId, genreName) {
         console.log(`💯 Fetching tracks from ${genreTop100Url}`);
 
         // Get track data from genre top 100 page
-        const response = await fetch('/api/beatport/scrape-releases', {
+        const response = await callServer('/api/beatport/scrape-releases', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -29107,7 +29113,7 @@ async function loadGenreTop10Releases(genreSlug, genreId, genreName) {
     }
 
     try {
-        const response = await fetch(`/api/beatport/genre/${genreSlug}/${genreId}/top-10-releases`);
+        const response = await callServer(`/api/beatport/genre/${genreSlug}/${genreId}/top-10-releases`);
         const data = await response.json();
 
         if (!data.success) {
@@ -29243,7 +29249,7 @@ async function handleGenreReleaseCardClick(cardElement, release) {
 
         // Get track data from this single release (exact same API call as main page)
         console.log(`🎵 Fetching tracks from release: ${release.url}`);
-        const response = await fetch('/api/beatport/scrape-releases', {
+        const response = await callServer('/api/beatport/scrape-releases', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -29332,7 +29338,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 async function loadPlexMusicLibraries() {
     try {
-        const response = await fetch('/api/plex/music-libraries');
+        const response = await callServer('/api/plex/music-libraries');
         const data = await response.json();
 
         if (data.success && data.libraries && data.libraries.length > 0) {
@@ -29375,7 +29381,7 @@ async function selectPlexLibrary() {
     if (!selectedLibrary) return;
 
     try {
-        const response = await fetch('/api/plex/select-music-library', {
+        const response = await callServer('/api/plex/select-music-library', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -29403,7 +29409,7 @@ async function selectPlexLibrary() {
 
 async function loadJellyfinMusicLibraries() {
     try {
-        const response = await fetch('/api/jellyfin/music-libraries');
+        const response = await callServer('/api/jellyfin/music-libraries');
         const data = await response.json();
 
         if (data.success && data.libraries && data.libraries.length > 0) {
@@ -29446,7 +29452,7 @@ async function selectJellyfinLibrary() {
     if (!selectedLibrary) return;
 
     try {
-        const response = await fetch('/api/jellyfin/select-music-library', {
+        const response = await callServer('/api/jellyfin/select-music-library', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -29528,7 +29534,7 @@ async function loadDiscoverPage() {
 async function checkForActiveDiscoverSyncs() {
     // Check if Fresh Tape sync is active
     try {
-        const releaseRadarResponse = await fetch('/api/sync/status/discover_release_radar');
+        const releaseRadarResponse = await callServer('/api/sync/status/discover_release_radar');
         if (releaseRadarResponse.ok) {
             const data = await releaseRadarResponse.json();
             if (data.status === 'syncing' || data.status === 'starting') {
@@ -29558,7 +29564,7 @@ async function checkForActiveDiscoverSyncs() {
 
     // Check if The Archives sync is active
     try {
-        const discoveryWeeklyResponse = await fetch('/api/sync/status/discover_discovery_weekly');
+        const discoveryWeeklyResponse = await callServer('/api/sync/status/discover_discovery_weekly');
         if (discoveryWeeklyResponse.ok) {
             const data = await discoveryWeeklyResponse.json();
             if (data.status === 'syncing' || data.status === 'starting') {
@@ -29588,7 +29594,7 @@ async function checkForActiveDiscoverSyncs() {
 
     // Check if Seasonal Playlist sync is active
     try {
-        const seasonalResponse = await fetch('/api/sync/status/discover_seasonal_playlist');
+        const seasonalResponse = await callServer('/api/sync/status/discover_seasonal_playlist');
         if (seasonalResponse.ok) {
             const data = await seasonalResponse.json();
             if (data.status === 'syncing' || data.status === 'starting') {
@@ -29616,7 +29622,7 @@ async function checkForActiveDiscoverSyncs() {
 
 async function loadDiscoverHero() {
     try {
-        const response = await fetch('/api/discover/hero');
+        const response = await callServer('/api/discover/hero');
         if (!response.ok) {
             console.error('Failed to fetch discover hero');
             return;
@@ -29739,7 +29745,7 @@ function displayDiscoverHeroArtist(artist) {
 
 async function checkAndUpdateDiscoverHeroWatchlistButton(artistId) {
     try {
-        const response = await fetch('/api/watchlist/check', {
+        const response = await callServer('/api/watchlist/check', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ artist_id: artistId })
@@ -29869,7 +29875,7 @@ async function loadDiscoverRecentReleases() {
 
         carousel.innerHTML = '<div class="discover-loading"><div class="loading-spinner"></div><p>Loading recent releases...</p></div>';
 
-        const response = await fetch('/api/discover/recent-releases');
+        const response = await callServer('/api/discover/recent-releases');
         if (!response.ok) {
             throw new Error('Failed to fetch recent releases');
         }
@@ -29919,7 +29925,7 @@ async function loadDiscoverReleaseRadar() {
 
         playlistContainer.innerHTML = '<div class="discover-loading"><div class="loading-spinner"></div><p>Loading release radar...</p></div>';
 
-        const response = await fetch('/api/discover/release-radar');
+        const response = await callServer('/api/discover/release-radar');
         if (!response.ok) {
             throw new Error('Failed to fetch release radar');
         }
@@ -29976,7 +29982,7 @@ async function loadDiscoverWeekly() {
 
         playlistContainer.innerHTML = '<div class="discover-loading"><div class="loading-spinner"></div><p>Curating your discovery playlist...</p></div>';
 
-        const response = await fetch('/api/discover/weekly');
+        const response = await callServer('/api/discover/weekly');
         if (!response.ok) {
             throw new Error('Failed to fetch discovery weekly');
         }
@@ -30039,7 +30045,7 @@ async function loadDecadeBrowser() {
         if (!carousel) return;
 
         // Fetch available decades from backend
-        const response = await fetch('/api/discover/decades/available');
+        const response = await callServer('/api/discover/decades/available');
         if (!response.ok) {
             throw new Error('Failed to fetch available decades');
         }
@@ -30098,7 +30104,7 @@ async function openDecadePlaylist(decade) {
     try {
         showLoadingOverlay(`Loading ${decade}s playlist...`);
 
-        const response = await fetch(`/api/discover/decade/${decade}`);
+        const response = await callServer(`/api/discover/decade/${decade}`);
         if (!response.ok) {
             throw new Error('Failed to fetch decade playlist');
         }
@@ -30141,7 +30147,7 @@ async function loadGenreBrowser() {
         if (!carousel) return;
 
         // Fetch available genres from backend
-        const response = await fetch('/api/discover/genres/available');
+        const response = await callServer('/api/discover/genres/available');
         if (!response.ok) {
             throw new Error('Failed to fetch available genres');
         }
@@ -30269,7 +30275,7 @@ async function openGenrePlaylist(genre) {
     try {
         showLoadingOverlay(`Loading ${capitalizeGenre(genre)} playlist...`);
 
-        const response = await fetch(`/api/discover/genre/${encodeURIComponent(genre)}`);
+        const response = await callServer(`/api/discover/genre/${encodeURIComponent(genre)}`);
         if (!response.ok) {
             throw new Error('Failed to fetch genre playlist');
         }
@@ -30314,7 +30320,7 @@ async function loadDecadeBrowserTabs() {
         if (!tabsContainer || !contentsContainer) return;
 
         // Fetch available decades from backend
-        const response = await fetch('/api/discover/decades/available');
+        const response = await callServer('/api/discover/decades/available');
         if (!response.ok) {
             throw new Error('Failed to fetch available decades');
         }
@@ -30439,7 +30445,7 @@ async function loadDecadeTracks(decade) {
         const playlistContainer = document.getElementById(`decade-${decade}-playlist`);
         if (!playlistContainer) return;
 
-        const response = await fetch(`/api/discover/decade/${decade}`);
+        const response = await callServer(`/api/discover/decade/${decade}`);
         if (!response.ok) {
             throw new Error('Failed to fetch decade playlist');
         }
@@ -30578,7 +30584,7 @@ function startDecadeSyncPolling(decade, virtualPlaylistId) {
 
     discoverSyncPollers[pollerId] = setInterval(async () => {
         try {
-            const response = await fetch(`/api/sync/status/${virtualPlaylistId}`);
+            const response = await callServer(`/api/sync/status/${virtualPlaylistId}`);
             if (!response.ok) return;
 
             const data = await response.json();
@@ -30677,7 +30683,7 @@ async function loadGenreBrowserTabs() {
         if (!tabsContainer || !contentsContainer) return;
 
         // Fetch available genres from backend
-        const response = await fetch('/api/discover/genres/available');
+        const response = await callServer('/api/discover/genres/available');
         if (!response.ok) {
             throw new Error('Failed to fetch available genres');
         }
@@ -30808,7 +30814,7 @@ async function loadGenreTracks(genreName) {
         const playlistContainer = document.getElementById(`genre-${genreId}-playlist`);
         if (!playlistContainer) return;
 
-        const response = await fetch(`/api/discover/genre/${encodeURIComponent(genreName)}`);
+        const response = await callServer(`/api/discover/genre/${encodeURIComponent(genreName)}`);
         if (!response.ok) {
             throw new Error('Failed to fetch genre playlist');
         }
@@ -30950,7 +30956,7 @@ function startGenreSyncPolling(genreName, genreId, virtualPlaylistId) {
 
     discoverSyncPollers[pollerId] = setInterval(async () => {
         try {
-            const response = await fetch(`/api/sync/status/${virtualPlaylistId}`);
+            const response = await callServer(`/api/sync/status/${virtualPlaylistId}`);
             if (!response.ok) return;
 
             const data = await response.json();
@@ -31047,9 +31053,9 @@ async function initializeListenBrainzTabs() {
 
         // Fetch all playlists types
         const [createdForRes, userPlaylistsRes, collaborativeRes] = await Promise.all([
-            fetch('/api/discover/listenbrainz/created-for'),
-            fetch('/api/discover/listenbrainz/user-playlists'),
-            fetch('/api/discover/listenbrainz/collaborative')
+            callServer('/api/discover/listenbrainz/created-for'),
+            callServer('/api/discover/listenbrainz/user-playlists'),
+            callServer('/api/discover/listenbrainz/collaborative')
         ]);
 
         console.log('📡 API Responses:', {
@@ -31264,7 +31270,7 @@ async function loadListenBrainzPlaylistTracks(identifier, playlistId) {
         }
 
         console.log(`🔄 Fetching tracks for playlist: ${identifier}`);
-        const response = await fetch(`/api/discover/listenbrainz/playlist/${identifier}`);
+        const response = await callServer(`/api/discover/listenbrainz/playlist/${identifier}`);
         console.log(`📡 Response status: ${response.status}`);
 
         if (!response.ok) {
@@ -31544,7 +31550,7 @@ async function openDownloadModalForListenBrainzPlaylist(identifier, title) {
             console.log(`🔍 Starting ListenBrainz discovery for: ${title}`);
 
             // Call the discovery start endpoint with playlist data
-            const response = await fetch(`/api/listenbrainz/discovery/start/${identifier}`, {
+            const response = await callServer(`/api/listenbrainz/discovery/start/${identifier}`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -31587,7 +31593,7 @@ async function openListenBrainzPlaylist(playlistMbid, playlistName) {
     try {
         showLoadingOverlay(`Loading ${playlistName}...`);
 
-        const response = await fetch(`/api/discover/listenbrainz/playlist/${playlistMbid}`);
+        const response = await callServer(`/api/discover/listenbrainz/playlist/${playlistMbid}`);
         if (!response.ok) {
             throw new Error('Failed to fetch playlist');
         }
@@ -31645,7 +31651,7 @@ async function refreshListenBrainzPlaylists() {
         console.log('🔄 Refreshing ListenBrainz playlists...');
         showToast('Refreshing ListenBrainz playlists...', 'info');
 
-        const response = await fetch('/api/discover/listenbrainz/refresh', {
+        const response = await callServer('/api/discover/listenbrainz/refresh', {
             method: 'POST'
         });
 
@@ -31704,7 +31710,7 @@ async function refreshListenBrainzPlaylists() {
 
 async function loadSeasonalContent() {
     try {
-        const response = await fetch('/api/discover/seasonal/current');
+        const response = await callServer('/api/discover/seasonal/current');
         if (!response.ok) {
             console.error('Failed to fetch seasonal content');
             return;
@@ -31814,7 +31820,7 @@ async function loadSeasonalPlaylist(seasonData) {
         playlistContainer.innerHTML = '<div class="discover-loading"><div class="loading-spinner"></div><p>Loading playlist...</p></div>';
 
         // Fetch playlist tracks
-        const response = await fetch(`/api/discover/seasonal/${currentSeasonKey}/playlist`);
+        const response = await callServer(`/api/discover/seasonal/${currentSeasonKey}/playlist`);
         if (!response.ok) {
             throw new Error('Failed to fetch seasonal playlist');
         }
@@ -31889,7 +31895,7 @@ async function openDownloadModalForSeasonalAlbum(albumIndex) {
 
     try {
         // Fetch album tracks from Spotify API via backend
-        const response = await fetch(`/api/spotify/album/${album.spotify_album_id}`);
+        const response = await callServer(`/api/spotify/album/${album.spotify_album_id}`);
         if (!response.ok) {
             throw new Error('Failed to fetch album tracks');
         }
@@ -31988,7 +31994,7 @@ async function loadPersonalizedRecentlyAdded() {
         const container = document.getElementById('personalized-recently-added');
         if (!container) return;
 
-        const response = await fetch('/api/discover/personalized/recently-added');
+        const response = await callServer('/api/discover/personalized/recently-added');
         if (!response.ok) return;
 
         const data = await response.json();
@@ -32011,7 +32017,7 @@ async function loadPersonalizedTopTracks() {
         const container = document.getElementById('personalized-top-tracks');
         if (!container) return;
 
-        const response = await fetch('/api/discover/personalized/top-tracks');
+        const response = await callServer('/api/discover/personalized/top-tracks');
         if (!response.ok) return;
 
         const data = await response.json();
@@ -32034,7 +32040,7 @@ async function loadPersonalizedForgottenFavorites() {
         const container = document.getElementById('personalized-forgotten-favorites');
         if (!container) return;
 
-        const response = await fetch('/api/discover/personalized/forgotten-favorites');
+        const response = await callServer('/api/discover/personalized/forgotten-favorites');
         if (!response.ok) return;
 
         const data = await response.json();
@@ -32057,7 +32063,7 @@ async function loadPersonalizedPopularPicks() {
         const container = document.getElementById('personalized-popular-picks');
         if (!container) return;
 
-        const response = await fetch('/api/discover/personalized/popular-picks');
+        const response = await callServer('/api/discover/personalized/popular-picks');
         if (!response.ok) return;
 
         const data = await response.json();
@@ -32080,7 +32086,7 @@ async function loadPersonalizedHiddenGems() {
         const container = document.getElementById('personalized-hidden-gems');
         if (!container) return;
 
-        const response = await fetch('/api/discover/personalized/hidden-gems');
+        const response = await callServer('/api/discover/personalized/hidden-gems');
         if (!response.ok) return;
 
         const data = await response.json();
@@ -32103,7 +32109,7 @@ async function loadPersonalizedDailyMixes() {
         const container = document.getElementById('daily-mixes-grid');
         if (!container) return;
 
-        const response = await fetch('/api/discover/personalized/daily-mixes');
+        const response = await callServer('/api/discover/personalized/daily-mixes');
         if (!response.ok) return;
 
         const data = await response.json();
@@ -32178,7 +32184,7 @@ async function loadDiscoveryShuffle() {
         const container = document.getElementById('personalized-discovery-shuffle');
         if (!container) return;
 
-        const response = await fetch('/api/discover/personalized/discovery-shuffle?limit=50');
+        const response = await callServer('/api/discover/personalized/discovery-shuffle?limit=50');
         if (!response.ok) return;
 
         const data = await response.json();
@@ -32201,7 +32207,7 @@ async function loadFamiliarFavorites() {
         const container = document.getElementById('personalized-familiar-favorites');
         if (!container) return;
 
-        const response = await fetch('/api/discover/personalized/familiar-favorites?limit=50');
+        const response = await callServer('/api/discover/personalized/familiar-favorites?limit=50');
         if (!response.ok) return;
 
         const data = await response.json();
@@ -32240,7 +32246,7 @@ async function searchBuildPlaylistArtists() {
     clearTimeout(buildPlaylistSearchTimeout);
     buildPlaylistSearchTimeout = setTimeout(async () => {
         try {
-            const response = await fetch(`/api/discover/build-playlist/search-artists?query=${encodeURIComponent(query)}`);
+            const response = await callServer(`/api/discover/build-playlist/search-artists?query=${encodeURIComponent(query)}`);
             if (!response.ok) return;
 
             const data = await response.json();
@@ -32357,7 +32363,7 @@ async function generateBuildPlaylist() {
 
     try {
         const seedIds = buildPlaylistSelectedArtists.map(a => a.id);
-        const response = await fetch('/api/discover/build-playlist/generate', {
+        const response = await callServer('/api/discover/build-playlist/generate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -32687,7 +32693,7 @@ function startDiscoverSyncPolling(playlistType, virtualPlaylistId) {
     // Poll every 500ms for progress updates
     discoverSyncPollers[playlistType] = setInterval(async () => {
         try {
-            const response = await fetch(`/api/sync/status/${virtualPlaylistId}`);
+            const response = await callServer(`/api/sync/status/${virtualPlaylistId}`);
             if (!response.ok) {
                 console.log(`⚠️ Sync status response not OK: ${response.status}`);
                 return;
@@ -32774,7 +32780,7 @@ async function openDownloadModalForRecentAlbum(albumIndex) {
 
     try {
         // Fetch album tracks from Spotify API via backend
-        const response = await fetch(`/api/spotify/album/${album.album_spotify_id}`);
+        const response = await callServer(`/api/spotify/album/${album.album_spotify_id}`);
         if (!response.ok) {
             throw new Error('Failed to fetch album tracks');
         }
@@ -32891,7 +32897,7 @@ function monitorDiscoverDownload(playlistId) {
             }
 
             // Check sync status API (for sync-based downloads)
-            const response = await fetch(`/api/sync/status/${playlistId}`);
+            const response = await callServer(`/api/sync/status/${playlistId}`);
             if (response.ok) {
                 const data = await response.json();
                 notFoundCount = 0; // Reset counter if found
@@ -33091,7 +33097,7 @@ async function rehydrateDiscoverDownloadModal(playlistId) {
         console.log(`💧 [REHYDRATE] Attempting to rehydrate modal for: ${playlistId}`);
 
         // Check if there's an active backend process for this playlist
-        const batchResponse = await fetch(`/api/download_status/batch`);
+        const batchResponse = await callServer(`/api/download_status/batch`);
         if (!batchResponse.ok) {
             console.log(`⚠️ [REHYDRATE] Failed to fetch batch info`);
             return false;
@@ -33131,7 +33137,7 @@ async function rehydrateDiscoverDownloadModal(playlistId) {
             console.log(`💧 [REHYDRATE] Album download - fetching album ${albumId}...`);
 
             try {
-                const albumResponse = await fetch(`/api/spotify/album/${albumId}`);
+                const albumResponse = await callServer(`/api/spotify/album/${albumId}`);
                 if (!albumResponse.ok) {
                     console.error(`❌ [REHYDRATE] Failed to fetch album: ${albumResponse.status}`);
                     return false;
@@ -33254,7 +33260,7 @@ async function rehydrateDiscoverDownloadModal(playlistId) {
 
             try {
                 // Fetch ListenBrainz state from backend
-                const stateResponse = await fetch(`/api/listenbrainz/state/${mbid}`);
+                const stateResponse = await callServer(`/api/listenbrainz/state/${mbid}`);
                 if (!stateResponse.ok) {
                     console.log(`⚠️ [REHYDRATE] Failed to fetch ListenBrainz state`);
                     return false;
@@ -33334,7 +33340,7 @@ async function rehydrateDiscoverDownloadModal(playlistId) {
 
         // Fetch tracks from API
         console.log(`📡 [REHYDRATE] Fetching tracks from ${apiEndpoint}...`);
-        const response = await fetch(apiEndpoint);
+        const response = await callServer(apiEndpoint);
         if (!response.ok) {
             console.error(`❌ [REHYDRATE] Failed to fetch tracks: ${response.status}`);
             return false;
@@ -33445,7 +33451,7 @@ async function saveDiscoverDownloadSnapshot() {
                 };
             }
 
-            const response = await fetch('/api/discover_downloads/snapshot', {
+            const response = await callServer('/api/discover_downloads/snapshot', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -33477,7 +33483,7 @@ async function hydrateDiscoverDownloadsFromSnapshot() {
     try {
         console.log('🔄 Loading discover download snapshot from backend...');
 
-        const response = await fetch('/api/discover_downloads/hydrate');
+        const response = await callServer('/api/discover_downloads/hydrate');
         const data = await response.json();
 
         if (!data.success) {

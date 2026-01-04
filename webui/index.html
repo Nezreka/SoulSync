@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <title>SoulSync - Music Sync & Manager</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <!-- APP_BASE_URL obtained from server, used in script.js to know the base server path -->
+    <script>var APP_BASE_URL = "{{ base_url }}"; console.log('Soulsync base url:', APP_BASE_URL);</script>
 </head>
 <body>
     <div class="main-container">
