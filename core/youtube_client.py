@@ -16,6 +16,7 @@ import re
 import platform
 import asyncio
 import uuid
+import threading
 from typing import List, Optional, Dict, Any, Tuple
 from dataclasses import dataclass
 from pathlib import Path
@@ -96,9 +97,16 @@ class YouTubeClient:
     Provides search, matching, and download capabilities with full Spotify metadata integration.
     """
 
-    def __init__(self, download_path: str = "./downloads/youtube"):
+    def __init__(self, download_path: str = None):
+        # Use Soulseek download path for consistency (post-processing expects files here)
+        from config.settings import config_manager
+        if download_path is None:
+            download_path = config_manager.get('soulseek.download_path', './downloads')
+
         self.download_path = Path(download_path)
         self.download_path.mkdir(parents=True, exist_ok=True)
+
+        logger.info(f"📁 YouTube client using download path: {self.download_path}")
 
         # Initialize production matching engine for parity with Soulseek
         self.matching_engine = MusicMatchingEngine()
@@ -112,9 +120,9 @@ class YouTubeClient:
         # Download queue management (mirrors Soulseek's download tracking)
         # Maps download_id -> download_info dict
         self.active_downloads: Dict[str, Dict[str, Any]] = {}
-        self._download_lock = asyncio.Lock()
+        self._download_lock = threading.Lock()  # Use threading.Lock for thread safety
 
-        # Configure yt-dlp options
+        # Configure yt-dlp options with bot detection bypass
         self.download_opts = {
             'format': 'bestaudio/best',
             'outtmpl': str(self.download_path / '%(title)s.%(ext)s'),
@@ -127,6 +135,15 @@ class YouTubeClient:
                 'preferredquality': '320',
             }],
             'progress_hooks': [self._progress_hook],  # Track download progress
+            # Bot detection bypass options
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['android', 'web'],  # Try multiple clients
+                    'skip': ['hls', 'dash'],  # Skip problematic formats
+                }
+            },
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'age_limit': None,  # Don't skip age-restricted
         }
 
         # Track current download progress (mirrors Soulseek transfer tracking)
@@ -179,6 +196,14 @@ class YouTubeClient:
                     'quiet': True,
                     'no_warnings': True,
                     'extract_flat': True,  # Don't download, just extract info
+                    # Bot detection bypass
+                    'extractor_args': {
+                        'youtube': {
+                            'player_client': ['android', 'web'],
+                            'skip': ['hls', 'dash'],
+                        }
+                    },
+                    'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 }
 
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -245,15 +270,16 @@ class YouTubeClient:
                 else:
                     percent = 0
 
-                # Update active downloads dictionary (thread-safe update)
-                if self.current_download_id in self.active_downloads:
-                    download_info = self.active_downloads[self.current_download_id]
-                    download_info['state'] = 'Downloading'
-                    download_info['progress'] = round(percent, 1)
-                    download_info['transferred'] = downloaded
-                    download_info['size'] = total
-                    download_info['speed'] = int(speed)
-                    download_info['time_remaining'] = int(eta) if eta > 0 else None
+                # Update active downloads dictionary (thread-safe update with lock)
+                with self._download_lock:
+                    if self.current_download_id in self.active_downloads:
+                        download_info = self.active_downloads[self.current_download_id]
+                        download_info['state'] = 'InProgress, Downloading'  # Match Soulseek state format
+                        download_info['progress'] = round(percent, 1)
+                        download_info['transferred'] = downloaded
+                        download_info['size'] = total
+                        download_info['speed'] = int(speed)
+                        download_info['time_remaining'] = int(eta) if eta > 0 else None
 
                 # Also update current_download_progress for legacy compatibility
                 self.current_download_progress = {
@@ -271,21 +297,23 @@ class YouTubeClient:
                     self.progress_callback(self.current_download_progress)
 
             elif status == 'finished':
-                # Update to postprocessing state
-                if self.current_download_id in self.active_downloads:
-                    self.active_downloads[self.current_download_id]['state'] = 'Postprocessing'
-                    self.active_downloads[self.current_download_id]['progress'] = 100.0
+                # Download finished, ffmpeg is converting to MP3
+                # Keep state as 'InProgress, Downloading' - the download thread will set final state
+                with self._download_lock:
+                    if self.current_download_id in self.active_downloads:
+                        self.active_downloads[self.current_download_id]['progress'] = 95.0  # Almost done (converting)
 
                 self.current_download_progress['status'] = 'postprocessing'
-                self.current_download_progress['percent'] = 100.0
+                self.current_download_progress['percent'] = 95.0
 
                 if self.progress_callback:
                     self.progress_callback(self.current_download_progress)
 
             elif status == 'error':
-                # Mark as error
-                if self.current_download_id in self.active_downloads:
-                    self.active_downloads[self.current_download_id]['state'] = 'Errored'
+                # Mark as error (thread-safe)
+                with self._download_lock:
+                    if self.current_download_id in self.active_downloads:
+                        self.active_downloads[self.current_download_id]['state'] = 'Errored'
 
                 self.current_download_progress['status'] = 'error'
                 if self.progress_callback:
@@ -525,6 +553,14 @@ class YouTubeClient:
                     'no_warnings': True,
                     'extract_flat': False,
                     'default_search': 'ytsearch',
+                    # Bot detection bypass (same as download options)
+                    'extractor_args': {
+                        'youtube': {
+                            'player_client': ['android', 'web'],
+                            'skip': ['hls', 'dash'],
+                        }
+                    },
+                    'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 }
 
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -716,13 +752,16 @@ class YouTubeClient:
         """
         Download YouTube video as audio (async, Soulseek-compatible interface).
 
+        Returns download_id immediately and runs download in background thread.
+        Monitor via get_download_status() or get_all_downloads().
+
         Args:
             username: Ignored for YouTube (always "youtube")
             filename: Encoded as "video_id||title" from search results
             file_size: Ignored for YouTube (kept for interface compatibility)
 
         Returns:
-            download_id: Unique ID for tracking this download, or None if failed to start
+            download_id: Unique ID for tracking this download
         """
         try:
             # Parse filename to extract video_id
@@ -740,12 +779,12 @@ class YouTubeClient:
             download_id = str(uuid.uuid4())
 
             # Initialize download info in active downloads
-            async with self._download_lock:
+            with self._download_lock:
                 self.active_downloads[download_id] = {
                     'id': download_id,
-                    'filename': title,
+                    'filename': filename,  # Keep original encoded format for context matching!
                     'username': 'youtube',
-                    'state': 'Initializing',
+                    'state': 'Initializing',  # Soulseek-style states
                     'progress': 0.0,
                     'size': file_size or 0,
                     'transferred': 0,
@@ -755,51 +794,107 @@ class YouTubeClient:
                     'url': youtube_url,
                     'title': title,
                     'file_path': None,  # Will be set when download completes
-                    'task': None  # Will hold the background task
                 }
 
-            # Start download in background task
-            loop = asyncio.get_event_loop()
-            task = loop.create_task(self._download_internal(download_id, youtube_url, title))
+            # Start download in background thread (returns immediately)
+            download_thread = threading.Thread(
+                target=self._download_thread_worker,
+                args=(download_id, youtube_url, title, filename),
+                daemon=True
+            )
+            download_thread.start()
 
-            # Store task reference
-            async with self._download_lock:
-                self.active_downloads[download_id]['task'] = task
-
-            logger.info(f"✅ Download started with ID: {download_id}")
+            logger.info(f"✅ YouTube download {download_id} started in background")
             return download_id
 
         except Exception as e:
-            logger.error(f"❌ Failed to start download: {e}")
+            logger.error(f"❌ Failed to start YouTube download: {e}")
             import traceback
             traceback.print_exc()
             return None
 
-    async def _download_internal(self, download_id: str, youtube_url: str, title: str):
+    def _download_thread_worker(self, download_id: str, youtube_url: str, title: str, original_filename: str):
         """
-        Internal method to perform the actual YouTube download in the background.
-
-        Args:
-            download_id: Unique download ID
-            youtube_url: YouTube video URL
-            title: Video title for display
+        Background thread worker for downloading YouTube videos.
+        Updates active_downloads dict with progress.
         """
         try:
             # Update state to downloading
-            async with self._download_lock:
+            with self._download_lock:
                 if download_id in self.active_downloads:
-                    self.active_downloads[download_id]['state'] = 'Downloading'
+                    self.active_downloads[download_id]['state'] = 'InProgress, Downloading'  # Match Soulseek state
 
-            # Set current download ID for progress tracking
+            # Set current download ID for progress hook
             self.current_download_id = download_id
 
-            # Run yt-dlp download in thread pool (to avoid blocking event loop)
-            loop = asyncio.get_event_loop()
+            # Perform actual download
+            file_path = self._download_sync(youtube_url, title)
 
-            def _download():
+            # Clear current download ID
+            self.current_download_id = None
+
+            if file_path:
+                # Mark as completed/succeeded (match Soulseek state)
+                with self._download_lock:
+                    if download_id in self.active_downloads:
+                        # IMPORTANT: Keep original filename for context lookup!
+                        # The filename must match what was used to create the context entry
+                        # We store the actual file path separately
+                        self.active_downloads[download_id]['state'] = 'Completed, Succeeded'  # Match Soulseek
+                        self.active_downloads[download_id]['progress'] = 100.0
+                        self.active_downloads[download_id]['file_path'] = file_path
+                        # DO NOT update filename - keep original_filename for context matching
+
+                logger.info(f"✅ YouTube download {download_id} completed: {file_path}")
+            else:
+                # Mark as errored
+                with self._download_lock:
+                    if download_id in self.active_downloads:
+                        self.active_downloads[download_id]['state'] = 'Errored'
+
+                logger.error(f"❌ YouTube download {download_id} failed")
+
+        except Exception as e:
+            logger.error(f"❌ YouTube download thread failed for {download_id}: {e}")
+            import traceback
+            traceback.print_exc()
+
+            # Mark as errored
+            with self._download_lock:
+                if download_id in self.active_downloads:
+                    self.active_downloads[download_id]['state'] = 'Errored'
+
+            # Clear current download ID
+            if self.current_download_id == download_id:
+                self.current_download_id = None
+
+    def _download_sync(self, youtube_url: str, title: str) -> Optional[str]:
+        """
+        Synchronous download method (runs in thread pool executor).
+
+        Args:
+            youtube_url: YouTube video URL
+            title: Video title for display
+
+        Returns:
+            File path if successful, None otherwise
+        """
+        try:
+            max_retries = 2
+            for attempt in range(max_retries):
                 try:
                     # Use default download options
                     download_opts = self.download_opts.copy()
+
+                    # On retry, try different player client
+                    if attempt > 0:
+                        logger.info(f"🔄 Retry {attempt + 1}/{max_retries} with different settings")
+                        download_opts['extractor_args'] = {
+                            'youtube': {
+                                'player_client': ['web'],  # Try web-only on retry
+                                'skip': ['hls', 'dash'],
+                            }
+                        }
 
                     # Perform download
                     with yt_dlp.YoutubeDL(download_opts) as ydl:
@@ -812,57 +907,38 @@ class YouTubeClient:
                             return str(filename)
                         else:
                             logger.error(f"❌ Download completed but file not found: {filename}")
+                            if attempt < max_retries - 1:
+                                continue  # Retry
                             return None
 
                 except Exception as e:
-                    logger.error(f"❌ Download failed in thread: {e}")
-                    import traceback
-                    traceback.print_exc()
+                    error_msg = str(e)
+                    logger.error(f"❌ Download attempt {attempt + 1} failed: {error_msg}")
+
+                    # Check if it's a 403 error
+                    if '403' in error_msg or 'Forbidden' in error_msg:
+                        if attempt < max_retries - 1:
+                            logger.info(f"⏳ Waiting 2 seconds before retry...")
+                            import time
+                            time.sleep(2)
+                            continue  # Retry on 403
+
+                    # For other errors or last retry, print traceback and return
+                    if attempt == max_retries - 1:
+                        import traceback
+                        traceback.print_exc()
+                    else:
+                        continue  # Retry
+
                     return None
 
-            # Run download
-            file_path = await loop.run_in_executor(None, _download)
-
-            if file_path:
-                # Mark download as completed
-                async with self._download_lock:
-                    if download_id in self.active_downloads:
-                        self.active_downloads[download_id]['state'] = 'Completed'
-                        self.active_downloads[download_id]['progress'] = 100.0
-                        self.active_downloads[download_id]['file_path'] = file_path
-
-                logger.info(f"✅ Download {download_id} completed: {file_path}")
-            else:
-                # Mark as error
-                async with self._download_lock:
-                    if download_id in self.active_downloads:
-                        self.active_downloads[download_id]['state'] = 'Errored'
-
-                logger.error(f"❌ Download {download_id} failed")
-
-        except asyncio.CancelledError:
-            # Download was cancelled
-            async with self._download_lock:
-                if download_id in self.active_downloads:
-                    self.active_downloads[download_id]['state'] = 'Cancelled'
-
-            logger.info(f"⚠️  Download {download_id} cancelled")
-            raise
+            return None  # All retries failed
 
         except Exception as e:
-            # Download error
-            async with self._download_lock:
-                if download_id in self.active_downloads:
-                    self.active_downloads[download_id]['state'] = 'Errored'
-
-            logger.error(f"❌ Download {download_id} failed: {e}")
+            logger.error(f"❌ Download failed: {e}")
             import traceback
             traceback.print_exc()
-
-        finally:
-            # Clear current download ID
-            if self.current_download_id == download_id:
-                self.current_download_id = None
+            return None
 
     async def get_all_downloads(self) -> List[DownloadStatus]:
         """
@@ -873,7 +949,7 @@ class YouTubeClient:
         """
         download_statuses = []
 
-        async with self._download_lock:
+        with self._download_lock:
             for download_id, download_info in self.active_downloads.items():
                 status = DownloadStatus(
                     id=download_info['id'],
@@ -900,7 +976,7 @@ class YouTubeClient:
         Returns:
             DownloadStatus object or None if not found
         """
-        async with self._download_lock:
+        with self._download_lock:
             if download_id not in self.active_downloads:
                 return None
 
@@ -922,6 +998,9 @@ class YouTubeClient:
         """
         Cancel an active download (matches Soulseek interface).
 
+        NOTE: YouTube downloads cannot be truly cancelled mid-download,
+        but we mark them as cancelled for UI consistency.
+
         Args:
             download_id: Download ID to cancel
             username: Ignored for YouTube (kept for interface compatibility)
@@ -931,26 +1010,19 @@ class YouTubeClient:
             True if cancelled successfully, False otherwise
         """
         try:
-            async with self._download_lock:
+            with self._download_lock:
                 if download_id not in self.active_downloads:
                     logger.warning(f"⚠️  Download {download_id} not found")
                     return False
 
-                download_info = self.active_downloads[download_id]
-                task = download_info.get('task')
-
-                # Cancel the background task if it exists
-                if task and not task.done():
-                    task.cancel()
-                    logger.info(f"⚠️  Cancelled download {download_id}")
-
-                # Update state
-                download_info['state'] = 'Cancelled'
+                # Update state to cancelled
+                self.active_downloads[download_id]['state'] = 'Cancelled'
+                logger.info(f"⚠️  Marked YouTube download {download_id} as cancelled")
 
                 # Remove from active downloads if requested
                 if remove:
                     del self.active_downloads[download_id]
-                    logger.info(f"🗑️  Removed download {download_id} from queue")
+                    logger.info(f"🗑️  Removed YouTube download {download_id} from queue")
 
             return True
 

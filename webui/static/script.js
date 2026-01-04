@@ -1678,7 +1678,15 @@ async function loadSettingsData() {
         // Populate Download settings (right column)
         document.getElementById('download-path').value = settings.soulseek?.download_path || './downloads';
         document.getElementById('transfer-path').value = settings.soulseek?.transfer_path || './Transfer';
-        
+
+        // Populate Download Source settings
+        document.getElementById('download-source-mode').value = settings.download_source?.mode || 'soulseek';
+        document.getElementById('hybrid-primary-source').value = settings.download_source?.hybrid_primary || 'soulseek';
+        document.getElementById('youtube-min-confidence').value = settings.download_source?.youtube_min_confidence || 0.65;
+
+        // Update UI based on download source mode
+        updateDownloadSourceUI();
+
         // Populate Database settings
         document.getElementById('max-workers').value = settings.database?.max_workers || '5';
         
@@ -1786,6 +1794,18 @@ function toggleServer(serverType) {
     // Load Jellyfin music libraries when switching to Jellyfin
     if (serverType === 'jellyfin') {
         loadJellyfinMusicLibraries();
+    }
+}
+
+function updateDownloadSourceUI() {
+    const mode = document.getElementById('download-source-mode').value;
+    const hybridContainer = document.getElementById('hybrid-settings-container');
+
+    // Show hybrid settings only when hybrid mode is selected
+    if (mode === 'hybrid') {
+        hybridContainer.style.display = 'block';
+    } else {
+        hybridContainer.style.display = 'none';
     }
 }
 
@@ -2052,6 +2072,11 @@ async function saveSettings() {
         },
         listenbrainz: {
             token: document.getElementById('listenbrainz-token').value
+        },
+        download_source: {
+            mode: document.getElementById('download-source-mode').value,
+            hybrid_primary: document.getElementById('hybrid-primary-source').value,
+            youtube_min_confidence: parseFloat(document.getElementById('youtube-min-confidence').value) || 0.65
         },
         database: {
             max_workers: parseInt(document.getElementById('max-workers').value)
