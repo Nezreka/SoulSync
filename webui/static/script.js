@@ -2940,8 +2940,9 @@ function initializeSearchModeToggle() {
 
             const slskdResult = data.result;
 
-            // Check if audio format is supported
-            if (slskdResult.filename && !isAudioFormatSupported(slskdResult.filename)) {
+            // Check if audio format is supported (YouTube is always MP3, so skip check)
+            const isYouTube = slskdResult.username === 'youtube';
+            if (!isYouTube && slskdResult.filename && !isAudioFormatSupported(slskdResult.filename)) {
                 const format = getFileExtension(slskdResult.filename);
                 hideLoadingOverlay();
                 showToast(`Sorry, ${format.toUpperCase()} format is not supported in your browser. Try downloading instead.`, 'error');
@@ -9315,9 +9316,10 @@ async function streamTrack(index) {
         
         const result = window.currentSearchResults[index];
         console.log(`🎵 Streaming track:`, result);
-        
-        // Check for unsupported formats before streaming
-        if (result.filename) {
+
+        // Check for unsupported formats before streaming (YouTube is always MP3, so skip check)
+        const isYouTube = result.username === 'youtube';
+        if (!isYouTube && result.filename) {
             const format = getFileExtension(result.filename);
             console.log(`🎵 [STREAM CHECK] File: ${result.filename}, Extension: ${format}`);
 
@@ -9373,9 +9375,10 @@ async function streamAlbumTrack(albumIndex, trackIndex) {
         };
         
         console.log(`🎵 Enhanced track data:`, trackData);
-        
-        // Check for unsupported formats before streaming
-        if (trackData.filename && !isAudioFormatSupported(trackData.filename)) {
+
+        // Check for unsupported formats before streaming (YouTube is always MP3, so skip check)
+        const isYouTube = trackData.username === 'youtube';
+        if (!isYouTube && trackData.filename && !isAudioFormatSupported(trackData.filename)) {
             const format = getFileExtension(trackData.filename);
             showToast(`Sorry, ${format.toUpperCase()} format is not supported in web browsers. Try downloading instead.`, 'error');
             return;
