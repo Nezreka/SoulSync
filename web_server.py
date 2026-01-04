@@ -90,10 +90,18 @@ def extract_filename(full_path):
     """
     Extract filename by working backwards from the end until we hit a separator.
     This is cross-platform compatible and handles both Windows and Unix path separators.
+
+    Special handling for YouTube: If the filename contains '||' (YouTube encoding format),
+    treat it as a filename, not a path, to avoid splitting on '/' in video titles.
     """
     if not full_path:
         return ""
-    
+
+    # YouTube filenames are encoded as "video_id||title" and may contain '/' in the title
+    # Don't split these on path separators
+    if '||' in full_path:
+        return full_path
+
     last_slash = max(full_path.rfind('/'), full_path.rfind('\\'))
     if last_slash != -1:
         return full_path[last_slash + 1:]
@@ -1127,14 +1135,15 @@ def _prepare_stream_task(track_data):
             while wait_count * poll_interval < max_wait_time:
                 wait_count += 1
                 
-                # Check download progress via slskd API
+                # Check download progress via orchestrator (works for Soulseek and YouTube)
                 api_progress = None
                 download_state = None
                 download_status = None
-                
+
                 try:
-                    transfers_data = loop.run_until_complete(soulseek_client._make_request('GET', 'transfers/downloads'))
-                    download_status = _find_streaming_download_in_transfers(transfers_data, track_data)
+                    # Use orchestrator's get_all_downloads() which works for both sources
+                    all_downloads = loop.run_until_complete(soulseek_client.get_all_downloads())
+                    download_status = _find_streaming_download_in_all_downloads(all_downloads, track_data)
                     
                     if download_status:
                         api_progress = download_status.get('percentComplete', 0)
@@ -1296,57 +1305,115 @@ def _prepare_stream_task(track_data):
                 "error_message": f"Streaming error: {str(e)}"
             })
 
-def _find_streaming_download_in_transfers(transfers_data, track_data):
-    """Find streaming download in transfer data using same logic as download queue"""
+def _find_streaming_download_in_all_downloads(all_downloads, track_data):
+    """
+    Find streaming download in DownloadStatus list (works for both Soulseek and YouTube).
+    Replaces the old _find_streaming_download_in_transfers function.
+    """
     try:
-        if not transfers_data:
+        if not all_downloads:
             return None
-            
-        # Flatten the transfers data structure
-        all_transfers = []
-        for user_data in transfers_data:
-            if 'directories' in user_data:
-                for directory in user_data['directories']:
-                    if 'files' in directory:
-                        all_transfers.extend(directory['files'])
-        
+
         # Look for our specific file by filename and username
         target_filename = extract_filename(track_data.get('filename', ''))
         target_username = track_data.get('username', '')
-        
-        for transfer in all_transfers:
-            transfer_filename = extract_filename(transfer.get('filename', ''))
-            transfer_username = transfer.get('username', '')
-            
-            if (transfer_filename == target_filename and 
-                transfer_username == target_username):
-                return transfer
-        
+
+        for download in all_downloads:
+            download_filename = extract_filename(download.filename)
+            download_username = download.username
+
+            if (download_filename == target_filename and
+                download_username == target_username):
+                # Convert DownloadStatus to dict format expected by caller
+                return {
+                    'percentComplete': download.progress,
+                    'state': download.state,
+                    'size': download.size,
+                    'bytesTransferred': download.transferred,
+                    'averageSpeed': download.speed,
+                }
+
         return None
     except Exception as e:
-        print(f"Error finding streaming download in transfers: {e}")
+        print(f"Error finding streaming download: {e}")
         return None
 
 def _find_downloaded_file(download_path, track_data):
-    """Find the downloaded audio file in the downloads directory tree"""
+    """Find the downloaded audio file in the downloads directory tree (works for Soulseek and YouTube)"""
     audio_extensions = {'.mp3', '.flac', '.ogg', '.aac', '.wma', '.wav', '.m4a'}
     target_filename = extract_filename(track_data.get('filename', ''))
-    
+
+    # YOUTUBE SUPPORT: Handle encoded filename format "video_id||title"
+    # The file on disk will be "title.mp3", not "video_id||title"
+    is_youtube = track_data.get('username') == 'youtube'
+    target_filename_youtube = None
+    if is_youtube and '||' in target_filename:
+        _, title = target_filename.split('||', 1)
+        # yt-dlp will create "Title.mp3" from "Title"
+        target_filename_youtube = f"{title}.mp3"
+        print(f"🎵 [YouTube Stream] Looking for file: {target_filename_youtube}")
+    elif is_youtube:
+        # Fallback: if YouTube but no encoded format, use as-is
+        target_filename_youtube = target_filename
+        print(f"🎵 [YouTube Stream] Using direct filename: {target_filename_youtube}")
+
     try:
         # Walk through the downloads directory to find the file
+        best_match = None
+        best_similarity = 0.0
+
         for root, dirs, files in os.walk(download_path):
             for file in files:
+                # Skip non-audio files
+                if os.path.splitext(file)[1].lower() not in audio_extensions:
+                    continue
+
+                file_path = os.path.join(root, file)
+
+                # Skip empty files
+                try:
+                    if os.path.getsize(file_path) < 1024:  # At least 1KB
+                        continue
+                except:
+                    continue
+
                 # Check if this is our target file
-                if file == target_filename:
-                    file_path = os.path.join(root, file)
-                    # Verify it's an audio file and has content
-                    if (os.path.splitext(file)[1].lower() in audio_extensions and 
-                        os.path.getsize(file_path) > 1024):  # At least 1KB
+                if is_youtube and target_filename_youtube:
+                    # For YouTube, use fuzzy matching (case-insensitive, flexible)
+                    # Because yt-dlp might sanitize the filename differently
+                    from difflib import SequenceMatcher
+                    similarity = SequenceMatcher(None,
+                                                file.lower(),
+                                                target_filename_youtube.lower()).ratio()
+
+                    print(f"🔍 [YouTube Stream] Comparing: '{file}' vs '{target_filename_youtube}' = {similarity:.2f}")
+
+                    # Keep track of best match
+                    if similarity > best_similarity:
+                        best_similarity = similarity
+                        best_match = file_path
+
+                        # If we have a very good match (95%+), use it immediately
+                        if similarity >= 0.95:
+                            print(f"✅ Found excellent match for streaming file: {file_path}")
+                            return file_path
+                else:
+                    # For Soulseek, exact match
+                    if file == target_filename:
+                        print(f"✅ Found streaming file: {file_path}")
                         return file_path
-        
+
+        # For YouTube, if we found a good enough match (80%+), use it
+        if is_youtube and best_match and best_similarity >= 0.80:
+            print(f"✅ Found good match ({best_similarity:.2f}) for YouTube streaming file: {best_match}")
+            return best_match
+
         print(f"❌ Could not find downloaded file: {target_filename}")
+        if is_youtube:
+            print(f"   Looking for: {target_filename_youtube}")
+            print(f"   Best similarity: {best_similarity:.2f}")
         return None
-        
+
     except Exception as e:
         print(f"Error searching for downloaded file: {e}")
         return None
@@ -1446,13 +1513,30 @@ def run_service_test(service, test_config):
             except Exception as e:
                 return False, f"Navidrome connection error: {str(e)}"
         elif service == "soulseek":
-            temp_client = SoulseekClient()
+            # Test the orchestrator's configured download source (not just Soulseek)
+            download_mode = config_manager.get('download_source.mode', 'soulseek')
+
             async def check():
-                return await temp_client.check_connection()
+                return await soulseek_client.check_connection()
+
             if asyncio.run(check()):
-                return True, "Successfully connected to slskd."
+                # Success message based on active mode
+                mode_messages = {
+                    'soulseek': "Successfully connected to slskd.",
+                    'youtube': "YouTube download source ready.",
+                    'hybrid': "Download sources ready (Hybrid mode)."
+                }
+                message = mode_messages.get(download_mode, "Download source connected.")
+                return True, message
             else:
-                return False, "Could not connect to slskd. Check URL and API Key."
+                # Failure message based on active mode
+                mode_errors = {
+                    'soulseek': "Could not connect to slskd. Check URL and API Key.",
+                    'youtube': "YouTube download source not available.",
+                    'hybrid': "Could not connect to download sources. Check configuration."
+                }
+                error = mode_errors.get(download_mode, "Download source connection failed.")
+                return False, error
         elif service == "listenbrainz":
             token = test_config.get('token', '')
 
@@ -3394,21 +3478,40 @@ def stream_enhanced_search_track():
             'duration_ms': duration_ms
         })()
 
-        # Generate search queries - TRACK NAME ONLY (artist is used for matching, not searching)
-        # This avoids Soulseek keyword filtering on artist names like "Kendrick Lamar"
+        # Generate search queries based on download source mode
+        # - Soulseek: Track name only (avoids keyword filtering on artist names)
+        # - YouTube: Include artist name (provides context to find actual music)
+        download_mode = config_manager.get('download_source.mode', 'soulseek')
         search_queries = []
         import re
 
-        # Primary query: Full track name
-        if track_name.strip():
-            search_queries.append(track_name.strip())
+        if download_mode == 'youtube' or (download_mode == 'hybrid' and config_manager.get('download_source.hybrid_primary') == 'youtube'):
+            # YouTube mode: Include artist for better context
+            # Primary query: Artist + Track
+            if artist_name and track_name:
+                search_queries.append(f"{artist_name} {track_name}".strip())
 
-        # Cleaned query: Remove parentheses and brackets
-        cleaned_name = re.sub(r'\s*\([^)]*\)', '', track_name).strip()
-        cleaned_name = re.sub(r'\s*\[[^\]]*\]', '', cleaned_name).strip()
+            # Fallback: Artist + Cleaned track (remove parentheses/brackets)
+            cleaned_name = re.sub(r'\s*\([^)]*\)', '', track_name).strip()
+            cleaned_name = re.sub(r'\s*\[[^\]]*\]', '', cleaned_name).strip()
+            if cleaned_name and cleaned_name.lower() != track_name.lower():
+                search_queries.append(f"{artist_name} {cleaned_name}".strip())
 
-        if cleaned_name and cleaned_name.lower() != track_name.lower():
-            search_queries.append(cleaned_name.strip())
+            logger.info(f"🔍 YouTube mode: Searching with artist + track name: {search_queries}")
+        else:
+            # Soulseek mode: Track name only to avoid keyword filtering
+            # Primary query: Full track name
+            if track_name.strip():
+                search_queries.append(track_name.strip())
+
+            # Cleaned query: Remove parentheses and brackets
+            cleaned_name = re.sub(r'\s*\([^)]*\)', '', track_name).strip()
+            cleaned_name = re.sub(r'\s*\[[^\]]*\]', '', cleaned_name).strip()
+
+            if cleaned_name and cleaned_name.lower() != track_name.lower():
+                search_queries.append(cleaned_name.strip())
+
+            logger.info(f"🔍 Soulseek mode: Searching by track name only (will match with artist): {search_queries}")
 
         # Remove duplicates while preserving order
         unique_queries = []
@@ -3419,7 +3522,6 @@ def stream_enhanced_search_track():
                 seen.add(query.lower())
 
         search_queries = unique_queries
-        logger.info(f"🔍 Searching by track name only (will match with artist): {search_queries}")
 
         # Try queries sequentially until we find a good match
         for query_index, query in enumerate(search_queries):

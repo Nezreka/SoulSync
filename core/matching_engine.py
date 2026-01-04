@@ -577,7 +577,9 @@ class MusicMatchingEngine:
 
         # Apply short title penalty AFTER calculating base confidence
         # This allows perfect matches to still pass, but penalizes weak artist matches
-        if is_short_title and artist_score < 0.5:
+        # For YouTube, skip penalty since artist matching is less reliable (searches are track-name-only)
+        is_youtube = slskd_track.username == 'youtube'
+        if is_short_title and artist_score < 0.5 and not is_youtube:
             # Heavy penalty but not complete rejection
             # Multiply by 0.4 (60% penalty) - still possible to pass if title+duration are perfect
             logger.debug(f"Short title '{spotify_cleaned_title}' with low artist match ({artist_score:.2f}) - applying 60% penalty")
