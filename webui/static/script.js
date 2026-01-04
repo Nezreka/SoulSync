@@ -9378,6 +9378,23 @@ async function streamAlbumTrack(albumIndex, trackIndex) {
         const album = window.currentSearchResults[albumIndex];
         console.log(`🎵 Album data:`, album);
 
+        // Surgical Fix: Handle YouTube results which are "flat" (no tracks array)
+        if (album.username === 'youtube') {
+            // For YouTube results, the "album" is actually the track itself
+            const track = album;
+            const trackData = {
+                ...track,
+                username: 'youtube',
+                filename: track.filename,
+                artist: track.artist,
+                album: track.title, // Use title as album name for player
+                title: track.title
+            };
+            console.log(`🎵 Streaming YouTube track directly:`, trackData);
+            await startStream(trackData);
+            return;
+        }
+
         if (!album.tracks || !album.tracks[trackIndex]) {
             console.error(`❌ No tracks in album or invalid track index. Tracks length: ${album.tracks ? album.tracks.length : 'undefined'}`);
             showToast('Track not found in album', 'error');
